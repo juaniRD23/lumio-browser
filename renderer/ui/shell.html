@@ -69,6 +69,14 @@
       </div>
       <div id="chat-menu" class="popover" hidden><div id="chat-list"></div></div>
       <div id="messages" aria-live="polite"></div>
+      <section id="plan" aria-label="Task progress" hidden>
+        <button id="plan-head" type="button" aria-expanded="true" aria-controls="plan-list">
+          <span class="plan-ic"></span><span class="plan-title">Task progress</span>
+          <span id="plan-now" class="plan-now"></span>
+          <span id="plan-count" class="plan-count"></span><i class="chev"></i>
+        </button>
+        <ol id="plan-list"></ol>
+      </section>
       <div id="composer">
         <div id="model-menu" class="popover" role="listbox" aria-label="Model" hidden><div id="model-list"></div></div>
         <div id="context-chip" class="chip" hidden title="Lumio will read this page with your message"><i></i><span></span><button aria-label="Don't include this page">×</button></div>

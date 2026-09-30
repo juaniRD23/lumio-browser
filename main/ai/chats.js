@@ -10,6 +10,7 @@ function stripForDisk(chat) {
       ? { ...m, content: m.content.map((p) => (p.type === 'image_url' ? { type: 'text', text: '[screenshot]' } : p)) }
       : m)),
     display: chat.display.map((d) => (d.thumb ? { ...d, thumb: undefined } : d)),
+    ...(chat.plan ? { plan: chat.plan } : {}),
   };
 }
 

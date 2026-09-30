@@ -48,18 +48,20 @@ async function runToolCall(call, env) {
     emit({ type: 'step_done', id: call.id, status: 'error', summary: 'Unknown tool' });
     return { text: `Error: there is no tool named "${call.name}".` };
   }
+  // Quiet tools (the plan checklist) show up in their own UI, not as step chips.
+  const chip = tool.quiet ? () => {} : emit;
   let args;
   try {
     args = call.arguments && call.arguments.trim() ? JSON.parse(call.arguments) : {};
   } catch {
-    emit({ type: 'step', id: call.id, name: tool.name, label: tool.name, icon: tool.icon, risk: 'read' });
-    emit({ type: 'step_done', id: call.id, status: 'error', summary: 'Bad arguments' });
+    chip({ type: 'step', id: call.id, name: tool.name, label: tool.name, icon: tool.icon, risk: 'read' });
+    chip({ type: 'step_done', id: call.id, status: 'error', summary: 'Bad arguments' });
     return { text: `Error: the arguments were not valid JSON: ${String(call.arguments).slice(0, 300)}` };
   }
 
   const label = safe(() => tool.label(args, ctx)) || tool.name;
   const risk = typeof tool.risk === 'function' ? tool.risk(args, ctx) : tool.risk;
-  emit({ type: 'step', id: call.id, name: tool.name, label, icon: tool.icon, risk });
+  chip({ type: 'step', id: call.id, name: tool.name, label, icon: tool.icon, risk });
 
   if (needsApproval(risk, getMode()) && !grants.has(tool.name)) {
     const detail = tool.detail ? safe(() => tool.detail(args, ctx)) : null;
@@ -78,11 +80,11 @@ async function runToolCall(call, env) {
     const out = await tool.run(args, ctx);
     const res = typeof out === 'string' ? { text: out } : out || { text: 'Done.' };
     if (res.text && res.text.length > MAX_TOOL_TEXT) res.text = res.text.slice(0, MAX_TOOL_TEXT) + '\n…[truncated]';
-    emit({ type: 'step_done', id: call.id, status: res.status || 'ok', summary: res.summary, thumb: res.thumb });
+    chip({ type: 'step_done', id: call.id, status: res.status || 'ok', summary: res.summary, thumb: res.thumb });
     return res;
   } catch (err) {
     if (signal?.aborted) throw abortError();
-    emit({ type: 'step_done', id: call.id, status: 'error', summary: err.message });
+    chip({ type: 'step_done', id: call.id, status: 'error', summary: err.message });
     return { text: `Error: ${err.message}` };
   }
 }

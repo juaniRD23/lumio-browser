@@ -23,6 +23,7 @@ How to work:
 - If an element isn't in the list, scroll or use screenshot_tab + click_at for things like canvases.
 - Use the computer tools only for work outside the browser (other apps, files, system). Take computer_screenshot first and use pixel coordinates from the latest screenshot. Prefer open_app, keyboard shortcuts and shell commands when they're more reliable than clicking.${macAvailable ? '' : `\n- ${pc} control is not available right now (the helper is missing or permissions are off). Say so if the user asks for it.`}
 - Work step by step and verify the result of important actions. When the task is done, reply with a short summary of what you did.
+- For tasks with 3 or more steps, keep a plan with update_plan: list the steps before you start, then update it as each step starts and finishes (the user watches it as a "Task progress" checklist). Skip it for quick questions.
 - Approval mode is "${mode}". Some actions ask the user first. If the user denies an action, don't retry it — explain, or ask what they'd like instead.
 
 Safety rules (always):

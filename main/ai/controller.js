@@ -13,9 +13,11 @@ const { MODES } = require('./policy');
 const { MODELS, DEFAULT_MODEL, findModel } = require('./models');
 const browser = require('./tools/browser');
 const mac = require('./tools/mac');
+const plan = require('./tools/plan');
 
 const HELPER_TOOLS = new Set(['computer_screenshot', 'computer_click', 'computer_move', 'computer_drag', 'computer_scroll', 'computer_type', 'computer_key', 'list_apps']);
 const MODEL_TTL = 10 * 60 * 1000;
+const CAPS_TTL = 10 * 60 * 1000;
 
 
 class AIController {
@@ -29,6 +31,7 @@ class AIController {
     this.onSettingsChanged = onSettingsChanged; // lets every window refresh its panel
     this.run = null;
     this.modelCache = null;
+    this.capsCache = null; // { at, tools } from the Lumio server
     this.refs = new Map();
     if (!findModel(store.settings.model)) store.setSetting('model', DEFAULT_MODEL);
   }
@@ -150,7 +153,7 @@ class AIController {
 
   getChat(id) {
     const chat = this.chatStore.get(id);
-    return chat ? { id: chat.id, title: chat.title, display: chat.display } : null;
+    return chat ? { id: chat.id, title: chat.title, display: chat.display, plan: chat.plan || null } : null;
   }
 
   deleteChat(id) {
@@ -171,8 +174,20 @@ class AIController {
 
   tools() {
     const helperOk = this.helper.available();
-    return [...browser.tools, ...mac.tools].filter((t) => (helperOk || !HELPER_TOOLS.has(t.name))
+    return [...browser.tools, ...mac.tools, ...plan.tools].filter((t) => (helperOk || !HELPER_TOOLS.has(t.name))
       && (process.platform === 'darwin' || t.name !== 'run_applescript'));
+  }
+
+  // On a Lumio plan the server owns the tool definitions and rejects names it
+  // doesn't know, so only offer the tools it lists. A server too old to list
+  // them gets everything except the newer update_plan.
+  async lumioTools() {
+    if (!this.capsCache || Date.now() - this.capsCache.at > CAPS_TTL) {
+      const caps = await lumioCapabilities(this.account).catch(() => null);
+      this.capsCache = { at: Date.now(), tools: Array.isArray(caps?.tools) ? new Set(caps.tools) : null };
+    }
+    const allowed = this.capsCache.tools;
+    return this.tools().filter((t) => (allowed ? allowed.has(t.name) : t.name !== 'update_plan'));
   }
 
   async send({ chatId, text, includePage } = {}) {
@@ -214,6 +229,7 @@ class AIController {
     }
     chat.messages.push({ role: 'user', content });
     chat.display.push({ kind: 'user', text: clean, ctx: ctxInfo });
+    chat.plan = null; // a new request starts without a checklist until the AI makes one
     chat.updatedAt = Date.now();
     this.saveChats();
     this.emit('ai-event', { chatId: chat.id, type: 'user', text: clean, ctx: ctxInfo, title: chat.title });
@@ -229,6 +245,8 @@ class AIController {
     this.emitState();
     this.emit('ai-event', { chatId: chat.id, type: 'start' });
 
+    const key = this.key();
+    const record = (ev) => this.record(chat, run, ev);
     const ctx = {
       tabs: this.tabs,
       helper: this.helper,
@@ -237,9 +255,8 @@ class AIController {
       showCursor: true,
       lastTabShot: null,
       lastMacShot: null,
+      setPlan: (items) => record({ type: 'plan', items }),
     };
-    const key = this.key();
-    const record = (ev) => this.record(chat, run, ev);
     const lumio = this.aiSource() === 'lumio';
     const runId = crypto.randomUUID();
     let stepNo = 0;
@@ -248,7 +265,7 @@ class AIController {
       await runAgent({
         model: this.currentModel().id,
         messages: chat.messages,
-        tools: this.tools(),
+        tools: lumio ? await this.lumioTools() : this.tools(),
         systemPrompt: () => {
           const tab = this.tabs.active;
           return buildSystemPrompt({
@@ -315,6 +332,9 @@ class AIController {
         if (s) { s.status = ev.status; s.summary = ev.summary; if (ev.thumb) s.thumb = ev.thumb; }
         break;
       }
+      case 'plan':
+        chat.plan = ev.items;
+        break;
       case 'done':
         run.text = null;
         if (ev.reason === 'max_steps') d.push({ kind: 'note', text: 'Stopped after 30 steps. Say "continue" to keep going.' });

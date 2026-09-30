@@ -51,6 +51,10 @@ export const icons = {
   gear: s('<circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.2M12 18.3v2.2M4.6 7.2l1.9 1.1M17.5 15.7l1.9 1.1M4.6 16.8l1.9-1.1M17.5 8.3l1.9-1.1"/><circle cx="12" cy="12" r="6.3"/>', 'width="16" height="16"'),
   logout: s('<path d="M14 5H6.5a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1H14"/><path d="M11 12h9M17 8.5l3.5 3.5-3.5 3.5"/>', 'width="16" height="16"'),
   external: s('<path d="M14 5h5v5M19 5l-8 8"/><path d="M17 13.5V18a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h4.5"/>', 'width="13" height="13"'),
+  list: s('<path d="M10 6h10M10 12h10M10 18h10"/><path d="M3.5 6l1.2 1.2L7 5M3.5 12l1.2 1.2L7 11"/><circle cx="5" cy="18" r="1.3"/>', 'width="16" height="16"'),
+  stepDone: '<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="10" cy="10" r="8" fill="currentColor"/><path d="M6.3 10.3l2.4 2.4 5-5.2" fill="none" stroke="var(--panel, #161618)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  stepNow: '<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="10" cy="10" r="7.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path class="pie" d="M10 5.2A4.8 4.8 0 0 1 14.8 10H10z" fill="currentColor"/></svg>',
+  stepTodo: '<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="10" cy="10" r="7.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.6 2.4"/></svg>',
   dots: '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="5.5" r="1.7" fill="currentColor"/><circle cx="12" cy="12" r="1.7" fill="currentColor"/><circle cx="12" cy="18.5" r="1.7" fill="currentColor"/></svg>',
 };
 

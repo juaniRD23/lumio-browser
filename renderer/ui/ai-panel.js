@@ -34,6 +34,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   const includedUrl = new Map(); // chatId -> last page URL sent as context
   let live = null; // { textEl, textBuf, thinkingEl, steps: Map }
   let models = null;
+  let plan = null; // the current chat's checklist from update_plan
 
   // ------------------------------------------------------------ chrome
   $('#panel-mark').innerHTML = markSvg(18);
@@ -114,7 +115,45 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     sendBtn.disabled = !running && (!prompt.value.trim() || !ai.ready);
     setRunning(!!ai.running);
     spin(!!ai.running);
+    planEl.classList.toggle('live', !!(ai.running && ai.runChatId === chatId));
     if (!chatId && !messages.querySelector('.msg')) renderEmpty();
+  }
+
+  // ------------------------------------------------------------ task progress
+  const planEl = $('#plan');
+  const planList = $('#plan-list');
+  $('#plan-head .plan-ic').innerHTML = icons.list;
+  const STEP_ICON = { done: icons.stepDone, in_progress: icons.stepNow, pending: icons.stepTodo };
+  const STEP_WORD = { done: 'Done', in_progress: 'In progress', pending: 'Not started' };
+  function setPlanCollapsed(collapsed) {
+    planEl.classList.toggle('collapsed', collapsed);
+    $('#plan-head').setAttribute('aria-expanded', String(!collapsed));
+  }
+  $('#plan-head').addEventListener('click', () => setPlanCollapsed(!planEl.classList.contains('collapsed')));
+  function renderPlan(changed = false) {
+    planEl.hidden = !plan;
+    planEl.classList.toggle('live', !!(ai.running && ai.runChatId === chatId));
+    if (!plan) return;
+    const before = [...planList.children].map((li) => li.dataset.key);
+    planList.innerHTML = '';
+    plan.forEach((step, i) => {
+      const li = document.createElement('li');
+      li.className = `plan-step ${step.status}`;
+      li.dataset.key = `${step.status}:${step.title}`;
+      li.innerHTML = `<span class="ic" role="img" aria-label="${STEP_WORD[step.status]}">${STEP_ICON[step.status]}</span><span class="t"></span>`;
+      li.querySelector('.t').textContent = step.title;
+      if (changed && before[i] !== li.dataset.key) li.classList.add('flash');
+      planList.append(li);
+    });
+    const done = plan.filter((x) => x.status === 'done').length;
+    $('#plan-count').textContent = `${done}/${plan.length}`;
+    $('#plan-now').textContent = (plan.find((x) => x.status === 'in_progress') || plan.find((x) => x.status === 'pending'))?.title || '';
+  }
+  function showPlan(items, { changed = false } = {}) {
+    const first = !plan && items;
+    plan = items || null;
+    if (first) setPlanCollapsed(false);
+    renderPlan(changed);
   }
 
   api.on('ai-state', (s) => {
@@ -405,6 +444,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
       if (!chatId || chatId === ev.chatId) {
         if (!chatId) messages.innerHTML = '';
         chatId = ev.chatId;
+        showPlan(null); // each request starts fresh; the AI posts a new checklist if it needs one
         messages.append(userEl(ev.text, ev.ctx));
         scrollDown(true);
       }
@@ -442,6 +482,9 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
         scrollDown();
         break;
       }
+      case 'plan':
+        showPlan(ev.items, { changed: true });
+        break;
       case 'approval':
         messages.append(approvalEl(ev));
         scrollDown(true);
@@ -491,6 +534,9 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
         messages.querySelectorAll('.step.running').forEach((el) => setStepStatus(el, 'error', 'Stopped'));
         messages.querySelectorAll('.approval:not(.done)').forEach((el) => el.classList.add('done'));
         live = null;
+        planEl.classList.remove('live');
+        // A finished checklist folds away; it's still one click away.
+        if (plan && plan.every((x) => x.status === 'done')) setTimeout(() => { if (plan?.every((x) => x.status === 'done')) setPlanCollapsed(true); }, 1600);
         break;
       default:
         break;
@@ -599,6 +645,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     chatId = id;
     live = ai.running && ai.runChatId === id ? { textEl: null, textBuf: '', thinkingEl: null, steps: new Map() } : null;
     renderChat(chat.display);
+    showPlan(chat.plan || null);
     if (live) {
       messages.querySelectorAll('.step.running').forEach((el) => live.steps.set(el.dataset.id, el));
       const last = messages.lastElementChild;
@@ -609,6 +656,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   function newChat() {
     chatId = null;
     live = null;
+    showPlan(null);
     messages.innerHTML = '';
     renderEmpty();
     renderState();
