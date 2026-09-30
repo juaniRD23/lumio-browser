@@ -10,7 +10,7 @@ A Chromium web browser with **Lumio AI** built in. Lumio sits in a side panel ne
 - **You stay in control.** Three approval modes: **Ask** (confirm every action), **Auto** (browse on its own, ask before touching your computer), **Bypass**. While Lumio works, the page (or, when it controls your computer, the whole screen) glows blue with a **Stop** button. Esc stops it too.
 - **Task progress.** For bigger jobs, Lumio keeps a checklist above the chat box and ticks off steps as it goes.
 - **Safe by design.** Page content is treated as untrusted data, never as instructions. Lumio never types passwords, payment or ID details. It stops to confirm before anything irreversible.
-- **Your plan or your key.** Sign in with a Lumio account (Plus, Pro or Max) and the AI runs on your plan. Or use your own [OpenRouter](https://openrouter.ai) key. Models: Claude Opus 5.5, Claude Sonnet 5.5, GPT-6 Astra, GPT-6.1 Sol, GPT-5.6 Sol, GPT-5.6 Terra.
+- **Runs on your Lumio plan.** Sign in with a Lumio account and the AI runs on your plan. Every plan includes some use each week, Free too, and Plus, Pro and Max include much more. It uses one fast, inexpensive model (GPT-6 Luna); you choose how hard it thinks (Low, Medium or High) right under the chat box.
 - **Everything a browser needs:**
   - tabs, multiple windows, pinned tabs, incognito windows, find, zoom, downloads, and a PDF viewer;
   - history search with time-range clearing;
@@ -45,7 +45,7 @@ npm run release          # dist/release: Mac DMGs (Apple silicon, Intel) and a W
 
 - **Electron 43.** Each tab is a `WebContentsView`, and each window has one shell page (`renderer/ui`) and one AI controller.
 - **Agent:** `main/ai` holds the agent loop, the approval policy, browser tools, and computer tools. Computer tools go through a small native helper: Swift on macOS (`native/LumioHelper`), PowerShell on Windows (`native/windows`).
-- **Lumio account:** `main/account.js` uses the lumio-usa.online desktop sign-in hand-off. `main/ai/lumio.js` runs the AI through the account's plan.
+- **Lumio account:** `main/account.js` uses the lumio-usa.online desktop sign-in hand-off. `main/ai/lumio.js` runs the AI through the account's plan (`/api/browser/agent`); the server owns the model, the tool definitions and the system prompt.
 - **Passwords:** `main/passwords.js` and `main/password-manager.js`, plus the isolated preload in `preload/internal.js`. Each password is encrypted with Electron `safeStorage`.
 - **While it works:** `main/ai/indicators.js` (page glow and Stop bar) and `main/ai/screen-aura.js` (screen glow and Stop pill, left out of screen captures). `main/ai/tools/plan.js` is the Task progress checklist.
 - **Updates:** `main/updater.js` checks GitHub Releases, verifies the installer's SHA-256 and swaps the app in after it quits.

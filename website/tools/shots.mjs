@@ -1,14 +1,16 @@
-// Takes the website's screenshots from the real app (throwaway profile):
-// the Lumio agent booking a table, a page summary, the model picker, the
-// account menu, passwords, extensions, incognito and history.
+// Takes the website's screenshots from the real app (throwaway profile),
+// signed in to a stand-in Lumio server: the Lumio agent booking a table, a
+// page summary, the reasoning picker, the account menu, passwords,
+// extensions, incognito and history.
 // Run: node website/tools/shots.mjs   (writes website/public/shots/*.jpg)
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { launch, root } from '../../scripts/launch.mjs';
-import { startDemoModel } from './demo-model.mjs';
+import { demoTurn } from './demo-model.mjs';
 import { startMockLumio } from '../../tests/mock-lumio.mjs';
+import { turnEvents } from '../../tests/mock-scripts.mjs';
 
 const OUT = path.join(root, 'website', 'public', 'shots');
 const DEMO = path.join(root, 'website', 'tools', 'demo');
@@ -22,9 +24,9 @@ const site = http.createServer((q, r) => {
 });
 await new Promise((r) => site.listen(0, '127.0.0.1', r));
 const base = `http://127.0.0.1:${site.address().port}`;
-const model = await startDemoModel();
 const lumio = await startMockLumio({ plan: 'pro' });
-const L = await launch({ env: { LUMIO_OPENROUTER_BASE: model.base, LUMIO_ACCOUNT_BASE: lumio.base, LUMIO_TEST_AUTH: 'allow' } });
+lumio.state.agentScript = (body) => turnEvents(demoTurn(body.messages));
+const L = await launch({ env: { LUMIO_ACCOUNT_BASE: lumio.base, LUMIO_TEST_AUTH: 'allow' } });
 
 const until = async (fn, ms = 15000) => { const end = Date.now() + ms; for (;;) { const v = await fn().catch(() => null); if (v || Date.now() > end) return v; await L.wait(150); } };
 async function save(name) {
@@ -56,8 +58,6 @@ await L.main(({ net }, { base, hosts }) => {
     return net.fetch(`${base}${u.pathname === '/' ? '/' + file : u.pathname}`, { bypassCustomProtocolHandlers: true });
   });
 }, { base, hosts: DEMO_HOSTS });
-await L.main(() => global.lumio.ai.setKey('sk-or-demo-key'));
-await L.main(() => global.lumio.store.setSetting('aiSource', 'openrouter'));
 await L.main(() => global.lumio.store.setSetting('profile', { name: 'Sam', color: '#86b7ff', photo: null, theme: 'blue' }));
 // A little history and a couple of bookmarks so pages look lived-in.
 await L.main(() => {
@@ -69,6 +69,12 @@ await L.main(() => {
   s.toggleBookmark('https://www.wikipedia.org/', 'Wikipedia');
   s.setSetting('showBookmarksBar', true);
 });
+
+// Signed in to Lumio Pro; the AI runs on the plan.
+await L.main(() => global.lumio.account.startSignIn());
+const id = await until(() => L.main(() => global.lumio.account.pending?.id));
+await fetch(lumio.base + '/api/auth/desktop', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'approve', id }) });
+await until(() => L.main(() => global.lumio.account.state().signedIn));
 
 // 1. The agent booking a table, paused on an approval.
 await go(demo('osteria-luna.demo'), 'Osteria');
@@ -95,19 +101,14 @@ await ask('Summarize this page');
 await until(async () => !(await L.main(() => global.lumio.ai.isRunning())));
 await save('summary');
 
-// 3. The model picker.
-await L.shell(`document.getElementById('model-btn').click(); true`);
-await until(() => L.shell(`document.querySelectorAll('#model-list [data-id]').length === 6 && document.querySelector('#model-list .li-sub').textContent.includes('$')`));
-await save('models');
-await L.shell(`document.getElementById('model-btn').click(); true`);
+// 3. The reasoning picker.
+await L.shell(`document.getElementById('reasoning-btn').click(); true`);
+await until(() => L.shell(`document.querySelectorAll('#reasoning-list [data-id]').length === 3`));
+await L.wait(300);
+await save('reasoning');
+await L.shell(`document.getElementById('reasoning-btn').click(); true`);
 
-// 4. Account menu (signed in to Lumio Pro).
-await L.main(() => global.lumio.account.startSignIn());
-const id = await until(() => L.main(() => global.lumio.account.pending?.id));
-await fetch(lumio.base + '/api/auth/desktop', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'approve', id }) });
-await until(() => L.main(() => global.lumio.account.state().signedIn));
-await L.main(() => { const w = global.lumio.current; w.tabs.close(w.tabs.tabs.find((t) => (t.url || '').includes('desktop-connect'))?.id); });
-await go(demo('thelongread.demo'), 'Night Skies');
+// 4. Account menu (Lumio Pro).
 await L.shell(`document.getElementById('account-btn').click(); true`);
 await until(() => L.main(() => global.lumio.current.overlayKind === 'account'));
 await save('account');
@@ -161,9 +162,9 @@ async function crop(name, box) {
 await crop('passwords', [0.08, 0.15, 0.57, 0.5]);
 await crop('extensions', [0.04, 0.13, 0.5, 0.49]);
 await crop('incognito', [0.1, 0.21, 0.56, 0.55]);
-await crop('models', [0.5, 0.49, 0.5, 0.49]);
+await crop('reasoning', [0.52, 0.52, 0.48, 0.47]);
 await crop('history', [0.08, 0.15, 0.56, 0.55]);
 await crop('account', [0.48, 0.08, 0.52, 0.46]);
 
 await L.close();
-site.close(); model.server.close(); lumio.server.close();
+site.close(); lumio.server.close();
