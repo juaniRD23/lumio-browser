@@ -346,13 +346,18 @@ class TabManager {
   layout() {
     const tab = this.active;
     if (!tab?.view) return;
-    if (this.fullscreenTab === tab.id) {
+    const full = this.fullscreenTab === tab.id;
+    if (full) {
       const [w, h] = this.win.getContentSize();
       tab.view.setBounds({ x: 0, y: 0, width: w, height: h });
-      if (typeof tab.view.setBorderRadius === 'function') tab.view.setBorderRadius(0);
     } else {
       tab.view.setBounds(this.slot);
-      if (typeof tab.view.setBorderRadius === 'function') tab.view.setBorderRadius(10);
+    }
+    // Setting the corner radius rebuilds the view's layer; only do it when it changes.
+    const radius = full ? 0 : 10;
+    if (tab.view.lumioRadius !== radius && typeof tab.view.setBorderRadius === 'function') {
+      tab.view.setBorderRadius(radius);
+      tab.view.lumioRadius = radius;
     }
   }
 

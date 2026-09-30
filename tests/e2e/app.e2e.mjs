@@ -62,6 +62,24 @@ test('opens on the Lumio new tab page with the AI panel', async () => {
   await shot('01-newtab');
 });
 
+test('the AI panel slides open and closed, and the page follows it frame by frame', async () => {
+  // Samples the page view's width while the panel animates.
+  const slide = (button) => L.main(async (_e, btn) => {
+    const w = global.lumio.current;
+    const widths = new Set();
+    const t0 = Date.now();
+    w.win.webContents.executeJavaScript(`document.getElementById('${btn}').click()`);
+    while (Date.now() - t0 < 700) { widths.add(w.tabs.active.view.getBounds().width); await new Promise((r) => setTimeout(r, 12)); }
+    return [...widths];
+  }, button);
+  const closing = await slide('panel-close');
+  assert.ok(closing.length >= 6, `page widened in steps while closing (${closing.join(', ')})`);
+  assert.equal(await L.shell(`getComputedStyle(document.getElementById('panel')).visibility`), 'hidden');
+  const opening = await slide('ai-toggle');
+  assert.ok(opening.length >= 6, `page narrowed in steps while opening (${opening.join(', ')})`);
+  assert.equal(await L.shell(`Math.round(document.getElementById('panel').getBoundingClientRect().width)`), 380);
+});
+
 test('omnibox navigates, and web pages cannot reach internal pages', async () => {
   await L.shell(`(() => { const a = document.getElementById('address'); a.focus(); a.value = ${JSON.stringify(siteUrl + '/form.html')}; a.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return true })()`);
   await until(async () => (await L.main(() => global.lumio.tabs.wc().getTitle())).includes('Pizza'));

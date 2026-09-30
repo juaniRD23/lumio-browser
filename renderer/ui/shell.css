@@ -25,6 +25,8 @@
   --primary-bg: #eeeeef;
   --primary-fg: #171719;
   --ease: cubic-bezier(.22, 1, .36, 1);
+  --slide: .38s cubic-bezier(.32, .72, 0, 1);      /* AI panel opening */
+  --slide-out: .28s cubic-bezier(.32, .72, 0, 1);  /* ...and closing */
   --fast: 140ms;
   --panel-w: 380px;
   --font: 'Inter Variable', Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -314,7 +316,7 @@ body.agent-running #slot {
 }
 #find-count { color: var(--label); font-size: 12px; min-width: 44px; text-align: right; padding-right: 4px; font-variant-numeric: tabular-nums; }
 
-#resizer { width: 8px; flex: none; cursor: col-resize; position: relative; transition: width .34s var(--ease); }
+#resizer { width: 8px; flex: none; cursor: col-resize; position: relative; transition: width var(--slide); }
 #resizer::after {
   content: ''; position: absolute; left: 3px; top: 40%; bottom: 40%; width: 2px; border-radius: 2px;
   background: transparent; transition: background .15s;
@@ -331,18 +333,22 @@ body.agent-running #slot {
   display: flex; flex-direction: column; align-items: flex-end; position: relative;
   background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
   overflow: hidden;
-  transition: width .34s var(--ease), border-width .34s var(--ease), opacity .26s ease, visibility 0s;
+  transition: width var(--slide), border-width var(--slide), opacity .22s ease, visibility 0s;
 }
 #panel-head, #messages { width: calc(var(--panel-w) - 2px); }
 #composer, #plan { width: calc(var(--panel-w) - 22px); } /* 10px side margins */
-#panel-head, #messages, #composer, #plan { flex-shrink: 0; transition: transform .34s var(--ease); }
+#panel-head, #messages, #composer, #plan { flex-shrink: 0; transition: transform var(--slide), opacity .3s ease; }
 #panel > #messages { flex: 1 1 0; min-height: 0; }
 body.panel-closed #resizer { width: 0; pointer-events: none; }
 body.panel-closed #panel {
   width: 0; border-width: 0; opacity: 0; visibility: hidden;
-  transition: width .3s var(--ease), border-width .3s var(--ease), opacity .22s ease .06s, visibility 0s .3s;
+  transition: width var(--slide-out), border-width var(--slide-out), opacity .2s ease .08s, visibility 0s .3s;
 }
-body.panel-closed :is(#panel-head, #messages, #composer, #plan) { transform: translateX(24px); }
+body.panel-closed :is(#panel-head, #messages, #composer, #plan) { transform: translateX(28px); opacity: 0; }
+/* Opening: the contents trail the edge slightly, top to bottom. */
+#messages { transition-delay: .03s; }
+#plan { transition-delay: .05s; }
+body.panel-closed :is(#messages, #plan) { transition-delay: 0s; }
 body:is(.resizing, .no-anim) :is(#panel, #resizer, #panel-head, #messages, #composer, #plan) { transition: none !important; }
 @media (prefers-reduced-motion: reduce) {
   :is(#panel, #resizer, #panel-head, #messages, #composer, #plan) { transition: none !important; }
@@ -533,8 +539,9 @@ body:is(.resizing, .no-anim) :is(#panel, #resizer, #panel-head, #messages, #comp
   position: relative; container: composer / inline-size;
   flex: none; margin: 0 10px 10px; padding: 8px 8px 6px 12px;
   background: #202023; border: 1px solid #36363b; border-radius: 20px;
-  transition: border-color var(--fast) var(--ease);
+  transition: border-color var(--fast) var(--ease), transform var(--slide) .05s, opacity .3s ease .05s;
 }
+body.panel-closed #composer { transition: border-color var(--fast) var(--ease), transform var(--slide-out), opacity .2s ease; }
 #composer.focused { border-color: #4a4a52; }
 #prompt {
   display: block; width: 100%; resize: none; border: 0; outline: none; background: none;
