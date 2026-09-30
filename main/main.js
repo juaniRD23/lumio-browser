@@ -1,6 +1,6 @@
 // Lumio Browser — main process entry.
 const {
-  app, BrowserWindow, ipcMain, session, protocol, Menu, safeStorage, nativeImage, dialog,
+  app, BrowserWindow, ipcMain, session, protocol, Menu, safeStorage, nativeImage, dialog, net, shell,
 } = require('electron');
 const fs = require('fs');
 const path = require('path');
@@ -26,6 +26,7 @@ const { ExtensionManager } = require('./extensions');
 const { LumioAccount } = require('./account');
 const { PasswordManager } = require('./password-manager');
 const screenAura = require('./ai/screen-aura');
+const { Updater, LATEST } = require('./updater');
 const { generatePassword } = require('./passwords');
 const importer = require('./importer/chromium');
 
@@ -44,6 +45,7 @@ let normal = null; // the normal profile: { session, downloads, permissions, cha
 let incog = null; // the current incognito profile, while any incognito window is open
 let incogSeq = 0;
 let extensions = null;
+let updater = null;
 let account = null;
 let passwords = null;
 let quitting = false;
@@ -385,6 +387,28 @@ async function clearData({ range = 0, what = [] } = {}) {
   return true;
 }
 
+// ---------------------------------------------------------------- updates
+// The Update button: download and check the installer, then ask before restarting.
+async function startUpdate(w) {
+  if (!updater || ['downloading', 'installing'].includes(updater.state.status)) return updater?.state || null;
+  try { await updater.download(); } catch { return updater.state; }
+  if (!process.env.LUMIO_TEST) {
+    const working = alive().some((x) => x.ai.isRunning());
+    const { response } = await dialog.showMessageBox(w.win, {
+      type: 'info',
+      message: `Lumio Browser ${updater.state.latest} is ready to install`,
+      detail: `Lumio will restart and reopen your tabs.${working ? ' Lumio AI is working on a task right now; restarting will stop it.' : ''}`,
+      buttons: ['Restart Now', 'Later', "What's New"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response === 2 && updater.state.notesUrl) openUrl(updater.state.notesUrl);
+    if (response !== 0) return updater.state;
+  }
+  await updater.install().catch(() => {});
+  return updater.state;
+}
+
 // ---------------------------------------------------------------- IPC
 // Browser UI calls (shell + overlay) are routed to the window they came from.
 function handle(channel, fn) {
@@ -432,6 +456,7 @@ function registerIpc() {
     extensions: !w.incognito && !!extensions?.ece,
     platform: process.platform,
     version: app.getVersion(),
+    update: updater?.state || null,
   }));
 
   on('layout:slot', (w, rect) => { w.tabs.setSlot(rect); w.indicator.place(); });
@@ -545,6 +570,10 @@ function registerIpc() {
   on('passwords:manage', (w) => { w.hideOverlay(); openInternal('lumio://passwords/'); });
   on('extensions:manage', () => openInternal('lumio://extensions/'));
 
+  // ---- updates ----
+  handle('update:state', () => updater?.state || null);
+  on('update:install', (w) => { startUpdate(w); });
+
   // ---- AI panel ----
   handle('ai:state', (w) => w.ai.state());
   handle('ai:set-key', (w, key) => w.ai.setKey(key));
@@ -645,11 +674,14 @@ function registerIpc() {
     showBookmarksBar: !!store.settings.showBookmarksBar,
     ai: w.ai.state(),
     version: app.getVersion(),
+    update: updater?.state || null,
     sourceUrl: SOURCE_URL,
     isDefault: app.isDefaultProtocolClient('https'),
     importSources: importer.detect(),
     sitePermissions: Object.entries(normal.permissions.all()).map(([origin, perms]) => ({ origin, perms })),
   }));
+  internalHandle('page:check-updates', ['settings'], () => updater.check({ manual: true }));
+  internalHandle('page:update-now', ['settings'], ({ w }) => startUpdate(w));
   internalHandle('page:set-setting', ['settings', 'passwords'], ({ w }, key, value) => {
     if (key === 'searchEngine' && SEARCH_ENGINES[value]) store.setSetting('searchEngine', value);
     if (key === 'approvalMode') w.ai.setMode(value);
@@ -820,6 +852,23 @@ app.whenReady().then(async () => {
   });
   passwords.register();
   screenAura.register();
+
+  // Updates from GitHub Releases (packaged builds; tests point it at a mock).
+  const testUpdates = process.env.LUMIO_TEST && process.env.LUMIO_UPDATE_API;
+  updater = new Updater({
+    currentVersion: app.getVersion(),
+    fetchImpl: (url, opts) => net.fetch(url, opts),
+    workDir: path.join(app.getPath('temp'), 'Lumio Browser Update'),
+    onChange: (state) => alive().forEach((w) => w.emit('update', state)),
+    quit: process.env.LUMIO_UPDATE_TARGET && process.env.LUMIO_TEST ? () => {} : () => app.quit(),
+    openPath: (file) => shell.openPath(file),
+    api: testUpdates ? process.env.LUMIO_UPDATE_API : LATEST,
+    ...(process.env.LUMIO_TEST && process.env.LUMIO_UPDATE_TARGET ? { installTarget: process.env.LUMIO_UPDATE_TARGET, fakeExit: true } : {}),
+  });
+  if (app.isPackaged || testUpdates) {
+    setTimeout(() => updater.check(), testUpdates ? 300 : 8000);
+    setInterval(() => updater.check(), 6 * 60 * 60 * 1000).unref?.();
+  }
   normal.permissions = new Permissions(ses, { store, emitFor, persist: true });
 
   extensions = new ExtensionManager({
@@ -923,6 +972,7 @@ global.lumio = {
   get profiles() { return { normal, incognito: incog }; },
   get recentlyClosed() { return recentlyClosed; },
   screenAura,
+  get updater() { return updater; },
   focus: (w) => { lastFocused = w; },
   createWindow,
   openUrl,

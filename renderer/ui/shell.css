@@ -188,6 +188,29 @@ body.windows #tabstrip { padding-right: 146px; }
 }
 @keyframes pop { from { opacity: 0; transform: translateY(3px) scale(.96); } }
 
+/* Update button: shown next to the avatar when a newer release is out */
+.update-btn {
+  position: relative; overflow: hidden; flex: none;
+  height: 28px; margin-left: 6px; padding: 0 12px 0 9px; border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #2f7cf6; color: #fff; font-weight: 600; font-size: 12.5px; letter-spacing: -.1px;
+  box-shadow: 0 0 0 1px #5b9bff66 inset, 0 2px 10px #2f7cf655;
+  transition: background var(--fast) var(--ease), filter var(--fast) var(--ease);
+  animation: pop .3s var(--ease);
+}
+.update-btn:hover { background: #3d88ff; }
+.update-btn:active { filter: brightness(.94); }
+.update-btn .ic { display: grid; }
+.update-btn .label { position: relative; z-index: 1; font-variant-numeric: tabular-nums; }
+.update-btn .ic { position: relative; z-index: 1; }
+.update-btn .bar {
+  position: absolute; inset: 0; right: auto; width: calc(var(--p, 0) * 1%);
+  background: #ffffff2a; transition: width .25s var(--ease);
+}
+.update-btn.busy { cursor: default; background: #2563d9; }
+.update-btn.busy .ic { animation: spin-slow 1.2s linear infinite; }
+@keyframes spin-slow { to { transform: rotate(360deg); } }
+
 /* account button */
 .account-btn {
   width: 34px; height: 34px; margin-left: 4px; border-radius: 50%; flex: none;

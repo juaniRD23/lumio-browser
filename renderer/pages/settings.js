@@ -15,6 +15,43 @@ const PLANS = [
 let s = await page.invoke('page:settings');
 $('#version').textContent = 'v' + s.version;
 if (s.sourceUrl) $('#source-link').href = s.sourceUrl; else $('#source-link').hidden = true;
+
+// ---- updates (About)
+function renderUpdate(u) {
+  const status = $('#update-status');
+  const action = $('#update-action');
+  action.disabled = false;
+  action.classList.remove('primary');
+  if (!u) { status.textContent = 'Updates are checked in installed copies of Lumio Browser.'; return; }
+  const text = {
+    idle: 'Lumio Browser checks for updates automatically.',
+    checking: 'Checking for updates…',
+    current: `You have the latest version (${u.current}).`,
+    available: `Lumio Browser ${u.latest} is available.`,
+    downloading: `Downloading ${u.latest}… ${u.progress || 0}%`,
+    ready: `Lumio Browser ${u.latest} is downloaded and ready to install.`,
+    installing: 'Restarting to finish the update…',
+    manual: `The ${u.latest} installer is open. Drag Lumio Browser into Applications to finish.`,
+  }[u.status] || '';
+  status.textContent = u.error || text;
+  const canInstall = ['available', 'ready'].includes(u.status);
+  action.textContent = canInstall ? (u.status === 'ready' ? 'Restart to update' : 'Update now') : 'Check for updates';
+  action.classList.toggle('primary', canInstall);
+  action.disabled = ['checking', 'downloading', 'installing'].includes(u.status);
+}
+renderUpdate(s.update);
+$('#update-action').addEventListener('click', async () => {
+  const u = s.update;
+  $('#update-action').disabled = true;
+  if (u && ['available', 'ready'].includes(u.status)) {
+    $('#update-status').textContent = `Downloading ${u.latest}…`;
+    s.update = await page.invoke('page:update-now');
+  } else {
+    $('#update-status').textContent = 'Checking for updates…';
+    s.update = await page.invoke('page:check-updates');
+  }
+  renderUpdate(s.update);
+});
 if (s.platform !== 'darwin') {
   document.querySelectorAll('.mac-only').forEach((el) => { el.hidden = true; });
   document.querySelectorAll('.kbd-mod').forEach((el) => { el.textContent = 'Ctrl+'; });

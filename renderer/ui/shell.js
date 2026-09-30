@@ -495,6 +495,29 @@ window.addEventListener('mousedown', (e) => { if (overlayKind === 'account' && !
 api.on('account', (a) => { state.account = a || {}; renderAccount(); });
 api.on('profile', (p) => { state.profile = p || {}; renderAccount(); });
 
+// ------------------------------------------------------------------ updates
+// A blue Update button next to the avatar while a newer release is out.
+const updateBtn = $('#update-btn');
+function renderUpdate(u) {
+  const show = !!u && ['available', 'downloading', 'ready', 'installing'].includes(u.status);
+  updateBtn.hidden = !show;
+  if (!show) return;
+  const busy = u.status === 'downloading' || u.status === 'installing';
+  updateBtn.classList.toggle('busy', busy);
+  updateBtn.querySelector('.ic').innerHTML = busy ? icons.spinner : icons.update;
+  updateBtn.querySelector('.label').textContent = u.status === 'downloading' ? `Updating… ${u.progress || 0}%`
+    : u.status === 'installing' ? 'Restarting…'
+      : u.status === 'ready' ? 'Restart to update' : 'Update';
+  updateBtn.style.setProperty('--p', u.status === 'downloading' ? u.progress || 0 : 0);
+  updateBtn.title = u.error || `Lumio Browser ${u.latest} is available (you have ${u.current})`;
+  updateBtn.setAttribute('aria-label', `Update Lumio Browser to ${u.latest}`);
+}
+updateBtn.addEventListener('click', () => {
+  if (updateBtn.classList.contains('busy')) return;
+  api.send('update:install');
+});
+api.on('update', renderUpdate);
+
 // ------------------------------------------------------------------ extensions
 $('#ext-btn').addEventListener('click', () => api.send('extensions:manage'));
 
@@ -609,6 +632,7 @@ renderToolbar();
 renderDownloads(false);
 renderBookmarksBar();
 renderAccount();
+renderUpdate(init.update);
 panel.init(init);
 reportSlot();
 if (!activeTab()?.url) setTimeout(() => address.focus(), 50);
