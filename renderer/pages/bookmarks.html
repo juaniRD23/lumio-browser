@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Bookmarks</title>
+  <link rel="stylesheet" href="pages.css" />
+  <link rel="stylesheet" href="lists.css" />
+</head>
+<body>
+  <div class="wrap wide">
+    <div class="top">
+      <h1>Bookmarks</h1>
+      <span class="grow"></span>
+      <input id="search" class="field" type="search" placeholder="Search bookmarks" spellcheck="false" aria-label="Search bookmarks" />
+    </div>
+    <div class="top" style="margin-top:-6px">
+      <label class="bar-toggle"><input type="checkbox" id="bar-toggle"> Show bookmarks bar (⇧⌘B)</label>
+      <span class="grow"></span>
+      <a class="btn small" href="lumio://settings/#import" style="display:inline-flex;align-items:center">Import…</a>
+      <button class="btn small" id="export">Export…</button>
+    </div>
+    <div id="list" role="list"></div>
+  </div>
+  <script type="module" src="bookmarks.js"></script>
+</body>
+</html>

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Osteria Luna · Book a table</title>
+<style>
+  :root { --ink: #1d1a16; --muted: #7a6f63; --paper: #f6f0e6; --line: #e3d8c6; --red: #b3372a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.55 -apple-system, "Helvetica Neue", sans-serif; color: var(--ink); background: var(--paper); }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 22px 48px; border-bottom: 1px solid var(--line); }
+  .logo { font: italic 600 26px Georgia, serif; letter-spacing: -.5px; }
+  .logo span { color: var(--red); }
+  nav a { margin-left: 26px; color: var(--muted); text-decoration: none; font-size: 14px; }
+  main { display: grid; grid-template-columns: 1.05fr 1fr; gap: 56px; padding: 48px; max-width: 1180px; margin: 0 auto; }
+  .hero { border-radius: 18px; min-height: 560px; background:
+    radial-gradient(circle at 30% 30%, #f3c89a 0 8%, transparent 9%),
+    radial-gradient(circle at 70% 60%, #e8a86f 0 12%, transparent 13%),
+    linear-gradient(160deg, #3b2418, #8a4b2c 55%, #d08a52); position: relative; overflow: hidden; }
+  .hero::after { content: 'Handmade pasta · Wood-fired pizza · Since 1998'; position: absolute; left: 28px; bottom: 24px; color: #fff6e8; font: italic 20px Georgia, serif; }
+  h1 { font: 600 40px/1.1 Georgia, serif; letter-spacing: -1px; margin: 4px 0 10px; }
+  .sub { color: var(--muted); margin: 0 0 26px; }
+  form { display: grid; gap: 16px; }
+  label { display: grid; gap: 6px; font-size: 13px; font-weight: 600; color: #4a4239; }
+  input, select { font: inherit; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: #fffdf9; color: var(--ink); }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  button { margin-top: 6px; padding: 14px; border: 0; border-radius: 999px; background: var(--red); color: #fff; font: 600 15px -apple-system, sans-serif; cursor: pointer; }
+  #result { margin-top: 18px; padding: 14px 16px; border-radius: 12px; background: #e9f3e6; color: #28502a; display: none; }
+  #result.show { display: block; }
+</style>
+</head>
+<body>
+<header><div class="logo">Osteria <span>Luna</span></div><nav><a href="#">Menu</a><a href="#">Wine</a><a href="#">Private dining</a><a href="#">Find us</a></nav></header>
+<main>
+  <div class="hero" aria-hidden="true"></div>
+  <section>
+    <p class="sub" style="margin:0;text-transform:uppercase;letter-spacing:2px;font-size:12px">Reservations</p>
+    <h1>Book a table</h1>
+    <p class="sub">We hold tables for 15 minutes. For parties larger than 8, call us.</p>
+    <form id="f" onsubmit="event.preventDefault(); const d = new FormData(this); document.getElementById('result').textContent = 'Table for ' + d.get('party') + ' at ' + d.get('time') + ' tonight is booked under ' + d.get('name') + '. Confirmation LUNA-2841.'; document.getElementById('result').classList.add('show');">
+      <label>Your name<input name="name" autocomplete="name"></label>
+      <label>Email<input name="email" type="email" autocomplete="email"></label>
+      <div class="row">
+        <label>Party size<select name="party"><option>Choose…</option><option>1 guest</option><option>2 guests</option><option>3 guests</option><option>4 guests</option><option>6 guests</option></select></label>
+        <label>Time<select name="time"><option>Choose…</option><option>6:30 PM</option><option>7:00 PM</option><option>7:30 PM</option><option>8:00 PM</option><option>8:30 PM</option></select></label>
+      </div>
+      <label>Notes<input name="notes" placeholder="Allergies, a birthday, a quiet corner…"></label>
+      <button type="submit">Reserve table</button>
+    </form>
+    <div id="result" role="status"></div>
+  </section>
+</main>
+</body>
+</html>

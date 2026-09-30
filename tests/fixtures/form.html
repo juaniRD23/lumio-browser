@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Pizza Order — Test Shop</title>
+  <style>
+    body { font: 16px/1.5 -apple-system, sans-serif; max-width: 560px; margin: 40px auto; padding: 0 20px; color: #222; }
+    label { display: block; margin: 14px 0 4px; font-weight: 600; }
+    input[type=text], input[type=email], input[type=password], select, textarea { width: 100%; padding: 8px; font: inherit; border: 1px solid #bbb; border-radius: 6px; box-sizing: border-box; }
+    button { margin-top: 18px; padding: 10px 18px; font: inherit; border-radius: 8px; border: 0; background: #1a73e8; color: #fff; }
+    #result { margin-top: 20px; padding: 12px; background: #e8f5e9; border-radius: 8px; display: none; }
+    .spacer { height: 1400px; }
+  </style>
+</head>
+<body>
+  <h1>Order a pizza</h1>
+  <p>Fill in the form to order. This is a local test page for Lumio Browser.</p>
+  <form id="order">
+    <label for="name">Your name</label>
+    <input id="name" name="name" type="text" placeholder="Jane Doe" />
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" placeholder="you@example.com" />
+    <label for="size">Size</label>
+    <select id="size" name="size">
+      <option value="">Choose…</option>
+      <option value="s">Small</option>
+      <option value="m">Medium</option>
+      <option value="l">Large</option>
+    </select>
+    <label><input id="cheese" type="checkbox" name="cheese" /> Extra cheese</label>
+    <label for="pw">Account password</label>
+    <input id="pw" name="password" type="password" autocomplete="current-password" />
+    <div id="proxy" role="button" tabindex="0" onclick="document.getElementById('pw').focus()" style="margin-top:8px;padding:8px;border:1px dashed #999;border-radius:6px;cursor:pointer">Tap here to fill the secret</div>
+    <label for="notes">Notes</label>
+    <textarea id="notes" name="notes" rows="2"></textarea>
+    <button type="submit" id="submit">Place order</button>
+  </form>
+  <div id="result"></div>
+  <div class="spacer"></div>
+  <p id="footer">End of the page.</p>
+  <script>
+    document.getElementById('order').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const f = new FormData(e.target);
+      const r = document.getElementById('result');
+      r.style.display = 'block';
+      r.textContent = `Order placed for ${f.get('name')} (${f.get('email')}): size ${f.get('size') || '?'}${f.get('cheese') ? ' + extra cheese' : ''}. Trusted click: ${e.submitter ? 'yes' : 'no'}`;
+      document.title = 'Order placed — Test Shop';
+    });
+    window.clicks = [];
+    document.addEventListener('click', (e) => window.clicks.push({ trusted: e.isTrusted, id: e.target.id }));
+  </script>
+</body>
+</html>

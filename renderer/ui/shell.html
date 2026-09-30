@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Lumio Browser</title>
+  <link rel="stylesheet" href="shell.css" />
+</head>
+<body>
+  <header id="tabstrip">
+    <div class="traffic-space"></div>
+    <div id="tabs" role="tablist"></div>
+    <button id="newtab" class="icon-btn" title="New Tab (⌘T)" aria-label="New Tab"></button>
+    <div class="strip-drag"></div>
+    <div id="incognito-badge" hidden title="Incognito: pages you visit here aren't saved to history"><span class="ic"></span><span>Incognito</span></div>
+  </header>
+
+  <nav id="toolbar">
+    <button id="back" class="icon-btn" title="Back (⌘[)" aria-label="Back"></button>
+    <button id="forward" class="icon-btn" title="Forward (⌘])" aria-label="Forward"></button>
+    <button id="reload" class="icon-btn" title="Reload (⌘R)" aria-label="Reload"></button>
+    <div id="omnibox">
+      <button id="site-icon" aria-label="View site information"></button>
+      <input id="address" type="text" spellcheck="false" autocomplete="off" placeholder="Search or type a URL" aria-label="Address and search bar" />
+      <span id="toast" hidden></span>
+      <button id="zoom-badge" hidden title="Reset zoom"></button>
+      <button id="pw-key" class="icon-btn small" title="Save password" aria-label="Save password" hidden></button>
+      <button id="star" class="icon-btn small" title="Bookmark this page (⌘D)" aria-label="Bookmark"></button>
+    </div>
+    <div id="findbar" hidden>
+      <input id="find-input" type="text" placeholder="Find in page" spellcheck="false" />
+      <span id="find-count"></span>
+      <button class="icon-btn small" id="find-prev" title="Previous (⇧⌘G)"></button>
+      <button class="icon-btn small" id="find-next" title="Next (⌘G)"></button>
+      <button class="icon-btn small" id="find-close" title="Close (Esc)"></button>
+    </div>
+    <div id="ext-area" hidden>
+      <browser-action-list id="ext-actions" partition="persist:lumio" alignment="bottom left"></browser-action-list>
+      <button id="ext-btn" class="icon-btn" title="Extensions" aria-label="Extensions"></button>
+    </div>
+    <button id="downloads" class="icon-btn" title="Downloads" aria-label="Downloads" hidden><span class="ring"></span></button>
+    <button id="ai-toggle" class="ai-toggle" title="Lumio AI (⌘⇧L)" aria-label="Toggle Lumio AI">
+      <span class="mark"></span><span>Lumio</span>
+    </button>
+    <button id="account-btn" class="account-btn" title="Lumio account" aria-label="Lumio account"></button>
+    <button id="menu-btn" class="icon-btn" title="Menu" aria-label="Menu" hidden></button>
+  </nav>
+
+  <div id="bookmarks-bar" hidden role="toolbar" aria-label="Bookmarks"></div>
+
+  <main id="workspace">
+    <section id="pagecol">
+      <div id="permbar" class="infobar" hidden>
+        <span class="infobar-text"></span>
+        <span class="spacer"></span>
+        <button class="btn ghost" data-act="block">Block</button>
+        <button class="btn primary" data-act="allow">Allow</button>
+      </div>
+      <div id="slot"></div>
+    </section>
+    <div id="resizer" title="Drag to resize"></div>
+    <aside id="panel" aria-label="Lumio AI">
+      <div id="panel-head">
+        <span class="mark big" id="panel-mark"></span>
+        <span class="panel-title">Lumio</span>
+        <span class="spacer"></span>
+        <button id="chats-btn" class="icon-btn small" title="Chats"></button>
+        <button id="newchat-btn" class="icon-btn small" title="New chat"></button>
+        <button id="panel-close" class="icon-btn small" title="Hide (⌘⇧L)"></button>
+      </div>
+      <div id="chat-menu" class="popover" hidden><div id="chat-list"></div></div>
+      <div id="messages" aria-live="polite"></div>
+      <div id="composer">
+        <div id="model-menu" class="popover" role="listbox" aria-label="Model" hidden><div id="model-list"></div></div>
+        <div id="context-chip" class="chip" hidden title="Lumio will read this page with your message"><i></i><span></span><button aria-label="Don't include this page">×</button></div>
+        <textarea id="prompt" rows="1" placeholder="Ask Lumio, or tell it what to do…" spellcheck="true"></textarea>
+        <div class="composer-row">
+          <button id="model-btn" class="model-btn" title="Choose model" aria-haspopup="listbox"><span id="model-logo"></span><span id="model-name">Model</span><i class="chev"></i></button>
+          <div id="mode" class="segmented" role="radiogroup" aria-label="Approval mode">
+            <button data-mode="ask" title="Ask before every action">Ask</button>
+            <button data-mode="auto" title="Browse on its own; ask before Mac actions and commands">Auto</button>
+            <button data-mode="bypass" title="Never ask (use with care)">Bypass</button>
+          </div>
+          <span class="spacer"></span>
+          <button id="send" class="send" title="Send (↵)" aria-label="Send"></button>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <script type="module" src="shell.js"></script>
+</body>
+</html>

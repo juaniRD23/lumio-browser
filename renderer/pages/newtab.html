@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>New Tab</title>
+  <link rel="stylesheet" href="pages.css" />
+  <link rel="stylesheet" href="newtab.css" />
+</head>
+<body>
+  <main class="nt">
+    <div class="brand"><span class="mark" id="mark"></span><span class="word">Lumio</span></div>
+    <form id="box" class="box" autocomplete="off">
+      <input id="q" type="text" placeholder="Search the web or ask Lumio…" spellcheck="false" />
+      <button type="button" id="ask" class="ask" title="Ask Lumio (⌘↵)">Ask Lumio</button>
+      <button type="submit" id="go" class="go" title="Search (↵)">Search</button>
+    </form>
+    <p class="hint" id="hint"></p>
+    <section id="incog" class="incog" hidden>
+      <h2>You’re incognito</h2>
+      <p>Other people who use this Mac won’t see what you do here. Downloads and bookmarks you make are kept.</p>
+      <div class="cols">
+        <div><b>Lumio Browser won’t save</b><ul><li>Your browsing history</li><li>Cookies and site data</li><li>Info entered in forms</li><li>Lumio chats</li></ul></div>
+        <div><b>Your activity might still be visible to</b><ul><li>Websites you visit</li><li>Your employer or school</li><li>Your internet service provider</li></ul></div>
+      </div>
+      <p class="small">Extensions don’t run in incognito windows. Everything is cleared when you close the last incognito window.</p>
+    </section>
+    <section id="sites" class="sites"></section>
+    <section id="marks-wrap" hidden>
+      <h3>Bookmarks</h3>
+      <div id="marks" class="marks"></div>
+    </section>
+  </main>
+  <script type="module" src="newtab.js"></script>
+</body>
+</html>

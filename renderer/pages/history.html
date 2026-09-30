@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>History</title>
+  <link rel="stylesheet" href="pages.css" />
+  <link rel="stylesheet" href="history.css" />
+</head>
+<body>
+  <div class="wrap wide">
+    <div class="top">
+      <h1>History</h1>
+      <span class="grow"></span>
+      <input id="search" class="field" type="search" placeholder="Search history" spellcheck="false" aria-label="Search history" />
+      <button class="btn" id="clear-open">Clear browsing data…</button>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-view="history" class="on">History</button>
+      <button role="tab" data-view="closed">Recently closed</button>
+    </nav>
+    <div id="filter" class="filter" hidden><span></span><button title="Show all history" aria-label="Show all history">×</button></div>
+    <div id="selbar" class="selbar" hidden>
+      <span id="selcount"></span>
+      <span class="grow"></span>
+      <button class="btn ghost" id="sel-cancel">Cancel</button>
+      <button class="btn danger" id="sel-delete">Delete</button>
+    </div>
+    <div id="list" role="list"></div>
+    <div id="closed" hidden></div>
+  </div>
+
+  <dialog id="clear-dialog">
+    <form method="dialog">
+      <h2 class="dlg-title">Clear browsing data</h2>
+      <label class="range">Time range
+        <select id="range" class="field">
+          <option value="3600000">Last hour</option>
+          <option value="86400000">Last 24 hours</option>
+          <option value="604800000">Last 7 days</option>
+          <option value="2419200000">Last 4 weeks</option>
+          <option value="0" selected>All time</option>
+        </select>
+      </label>
+      <label class="chk"><input type="checkbox" value="history" checked><span><b>Browsing history</b><small>Pages you visited in normal windows</small></span></label>
+      <label class="chk"><input type="checkbox" value="downloads"><span><b>Download history</b><small>The list of downloads (files stay on your Mac)</small></span></label>
+      <label class="chk"><input type="checkbox" value="closed"><span><b>Recently closed tabs</b><small>What ⌘⇧T reopens</small></span></label>
+      <label class="chk"><input type="checkbox" value="cookies"><span><b>Cookies and other site data</b><small>Signs you out of most sites · always all time</small></span></label>
+      <label class="chk"><input type="checkbox" value="cache"><span><b>Cached images and files</b><small>Always all time</small></span></label>
+      <label class="chk"><input type="checkbox" value="chats"><span><b>Lumio chats</b><small>All saved conversations with Lumio</small></span></label>
+      <div class="dlg-actions">
+        <button class="btn" value="cancel">Cancel</button>
+        <button class="btn primary" id="clear-go" value="clear">Clear data</button>
+      </div>
+    </form>
+  </dialog>
+  <script type="module" src="history.js"></script>
+</body>
+</html>

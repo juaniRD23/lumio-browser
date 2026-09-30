@@ -1,0 +1,310 @@
+import './keys.js';
+const page = window.lumioPage;
+const $ = (sel) => document.querySelector(sel);
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+const AVATAR_COLORS = ['#86b7ff', '#b58cff', '#7ee2a8', '#ffb86b', '#ff8fc7', '#ff7a7a', '#ffd479', '#e4e4e7'];
+const THEMES = { blue: '#86b7ff', purple: '#b58cff', green: '#7ee2a8', orange: '#ffb86b', pink: '#ff8fc7', mono: '#e4e4e7' };
+const PLANS = [
+  { id: 'free', name: 'Free', price: '$0' },
+  { id: 'plus', name: 'Plus', price: '$20/mo' },
+  { id: 'pro', name: 'Pro', price: '$100/mo' },
+  { id: 'max', name: 'Max', price: '$200/mo' },
+];
+
+let s = await page.invoke('page:settings');
+$('#version').textContent = 'v' + s.version;
+if (s.sourceUrl) $('#source-link').href = s.sourceUrl; else $('#source-link').hidden = true;
+if (s.platform !== 'darwin') {
+  document.querySelectorAll('.mac-only').forEach((el) => { el.hidden = true; });
+  document.querySelectorAll('.kbd-mod').forEach((el) => { el.textContent = 'Ctrl+'; });
+}
+
+function avatar(profile, account, size) {
+  const box = `width:${size}px;height:${size}px;font-size:${Math.round(size * 0.46)}px`;
+  if (profile.photo && profile.photo.startsWith('data:image/')) return `<span class="avatar" style="${box}"><img src="${esc(profile.photo)}" alt=""></span>`;
+  const name = (profile.name || account.name || account.email || '').trim();
+  const letter = name ? esc([...name][0].toUpperCase()) : '?';
+  return `<span class="avatar" style="${box};background:${esc(profile.color || '#86b7ff')}">${letter}</span>`;
+}
+
+// ------------------------------------------------------------ account
+let pollTimer = null;
+function renderAccount() {
+  const a = s.account;
+  const p = s.profile;
+  $('#me-avatar').innerHTML = avatar(p, a, 44);
+  $('#me-name').textContent = p.name || a.name || (a.signedIn ? a.email : 'Lumio Browser');
+  $('#me-email').textContent = a.signedIn ? a.email : 'Not signed in';
+  $('#me-plan').hidden = !a.planName;
+  $('#me-plan').textContent = a.planName ? `Lumio ${a.planName}` : '';
+  $('#me-plan').className = 'pill' + (a.paid ? ' ok' : '');
+  $('#sign-in').hidden = a.signedIn || a.connecting;
+  $('#manage').hidden = !a.signedIn;
+  $('#sign-out').hidden = !a.signedIn;
+  $('#connecting').hidden = !a.connecting;
+  $('#code').textContent = a.code || '';
+  $('#account-error').hidden = !a.error;
+  $('#account-error .desc').textContent = a.error || '';
+  renderPlan();
+  renderSource();
+  clearTimeout(pollTimer);
+  if (a.connecting) pollTimer = setTimeout(async () => { s.account = await page.invoke('page:account'); renderAccount(); }, 1500);
+}
+$('#sign-in').addEventListener('click', async () => {
+  const res = await page.invoke('page:account-sign-in');
+  s.account = await page.invoke('page:account');
+  if (!res?.ok) s.account.error = res?.error || s.account.error;
+  renderAccount();
+});
+$('#cancel-sign-in').addEventListener('click', async () => { s.account = await page.invoke('page:account-cancel'); renderAccount(); });
+$('#sign-out').addEventListener('click', async () => { s.account = await page.invoke('page:account-sign-out'); renderAccount(); });
+$('#manage').addEventListener('click', () => page.invoke('page:account-open', 'manage'));
+window.addEventListener('focus', async () => {
+  if (!s.account.signedIn && !s.account.connecting) return;
+  s.account = await page.invoke('page:account-refresh');
+  renderAccount();
+});
+
+// ------------------------------------------------------------ profile
+function renderProfile() {
+  const p = s.profile;
+  if (document.activeElement !== $('#p-name')) $('#p-name').value = p.name || '';
+  $('#p-name').placeholder = s.account.name || 'Your name';
+  $('#p-preview').innerHTML = avatar(p, s.account, 34);
+  $('#p-photo-remove').hidden = !p.photo;
+  $('#p-colors').innerHTML = AVATAR_COLORS.map((c) => `<button class="swatch ${p.color === c && !p.photo ? 'on' : ''}" style="background:${c}" data-color="${c}" title="${c}" aria-label="Avatar color ${c}"></button>`).join('');
+  $('#p-themes').innerHTML = Object.entries(THEMES).map(([id, c]) => `<button class="swatch ${p.theme === id ? 'on' : ''}" style="background:${c}" data-theme="${id}" title="${id}" aria-label="Theme ${id}"></button>`).join('');
+  document.documentElement.style.setProperty('--accent', THEMES[p.theme] || THEMES.blue);
+  renderAccount();
+}
+async function saveProfile(patch) {
+  s.profile = await page.invoke('page:set-profile', patch);
+  renderProfile();
+}
+let nameTimer;
+$('#p-name').addEventListener('input', (e) => { clearTimeout(nameTimer); nameTimer = setTimeout(() => saveProfile({ name: e.target.value }), 300); });
+$('#p-colors').addEventListener('click', (e) => { const c = e.target.closest('[data-color]')?.dataset.color; if (c) saveProfile({ color: c, photo: null }); });
+$('#p-themes').addEventListener('click', (e) => { const t = e.target.closest('[data-theme]')?.dataset.theme; if (t) saveProfile({ theme: t }); });
+$('#p-photo').addEventListener('click', async () => { s.profile = await page.invoke('page:profile-photo'); renderProfile(); });
+$('#p-photo-remove').addEventListener('click', () => saveProfile({ photo: null }));
+
+// ------------------------------------------------------------ plan
+function when(t) {
+  const d = new Date(t);
+  const sameDay = d.toDateString() === new Date().toDateString();
+  return sameDay ? d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+function renderPlan() {
+  const a = s.account;
+  const current = a.plan === 'go' ? 'plus' : a.plan;
+  const options = `<div class="plans">${PLANS.map((p) => `<div class="plan-opt ${p.id === current ? 'current' : ''}"><b>${p.name}</b><span>${p.price}</span></div>`).join('')}</div>`;
+  if (!a.signedIn) {
+    $('#plan-card').innerHTML = `<div class="plan-top"><div class="grow"><div class="plan-name">Lumio plans</div><div class="desc">Sign in to see your plan and usage. Plus, Pro and Max can run the AI in this browser.</div></div><button class="btn" id="plan-sign-in">Sign in</button></div>${options}`;
+    $('#plan-sign-in').onclick = () => $('#sign-in').click();
+    return;
+  }
+  const windows = a.usage?.windows || [];
+  const meters = windows.map((w) => {
+    const left = w.limit ? Math.max(0, Math.round((w.remaining / w.limit) * 100)) : 0;
+    return `<div class="row"><div class="grow"><div class="title">${esc(w.label)}</div><div class="meter"><i style="width:${left}%"></i></div><div class="desc">${left}% left · resets ${esc(when(w.resetsAt))}</div></div></div>`;
+  }).join('');
+  $('#plan-card').innerHTML = `<div class="plan-top"><div class="grow"><div class="desc">Your plan</div><div class="plan-name">Lumio ${esc(a.planName || 'Free')}</div></div>
+      ${a.plan !== 'max' ? '<button class="btn primary" data-open="upgrade">Upgrade</button>' : ''}
+      <button class="btn" data-open="billing">Manage billing</button></div>
+    ${meters}${options}`;
+  $('#plan-card').querySelectorAll('[data-open]').forEach((b) => { b.onclick = () => page.invoke('page:account-open', b.dataset.open); });
+}
+
+// ------------------------------------------------------------ AI source
+function renderSource() {
+  document.querySelectorAll('input[name=source]').forEach((r) => { r.checked = r.value === s.aiSource; });
+  const a = s.account;
+  let text;
+  const usesLumio = s.aiSource === 'lumio' || (s.aiSource === 'auto' && a.signedIn && a.paid);
+  if (usesLumio) {
+    text = !a.signedIn ? 'Sign in to Lumio to use your plan.' : !a.paid ? `Your plan is ${a.planName || 'Free'}. The browser AI needs Plus, Pro or Max.` : `The AI is using your Lumio ${a.planName} plan.`;
+  } else {
+    text = s.ai.hasKey ? 'The AI is using your OpenRouter key.' : 'Add an OpenRouter key below, or sign in to Lumio on a paid plan.';
+  }
+  $('#source-status').textContent = text;
+}
+document.querySelectorAll('input[name=source]').forEach((r) => r.addEventListener('change', async () => {
+  await page.invoke('page:set-setting', 'aiSource', r.value);
+  s.aiSource = r.value;
+  renderSource();
+}));
+
+// ------------------------------------------------------------ OpenRouter key + model + approvals
+function renderKey() {
+  const ai = s.ai;
+  $('#key-pill').textContent = ai.hasKey ? 'Connected' : 'Not connected';
+  $('#key-pill').className = 'pill ' + (ai.hasKey ? 'ok' : '');
+  $('#key-clear').hidden = !ai.hasKey;
+  $('#key').placeholder = ai.hasKey ? `Saved (${ai.keyHint}). Paste a new key to replace it.` : 'sk-or-v1-…';
+}
+$('#key-save').addEventListener('click', async () => {
+  const key = $('#key').value.trim();
+  if (!key) return;
+  $('#key-save').disabled = true;
+  $('#key-save').textContent = 'Checking…';
+  const res = await page.invoke('page:set-key', key);
+  $('#key-save').disabled = false;
+  $('#key-save').textContent = 'Save key';
+  if (res.ok) { $('#key').value = ''; s = await page.invoke('page:settings'); renderKey(); renderSource(); loadModels(true); }
+  else { $('#key-status').textContent = res.error; $('#key-status').classList.add('err'); }
+});
+$('#key-clear').addEventListener('click', async () => {
+  await page.invoke('page:clear-key');
+  s = await page.invoke('page:settings');
+  renderKey();
+  renderSource();
+});
+
+async function loadModels(force) {
+  const sel = $('#model');
+  const current = s.ai.model;
+  sel.innerHTML = `<option value="${esc(current)}">${esc(s.ai.modelName || current)}</option>`;
+  try {
+    const models = await page.invoke('page:models', force);
+    sel.innerHTML = models.map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('');
+    sel.value = current;
+  } catch { /* offline: keep the current model */ }
+}
+$('#model').addEventListener('change', async (e) => {
+  await page.invoke('page:set-setting', 'model', e.target.value);
+  s.ai.model = e.target.value;
+});
+document.querySelectorAll('input[name=mode]').forEach((r) => {
+  r.checked = r.value === s.approvalMode;
+  r.addEventListener('change', () => page.invoke('page:set-setting', 'approvalMode', r.value));
+});
+
+async function perms() {
+  if (s.platform !== 'darwin') {
+    $('#perm-note').textContent = s.ai.macAvailable
+      ? 'Lumio can use the mouse, keyboard and take screenshots on this PC. It asks before doing so unless you choose Bypass.'
+      : 'Computer control isn’t available on this system.';
+    return;
+  }
+  try {
+    const p = await page.invoke('page:mac-permissions');
+    for (const k of ['accessibility', 'screen']) {
+      const el = $('#perm-' + k);
+      if (p[k] === undefined) { el.textContent = 'Unknown'; continue; }
+      el.textContent = p[k] ? 'On' : 'Off';
+      el.className = 'pill ' + (p[k] ? 'ok' : 'bad');
+    }
+    if (p.error) $('#perm-note').textContent = p.error;
+  } catch (e) { $('#perm-note').textContent = String(e.message || e); }
+}
+document.querySelectorAll('[data-perm]').forEach((b) => b.addEventListener('click', () => page.invoke('page:mac-permissions-open', b.dataset.perm)));
+window.addEventListener('focus', perms);
+
+// ------------------------------------------------------------ passwords
+$('#offer-pw').checked = s.offerPasswords;
+$('#autofill-pw').checked = s.autofillPasswords;
+$('#offer-pw').addEventListener('change', (e) => page.invoke('page:set-setting', 'offerPasswords', e.target.checked));
+$('#autofill-pw').addEventListener('change', (e) => page.invoke('page:set-setting', 'autofillPasswords', e.target.checked));
+
+// ------------------------------------------------------------ privacy
+$('#clear').addEventListener('click', async () => {
+  const what = [...document.querySelectorAll('.checks input[value]:checked')].map((i) => i.value);
+  if (!what.length) return;
+  $('#clear').disabled = true;
+  await page.invoke('page:clear-data', { range: 0, what });
+  $('#clear').disabled = false;
+  $('#clear-status').textContent = 'Cleared.';
+});
+
+const PERM_NAMES = { geolocation: 'Location', media: 'Camera and microphone', notifications: 'Notifications', 'clipboard-read': 'Clipboard', midi: 'MIDI devices', midiSysex: 'MIDI devices', 'display-capture': 'Screen sharing', 'idle-detection': 'Idle detection' };
+function renderSites() {
+  const list = s.sitePermissions.filter((x) => Object.keys(x.perms).length);
+  if (!list.length) {
+    $('#site-list').innerHTML = '<div class="row"><div class="desc">When you allow or block a site from using your camera, location or notifications, it shows up here.</div></div>';
+    return;
+  }
+  $('#site-list').innerHTML = list.map((site) => `
+    <div class="row site" data-origin="${esc(site.origin)}">
+      <div class="grow"><div class="title">${esc(site.origin.replace(/^https?:\/\//, ''))}</div>
+        <div class="desc">${Object.entries(site.perms).map(([p, v]) => `${esc(PERM_NAMES[p] || p)}: <b style="color:${v ? 'var(--ok)' : 'var(--danger)'}">${v ? 'Allowed' : 'Blocked'}</b>`).join(' · ')}</div></div>
+      <button class="btn" data-reset>Reset</button>
+    </div>`).join('');
+}
+$('#site-list').addEventListener('click', async (e) => {
+  const row = e.target.closest('[data-reset]')?.closest('.site');
+  if (!row) return;
+  const site = s.sitePermissions.find((x) => x.origin === row.dataset.origin);
+  for (const p of Object.keys(site?.perms || {})) await page.invoke('page:set-site-permission', site.origin, p, 'ask');
+  s = await page.invoke('page:settings');
+  renderSites();
+});
+
+// ------------------------------------------------------------ appearance, search, downloads, startup, default
+$('#bm-bar').checked = s.showBookmarksBar;
+$('#bm-bar').addEventListener('change', (e) => page.invoke('page:set-setting', 'showBookmarksBar', e.target.checked));
+
+$('#engine').innerHTML = s.engines.map((e) => `<option value="${e.id}">${esc(e.name)}</option>`).join('');
+$('#engine').value = s.searchEngine;
+$('#engine').addEventListener('change', (e) => page.invoke('page:set-setting', 'searchEngine', e.target.value));
+
+$('#dl-dir').textContent = s.downloadDir;
+$('#dl-ask').checked = s.askDownload;
+$('#dl-ask').addEventListener('change', (e) => page.invoke('page:set-setting', 'askDownload', e.target.checked));
+$('#dl-change').addEventListener('click', async () => { $('#dl-dir').textContent = await page.invoke('page:choose-download-dir'); });
+
+document.querySelectorAll('input[name=startup]').forEach((r) => {
+  r.checked = r.value === s.startup;
+  r.addEventListener('change', () => page.invoke('page:set-setting', 'startup', r.value));
+});
+
+if (s.isDefault) { $('#make-default').disabled = true; $('#make-default').textContent = 'Default'; }
+$('#make-default').addEventListener('click', async () => {
+  const ok = await page.invoke('page:make-default');
+  $('#default-desc').textContent = ok ? 'Your system will ask you to confirm.' : 'Only the installed app can become the default browser.';
+});
+
+// ------------------------------------------------------------ import
+const sources = s.importSources;
+if (!sources.length) {
+  $('#import-from').innerHTML = '<option>No other browsers found</option>';
+  $('#import-from').disabled = true;
+  $('#import-go').disabled = true;
+} else {
+  $('#import-from').innerHTML = sources.map((b) => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
+}
+$('#import-go').addEventListener('click', async () => {
+  const bookmarks = $('#import-bm').checked;
+  const history = $('#import-hist').checked;
+  if (!bookmarks && !history) return;
+  $('#import-go').disabled = true;
+  $('#import-go').textContent = 'Importing…';
+  const res = await page.invoke('page:import', $('#import-from').value, { bookmarks, history });
+  $('#import-go').disabled = false;
+  $('#import-go').textContent = 'Import';
+  const desc = $('#import-desc');
+  if (res.ok) {
+    desc.textContent = `Imported ${res.bookmarks} bookmark${res.bookmarks === 1 ? '' : 's'} and ${res.history} history entr${res.history === 1 ? 'y' : 'ies'} from ${res.browser}.`;
+    desc.style.color = 'var(--ok)';
+  } else {
+    desc.textContent = res.error;
+    desc.style.color = 'var(--danger)';
+  }
+});
+
+// ------------------------------------------------------------ sidebar highlight
+const links = [...document.querySelectorAll('.side a')];
+const spy = new IntersectionObserver((entries) => {
+  for (const e of entries) {
+    if (!e.isIntersecting) continue;
+    links.forEach((a) => a.classList.toggle('on', a.getAttribute('href') === '#' + e.target.id));
+  }
+}, { rootMargin: '-10% 0px -80% 0px' });
+document.querySelectorAll('main section').forEach((sec) => spy.observe(sec));
+
+renderKey();
+renderProfile();
+renderSites();
+loadModels(false);
+perms();
+if (location.hash) document.querySelector(location.hash)?.scrollIntoView();

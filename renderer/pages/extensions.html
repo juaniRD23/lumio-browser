@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Extensions</title>
+  <link rel="stylesheet" href="pages.css" />
+  <link rel="stylesheet" href="lists.css" />
+</head>
+<body>
+  <div class="wrap wide">
+    <div class="top">
+      <h1>Extensions</h1>
+      <span class="grow"></span>
+      <label class="bar-toggle">Developer mode <span class="switch"><input type="checkbox" id="dev"><i></i></span></label>
+    </div>
+    <div class="devbar" id="devbar" hidden>
+      <button class="btn small" id="load">Load unpacked…</button>
+      <span class="note" style="margin:0">Load an extension folder you’re building. Lumio remembers it and reloads it at startup.</span>
+    </div>
+    <div class="top">
+      <span class="note" style="margin:0">Add extensions from the Chrome Web Store. Most work in Lumio; a few that rely on Chrome-only features may not. Extensions don’t run in incognito windows.</span>
+      <span class="grow"></span>
+      <button class="btn small primary" id="store">Chrome Web Store</button>
+    </div>
+    <div id="msg" class="note" hidden></div>
+    <div id="grid" class="ext-grid"></div>
+  </div>
+  <script type="module" src="extensions.js"></script>
+</body>
+</html>

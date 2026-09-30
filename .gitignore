@@ -1,0 +1,7 @@
+node_modules/
+dist/
+native/bin/
+.DS_Store
+preload/dist/
+website/.wrangler/
+*.log

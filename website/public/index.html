@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lumio Browser — the browser that does the work</title>
+  <meta name="description" content="Lumio Browser is a free, open-source web browser with Lumio AI built in. Ask it to book, fill, find and compare: it works the page like you would, and asks before it acts. For Mac and Windows.">
+  <meta property="og:title" content="Lumio Browser — the browser that does the work">
+  <meta property="og:description" content="A free, open-source browser with an AI that reads and operates web pages, and asks before it acts. Mac and Windows.">
+  <meta property="og:image" content="/shots/agent-approval.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="theme-color" content="#070708">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+
+  <header class="nav">
+    <a class="brand" href="#top" aria-label="Lumio Browser home">
+      <svg class="mark" viewBox="0 0 64 64" width="22" height="22" aria-hidden="true"><path d="M35 12a21 21 0 1 0 17 19" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><circle cx="48" cy="17" r="5" fill="#86b7ff"/></svg>
+      <span>Lumio Browser</span>
+    </a>
+    <nav aria-label="Main">
+      <a href="#how">How it works</a>
+      <a href="#features">Features</a>
+      <a href="#safety">Safety</a>
+      <a href="https://github.com/juaniRD23/lumio-browser">GitHub</a>
+    </nav>
+    <a class="nav-cta" href="#download">Download</a>
+  </header>
+
+  <main id="top">
+    <!-- Hero -->
+    <section class="hero">
+      <div class="orbit" aria-hidden="true">
+        <svg viewBox="0 0 600 600"><defs><linearGradient id="og" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#86b7ff" stop-opacity=".0"/><stop offset=".55" stop-color="#86b7ff" stop-opacity=".55"/><stop offset="1" stop-color="#c9a8ff" stop-opacity=".9"/></linearGradient></defs>
+          <path d="M330 110a196 196 0 1 0 158 178" fill="none" stroke="url(#og)" stroke-width="2" stroke-linecap="round"/>
+          <circle class="orbit-dot" cx="449" cy="157" r="9" fill="#86b7ff"/></svg>
+      </div>
+      <p class="eyebrow reveal">Free &amp; open source · Mac &amp; Windows</p>
+      <h1 class="reveal">The browser that <em>does</em> the&nbsp;work.</h1>
+      <p class="lede reveal">Lumio Browser has an AI in every window. Ask it to book, fill, find and compare. It works the page the way you would, and asks before it&nbsp;acts.</p>
+      <div class="cta reveal">
+        <a class="btn primary" id="hero-download" href="#download"><span class="os-icon" aria-hidden="true"></span><span id="hero-download-label">Download Lumio Browser</span></a>
+        <a class="btn ghost" href="#how">See how it works</a>
+      </div>
+      <p class="fine reveal" id="hero-fine">macOS 14+ · Windows 10/11 · Runs on your Lumio plan or your own OpenRouter key</p>
+
+      <figure class="window hero-shot reveal" aria-label="Lumio booking a restaurant table, waiting for approval to click Reserve">
+        <div class="glow" aria-hidden="true"></div>
+        <div class="chrome"><i></i><i></i><i></i></div>
+        <img src="/shots/agent-approval.jpg" alt="Lumio Browser with the Lumio panel filling in a restaurant booking form and asking for approval before clicking Reserve table" width="2960" height="1880">
+      </figure>
+    </section>
+
+    <!-- Marquee of things to ask -->
+    <section class="asks" aria-label="Things you can ask Lumio">
+      <div class="track">
+        <span>“Book a table for 2 at 8pm”</span><span>“Summarize this page”</span><span>“Compare the three cheapest flights”</span><span>“Fill in this form with my details”</span><span>“Find a used bike under $300 near me”</span><span>“What changed in this contract?”</span><span>“Open Notes and jot down this address”</span><span>“Unsubscribe me from these emails”</span>
+        <span aria-hidden="true">“Book a table for 2 at 8pm”</span><span aria-hidden="true">“Summarize this page”</span><span aria-hidden="true">“Compare the three cheapest flights”</span><span aria-hidden="true">“Fill in this form with my details”</span><span aria-hidden="true">“Find a used bike under $300 near me”</span><span aria-hidden="true">“What changed in this contract?”</span><span aria-hidden="true">“Open Notes and jot down this address”</span><span aria-hidden="true">“Unsubscribe me from these emails”</span>
+      </div>
+    </section>
+
+    <!-- How it works -->
+    <section class="how" id="how">
+      <div class="section-head">
+        <p class="eyebrow">How Lumio works</p>
+        <h2>You say what you want.<br><em>Lumio does the clicking.</em></h2>
+      </div>
+      <div class="steps">
+        <div class="step-visual" aria-hidden="true">
+          <figure class="window">
+            <div class="chrome"><i></i><i></i><i></i></div>
+            <img class="step-img on" data-step="0" src="/shots/summary.jpg" alt="">
+            <img class="step-img" data-step="1" src="/shots/agent-approval.jpg" alt="">
+            <img class="step-img" data-step="2" src="/shots/agent-approval.jpg" alt="" style="object-position: 100% 30%">
+            <img class="step-img" data-step="3" src="/shots/agent-done.jpg" alt="">
+          </figure>
+        </div>
+        <ol class="step-list">
+          <li class="step" data-step="0">
+            <span class="num">01</span>
+            <h3>Ask, right next to the page</h3>
+            <p>The Lumio panel lives beside every tab. Ask a question about the page, or tell it what to get done. It can include the page you’re looking at, so “summarize this” just works.</p>
+          </li>
+          <li class="step" data-step="1">
+            <span class="num">02</span>
+            <h3>It reads the page and gets to work</h3>
+            <p>Lumio reads the page like a screen reader would, then clicks, types, picks from menus and scrolls with real input. You watch each step appear in the panel as it happens.</p>
+          </li>
+          <li class="step" data-step="2">
+            <span class="num">03</span>
+            <h3>You approve what matters</h3>
+            <p>Before an action, Lumio shows exactly what it wants to do. <b>Allow</b> it once, allow it for the rest of the task, or <b>Deny</b>. Press <kbd>Esc</kbd> to stop at any time.</p>
+          </li>
+          <li class="step" data-step="3">
+            <span class="num">04</span>
+            <h3>Done, with a short summary</h3>
+            <p>When the job’s finished, Lumio checks the result and tells you what happened. It can go beyond the browser too: see your screen, open apps and type on your Mac or PC, with your permission.</p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- Modes -->
+    <section class="modes">
+      <div class="section-head narrow">
+        <p class="eyebrow">Your pace</p>
+        <h2>Three ways to work.</h2>
+      </div>
+      <div class="mode-grid">
+        <article class="mode">
+          <span class="pill">Ask</span>
+          <h3>Confirm every action</h3>
+          <p>The default. Reading pages never asks; clicking, typing and anything on your computer does.</p>
+        </article>
+        <article class="mode">
+          <span class="pill">Auto</span>
+          <h3>Browse on its own</h3>
+          <p>Lumio works through websites by itself, and still asks before it touches your computer or runs a command.</p>
+        </article>
+        <article class="mode">
+          <span class="pill warn">Bypass</span>
+          <h3>Never ask</h3>
+          <p>For tasks you trust completely. Lumio acts without stopping, so use it with care.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- Safety -->
+    <section class="safety" id="safety">
+      <div class="safety-inner">
+        <div>
+          <p class="eyebrow">Safety</p>
+          <h2>Built to be <em>careful</em> with your stuff.</h2>
+        </div>
+        <ul class="rules">
+          <li><b>Pages can’t give orders.</b> Text on websites, emails and screenshots is treated as information, never as instructions. If a page tries to steer Lumio, it tells you.</li>
+          <li><b>No passwords, cards or IDs.</b> Lumio refuses to type into password, payment and ID fields, even when a click lands focus there by surprise.</li>
+          <li><b>It stops before anything big.</b> Buying, sending, posting or deleting always needs your OK in the chat.</li>
+          <li><b>Your passwords stay yours.</b> The password manager encrypts every entry with your system keychain. The AI can’t read them, and websites only get one after you pick it.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Features bento -->
+    <section class="features" id="features">
+      <div class="section-head">
+        <p class="eyebrow">Everything a browser should have</p>
+        <h2>A real browser first.</h2>
+      </div>
+      <div class="bento">
+        <article class="tile t-wide">
+          <div class="copy"><h3>Password manager</h3><p>Saves sign-ins, fills them when you click a field, suggests strong passwords, flags weak and reused ones, and imports from Chrome or 1Password. Showing a password asks for Touch ID or Windows Hello.</p></div>
+          <img src="/shots/passwords.jpg" alt="The Password Manager page" loading="lazy">
+        </article>
+        <article class="tile">
+          <div class="copy"><h3>Chrome extensions</h3><p>Add from the Chrome Web Store with “Add to Lumio Browser”. Toolbar buttons and popups work too.</p></div>
+          <img src="/shots/extensions.jpg" alt="The Extensions page" loading="lazy">
+        </article>
+        <article class="tile">
+          <div class="copy"><h3>Incognito</h3><p>A throwaway session. No history, cookies or chats are kept, and it’s wiped when you close it.</p></div>
+          <img src="/shots/incognito.jpg" alt="An incognito window" loading="lazy">
+        </article>
+        <article class="tile">
+          <div class="copy"><h3>Six top models</h3><p>Claude Opus 5.5 and Sonnet 5.5, GPT-6 Astra, GPT-6.1 Sol, GPT-5.6 Sol and Terra: all strong at operating pages and computers.</p></div>
+          <img src="/shots/models.jpg" alt="The model picker" loading="lazy">
+        </article>
+        <article class="tile">
+          <div class="copy"><h3>History you can use</h3><p>Search by day, filter by site, delete a few or a whole time range, and reopen what you closed.</p></div>
+          <img src="/shots/history.jpg" alt="The History page" loading="lazy">
+        </article>
+        <article class="tile t-list">
+          <div class="copy"><h3>And the rest</h3>
+            <ul class="ticks"><li>Multiple windows &amp; pinned tabs</li><li>Bookmarks bar &amp; manager</li><li>Downloads you can find later</li><li>Import from Chrome, Edge, Brave, Arc</li><li>Built-in PDF viewer</li><li>Site permissions per website</li></ul>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- Plan or key -->
+    <section class="power">
+      <div class="section-head narrow">
+        <p class="eyebrow">Powering the AI</p>
+        <h2>Your Lumio plan, <em>or</em> your own key.</h2>
+      </div>
+      <div class="power-grid">
+        <article class="card">
+          <img src="/shots/account.jpg" alt="The account menu showing a Lumio Pro plan" loading="lazy">
+          <h3>Sign in with Lumio</h3>
+          <p>Use the same account as <a href="https://lumio-usa.online">lumio-usa.online</a>. On Plus, Pro or Max, the browser’s AI runs on your plan, with no key to manage. Your plan and usage live in the account menu, top right.</p>
+        </article>
+        <article class="card">
+          <div class="key-art" aria-hidden="true"><span>sk-or-v1-••••••••••••••••</span></div>
+          <h3>Bring your OpenRouter key</h3>
+          <p>Prefer to pay per use? Paste an <a href="https://openrouter.ai/keys">OpenRouter</a> key. It’s encrypted with your system keychain and only ever sent to OpenRouter.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- Download -->
+    <section class="download" id="download">
+      <div class="section-head narrow">
+        <p class="eyebrow">Download</p>
+        <h2>Get Lumio Browser.</h2>
+        <p class="sub">Free and open source. Version <span id="version">0.2.0</span>.</p>
+      </div>
+      <div class="dl-grid">
+        <a class="dl" data-os="mac-arm" href="https://github.com/juaniRD23/lumio-browser/releases/latest/download/Lumio-Browser-mac-apple-silicon.dmg">
+          <span class="dl-os"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M16.5 12.7c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.9-3.5.9-.7 0-1.9-.8-3.1-.8-1.6 0-3.1.9-3.9 2.4-1.7 2.9-.4 7.1 1.2 9.5.8 1.1 1.7 2.4 2.9 2.3 1.2 0 1.6-.7 3-.7s1.8.7 3 .7c1.3 0 2.1-1.1 2.9-2.3.9-1.3 1.3-2.6 1.3-2.7 0 0-2.4-.9-2.4-4zM14.2 5.8c.6-.8 1.1-1.8 1-2.8-.9 0-2 .6-2.7 1.4-.6.7-1.1 1.7-1 2.7 1 .1 2-.5 2.7-1.3z"/></svg>Mac</span>
+          <b>Apple silicon</b><small>M1 and later · .dmg</small>
+        </a>
+        <a class="dl" data-os="mac-intel" href="https://github.com/juaniRD23/lumio-browser/releases/latest/download/Lumio-Browser-mac-intel.dmg">
+          <span class="dl-os"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M16.5 12.7c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.9-3.5.9-.7 0-1.9-.8-3.1-.8-1.6 0-3.1.9-3.9 2.4-1.7 2.9-.4 7.1 1.2 9.5.8 1.1 1.7 2.4 2.9 2.3 1.2 0 1.6-.7 3-.7s1.8.7 3 .7c1.3 0 2.1-1.1 2.9-2.3.9-1.3 1.3-2.6 1.3-2.7 0 0-2.4-.9-2.4-4zM14.2 5.8c.6-.8 1.1-1.8 1-2.8-.9 0-2 .6-2.7 1.4-.6.7-1.1 1.7-1 2.7 1 .1 2-.5 2.7-1.3z"/></svg>Mac</span>
+          <b>Intel</b><small>2020 and earlier Macs · .dmg</small>
+        </a>
+        <a class="dl" data-os="win" href="https://github.com/juaniRD23/lumio-browser/releases/latest/download/Lumio-Browser-windows-x64.zip">
+          <span class="dl-os"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M3 5.1l7.4-1v7.2H3zM11.3 3.9L21 2.5v8.8h-9.7zM3 12.2h7.4v7.2L3 18.4zM11.3 12.2H21V21l-9.7-1.4z"/></svg>Windows</span>
+          <b>Windows 10 / 11</b><small>64-bit · .zip</small>
+        </a>
+      </div>
+
+      <div class="install">
+        <details open>
+          <summary>Installing on a Mac</summary>
+          <ol>
+            <li>Open the <b>.dmg</b> and drag <b>Lumio Browser</b> into <b>Applications</b>.</li>
+            <li>Open it. macOS says it can’t verify the app, because Lumio Browser isn’t signed with a paid Apple Developer ID yet. Click <b>Done</b>.</li>
+            <li>Open <b>System Settings → Privacy &amp; Security</b>, scroll down and click <b>Open Anyway</b>, then confirm. You only do this once.</li>
+            <li>Optional: to let Lumio use your whole Mac, turn on Lumio Browser under <b>Accessibility</b> and <b>Screen Recording</b> in the same settings.</li>
+          </ol>
+        </details>
+        <details>
+          <summary>Installing on Windows</summary>
+          <ol>
+            <li>Right-click the <b>.zip</b> and choose <b>Extract All</b>. Move the folder anywhere you like, for example your Documents.</li>
+            <li>Open the folder and run <b>Lumio Browser.exe</b>.</li>
+            <li>If Windows SmartScreen says it protected your PC, click <b>More info → Run anyway</b>. The app isn’t code-signed yet.</li>
+            <li>Tip: right-click Lumio Browser in the taskbar and choose <b>Pin to taskbar</b>.</li>
+          </ol>
+        </details>
+      </div>
+    </section>
+
+    <!-- Open source -->
+    <section class="oss">
+      <div class="oss-inner">
+        <svg class="mark big" viewBox="0 0 64 64" aria-hidden="true"><path d="M35 12a21 21 0 1 0 17 19" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"/><circle cx="48" cy="17" r="4" fill="#86b7ff"/></svg>
+        <div>
+          <h2>Open source, <em>for real</em>.</h2>
+          <p>Lumio Browser is free software under the GNU GPL v3. Read the code, build it yourself, or help improve it on GitHub.</p>
+          <a class="btn ghost" href="https://github.com/juaniRD23/lumio-browser">View on GitHub</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAQ -->
+    <section class="faq">
+      <div class="section-head narrow">
+        <p class="eyebrow">Questions</p>
+        <h2>Good to know.</h2>
+      </div>
+      <div class="faq-list">
+        <details><summary>Is Lumio Browser free?</summary><p>Yes. The browser is free and open source. The AI runs on either a Lumio plan (Plus, Pro or Max) or your own OpenRouter key, which you pay OpenRouter for as you use it.</p></details>
+        <details><summary>Is it based on Chrome?</summary><p>It’s built on Chromium, the open-source engine inside Chrome, through Electron. Websites work like they do in Chrome, and most Chrome extensions install from the Chrome Web Store.</p></details>
+        <details><summary>What can the AI see?</summary><p>Only what you share: the page you include in a message, or pages and screenshots it opens while doing a task you asked for. Chats are saved on your computer (never in incognito). Saved passwords are never available to it.</p></details>
+        <details><summary>Can it control my whole computer?</summary><p>If you let it. On a Mac, turn on Accessibility and Screen Recording for Lumio Browser. On Windows it works out of the box. In the default Ask mode, it asks before every action on your computer.</p></details>
+        <details><summary>Why does my computer warn me when I open it?</summary><p>Lumio Browser isn’t signed with a paid Apple or Microsoft certificate yet, so your system can’t vouch for it. The install steps above show the one-time way to open it. The source code is public if you’d like to check it.</p></details>
+        <details><summary>Does it sync between devices?</summary><p>Not yet. Bookmarks, history and passwords stay on your computer. Your Lumio account and plan work everywhere you sign in.</p></details>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="brand"><svg class="mark" viewBox="0 0 64 64" width="18" height="18" aria-hidden="true"><path d="M35 12a21 21 0 1 0 17 19" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><circle cx="48" cy="17" r="5" fill="#86b7ff"/></svg><span>Lumio Browser</span></div>
+    <nav aria-label="Footer">
+      <a href="https://lumio-usa.online">Lumio</a>
+      <a href="https://github.com/juaniRD23/lumio-browser">GitHub</a>
+      <a href="https://github.com/juaniRD23/lumio-browser/releases">All releases</a>
+      <a href="https://github.com/juaniRD23/lumio-browser/blob/main/LICENSE">License (GPL-3.0)</a>
+    </nav>
+  </footer>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

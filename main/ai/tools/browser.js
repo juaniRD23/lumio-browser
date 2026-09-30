@@ -1,0 +1,460 @@
+// Browser tools: read and operate web pages in Lumio's own tabs. Input is
+// sent as real (trusted) mouse/keyboard events via webContents.sendInputEvent.
+const scripts = require('./page-scripts');
+const { parseInput, displayUrl } = require('../../omnibox');
+
+const WORLD = 1001;
+const TAB_ID = { type: 'integer', description: 'Tab id (defaults to the active tab)' };
+
+function inPage(wc, fn, arg = {}) {
+  const code = `(${fn.toString()})(${JSON.stringify(arg)})`;
+  return wc.executeJavaScriptInIsolatedWorld(WORLD, [{ code }]);
+}
+
+function wait(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+// Resolves once the page stops loading (or after `max` ms).
+function settle(wc, max = 8000) {
+  return new Promise((resolve) => {
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      if (!wc.isDestroyed()) wc.removeListener('did-stop-loading', finish);
+      setTimeout(resolve, 250);
+    };
+    const timer = setTimeout(finish, max);
+    setTimeout(() => {
+      if (wc.isDestroyed() || !wc.isLoading()) finish();
+      else wc.once('did-stop-loading', finish);
+    }, 350);
+  });
+}
+
+function hostOf(url) {
+  try { return new URL(url).host || url; } catch { return url; }
+}
+
+function tabFor(ctx, id, { activate = false } = {}) {
+  const tab = id ? ctx.tabs.get(id) : ctx.tabs.active;
+  if (!tab) throw new Error(id ? `There is no tab ${id}. Use list_tabs.` : 'No tab is open.');
+  ctx.tabs.ensureView(tab);
+  if (activate && ctx.tabs.activeId !== tab.id) ctx.tabs.activate(tab.id);
+  const wc = tab.view.webContents;
+  const url = wc.getURL() || tab.url || '';
+  if (url.startsWith('lumio://settings')) throw new Error("Lumio can't read or operate its own Settings page. Ask the user to change settings themselves.");
+  return { tab, wc, url };
+}
+
+function pageLine(wc) {
+  return `Page is now: "${wc.getTitle()}" — ${wc.getURL()}`;
+}
+
+function refName(ctx, tabId, ref) {
+  const tab = tabId ? ctx.tabs.get(tabId) : ctx.tabs.active;
+  const meta = tab && ctx.refs.get(tab.id);
+  const name = meta?.[ref]?.name;
+  return name ? `“${name.length > 40 ? name.slice(0, 40) + '…' : name}”` : `element [${ref}]`;
+}
+
+function activeHost(ctx, tabId) {
+  const tab = tabId ? ctx.tabs.get(tabId) : ctx.tabs.active;
+  return tab ? hostOf(ctx.tabs.displayUrl(tab)) : '';
+}
+
+function safeUrl(ctx, input) {
+  const parsed = parseInput(input, ctx.tabs.searchTemplate());
+  if (!parsed) throw new Error('Empty URL.');
+  if (/^(file|view-source|data|javascript):/i.test(parsed.url)) throw new Error('Lumio can only open web pages (http/https).');
+  if (/^lumio:\/\/settings/i.test(parsed.url)) throw new Error("Lumio can't open its own Settings page.");
+  return parsed.url;
+}
+
+async function moveCursor(ctx, wc, x, y, click) {
+  if (!ctx.showCursor) return;
+  try {
+    await inPage(wc, scripts.cursor, { x, y, click });
+    if (!click) await wait(380);
+  } catch { /* page may block injection; not critical */ }
+}
+
+async function mouseClick(wc, xDip, yDip, count = 1, button = 'left') {
+  wc.sendInputEvent({ type: 'mouseMove', x: xDip, y: yDip });
+  for (let i = 1; i <= count; i++) {
+    wc.sendInputEvent({ type: 'mouseDown', x: xDip, y: yDip, button, clickCount: i });
+    wc.sendInputEvent({ type: 'mouseUp', x: xDip, y: yDip, button, clickCount: i });
+  }
+}
+
+const KEY_NAMES = {
+  enter: 'Enter', return: 'Enter', tab: 'Tab', esc: 'Escape', escape: 'Escape', backspace: 'Backspace',
+  delete: 'Delete', del: 'Delete', space: 'Space', up: 'Up', down: 'Down', left: 'Left', right: 'Right',
+  arrowup: 'Up', arrowdown: 'Down', arrowleft: 'Left', arrowright: 'Right', home: 'Home', end: 'End',
+  pageup: 'PageUp', pagedown: 'PageDown',
+};
+const MODS = { cmd: 'meta', command: 'meta', meta: 'meta', ctrl: 'control', control: 'control', alt: 'alt', option: 'alt', opt: 'alt', shift: 'shift' };
+
+function pressKey(wc, combo) {
+  const parts = String(combo).split('+').map((p) => p.trim()).filter(Boolean);
+  const modifiers = [];
+  let key = '';
+  for (const p of parts) {
+    const m = MODS[p.toLowerCase()];
+    if (m) modifiers.push(m); else key = p;
+  }
+  if (!key) throw new Error(`No key in "${combo}".`);
+  const lower = key.toLowerCase();
+  // Editing shortcuts go through webContents (sendInputEvent bypasses the menu on macOS).
+  if (modifiers.includes('meta') && key.length === 1) {
+    const shift = modifiers.includes('shift');
+    const edit = { a: 'selectAll', c: 'copy', v: 'paste', x: 'cut', z: shift ? 'redo' : 'undo' }[lower];
+    if (edit) { wc[edit](); return; }
+  }
+  const keyCode = KEY_NAMES[lower] || (key.length === 1 ? key.toUpperCase() : key);
+  wc.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
+  const plain = !modifiers.some((m) => m !== 'shift');
+  if (plain) {
+    if (keyCode === 'Enter') wc.sendInputEvent({ type: 'char', keyCode: '\r', modifiers });
+    else if (keyCode === 'Space') wc.sendInputEvent({ type: 'char', keyCode: ' ', modifiers });
+    else if (key.length === 1) wc.sendInputEvent({ type: 'char', keyCode: modifiers.includes('shift') ? key.toUpperCase() : key, modifiers });
+  }
+  wc.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
+}
+
+async function thumbOf(image, width = 320) {
+  return 'data:image/jpeg;base64,' + image.resize({ width, quality: 'good' }).toJPEG(70).toString('base64');
+}
+
+const tools = [
+  {
+    name: 'read_page',
+    risk: 'read',
+    icon: 'page',
+    description: 'Read a tab: its URL, title, the interactive elements (with [ref] numbers for click/type) and the visible text. Call again after the page changes; refs are renumbered each time.',
+    parameters: {
+      type: 'object',
+      properties: {
+        tab_id: TAB_ID,
+        include_text: { type: 'boolean', description: 'Include page text (default true). Set false for just the elements.' },
+      },
+    },
+    label: (a, ctx) => `Reading ${activeHost(ctx, a.tab_id) || 'the page'}`,
+    async run(a, ctx) {
+      const { tab, wc } = tabFor(ctx, a.tab_id);
+      if (wc.isLoading()) await settle(wc, 6000);
+      const snap = await inPage(wc, scripts.snapshot, { maxText: a.include_text === false ? 0 : 7000 });
+      ctx.refs.set(tab.id, snap.meta);
+      const parts = [
+        `Tab ${tab.id}: "${snap.title}"`,
+        `URL: ${snap.url}`,
+        `Viewport ${snap.viewport} · scrolled ${snap.scrollY} of ${snap.scrollHeight}px`,
+        `Interactive elements (${snap.lines.length}${snap.total > snap.lines.length ? ` of ${snap.total}` : ''}):`,
+        snap.lines.join('\n') || '(none)',
+      ];
+      if (snap.text) parts.push('', 'Page text:', snap.text);
+      if (snap.frames) parts.push('', `(${snap.frames} embedded frame(s) not included; use screenshot_tab to see them.)`);
+      return { text: parts.join('\n'), summary: `${snap.lines.length} elements` };
+    },
+  },
+  {
+    name: 'click',
+    risk: 'browser',
+    icon: 'cursor',
+    description: 'Click an element by its [ref] from the latest read_page.',
+    parameters: {
+      type: 'object',
+      properties: { ref: { type: 'integer', description: 'Element ref from read_page' }, double: { type: 'boolean', description: 'Double-click' }, tab_id: TAB_ID },
+      required: ['ref'],
+    },
+    label: (a, ctx) => `Click ${refName(ctx, a.tab_id, a.ref)}`,
+    detail: (a, ctx) => `Click ${refName(ctx, a.tab_id, a.ref)} on ${activeHost(ctx, a.tab_id)}`,
+    async run(a, ctx) {
+      const { wc } = tabFor(ctx, a.tab_id, { activate: true });
+      const info = await inPage(wc, scripts.locate, { ref: a.ref });
+      if (info.error) throw new Error(info.error);
+      const z = wc.getZoomFactor();
+      await moveCursor(ctx, wc, info.x, info.y, false);
+      await mouseClick(wc, Math.round(info.x * z), Math.round(info.y * z), a.double ? 2 : 1);
+      await moveCursor(ctx, wc, info.x, info.y, true);
+      await settle(wc);
+      const note = info.covered ? `\nNote: the click point was covered by ${info.covered}; the click may have hit that instead.` : '';
+      return { text: `Clicked [${a.ref}]. ${pageLine(wc)}${note}` };
+    },
+  },
+  {
+    name: 'type',
+    risk: 'browser',
+    icon: 'keyboard',
+    description: 'Type text into a field by its [ref]. Replaces what is there unless clear=false. Set submit=true to press Enter afterwards. Refuses password, payment and ID fields.',
+    parameters: {
+      type: 'object',
+      properties: {
+        ref: { type: 'integer' },
+        text: { type: 'string' },
+        submit: { type: 'boolean', description: 'Press Enter after typing' },
+        clear: { type: 'boolean', description: 'Replace existing text (default true)' },
+        tab_id: TAB_ID,
+      },
+      required: ['ref', 'text'],
+    },
+    label: (a, ctx) => `Type “${String(a.text).slice(0, 30)}${String(a.text).length > 30 ? '…' : ''}” into ${refName(ctx, a.tab_id, a.ref)}`,
+    detail: (a, ctx) => `Type into ${refName(ctx, a.tab_id, a.ref)} on ${activeHost(ctx, a.tab_id)}${a.submit ? ' and press Enter' : ''}:\n${a.text}`,
+    async run(a, ctx) {
+      const { wc } = tabFor(ctx, a.tab_id, { activate: true });
+      const info = await inPage(wc, scripts.locate, { ref: a.ref });
+      if (info.error) throw new Error(info.error);
+      if (info.sensitive) {
+        return { text: 'Refused: this looks like a password, payment, or ID field. Ask the user to fill it in themselves.', summary: 'Sensitive field, left for you', status: 'blocked' };
+      }
+      if (info.isSelect) throw new Error('That element is a dropdown; use select_option.');
+      const z = wc.getZoomFactor();
+      await moveCursor(ctx, wc, info.x, info.y, false);
+      await mouseClick(wc, Math.round(info.x * z), Math.round(info.y * z));
+      await moveCursor(ctx, wc, info.x, info.y, true);
+      await wait(60);
+      const focus = await inPage(wc, scripts.focusCheck);
+      if (focus.sensitive) {
+        return { text: 'Refused: focus landed on a password, payment, or ID field. Ask the user to fill it in themselves.', summary: 'Sensitive field, left for you', status: 'blocked' };
+      }
+      if (a.clear !== false) await inPage(wc, scripts.selectContents, { ref: a.ref });
+      await wc.insertText(String(a.text));
+      if (a.submit) { await wait(120); pressKey(wc, 'Enter'); await settle(wc); } else await wait(150);
+      return { text: `Typed into [${a.ref}]${a.submit ? ' and pressed Enter' : ''}. ${pageLine(wc)}` };
+    },
+  },
+  {
+    name: 'select_option',
+    risk: 'browser',
+    icon: 'cursor',
+    description: 'Choose an option in a <select> dropdown by its [ref], matching option text or value.',
+    parameters: { type: 'object', properties: { ref: { type: 'integer' }, value: { type: 'string' }, tab_id: TAB_ID }, required: ['ref', 'value'] },
+    label: (a, ctx) => `Choose “${a.value}” in ${refName(ctx, a.tab_id, a.ref)}`,
+    detail: (a, ctx) => `Choose “${a.value}” in ${refName(ctx, a.tab_id, a.ref)} on ${activeHost(ctx, a.tab_id)}`,
+    async run(a, ctx) {
+      const { wc } = tabFor(ctx, a.tab_id, { activate: true });
+      const res = await inPage(wc, scripts.selectOption, { ref: a.ref, value: a.value });
+      if (res.error) throw new Error(res.error);
+      await wait(200);
+      return `Selected "${res.selected}".`;
+    },
+  },
+  {
+    name: 'press_key',
+    risk: 'browser',
+    icon: 'keyboard',
+    description: 'Press a key or shortcut in the active tab, e.g. "Enter", "Escape", "Tab", "Down", "cmd+a".',
+    parameters: { type: 'object', properties: { keys: { type: 'string' }, tab_id: TAB_ID }, required: ['keys'] },
+    label: (a) => `Press ${a.keys}`,
+    detail: (a, ctx) => `Press ${a.keys} on ${activeHost(ctx, a.tab_id)}`,
+    async run(a, ctx) {
+      const { wc } = tabFor(ctx, a.tab_id, { activate: true });
+      const printable = String(a.keys).length === 1 || /^(shift\+).$/i.test(a.keys) || /\+v$/i.test(a.keys);
+      if (printable && (await inPage(wc, scripts.focusCheck)).sensitive) {
+        return { text: 'Refused: the focused field is a password, payment, or ID field. Ask the user to fill it in themselves.', summary: 'Sensitive field, left for you', status: 'blocked' };
+      }
+      pressKey(wc, a.keys);
+      await settle(wc, 4000);
+      return `Pressed ${a.keys}. ${pageLine(wc)}`;
+    },
+  },
+  {
+    name: 'scroll',
+    risk: 'read',
+    icon: 'scroll',
+    description: 'Scroll the page (or the element under [ref]) up or down by a number of screens (default 0.8).',
+    parameters: {
+      type: 'object',
+      properties: { direction: { type: 'string', enum: ['up', 'down'] }, amount: { type: 'number' }, ref: { type: 'integer' }, tab_id: TAB_ID },
+      required: ['direction'],
+    },
+    label: (a) => `Scroll ${a.direction}`,
+    async run(a, ctx) {
+      const { tab, wc } = tabFor(ctx, a.tab_id, { activate: true });
+      const bounds = tab.view.getBounds();
+      let x = Math.round(bounds.width / 2);
+      let y = Math.round(bounds.height / 2);
+      if (a.ref) {
+        const info = await inPage(wc, scripts.locate, { ref: a.ref });
+        if (!info.error) { const z = wc.getZoomFactor(); x = Math.round(info.x * z); y = Math.round(info.y * z); }
+      }
+      // Chromium caps each wheel event, so big scrolls go out as several.
+      let px = Math.round(bounds.height * Math.min(5, Math.max(0.1, a.amount || 0.8)));
+      wc.sendInputEvent({ type: 'mouseMove', x, y });
+      while (px > 0) {
+        const step = Math.min(px, Math.round(bounds.height * 0.8));
+        wc.sendInputEvent({ type: 'mouseWheel', x, y, deltaX: 0, deltaY: a.direction === 'up' ? step : -step, canScroll: true });
+        px -= step;
+        await wait(120);
+      }
+      await wait(350);
+      const s = await inPage(wc, scripts.scrollInfo);
+      return `Scrolled ${a.direction}. Now at ${s.y} of ${s.height}px (viewport ${s.vh}px).`;
+    },
+  },
+  {
+    name: 'navigate',
+    risk: 'browser',
+    icon: 'globe',
+    description: 'Open a URL (or search terms) in the current tab.',
+    parameters: { type: 'object', properties: { url: { type: 'string' }, tab_id: TAB_ID }, required: ['url'] },
+    label: (a) => `Open ${displayUrl(a.url).slice(0, 50)}`,
+    detail: (a) => `Open ${a.url}`,
+    async run(a, ctx) {
+      const url = safeUrl(ctx, a.url);
+      const { tab, wc } = tabFor(ctx, a.tab_id, { activate: true });
+      ctx.tabs.navigate(url, tab.id);
+      await settle(wc, 15000);
+      return pageLine(wc);
+    },
+  },
+  {
+    name: 'go_back',
+    risk: 'browser',
+    icon: 'globe',
+    description: 'Go back (or forward) in the tab history.',
+    parameters: { type: 'object', properties: { forward: { type: 'boolean' }, tab_id: TAB_ID } },
+    label: (a) => (a.forward ? 'Go forward' : 'Go back'),
+    async run(a, ctx) {
+      const { wc } = tabFor(ctx, a.tab_id, { activate: true });
+      const h = wc.navigationHistory;
+      if (a.forward ? !h.canGoForward() : !h.canGoBack()) return `Can't go ${a.forward ? 'forward' : 'back'}. ${pageLine(wc)}`;
+      if (a.forward) h.goForward(); else h.goBack();
+      await settle(wc);
+      return pageLine(wc);
+    },
+  },
+  {
+    name: 'screenshot_tab',
+    risk: 'read',
+    icon: 'eye',
+    description: 'Take a screenshot of a tab to see its layout, images, canvases or embedded frames. Pixel coordinates can be used with click_at.',
+    parameters: { type: 'object', properties: { tab_id: TAB_ID } },
+    label: () => 'Look at the page',
+    async run(a, ctx) {
+      const { tab, wc } = tabFor(ctx, a.tab_id);
+      const bounds = tab.view.getBounds();
+      const img = await wc.capturePage();
+      const width = Math.min(1280, bounds.width);
+      const shot = img.resize({ width, quality: 'good' });
+      const size = shot.getSize();
+      ctx.lastTabShot = { tabId: tab.id, scale: size.width / bounds.width };
+      return {
+        text: `Screenshot of tab ${tab.id} (${size.width}x${size.height}px). ${pageLine(wc)}`,
+        image: 'data:image/jpeg;base64,' + shot.toJPEG(72).toString('base64'),
+        thumb: await thumbOf(img),
+      };
+    },
+  },
+  {
+    name: 'click_at',
+    risk: 'browser',
+    icon: 'cursor',
+    description: 'Click at pixel coordinates from the latest screenshot_tab of that tab (for things without a ref, like canvases).',
+    parameters: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' }, double: { type: 'boolean' } }, required: ['x', 'y'] },
+    label: (a) => `Click at (${Math.round(a.x)}, ${Math.round(a.y)})`,
+    detail: (a, ctx) => `Click at (${Math.round(a.x)}, ${Math.round(a.y)}) on ${activeHost(ctx)}`,
+    async run(a, ctx) {
+      const shot = ctx.lastTabShot;
+      if (!shot) throw new Error('Take a screenshot_tab first.');
+      const { wc } = tabFor(ctx, shot.tabId, { activate: true });
+      const x = Math.round(a.x / shot.scale);
+      const y = Math.round(a.y / shot.scale);
+      const z = wc.getZoomFactor();
+      await moveCursor(ctx, wc, x / z, y / z, false);
+      await mouseClick(wc, x, y, a.double ? 2 : 1);
+      await moveCursor(ctx, wc, x / z, y / z, true);
+      await settle(wc);
+      return `Clicked. ${pageLine(wc)}`;
+    },
+  },
+  {
+    name: 'list_tabs',
+    risk: 'read',
+    icon: 'tabs',
+    description: 'List open tabs with their ids.',
+    parameters: { type: 'object', properties: {} },
+    label: () => 'Check open tabs',
+    run(_a, ctx) {
+      return ctx.tabs.tabs.map((t) => `[${t.id}]${t.id === ctx.tabs.activeId ? ' (active)' : ''} ${t.title} — ${ctx.tabs.displayUrl(t) || 'new tab'}`).join('\n');
+    },
+  },
+  {
+    name: 'open_tab',
+    risk: 'browser',
+    icon: 'tabs',
+    description: 'Open a URL in a new tab (it becomes the active tab unless background=true).',
+    parameters: { type: 'object', properties: { url: { type: 'string' }, background: { type: 'boolean' } }, required: ['url'] },
+    label: (a) => `Open ${displayUrl(a.url).slice(0, 50)} in a new tab`,
+    detail: (a) => `Open a new tab: ${a.url}`,
+    async run(a, ctx) {
+      const url = safeUrl(ctx, a.url);
+      const tab = ctx.tabs.create(url, { active: !a.background });
+      await settle(tab.view.webContents, 15000);
+      return `Opened tab ${tab.id}. ${pageLine(tab.view.webContents)}`;
+    },
+  },
+  {
+    name: 'switch_tab',
+    risk: 'read',
+    icon: 'tabs',
+    description: 'Switch to another tab by id.',
+    parameters: { type: 'object', properties: { tab_id: { type: 'integer' } }, required: ['tab_id'] },
+    label: (a, ctx) => `Switch to “${(ctx.tabs.get(a.tab_id)?.title || 'tab ' + a.tab_id).slice(0, 40)}”`,
+    run(a, ctx) {
+      const { wc } = tabFor(ctx, a.tab_id, { activate: true });
+      return `Switched to tab ${a.tab_id}. ${pageLine(wc)}`;
+    },
+  },
+  {
+    name: 'close_tab',
+    risk: 'browser',
+    icon: 'tabs',
+    description: 'Close a tab by id.',
+    parameters: { type: 'object', properties: { tab_id: { type: 'integer' } }, required: ['tab_id'] },
+    label: (a, ctx) => `Close “${(ctx.tabs.get(a.tab_id)?.title || 'tab ' + a.tab_id).slice(0, 40)}”`,
+    run(a, ctx) {
+      if (!ctx.tabs.get(a.tab_id)) throw new Error(`There is no tab ${a.tab_id}.`);
+      ctx.tabs.close(a.tab_id);
+      return `Closed tab ${a.tab_id}.`;
+    },
+  },
+  {
+    name: 'wait',
+    risk: 'read',
+    icon: 'clock',
+    description: 'Wait a few seconds for something to load or finish (max 10).',
+    parameters: { type: 'object', properties: { seconds: { type: 'number' } }, required: ['seconds'] },
+    label: (a) => `Wait ${Math.min(10, Math.max(0.5, a.seconds || 1))}s`,
+    async run(a, ctx) {
+      await wait(Math.min(10, Math.max(0.5, a.seconds || 1)) * 1000);
+      if (ctx.signal?.aborted) throw new Error('Stopped');
+      return 'Done waiting.';
+    },
+  },
+];
+
+// Removes the fake cursor from every tab (called when a run ends).
+async function clearCursors(tabs) {
+  for (const t of tabs.tabs) {
+    if (!t.view || t.view.webContents.isDestroyed()) continue;
+    try { await inPage(t.view.webContents, scripts.cursor, { remove: true }); } catch { /* ignore */ }
+  }
+}
+
+// Text of the active page, for "Include this page" context.
+async function pageContext(tabs) {
+  const tab = tabs.active;
+  if (!tab?.view) return null;
+  const wc = tab.view.webContents;
+  const url = wc.getURL();
+  if (!/^https?:/.test(url)) return null;
+  try {
+    const snap = await inPage(wc, scripts.snapshot, { max: 0, maxText: 12000 });
+    return { tabId: tab.id, title: snap.title, url: snap.url, text: snap.text, favicon: tab.favicon };
+  } catch {
+    return { tabId: tab.id, title: wc.getTitle(), url, text: '', favicon: tab.favicon };
+  }
+}
+
+module.exports = { tools, clearCursors, pageContext, pressKey, inPage, settle };

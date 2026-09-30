@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Can't open this page</title>
+  <link rel="stylesheet" href="pages.css" />
+  <style>
+    body { display: grid; place-items: center; min-height: 100vh; }
+    .box { max-width: 520px; padding: 24px; animation: rise .4s var(--ease); }
+    .ico { width: 48px; height: 48px; border-radius: 14px; background: var(--card); border: 1px solid var(--line); display: grid; place-items: center; margin-bottom: 18px; color: var(--dim); }
+    h1 { font-size: 24px; }
+    .url { color: var(--dim); word-break: break-all; margin: 0 0 6px; }
+    .code { color: var(--label); font-size: 12px; font-family: ui-monospace, Menlo, monospace; margin: 0 0 22px; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div class="ico"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5M12 16h.01"/></svg></div>
+    <h1 id="title">This site can't be reached</h1>
+    <p class="url" id="url"></p>
+    <p class="code" id="code"></p>
+    <button class="btn primary" id="retry">Try again</button>
+  </div>
+  <script type="module" src="error.js"></script>
+</body>
+</html>

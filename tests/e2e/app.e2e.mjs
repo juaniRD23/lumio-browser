@@ -1,0 +1,250 @@
+// End-to-end tests: launch the real app (throwaway profile), drive it, and
+// check the browser, the AI panel and the agent against a mock OpenRouter.
+// Run: npm run test:e2e   (set LUMIO_SHOTS=/some/dir to save screenshots)
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { launch, root } from '../../scripts/launch.mjs';
+import { startMockOpenRouter } from '../mock-openrouter.mjs';
+
+const FIX = path.join(root, 'tests', 'fixtures');
+const SHOTS = process.env.LUMIO_SHOTS;
+let L;
+let site;
+let siteUrl;
+let mock;
+
+const shot = async (name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await L.shot(path.join(SHOTS, name + '.png')); } };
+const until = async (fn, ms = 10_000) => {
+  const end = Date.now() + ms;
+  for (;;) {
+    const v = await fn();
+    if (v) return v;
+    if (Date.now() > end) return v;
+    await L.wait(200);
+  }
+};
+const ask = async (text) => {
+  await L.shell(`(() => { const p = document.getElementById('prompt'); p.value = ${JSON.stringify(text)}; p.dispatchEvent(new Event('input')); document.getElementById('send').click(); return true })()`);
+  await until(() => L.main(() => global.lumio.ai.isRunning()), 3000);
+};
+const lastReply = () => L.shell(`[...document.querySelectorAll('.msg.ai')].at(-1)?.innerText || ''`);
+const idle = () => until(async () => !(await L.main(() => global.lumio.ai.isRunning())), 30_000);
+
+before(async () => {
+  site = http.createServer((q, r) => {
+    const f = path.join(FIX, q.url === '/' ? 'article.html' : q.url.split('?')[0]);
+    if (!f.startsWith(FIX) || !fs.existsSync(f)) { r.writeHead(404); r.end(); return; }
+    r.writeHead(200, { 'content-type': 'text/html' });
+    r.end(fs.readFileSync(f));
+  });
+  await new Promise((r) => site.listen(0, '127.0.0.1', r));
+  siteUrl = `http://127.0.0.1:${site.address().port}`;
+  mock = await startMockOpenRouter();
+  L = await launch({ env: { LUMIO_OPENROUTER_BASE: mock.base } });
+  await until(() => L.main(() => !!global.lumio.tabs?.active), 15_000);
+  await L.wait(800);
+});
+
+after(async () => {
+  await L?.close();
+  site?.close();
+  mock?.server.close();
+});
+
+test('opens on the Lumio new tab page with the AI panel', async () => {
+  const url = await L.main(() => global.lumio.tabs.wc().getURL());
+  assert.equal(url, 'lumio://newtab/');
+  assert.match(await L.page('document.body.innerText'), /Lumio/);
+  assert.equal(await L.shell(`document.body.classList.contains('panel-closed')`), false);
+  await shot('01-newtab');
+});
+
+test('omnibox navigates, and web pages cannot reach internal pages', async () => {
+  await L.shell(`(() => { const a = document.getElementById('address'); a.focus(); a.value = ${JSON.stringify(siteUrl + '/form.html')}; a.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return true })()`);
+  await until(async () => (await L.main(() => global.lumio.tabs.wc().getTitle())).includes('Pizza'));
+  assert.match(await L.main(() => global.lumio.tabs.wc().getTitle()), /Pizza Order/);
+  // A website must not get the internal bridge or navigate to lumio:// pages.
+  assert.equal(await L.page('typeof window.lumioPage'), 'undefined');
+  assert.equal(await L.page('typeof window.lumio'), 'undefined');
+  await L.page(`location.href = 'lumio://settings/'; true`).catch(() => {});
+  await L.wait(600);
+  assert.match(await L.main(() => global.lumio.tabs.wc().getURL()), /form\.html$/);
+});
+
+test('tabs: new, switch, close, reopen', async () => {
+  await L.main(() => global.lumio.cmd.newTab());
+  await L.main((_e, u) => global.lumio.tabs.navigate(u), siteUrl + '/');
+  await until(async () => (await L.main(() => global.lumio.tabs.wc().getTitle())).includes('Lighthouses'));
+  let s = await L.main(() => global.lumio.tabs.state());
+  assert.equal(s.tabs.length, 2);
+  await L.main(() => global.lumio.cmd.tabIndex(1));
+  s = await L.main(() => global.lumio.tabs.state());
+  assert.equal(s.activeId, s.tabs[0].id);
+  await L.main(() => global.lumio.cmd.tabIndex(2));
+  await L.main(() => global.lumio.cmd.closeTab());
+  assert.equal((await L.main(() => global.lumio.tabs.state())).tabs.length, 1);
+  await L.main(() => global.lumio.cmd.reopenTab());
+  await L.wait(500);
+  s = await L.main(() => global.lumio.tabs.state());
+  assert.equal(s.tabs.length, 2);
+  assert.match(s.tabs[1].url, /127\.0\.0\.1/);
+});
+
+test('find in page counts matches', async () => {
+  await L.main(() => global.lumio.cmd.tabIndex(2));
+  await until(async () => (await L.main(() => global.lumio.tabs.wc().getTitle())).includes('Lighthouses'));
+  await L.main(() => global.lumio.cmd.find());
+  await L.shell(`(() => { const i = document.getElementById('find-input'); i.value = 'keeper'; i.dispatchEvent(new Event('input')); return true })()`);
+  const count = await until(() => L.shell(`document.getElementById('find-count').textContent`));
+  assert.match(count, /\/3$/);
+  await L.shell(`document.getElementById('find-close').click(); true`);
+});
+
+test('bookmarks and history are recorded', async () => {
+  await L.main(() => global.lumio.cmd.bookmark());
+  const marks = await L.main(() => global.lumio.store.bookmarks());
+  assert.ok(marks.some((b) => b.title.includes('Lighthouses')));
+  const hist = await L.main(() => global.lumio.store.history());
+  assert.ok(hist.length >= 2);
+});
+
+test('OpenRouter key: rejects a bad key, accepts a good one', async () => {
+  const bad = await L.main(() => global.lumio.ai.setKey('sk-or-nope'));
+  assert.equal(bad.ok, false);
+  const notOr = await L.main(() => global.lumio.ai.setKey('hello'));
+  assert.match(notOr.error, /OpenRouter key/);
+  const good = await L.main(() => global.lumio.ai.setKey('sk-or-test-e2e'));
+  assert.equal(good.ok, true);
+  const state = await L.main(() => global.lumio.ai.state());
+  assert.equal(state.hasKey, true);
+  // The key never reaches the UI in full.
+  assert.ok(!state.keyHint.includes('test-e2e'));
+  await until(() => L.shell(`!!document.querySelector('.suggestion')`));
+});
+
+test('model picker sits under the chat box and only offers the six models', async () => {
+  assert.equal(await L.shell(`!!document.querySelector('#composer .composer-row #model-btn') && !document.querySelector('#panel-head #model-btn')`), true);
+  assert.equal(await L.shell(`document.getElementById('model-name').textContent`), 'Sonnet 5.5');
+  await L.shell(`document.getElementById('model-btn').click(); true`);
+  await until(() => L.shell(`document.querySelectorAll('#model-list [data-id]').length === 6 && document.querySelector('#model-list .li-sub').textContent.includes('$')`));
+  assert.deepEqual(await L.shell(`[...document.querySelectorAll('#model-list [data-id]')].map((b) => b.dataset.id)`), [
+    'anthropic/claude-opus-5.5', 'anthropic/claude-sonnet-5.5', 'openai/gpt-6-astra', 'openai/gpt-6.1-sol', 'openai/gpt-5.6-sol', 'openai/gpt-5.6-terra',
+  ]);
+  // The menu opens upward, above the chat box.
+  assert.equal(await L.shell(`document.getElementById('model-menu').getBoundingClientRect().bottom <= document.getElementById('composer').getBoundingClientRect().top`), true);
+  // The mock doesn't list GPT-6 Astra, so it shows as unavailable.
+  assert.match(await L.shell(`document.querySelector('[data-id="openai/gpt-6-astra"]').textContent`), /Not available/);
+  assert.match(await L.shell(`document.querySelector('[data-id="anthropic/claude-opus-5.5"]').textContent`), /\$4 \/ \$20 per 1M/);
+  // Maker logos: Claude on the Anthropic models, OpenAI on the GPT models.
+  assert.equal(await L.shell(`[...document.querySelectorAll('#model-list .logo svg')].length`), 6);
+  assert.equal(await L.shell(`document.querySelector('[data-id="anthropic/claude-opus-5.5"] .logo svg').getAttribute('fill')`), '#d97757');
+  assert.equal(await L.shell(`!!document.querySelector('#model-logo svg')`), true);
+  await shot('05-model-menu');
+  await L.shell(`document.querySelector('[data-id="openai/gpt-6.1-sol"]').click(); true`);
+  await until(async () => (await L.shell(`document.getElementById('model-name').textContent`)) === 'Sol 6.1');
+  assert.equal(await L.shell(`document.getElementById('model-menu').hidden`), true);
+  assert.equal(await L.main(() => global.lumio.store.settings.model), 'openai/gpt-6.1-sol');
+  // Anything outside the list is refused, from the panel or Settings.
+  await L.main(() => global.lumio.ai.setModel('x-ai/grok-4.7'));
+  assert.equal(await L.main(() => global.lumio.store.settings.model), 'openai/gpt-6.1-sol');
+});
+
+test('chat streams markdown and includes the page when asked', async () => {
+  await ask('summarize this page');
+  await idle();
+  assert.match(await lastReply(), /Keepers ran them/);
+  const req = mock.log.at(-1);
+  assert.ok(req.messages.some((m) => Array.isArray(m.content) && m.content.some((p) => /<current_page/.test(p.text || ''))));
+  assert.equal(req.stream, true);
+  assert.equal(req.model, 'openai/gpt-6.1-sol');
+  assert.ok(req.tools.some((t) => t.function.name === 'read_page'));
+  await shot('02-chat');
+});
+
+test('agent fills a form with approvals and refuses password fields', async () => {
+  await L.main((_e, u) => global.lumio.tabs.navigate(u), siteUrl + '/form.html');
+  await until(async () => (await L.main(() => global.lumio.tabs.wc().getTitle())).includes('Pizza'));
+  await L.shell(`document.getElementById('newchat-btn').click(); true`);
+  await ask('Order a large pizza with extra cheese for Sam Tester, sam@example.com');
+  let approvals = 0;
+  for (let i = 0; i < 120 && (await L.main(() => global.lumio.ai.isRunning())); i++) {
+    if (await L.shell(`!!document.querySelector('.approval [data-d="once"]:not(:disabled)')`)) {
+      approvals++;
+      if (approvals === 2) await shot('03-approval');
+      await L.shell(`document.querySelector('.approval [data-d="once"]:not(:disabled)').click(); true`);
+    }
+    await L.wait(250);
+  }
+  assert.ok(approvals >= 6, `expected approvals, got ${approvals}`);
+  const result = await L.page(`document.getElementById('result').textContent`);
+  assert.match(result, /Order placed for Sam Tester \(sam@example\.com\): size l \+ extra cheese\. Trusted click: yes/);
+  assert.equal(await L.page(`document.getElementById('pw').value`), '');
+  const blocked = await L.shell(`document.querySelectorAll('.step.blocked').length`);
+  assert.equal(blocked, 2);
+  assert.match(await lastReply(), /Order placed for Sam Tester/);
+  await shot('04-agent-done');
+});
+
+test('deny stops that action; Auto mode skips browser approvals', async () => {
+  await L.main((_e, u) => global.lumio.tabs.navigate(u), siteUrl + '/form.html');
+  await until(async () => (await L.main(() => global.lumio.tabs.wc().getTitle())).includes('Pizza'));
+  await L.main(() => global.lumio.ai.setMode('auto'));
+  await L.shell(`document.getElementById('newchat-btn').click(); true`);
+  await ask('Order a pizza for Sam Tester, sam@example.com');
+  await idle();
+  assert.equal(await L.shell(`document.querySelectorAll('.approval').length`), 0);
+  assert.match(await L.page(`document.getElementById('result').textContent`), /Order placed/);
+  await L.main(() => global.lumio.ai.setMode('ask'));
+  await ask('run a shell test');
+  const card = await until(() => L.shell(`!!document.querySelector('.approval [data-d="deny"]')`));
+  assert.ok(card);
+  assert.match(await L.shell(`document.querySelector('.approval pre').textContent`), /echo lumio/);
+  await L.shell(`document.querySelector('.approval [data-d="deny"]').click(); true`);
+  await idle();
+  assert.equal(await L.shell(`[...document.querySelectorAll('.step')].at(-1).className`), 'step denied');
+});
+
+test('shell commands run after approval', async () => {
+  await ask('run a shell test');
+  await until(() => L.shell(`!!document.querySelector('.approval [data-d="once"]')`));
+  await L.shell(`document.querySelector('.approval [data-d="once"]').click(); true`);
+  await idle();
+  assert.match(await lastReply(), /lumio-42/);
+});
+
+test('screenshots of a tab reach the model as images', async () => {
+  await ask('take a screenshot');
+  await idle();
+  assert.match(await lastReply(), /Images received: 1/);
+  assert.ok(await L.shell(`!!document.querySelector('.step-thumb')`));
+});
+
+test('Stop ends a run and keeps the chat usable', async () => {
+  await ask('Order a pizza for Sam Tester, sam@example.com');
+  await until(() => L.shell(`!!document.querySelector('.approval [data-d="once"]:not(:disabled)')`));
+  await L.shell(`document.getElementById('send').click(); true`); // the send button is Stop while running
+  await idle();
+  assert.match(await L.shell(`[...document.querySelectorAll('.notice')].at(-1).textContent`), /Stopped/);
+  await ask('hello');
+  await idle();
+  assert.match(await lastReply(), /mock/);
+});
+
+test('API errors show a friendly message', async () => {
+  await ask('please fail');
+  await idle();
+  assert.match(await L.shell(`[...document.querySelectorAll('.notice')].at(-1).textContent`), /out of credits/);
+});
+
+test('chats are saved without screenshots', async () => {
+  const chats = await L.main(() => global.lumio.ai.listChats());
+  assert.ok(chats.length >= 3);
+  await L.main(() => global.lumio.store.chatsFile.flush());
+  const raw = fs.readFileSync(path.join(L.userData, 'chats.json'), 'utf8');
+  assert.ok(!raw.includes('data:image/jpeg'));
+  const secrets = fs.readFileSync(path.join(L.userData, 'secrets.json'), 'utf8');
+  assert.ok(!secrets.includes('sk-or-test-e2e'), 'key is encrypted at rest');
+});

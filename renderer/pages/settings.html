@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Settings</title>
+  <link rel="stylesheet" href="pages.css" />
+  <link rel="stylesheet" href="settings.css" />
+</head>
+<body>
+  <div class="layout">
+    <nav class="side" aria-label="Settings sections">
+      <div class="side-title">Settings</div>
+      <a href="#you">You and Lumio</a>
+      <a href="#profile">Customize profile</a>
+      <a href="#plan">Plan and usage</a>
+      <a href="#ai">Lumio AI</a>
+      <a href="#autofill">Passwords and autofill</a>
+      <a href="#privacy">Privacy and security</a>
+      <a href="#appearance">Appearance</a>
+      <a href="#search">Search engine</a>
+      <a href="#downloads">Downloads</a>
+      <a href="#startup">On startup</a>
+      <a href="#browser">Default browser</a>
+      <a href="#import">Import</a>
+      <a href="#about">About Lumio Browser</a>
+    </nav>
+
+    <main class="content">
+      <!-- You and Lumio -->
+      <section id="you">
+        <h2>You and Lumio</h2>
+        <div class="card">
+          <div class="row account-row">
+            <span id="me-avatar"></span>
+            <div class="grow">
+              <div class="title" id="me-name">Lumio Browser</div>
+              <div class="desc" id="me-email">Not signed in</div>
+            </div>
+            <span class="pill" id="me-plan" hidden></span>
+            <button class="btn primary" id="sign-in">Sign in to Lumio</button>
+            <button class="btn" id="manage" hidden>Manage account</button>
+            <button class="btn danger" id="sign-out" hidden>Sign out</button>
+          </div>
+          <div class="row" id="connecting" hidden>
+            <div class="grow">
+              <div class="title">Approve the sign-in on lumio-usa.online</div>
+              <div class="desc">A tab opened on the Lumio website. Check that it shows this code, then click Connect.</div>
+            </div>
+            <span class="code" id="code"></span>
+            <button class="btn" id="cancel-sign-in">Cancel</button>
+          </div>
+          <div class="row" id="account-error" hidden><div class="desc err"></div></div>
+          <div class="row"><div class="desc">Signing in uses the same account as lumio-usa.online. Your Lumio plan can then run the AI in this browser, so you don’t need an OpenRouter key.</div></div>
+        </div>
+      </section>
+
+      <!-- Profile -->
+      <section id="profile">
+        <h2>Customize profile</h2>
+        <div class="card">
+          <div class="row">
+            <div class="grow"><div class="title">Name</div><div class="desc">Shown on the account button. Leave empty to use your Lumio name.</div></div>
+            <input id="p-name" class="field" type="text" maxlength="40" placeholder="Your name" spellcheck="false" style="width:220px" />
+          </div>
+          <div class="row">
+            <div class="grow"><div class="title">Picture</div><div class="desc">A photo, or your initial on a color.</div></div>
+            <span id="p-preview"></span>
+            <button class="btn" id="p-photo">Choose photo…</button>
+            <button class="btn ghost" id="p-photo-remove" hidden>Remove</button>
+          </div>
+          <div class="row">
+            <div class="grow"><div class="title">Avatar color</div></div>
+            <div class="swatches" id="p-colors"></div>
+          </div>
+          <div class="row">
+            <div class="grow"><div class="title">Theme color</div><div class="desc">Highlights across the browser, like the address bar and Lumio’s glow.</div></div>
+            <div class="swatches" id="p-themes"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Plan -->
+      <section id="plan">
+        <h2>Plan and usage</h2>
+        <div class="card" id="plan-card"></div>
+      </section>
+
+      <!-- Lumio AI -->
+      <section id="ai">
+        <h2>Lumio AI</h2>
+        <div class="card modes" id="ai-source">
+          <label class="row"><input type="radio" name="source" value="auto" /><div class="grow"><div class="title">Automatic</div><div class="desc">Use your Lumio plan when you’re signed in on Plus, Pro or Max. Otherwise use your OpenRouter key.</div></div></label>
+          <label class="row"><input type="radio" name="source" value="lumio" /><div class="grow"><div class="title">Lumio plan</div><div class="desc">Always use your Lumio plan’s allowance.</div></div></label>
+          <label class="row"><input type="radio" name="source" value="openrouter" /><div class="grow"><div class="title">My OpenRouter key</div><div class="desc">Always use your own OpenRouter account and credits.</div></div></label>
+          <div class="row"><div class="desc" id="source-status"></div></div>
+        </div>
+
+        <div class="card" style="margin-top:12px">
+          <div class="row">
+            <div class="grow">
+              <div class="title">OpenRouter API key</div>
+              <div class="desc" id="key-status">Used when the AI runs on your OpenRouter account. Stored encrypted with your system keychain.</div>
+            </div>
+            <span class="pill" id="key-pill">Not connected</span>
+          </div>
+          <div class="row">
+            <input id="key" class="field grow" type="password" placeholder="sk-or-v1-…" spellcheck="false" autocomplete="off" />
+            <button class="btn primary" id="key-save">Save key</button>
+            <button class="btn danger" id="key-clear" hidden>Remove</button>
+          </div>
+          <div class="row"><div class="desc">Don’t have one? <a href="https://openrouter.ai/keys">Create a key at openrouter.ai/keys</a>.</div></div>
+        </div>
+
+        <div class="card" style="margin-top:12px">
+          <div class="row">
+            <div class="grow"><div class="title">Model</div><div class="desc">Models that are good at operating web pages and your computer. You can also switch under the chat box.</div></div>
+            <select id="model" class="field" style="max-width:320px"></select>
+          </div>
+        </div>
+
+        <h3>Approvals</h3>
+        <div class="card modes" id="modes">
+          <label class="row"><input type="radio" name="mode" value="ask" /><div class="grow"><div class="title">Ask</div><div class="desc">Ask before every action: clicking, typing, opening pages, and anything on your computer. Reading pages never asks.</div></div></label>
+          <label class="row"><input type="radio" name="mode" value="auto" /><div class="grow"><div class="title">Auto</div><div class="desc">Browse on its own. Still asks before controlling your computer, running commands, or scripts.</div></div></label>
+          <label class="row"><input type="radio" name="mode" value="bypass" /><div class="grow"><div class="title">Bypass <span class="pill bad" style="margin-left:6px">Careful</span></div><div class="desc">Never asks. Lumio can click, type, and run commands on your computer without checking with you.</div></div></label>
+        </div>
+
+        <h3>Computer control</h3>
+        <div class="card" id="perm-card">
+          <div class="row mac-only">
+            <div class="grow"><div class="title">Accessibility</div><div class="desc">Lets Lumio move the mouse, click, and type in other apps.</div></div>
+            <span class="pill" id="perm-accessibility">…</span>
+            <button class="btn" data-perm="accessibility">Open Settings</button>
+          </div>
+          <div class="row mac-only">
+            <div class="grow"><div class="title">Screen Recording</div><div class="desc">Lets Lumio take screenshots of your screen so it can see what it’s doing.</div></div>
+            <span class="pill" id="perm-screen">…</span>
+            <button class="btn" data-perm="screen">Open Settings</button>
+          </div>
+          <div class="row"><div class="desc" id="perm-note">After you turn a permission on, quit and reopen Lumio Browser.</div></div>
+        </div>
+      </section>
+
+      <!-- Autofill -->
+      <section id="autofill">
+        <h2>Passwords and autofill</h2>
+        <div class="card">
+          <label class="row" style="cursor:pointer">
+            <div class="grow"><div class="title">Offer to save passwords</div><div class="desc">Ask after you sign in to a site.</div></div>
+            <span class="switch"><input type="checkbox" id="offer-pw"><i></i></span>
+          </label>
+          <label class="row" style="cursor:pointer">
+            <div class="grow"><div class="title">Suggest saved passwords</div><div class="desc">Show your saved accounts when you click a sign-in field. Nothing is filled until you choose one.</div></div>
+            <span class="switch"><input type="checkbox" id="autofill-pw"><i></i></span>
+          </label>
+          <div class="row">
+            <div class="grow"><div class="title">Password Manager</div><div class="desc">See, edit, import and export your saved passwords.</div></div>
+            <a class="btn" href="lumio://passwords/" style="display:inline-flex;align-items:center">Open</a>
+          </div>
+        </div>
+      </section>
+
+      <!-- Privacy -->
+      <section id="privacy">
+        <h2>Privacy and security</h2>
+        <div class="card">
+          <div class="row checks">
+            <label><input type="checkbox" value="history" checked /> History</label>
+            <label><input type="checkbox" value="downloads" /> Download history</label>
+            <label><input type="checkbox" value="cookies" /> Cookies and site data</label>
+            <label><input type="checkbox" value="cache" checked /> Cached files</label>
+            <label><input type="checkbox" value="chats" /> AI chats</label>
+            <label><input type="checkbox" value="permissions" /> Site permissions</label>
+          </div>
+          <div class="row"><div class="grow desc" id="clear-status">Clears everything, from all time. For a time range, use Clear browsing data on the History page. Cookies and site data will sign you out of websites.</div><button class="btn danger" id="clear">Clear data</button></div>
+        </div>
+        <h3 id="sites">Site settings</h3>
+        <div class="card" id="site-list"></div>
+      </section>
+
+      <!-- Appearance -->
+      <section id="appearance">
+        <h2>Appearance</h2>
+        <div class="card">
+          <label class="row" style="cursor:pointer">
+            <div class="grow"><div class="title">Show bookmarks bar</div><div class="desc">Your bookmarks under the address bar (<span class="kbd-mod">⌘</span>⇧B).</div></div>
+            <span class="switch"><input type="checkbox" id="bm-bar"><i></i></span>
+          </label>
+          <div class="row">
+            <div class="grow"><div class="title">Theme color</div><div class="desc">Change it under Customize profile.</div></div>
+            <a class="btn" href="#profile" style="display:inline-flex;align-items:center">Customize</a>
+          </div>
+        </div>
+      </section>
+
+      <!-- Search -->
+      <section id="search">
+        <h2>Search engine</h2>
+        <div class="card">
+          <div class="row">
+            <div class="grow"><div class="title">Search engine</div><div class="desc">Used by the address bar and the new tab page.</div></div>
+            <select id="engine" class="field"></select>
+          </div>
+        </div>
+      </section>
+
+      <!-- Downloads -->
+      <section id="downloads">
+        <h2>Downloads</h2>
+        <div class="card">
+          <div class="row">
+            <div class="grow"><div class="title">Location</div><div class="desc" id="dl-dir"></div></div>
+            <button class="btn" id="dl-change">Change…</button>
+          </div>
+          <label class="row" style="cursor:pointer">
+            <div class="grow"><div class="title">Ask where to save each file</div></div>
+            <span class="switch"><input type="checkbox" id="dl-ask"><i></i></span>
+          </label>
+        </div>
+      </section>
+
+      <!-- Startup -->
+      <section id="startup">
+        <h2>On startup</h2>
+        <div class="card modes">
+          <label class="row"><input type="radio" name="startup" value="restore" /><div class="grow"><div class="title">Continue where you left off</div><div class="desc">Reopen your windows and tabs.</div></div></label>
+          <label class="row"><input type="radio" name="startup" value="newtab" /><div class="grow"><div class="title">Open a new tab</div><div class="desc">Start fresh each time. Closed windows are still under History → Recently closed.</div></div></label>
+        </div>
+      </section>
+
+      <!-- Default browser -->
+      <section id="browser">
+        <h2>Default browser</h2>
+        <div class="card">
+          <div class="row">
+            <div class="grow"><div class="title">Default browser</div><div class="desc" id="default-desc">Open links from other apps in Lumio Browser.</div></div>
+            <button class="btn" id="make-default">Make default</button>
+          </div>
+          <div class="row">
+            <div class="grow"><div class="title">Extensions</div><div class="desc">Add, turn off or remove Chrome extensions.</div></div>
+            <a class="btn" href="lumio://extensions/" style="display:inline-flex;align-items:center">Manage extensions</a>
+          </div>
+        </div>
+      </section>
+
+      <!-- Import -->
+      <section id="import">
+        <h2>Import from another browser</h2>
+        <div class="card">
+          <div class="row">
+            <div class="grow"><div class="title">Bookmarks and history</div><div class="desc" id="import-desc">Copy bookmarks and the last 90 days of history. To bring passwords, export them from the other browser as a CSV file and import it in the Password Manager.</div></div>
+            <select id="import-from" class="field"></select>
+          </div>
+          <div class="row checks">
+            <label><input type="checkbox" id="import-bm" checked /> Bookmarks</label>
+            <label><input type="checkbox" id="import-hist" checked /> History</label>
+            <span class="grow"></span>
+            <button class="btn primary" id="import-go">Import</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- About -->
+      <section id="about">
+        <h2>About Lumio Browser</h2>
+        <div class="card">
+          <div class="row"><div class="grow"><div class="title">Lumio Browser <span id="version"></span></div><div class="desc">A Chromium web browser with Lumio AI built in.</div></div></div>
+          <div class="row"><div class="grow"><div class="title">Open source</div><div class="desc">Lumio Browser is free software under the GNU General Public License v3.0. The Lumio website, server and plans are separate.</div></div><a class="btn" id="source-link" href="https://github.com/" style="display:inline-flex;align-items:center">Source code</a></div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script type="module" src="settings.js"></script>
+</body>
+</html>
