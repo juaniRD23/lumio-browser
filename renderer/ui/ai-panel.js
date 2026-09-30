@@ -45,11 +45,15 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   function setOpen(open, save = true) {
     panelOpen = open;
     body.classList.toggle('panel-closed', !open);
+    $('#panel').inert = !open;
     $('#ai-toggle').classList.toggle('on', open);
     if (save) api.send('panel:set', { open });
     onLayout();
     if (open) requestAnimationFrame(() => prompt.focus());
   }
+  // The page follows the sliding panel through the slot's ResizeObserver;
+  // report once more when the slide ends so the final size is exact.
+  $('#panel').addEventListener('transitionend', (e) => { if (e.target === e.currentTarget && e.propertyName === 'width') onLayout(); });
   $('#ai-toggle').addEventListener('click', () => setOpen(!panelOpen));
   $('#panel-close').addEventListener('click', () => setOpen(false));
   api.on('panel-toggle', () => setOpen(!panelOpen));
@@ -60,6 +64,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   resizer.addEventListener('pointerdown', (e) => {
     resizer.setPointerCapture(e.pointerId);
     resizer.classList.add('dragging');
+    body.classList.add('resizing'); // follow the pointer without the open/close easing
     const move = (ev) => {
       const w = Math.max(320, Math.min(760, window.innerWidth - ev.clientX - 8));
       document.documentElement.style.setProperty('--panel-w', w + 'px');
@@ -67,6 +72,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     };
     const up = () => {
       resizer.classList.remove('dragging');
+      body.classList.remove('resizing');
       resizer.removeEventListener('pointermove', move);
       resizer.removeEventListener('pointerup', up);
       const w = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--panel-w'), 10);
@@ -633,6 +639,8 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
       renderEmpty();
       renderState();
       renderChip();
+      // The saved open/closed state applies instantly; only later toggles slide.
+      requestAnimationFrame(() => requestAnimationFrame(() => body.classList.remove('no-anim')));
     },
     open() { if (!panelOpen) setOpen(true); },
     sendText(text) { submit(text); },

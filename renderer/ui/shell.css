@@ -291,20 +291,38 @@ body.agent-running #slot {
 }
 #find-count { color: var(--label); font-size: 12px; min-width: 44px; text-align: right; padding-right: 4px; font-variant-numeric: tabular-nums; }
 
-#resizer { width: 8px; flex: none; cursor: col-resize; position: relative; }
+#resizer { width: 8px; flex: none; cursor: col-resize; position: relative; transition: width .34s var(--ease); }
 #resizer::after {
   content: ''; position: absolute; left: 3px; top: 40%; bottom: 40%; width: 2px; border-radius: 2px;
   background: transparent; transition: background .15s;
 }
 #resizer:hover::after, #resizer.dragging::after { background: var(--line-strong); }
-body.panel-closed #resizer, body.panel-closed #panel { display: none; }
 
 /* ---------------------------------------------------------------- AI panel */
+/* Opening and closing slide the panel in from the right edge: the panel's
+   width animates while its contents keep their full width, right-aligned, so
+   they glide out from under the page instead of squeezing. The page follows
+   frame by frame (the slot's ResizeObserver reports each new size). */
 #panel {
   width: var(--panel-w); flex: none; min-width: 0;
-  display: flex; flex-direction: column; position: relative;
+  display: flex; flex-direction: column; align-items: flex-end; position: relative;
   background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
   overflow: hidden;
+  transition: width .34s var(--ease), border-width .34s var(--ease), opacity .26s ease, visibility 0s;
+}
+#panel-head, #messages { width: calc(var(--panel-w) - 2px); }
+#composer, #plan { width: calc(var(--panel-w) - 22px); } /* 10px side margins */
+#panel-head, #messages, #composer, #plan { flex-shrink: 0; transition: transform .34s var(--ease); }
+#panel > #messages { flex: 1 1 0; min-height: 0; }
+body.panel-closed #resizer { width: 0; pointer-events: none; }
+body.panel-closed #panel {
+  width: 0; border-width: 0; opacity: 0; visibility: hidden;
+  transition: width .3s var(--ease), border-width .3s var(--ease), opacity .22s ease .06s, visibility 0s .3s;
+}
+body.panel-closed :is(#panel-head, #messages, #composer, #plan) { transform: translateX(24px); }
+body:is(.resizing, .no-anim) :is(#panel, #resizer, #panel-head, #messages, #composer, #plan) { transition: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  :is(#panel, #resizer, #panel-head, #messages, #composer, #plan) { transition: none !important; }
 }
 #panel-head {
   display: flex; align-items: center; gap: 4px;
