@@ -25,6 +25,7 @@ const { MacHelper } = require('./mac/helper');
 const { ExtensionManager } = require('./extensions');
 const { LumioAccount } = require('./account');
 const { PasswordManager } = require('./password-manager');
+const screenAura = require('./ai/screen-aura');
 const { generatePassword } = require('./passwords');
 const importer = require('./importer/chromium');
 
@@ -56,7 +57,7 @@ const alive = () => [...windows].filter((w) => !w.closed && !w.closing);
 const cur = () => (lastFocused && !lastFocused.closed && !lastFocused.closing ? lastFocused : alive().at(-1)) || null;
 const normalWin = () => { const c = cur(); return c && !c.incognito ? c : alive().reverse().find((w) => !w.incognito) || null; };
 const ensureWin = () => cur() || createWindow();
-const windowOfWc = (wc) => alive().find((w) => w.win.webContents === wc || w.overlay.webContents === wc) || null;
+const windowOfWc = (wc) => alive().find((w) => w.win.webContents === wc || w.overlay.webContents === wc || w.indicator?.bar?.webContents === wc) || null;
 const tabOfWc = (wc) => {
   for (const w of alive()) {
     const tab = w.tabs.byWebContents(wc);
@@ -433,7 +434,8 @@ function registerIpc() {
     version: app.getVersion(),
   }));
 
-  on('layout:slot', (w, rect) => w.tabs.setSlot(rect));
+  on('layout:slot', (w, rect) => { w.tabs.setSlot(rect); w.indicator.place(); });
+  on('aura:size', (w, size) => { if (w.indicator.bar?.webContents) w.indicator.resize(size); });
   on('panel:set', (_w, { open, width }) => {
     if (typeof open === 'boolean') store.setSetting('panelOpen', open);
     if (typeof width === 'number') store.setSetting('panelWidth', Math.round(Math.max(320, Math.min(760, width))));
@@ -817,6 +819,7 @@ app.whenReady().then(async () => {
     toast: (w, text) => w.emit('toast', { text }),
   });
   passwords.register();
+  screenAura.register();
   normal.permissions = new Permissions(ses, { store, emitFor, persist: true });
 
   extensions = new ExtensionManager({
@@ -899,6 +902,8 @@ async function snapshot(w = cur()) {
     }
   };
   if (tabs.active?.view) await paste(tabs.active.view);
+  const bar = w.indicator?.bar;
+  if (bar && win.contentView.children.includes(bar)) await paste(bar);
   if (win.contentView.children.includes(overlay)) await paste(overlay);
   return nativeImage.createFromBitmap(out, { width: W, height: H }).toPNG().toString('base64');
 }
@@ -917,6 +922,7 @@ global.lumio = {
   get passwords() { return passwords; },
   get profiles() { return { normal, incognito: incog }; },
   get recentlyClosed() { return recentlyClosed; },
+  screenAura,
   focus: (w) => { lastFocused = w; },
   createWindow,
   openUrl,

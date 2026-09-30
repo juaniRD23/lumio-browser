@@ -1,5 +1,5 @@
 // lumio:// serves the browser's own UI and internal pages from disk.
-//   lumio://shell/, lumio://overlay/          -> renderer/ui   (default session only)
+//   lumio://shell/, overlay/, aura/           -> renderer/ui   (default session only)
 //   lumio://newtab/, settings, history, downloads, bookmarks, extensions,
 //   error                                     -> renderer/pages (tab sessions)
 //   */assets/*  -> renderer/assets,  */vendor/* -> whitelisted node_modules files
@@ -15,7 +15,7 @@ const VENDOR = {
   'purify.js': path.join(ROOT, 'node_modules', 'dompurify', 'dist', 'purify.es.mjs'),
 };
 
-const UI_HOSTS = new Set(['shell', 'overlay']);
+const UI_HOSTS = new Set(['shell', 'overlay', 'aura']);
 const PAGE_HOSTS = new Set(['newtab', 'settings', 'history', 'downloads', 'bookmarks', 'extensions', 'passwords', 'error']);
 
 const MIME = {

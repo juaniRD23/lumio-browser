@@ -70,7 +70,10 @@ func screenshot(_ id: Any, _ args: [String: Any]) {
         do {
             let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
             guard let scDisplay = content.displays.first(where: { $0.displayID == d.id }) else { fail(id, "That display isn't available."); return }
-            let filter = SCContentFilter(display: scDisplay, excludingWindows: [])
+            // Lumio's own on-screen indicators (the glow and Stop pill) stay out of the picture.
+            let exclude = Set((args["excludeWindows"] as? [Int]) ?? [])
+            let hidden = content.windows.filter { exclude.contains(Int($0.windowID)) }
+            let filter = SCContentFilter(display: scDisplay, excludingWindows: hidden)
             let config = SCStreamConfiguration()
             let width = min(maxWidth, Int(d.bounds.width.rounded()))
             let scale = Double(width) / Double(d.bounds.width)

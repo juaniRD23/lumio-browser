@@ -6,6 +6,7 @@ const { BrowserWindow, WebContentsView, screen } = require('electron');
 const path = require('path');
 const { TabManager, NEWTAB } = require('./tabs');
 const { AIController } = require('./ai/controller');
+const { PageIndicator } = require('./ai/indicators');
 
 // Bundled by scripts/build-preload.mjs (it includes the extension toolbar code).
 const SHELL_PRELOAD = path.join(__dirname, '..', 'preload', 'dist', 'shell.js');
@@ -82,11 +83,11 @@ class BrowserWin {
         isAgentRunning: () => this.ai?.isRunning(),
         stopAgent: () => this.ai?.stop(),
         onFound: (tabId, result) => { if (tabId === this.tabs.activeId) this.emit('find-result', result); },
-        onActivated: (tab) => { this.hideOverlay(); this.emit('find-close'); app.onTabActivated(this, tab); },
+        onActivated: (tab) => { this.hideOverlay(); this.emit('find-close'); this.indicator.raise(); app.onTabActivated(this, tab); },
         onLastTabClosed: () => this.close(),
         onTabClosed: (_m, entry) => app.onTabClosed(this, entry),
         onChanged: () => app.onSessionChanged(),
-        onViewCreated: (tab) => app.onViewCreated(this, tab),
+        onViewCreated: (tab) => { this.indicator.raise(); app.onViewCreated(this, tab); },
         onAdopted: (tab) => app.onViewCreated(this, tab),
         onViewDestroyed: (wc) => profile.permissions.dropFor(wc.id),
         openInNewWindow: (url, inc) => app.createWindow({ incognito: inc, urls: [url] }),
@@ -94,6 +95,7 @@ class BrowserWin {
         contextMenuExtras: (tab, params) => app.contextMenuExtras(this, tab, params),
       },
     });
+    this.indicator = new PageIndicator(this);
     this.ai = new AIController({
       store: app.store,
       chats: profile.chats,
@@ -101,6 +103,7 @@ class BrowserWin {
       emit,
       helper: app.helper,
       account: app.account,
+      indicator: this.indicator,
       onSettingsChanged: () => app.broadcastAIState(),
     });
 
@@ -115,6 +118,7 @@ class BrowserWin {
     this.win.on('close', () => { this.closing = true; app.onClose(this); });
     this.win.on('closed', () => {
       this.ai.shutdown();
+      this.indicator.destroy();
       app.onClosed(this);
     });
     this.win.webContents.on('before-input-event', (e, input) => {

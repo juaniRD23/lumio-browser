@@ -1,0 +1,113 @@
+// What a window shows while Lumio works in the browser: every page it touches
+// gets a soft blue glow (injected, click-through), and a Stop bar floats over
+// the bottom of the page area. The bar is our own view, not part of the page,
+// so a website can't see or press it.
+const { WebContentsView } = require('electron');
+const path = require('path');
+const scripts = require('./tools/page-scripts');
+const { inPage } = require('./tools/browser');
+
+const PRELOAD = path.join(__dirname, '..', '..', 'preload', 'dist', 'shell.js');
+const MARGIN = 14; // room around the pill for its shadow
+
+class PageIndicator {
+  constructor(win) {
+    this.w = win; // BrowserWin
+    this.active = false;
+    this.pages = new Map(); // webContents -> dom-ready listener (re-adds the glow after navigation)
+    this.bar = null;
+    this.barSize = { width: 250, height: 40 };
+  }
+
+  // Lumio is acting on this page: make it glow and show the Stop bar.
+  touch(wc) {
+    if (!wc || wc.isDestroyed()) return;
+    if (!this.active) { this.active = true; this.showBar(); }
+    if (!this.pages.has(wc)) {
+      const again = () => this.paint(wc);
+      wc.on('dom-ready', again);
+      this.pages.set(wc, again);
+    }
+    this.paint(wc);
+  }
+
+  paint(wc, opts = {}) {
+    if (!this.active || wc.isDestroyed()) return Promise.resolve();
+    return inPage(wc, scripts.aura, opts).catch(() => {});
+  }
+
+  // Hide the glow for Lumio's own screenshot of the tab, then bring it back.
+  capture(wc, hidden) {
+    return this.pages.has(wc) ? this.paint(wc, { hidden }) : Promise.resolve();
+  }
+
+  label(text) {
+    if (this.bar && !this.bar.webContents.isDestroyed()) this.bar.webContents.send('aura', { label: String(text || '').slice(0, 80) });
+  }
+
+  end() {
+    this.active = false;
+    for (const [wc, again] of this.pages) {
+      if (wc.isDestroyed()) continue;
+      wc.removeListener('dom-ready', again);
+      inPage(wc, scripts.aura, { remove: true }).catch(() => {});
+    }
+    this.pages.clear();
+    this.hideBar();
+  }
+
+  // ---------------------------------------------------------------- Stop bar
+  showBar() {
+    if (this.w.closed) return;
+    if (!this.bar || this.bar.webContents.isDestroyed()) {
+      this.bar = new WebContentsView({ webPreferences: { preload: PRELOAD, contextIsolation: true, sandbox: true, nodeIntegration: false } });
+      this.bar.setBackgroundColor('#00000000');
+      this.bar.webContents.loadURL('lumio://aura/?mode=bar');
+    } else {
+      this.bar.webContents.send('aura', { reset: true, label: '' });
+    }
+    this.w.win.contentView.addChildView(this.bar);
+    this.place();
+  }
+
+  hideBar() {
+    if (!this.bar || this.w.closed) return;
+    if (this.w.win.contentView.children.includes(this.bar)) this.w.win.contentView.removeChildView(this.bar);
+  }
+
+  // Keeps the bar above the page (new or re-activated tabs are added on top).
+  raise() {
+    if (this.active && this.bar && !this.w.closed && this.w.win.contentView.children.includes(this.bar)) {
+      this.w.win.contentView.addChildView(this.bar);
+      if (this.w.overlayKind) this.w.win.contentView.addChildView(this.w.overlay); // dropdowns stay on top
+    }
+  }
+
+  resize({ width, height } = {}) {
+    if (!(width > 0 && height > 0)) return;
+    this.barSize = { width: Math.min(600, Math.ceil(width)), height: Math.min(80, Math.ceil(height)) };
+    this.place();
+  }
+
+  // Bottom center of the page area.
+  place() {
+    if (!this.bar || this.w.closed) return;
+    const slot = this.w.tabs.slot;
+    const width = Math.min(this.barSize.width + MARGIN * 2, Math.max(0, slot.width));
+    const height = this.barSize.height + MARGIN * 2;
+    this.bar.setBounds({
+      x: Math.round(slot.x + (slot.width - width) / 2),
+      y: Math.round(slot.y + slot.height - height - 4),
+      width: Math.round(width),
+      height,
+    });
+  }
+
+  destroy() {
+    this.end();
+    if (this.bar && !this.bar.webContents.isDestroyed()) this.bar.webContents.close();
+    this.bar = null;
+  }
+}
+
+module.exports = { PageIndicator };

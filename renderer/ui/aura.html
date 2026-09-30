@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Lumio</title>
+  <link rel="stylesheet" href="aura.css" />
+</head>
+<body>
+  <!-- ?mode=glow: the screen-edge glow while Lumio controls the computer.
+       ?mode=pill: the Stop button that goes with it.
+       ?mode=bar:  the Stop bar over the page while Lumio works in the browser. -->
+  <div id="pill" hidden>
+    <span id="mark" class="mark"></span>
+    <span class="text"><b id="title">Lumio is working</b><span id="step"></span></span>
+    <button id="stop" type="button" title="Stop Lumio"><i class="sq"></i>Stop</button>
+  </div>
+  <script type="module" src="aura.js"></script>
+</body>
+</html>

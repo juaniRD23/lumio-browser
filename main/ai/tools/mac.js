@@ -4,6 +4,7 @@
 const { execFile } = require('child_process');
 const { nativeImage } = require('electron');
 const os = require('os');
+const screenAura = require('../screen-aura');
 
 function run(file, args, opts = {}) {
   return new Promise((resolve) => {
@@ -55,7 +56,8 @@ const tools = [
     label: () => 'Look at your screen',
     detail: () => 'Take a screenshot of your whole screen',
     async run(a, ctx) {
-      const res = await ctx.helper.request('screenshot', { display: a.display || 'cursor', maxWidth: 1440 });
+      // Lumio's own glow and Stop pill are left out of what the model sees.
+      const res = await ctx.helper.request('screenshot', { display: a.display || 'cursor', maxWidth: 1440, excludeWindows: screenAura.windowIds() });
       ctx.lastMacShot = { bounds: res.bounds, width: res.width, height: res.height, display: res.display };
       const img = nativeImage.createFromBuffer(Buffer.from(res.image, 'base64'));
       const thumb = 'data:image/jpeg;base64,' + img.resize({ width: 320, quality: 'good' }).toJPEG(70).toString('base64');

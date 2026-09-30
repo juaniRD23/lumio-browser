@@ -99,6 +99,21 @@ export function startMockOpenRouter(port = 0) {
         const result = (lastTool?.content.match(/Order placed for[^\n]*/) || ['(no result found)'])[0];
         return sse(res, textChunks(`Done! **${result}**\n\nI left the password field for you to fill in yourself.`));
       }
+      if (ask.includes('plan a trip')) {
+        const steps = (a, b, c) => ({ name: 'update_plan', args: { steps: [{ title: 'Pick the dates', status: a }, { title: 'Compare hotels', status: b }, { title: 'Book the best one', status: c }] } });
+        if (step === 0) return sse(res, toolChunks([steps('in_progress', 'pending', 'pending'), { name: 'read_page' }]));
+        if (step === 1) return sse(res, toolChunks([steps('done', 'in_progress', 'pending'), { name: 'wait', args: { seconds: 1.5 } }]));
+        if (step === 2) return sse(res, toolChunks([steps('done', 'done', 'done')]));
+        return sse(res, textChunks('All set: dates picked, hotels compared, and the best one booked.'));
+      }
+      if (ask.includes('work on this page')) {
+        if (step === 0) return sse(res, toolChunks([{ name: 'read_page' }]));
+        return sse(res, toolChunks([{ name: 'wait', args: { seconds: 20 } }]));
+      }
+      if (ask.includes('use my computer')) {
+        if (step === 0) return sse(res, toolChunks([{ name: 'computer_screenshot' }]));
+        return sse(res, toolChunks([{ name: 'wait', args: { seconds: 20 } }]));
+      }
       if (ask.includes('screenshot')) {
         if (step === 0) return sse(res, toolChunks([{ name: 'screenshot_tab' }]));
         return sse(res, textChunks(`I can see the page. Images received: ${msgs.flatMap((m) => (Array.isArray(m.content) ? m.content : [])).filter((p) => p.type === 'image_url').length}.`));

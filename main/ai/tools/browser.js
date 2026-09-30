@@ -44,6 +44,7 @@ function tabFor(ctx, id, { activate = false } = {}) {
   const wc = tab.view.webContents;
   const url = wc.getURL() || tab.url || '';
   if (url.startsWith('lumio://settings')) throw new Error("Lumio can't read or operate its own Settings page. Ask the user to change settings themselves.");
+  ctx.onPage?.(wc); // the page glows while Lumio works on it
   return { tab, wc, url };
 }
 
@@ -334,7 +335,9 @@ const tools = [
     async run(a, ctx) {
       const { tab, wc } = tabFor(ctx, a.tab_id);
       const bounds = tab.view.getBounds();
-      const img = await wc.capturePage();
+      await ctx.onCapture?.(wc, true); // keep Lumio's own glow out of the picture
+      let img;
+      try { img = await wc.capturePage(); } finally { await ctx.onCapture?.(wc, false); }
       const width = Math.min(1280, bounds.width);
       const shot = img.resize({ width, quality: 'good' });
       const size = shot.getSize();
@@ -390,6 +393,7 @@ const tools = [
     async run(a, ctx) {
       const url = safeUrl(ctx, a.url);
       const tab = ctx.tabs.create(url, { active: !a.background });
+      ctx.onPage?.(tab.view.webContents);
       await settle(tab.view.webContents, 15000);
       return `Opened tab ${tab.id}. ${pageLine(tab.view.webContents)}`;
     },
@@ -427,7 +431,12 @@ const tools = [
     parameters: { type: 'object', properties: { seconds: { type: 'number' } }, required: ['seconds'] },
     label: (a) => `Wait ${Math.min(10, Math.max(0.5, a.seconds || 1))}s`,
     async run(a, ctx) {
-      await wait(Math.min(10, Math.max(0.5, a.seconds || 1)) * 1000);
+      // Stop ends the wait right away.
+      await new Promise((resolve) => {
+        const timer = setTimeout(done, Math.min(10, Math.max(0.5, a.seconds || 1)) * 1000);
+        function done() { clearTimeout(timer); ctx.signal?.removeEventListener('abort', done); resolve(); }
+        ctx.signal?.addEventListener('abort', done);
+      });
       if (ctx.signal?.aborted) throw new Error('Stopped');
       return 'Done waiting.';
     },

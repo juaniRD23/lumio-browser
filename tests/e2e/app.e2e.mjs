@@ -233,6 +233,64 @@ test('Stop ends a run and keeps the chat usable', async () => {
   assert.match(await lastReply(), /mock/);
 });
 
+test('multi-step tasks show a Task progress checklist', async () => {
+  await L.main(() => global.lumio.ai.setMode('auto'));
+  await ask('plan a trip to Lisbon');
+  assert.ok(await until(() => L.shell(`!document.getElementById('plan').hidden && document.querySelectorAll('.plan-step').length === 3`)));
+  assert.ok(await until(() => L.shell(`document.getElementById('plan-count').textContent === '1/3'`)), 'first step done');
+  assert.equal(await L.shell(`document.querySelector('.plan-step.in_progress .t').textContent`), 'Compare hotels');
+  await shot('30-task-progress');
+  assert.equal(await L.shell(`document.querySelectorAll('.step').length > 0 && ![...document.querySelectorAll('.step')].some((e) => /plan/i.test(e.textContent))`), true, 'no chip for update_plan');
+  await idle();
+  assert.equal(await L.shell(`document.getElementById('plan-count').textContent`), '3/3');
+  assert.ok(await until(() => L.shell(`document.getElementById('plan').classList.contains('collapsed')`), 4000), 'folds away when done');
+  assert.ok(mock.log.at(-1).tools.some((t) => t.function.name === 'update_plan'));
+  // The plan is saved with the chat.
+  const saved = await L.main(() => { const c = global.lumio.ai.chatStore.list()[0]; return global.lumio.ai.getChat(c.id).plan; });
+  assert.deepEqual(saved.map((x) => x.status), ['done', 'done', 'done']);
+  await L.main(() => global.lumio.ai.setMode('ask'));
+});
+
+test('while Lumio works on a page it glows, and the Stop bar stops it', async () => {
+  await L.main((_e, u) => global.lumio.tabs.navigate(u), siteUrl + '/');
+  await until(async () => (await L.main(() => global.lumio.tabs.wc().getTitle())).includes('Lighthouse'));
+  await ask('please work on this page');
+  const glowing = `[...document.documentElement.querySelectorAll('body > div')].some((d) => d.getAttribute('aria-hidden') === 'true' && d.style.zIndex === '2147483646')`;
+  assert.ok(await until(() => L.page(glowing)), 'the page glows');
+  assert.ok(await until(() => L.main(() => { const w = global.lumio.current; return !!w.indicator.bar && w.win.contentView.children.includes(w.indicator.bar); })), 'Stop bar shown');
+  const geo = await L.main(() => { const w = global.lumio.current; return { bar: w.indicator.bar.getBounds(), slot: w.tabs.slot }; });
+  assert.ok(geo.bar.y + geo.bar.height <= geo.slot.y + geo.slot.height && geo.bar.y > geo.slot.y + geo.slot.height / 2, 'bottom of the page area');
+  assert.ok(Math.abs(geo.bar.x + geo.bar.width / 2 - (geo.slot.x + geo.slot.width / 2)) < 2, 'centered');
+  await until(() => L.main(() => global.lumio.current.indicator.bar.webContents.executeJavaScript(`document.getElementById('step').textContent.length > 0`)));
+  await L.wait(600);
+  await shot('31-page-glow');
+  await L.main(() => global.lumio.current.indicator.bar.webContents.executeJavaScript(`document.getElementById('stop').click(); true`));
+  await idle();
+  assert.match(await L.shell(`[...document.querySelectorAll('.notice')].at(-1).textContent`), /Stopped/);
+  assert.equal(await L.page(glowing), false, 'glow removed');
+  assert.equal(await L.main(() => { const w = global.lumio.current; return w.win.contentView.children.includes(w.indicator.bar); }), false, 'bar removed');
+});
+
+test('while Lumio controls the computer the screen glows, and the Stop pill stops it', async () => {
+  await L.main(() => global.lumio.ai.setMode('bypass'));
+  await ask('please use my computer');
+  const auras = () => L.main(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter((w) => w.webContents.getURL().startsWith('lumio://aura/')).map((w) => ({ url: w.webContents.getURL(), focusable: w.isFocusable(), top: w.isAlwaysOnTop(), visible: w.isVisible(), protected: w.isContentProtected?.() ?? null })));
+  assert.ok(await until(async () => (await auras()).filter((a) => a.visible).length >= 2), 'glow and pill shown');
+  const list = await auras();
+  const displays = await L.main(({ screen }) => screen.getAllDisplays().length);
+  assert.equal(list.filter((a) => a.url.includes('mode=glow')).length, displays, 'one glow per display');
+  assert.equal(list.filter((a) => a.url.includes('mode=pill')).length, 1);
+  assert.ok(list.every((a) => a.focusable === false && a.top), 'never takes focus, always on top');
+  assert.ok(list.every((a) => a.protected !== false), 'left out of screen captures');
+  assert.ok((await L.main(() => global.lumio.screenAura.windowIds())).length >= 2, 'ids passed to the helper');
+  await L.main(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().includes('mode=pill')).webContents.executeJavaScript(`document.getElementById('stop').click(); true`));
+  await idle();
+  assert.match(await L.shell(`[...document.querySelectorAll('.notice')].at(-1).textContent`), /Stopped/);
+  assert.ok(await until(async () => (await auras()).length === 0, 3000), 'glow windows closed');
+  assert.equal(await L.main(() => global.lumio.screenAura.active()), false);
+  await L.main(() => global.lumio.ai.setMode('ask'));
+});
+
 test('API errors show a friendly message', async () => {
   await ask('please fail');
   await idle();

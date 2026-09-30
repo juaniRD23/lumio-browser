@@ -263,4 +263,35 @@ function cursor(opts) {
   return true;
 }
 
-module.exports = { snapshot, locate, focusCheck, selectContents, selectOption, scrollInfo, cursor };
+// A soft blue glow around the page while Lumio works on it. It ignores the
+// mouse, and it's hidden (hidden: true) while Lumio takes its own screenshot
+// of the tab, so the model doesn't see it.
+function aura(opts) {
+  const g = window;
+  if (opts.remove) {
+    if (g.__lumioAura) { g.__lumioAura.remove(); g.__lumioAura = null; }
+    return true;
+  }
+  if (!g.__lumioAura || !g.__lumioAura.isConnected) {
+    const host = document.createElement('div');
+    host.setAttribute('aria-hidden', 'true');
+    host.style.cssText = 'position:fixed;inset:0;z-index:2147483646;pointer-events:none;';
+    const root = host.attachShadow({ mode: 'closed' });
+    root.innerHTML = `<style>
+      .g{position:fixed;inset:0;pointer-events:none;opacity:0;animation:in .5s ease-out forwards,breathe 2.8s ease-in-out .5s infinite;
+        box-shadow:inset 0 0 0 1.5px rgba(140,196,255,.95),inset 0 0 14px 4px rgba(70,160,255,.7),inset 0 0 46px 12px rgba(40,136,255,.45),inset 0 0 120px 30px rgba(40,136,255,.18);}
+      @keyframes in{to{opacity:1}}
+      @keyframes breathe{0%,100%{opacity:1}50%{opacity:.7}}
+      @media (prefers-reduced-motion:reduce){.g{animation:none;opacity:1}}
+    </style><div class="g"></div>`;
+    (document.body || document.documentElement).appendChild(host);
+    g.__lumioAura = host;
+  }
+  const hide = !!opts.hidden;
+  if ((g.__lumioAura.style.visibility === 'hidden') === hide) return true;
+  g.__lumioAura.style.visibility = hide ? 'hidden' : 'visible';
+  // Resolve after the change is on screen, so a capture right after misses it.
+  return new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true))));
+}
+
+module.exports = { snapshot, locate, focusCheck, selectContents, selectOption, scrollInfo, cursor, aura };

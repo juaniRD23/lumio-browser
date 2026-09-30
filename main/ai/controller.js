@@ -14,15 +14,19 @@ const { MODELS, DEFAULT_MODEL, findModel } = require('./models');
 const browser = require('./tools/browser');
 const mac = require('./tools/mac');
 const plan = require('./tools/plan');
+const screenAura = require('./screen-aura');
 
 const HELPER_TOOLS = new Set(['computer_screenshot', 'computer_click', 'computer_move', 'computer_drag', 'computer_scroll', 'computer_type', 'computer_key', 'list_apps']);
+// Tools that look at or drive the computer itself: while one runs, the screen glows.
+const CONTROLS_COMPUTER = new Set(['computer_screenshot', 'computer_click', 'computer_move', 'computer_drag', 'computer_scroll', 'computer_type', 'computer_key', 'open_app', 'run_applescript']);
 const MODEL_TTL = 10 * 60 * 1000;
 const CAPS_TTL = 10 * 60 * 1000;
 
 
 class AIController {
-  constructor({ store, chats, tabs, emit, helper, account = null, onSettingsChanged = () => {} }) {
+  constructor({ store, chats, tabs, emit, helper, account = null, indicator = null, onSettingsChanged = () => {} }) {
     this.store = store;
+    this.indicator = indicator; // PageIndicator: page glow + Stop bar while working in the browser
     this.account = account; // LumioAccount: lets a paid Lumio plan run the AI
     this.chatStore = chats;
     this.tabs = tabs;
@@ -256,6 +260,12 @@ class AIController {
       lastTabShot: null,
       lastMacShot: null,
       setPlan: (items) => record({ type: 'plan', items }),
+      onPage: (wc) => this.indicator?.touch(wc),
+      onCapture: (wc, hidden) => this.indicator?.capture(wc, hidden),
+      onToolRun: (tool, _args, label) => {
+        this.indicator?.label(label);
+        if (CONTROLS_COMPUTER.has(tool.name)) screenAura.acquire(this);
+      },
     };
     const lumio = this.aiSource() === 'lumio';
     const runId = crypto.randomUUID();
@@ -294,6 +304,8 @@ class AIController {
       chat.updatedAt = Date.now();
       this.run = null;
       this.chatStore.running.delete(chat.id);
+      screenAura.release(this);
+      this.indicator?.end();
       browser.clearCursors(this.tabs).catch(() => {});
       this.saveChats();
       this.emit('ai-event', { chatId: chat.id, type: 'end' });

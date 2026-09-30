@@ -76,6 +76,7 @@ async function runToolCall(call, env) {
     if (decision === 'task') grants.add(tool.name);
   }
 
+  safe(() => ctx?.onToolRun?.(tool, args, label)); // e.g. the screen glow when it controls the computer
   try {
     const out = await tool.run(args, ctx);
     const res = typeof out === 'string' ? { text: out } : out || { text: 'Done.' };
