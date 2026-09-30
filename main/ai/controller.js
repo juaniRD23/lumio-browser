@@ -262,10 +262,7 @@ class AIController {
       setPlan: (items) => record({ type: 'plan', items }),
       onPage: (wc) => this.indicator?.touch(wc),
       onCapture: (wc, hidden) => this.indicator?.capture(wc, hidden),
-      onToolRun: (tool, _args, label) => {
-        this.indicator?.label(label);
-        if (CONTROLS_COMPUTER.has(tool.name)) screenAura.acquire(this);
-      },
+      onToolRun: (tool) => { if (CONTROLS_COMPUTER.has(tool.name)) screenAura.acquire(this); },
     };
     const lumio = this.aiSource() === 'lumio';
     const runId = crypto.randomUUID();
@@ -326,6 +323,7 @@ class AIController {
         break;
       case 'step': {
         run.text = null;
+        this.indicator?.label(ev.label); // the Stop bar shows what Lumio is doing
         const entry = { kind: 'step', id: ev.id, label: ev.label, icon: ev.icon, risk: ev.risk, status: 'running' };
         run.steps.set(ev.id, entry);
         d.push(entry);

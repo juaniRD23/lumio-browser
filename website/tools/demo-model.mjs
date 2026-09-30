@@ -43,17 +43,19 @@ export function startDemoModel() {
     const step = after.filter((m) => m.role === 'assistant').length;
     const snap = [...after].reverse().find((m) => m.role === 'tool' && /^Tab \d+:/.test(m.content))?.content || '';
     if (ask.includes('book')) {
-      if (step === 0) return sse(res, tools([{ name: 'read_page' }], 'On it. I’ll fill in the reservation form for you.'));
+      const plan = (a, b, c) => ({ name: 'update_plan', args: { steps: [{ title: 'Read the reservation form', status: a }, { title: 'Fill in your details', status: b }, { title: 'Reserve the table', status: c }] } });
+      if (step === 0) return sse(res, tools([plan('in_progress', 'pending', 'pending'), { name: 'read_page' }], 'On it. I’ll fill in the reservation form for you.'));
       if (step === 1) {
         return sse(res, tools([
+          plan('done', 'in_progress', 'pending'),
           { name: 'type', args: { ref: ref(snap, /textbox "Your name"/), text: 'Sam Rivera' } },
           { name: 'type', args: { ref: ref(snap, /textbox "Email"/), text: 'sam@example.com' } },
           { name: 'select_option', args: { ref: ref(snap, /select "Party size"/), value: '2 guests' } },
           { name: 'select_option', args: { ref: ref(snap, /select "Time"/), value: '8:00 PM' } },
         ]));
       }
-      if (step === 2) return sse(res, tools([{ name: 'click', args: { ref: ref(snap, /button "Reserve table"/) } }]));
-      if (step === 3) return sse(res, tools([{ name: 'read_page', args: { include_text: true } }]));
+      if (step === 2) return sse(res, tools([plan('done', 'done', 'in_progress'), { name: 'click', args: { ref: ref(snap, /button "Reserve table"/) } }]));
+      if (step === 3) return sse(res, tools([plan('done', 'done', 'done'), { name: 'read_page', args: { include_text: true } }]));
       return sse(res, text('Done! Your **table for 2 at 8:00 PM** tonight at Osteria Luna is booked under Sam Rivera.\n\n- Confirmation: **LUNA-2841**\n- They hold tables for **15 minutes**, so aim to arrive on time.'));
     }
     if (ask.includes('summar')) {

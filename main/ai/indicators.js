@@ -8,7 +8,7 @@ const scripts = require('./tools/page-scripts');
 const { inPage } = require('./tools/browser');
 
 const PRELOAD = path.join(__dirname, '..', '..', 'preload', 'dist', 'shell.js');
-const MARGIN = 14; // room around the pill for its shadow
+const MARGIN = 16; // room around the pill for its shadow
 
 class PageIndicator {
   constructor(win) {

@@ -7,7 +7,7 @@ const { BrowserWindow, screen, ipcMain } = require('electron');
 const path = require('path');
 
 const PRELOAD = path.join(__dirname, '..', '..', 'preload', 'dist', 'shell.js');
-const MARGIN = 14; // room around the pill for its shadow
+const MARGIN = 16; // room around the pill for its shadow
 const holders = new Set(); // AI controllers currently controlling the computer
 let glows = [];
 let pill = null;

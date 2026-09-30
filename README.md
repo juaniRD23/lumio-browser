@@ -7,7 +7,8 @@ A Chromium web browser with **Lumio AI** built in. Lumio sits in a side panel ne
 ## What it does
 
 - **An AI that does things.** Lumio reads the page you're on, clicks, types, fills forms, scrolls and opens tabs, using real mouse and keyboard input. It can also see your screen and use other apps on your Mac or PC.
-- **You stay in control.** Three approval modes: **Ask** (confirm every action), **Auto** (browse on its own, ask before touching your computer), **Bypass**. Stop any time with Esc.
+- **You stay in control.** Three approval modes: **Ask** (confirm every action), **Auto** (browse on its own, ask before touching your computer), **Bypass**. While Lumio works, the page (or, when it controls your computer, the whole screen) glows blue with a **Stop** button. Esc stops it too.
+- **Task progress.** For bigger jobs, Lumio keeps a checklist above the chat box and ticks off steps as it goes.
 - **Safe by design.** Page content is treated as untrusted data, never as instructions. Lumio never types passwords, payment or ID details. It stops to confirm before anything irreversible.
 - **Your plan or your key.** Sign in with a Lumio account (Plus, Pro or Max) and the AI runs on your plan. Or use your own [OpenRouter](https://openrouter.ai) key. Models: Claude Opus 5.5, Claude Sonnet 5.5, GPT-6 Astra, GPT-6.1 Sol, GPT-5.6 Sol, GPT-5.6 Terra.
 - **Everything a browser needs:**
@@ -16,7 +17,8 @@ A Chromium web browser with **Lumio AI** built in. Lumio sits in a side panel ne
   - a bookmarks bar and bookmark manager;
   - site permissions, and importing from Chrome, Edge, Brave, Arc or Vivaldi;
   - **Chrome extensions** from the Chrome Web Store;
-  - a **password manager** that saves, fills, generates, and imports or exports CSV, encrypted with your system keychain.
+  - a **password manager** that saves, fills, generates, and imports or exports CSV, encrypted with your system keychain;
+  - **updates in one click**: when a new release is out, a blue Update button appears next to your profile picture.
 
 ## Install
 
@@ -45,6 +47,8 @@ npm run release          # dist/release: Mac DMGs (Apple silicon, Intel) and a W
 - **Agent:** `main/ai` holds the agent loop, the approval policy, browser tools, and computer tools. Computer tools go through a small native helper: Swift on macOS (`native/LumioHelper`), PowerShell on Windows (`native/windows`).
 - **Lumio account:** `main/account.js` uses the lumio-usa.online desktop sign-in hand-off. `main/ai/lumio.js` runs the AI through the account's plan.
 - **Passwords:** `main/passwords.js` and `main/password-manager.js`, plus the isolated preload in `preload/internal.js`. Each password is encrypted with Electron `safeStorage`.
+- **While it works:** `main/ai/indicators.js` (page glow and Stop bar) and `main/ai/screen-aura.js` (screen glow and Stop pill, left out of screen captures). `main/ai/tools/plan.js` is the Task progress checklist.
+- **Updates:** `main/updater.js` checks GitHub Releases, verifies the installer's SHA-256 and swaps the app in after it quits.
 - **Extensions:** [electron-chrome-extensions](https://github.com/samuelmaddock/electron-browser-shell) and electron-chrome-web-store.
 
 ## License

@@ -31,7 +31,7 @@ body.glow::before {
   height: 40px; padding: 0 5px 0 13px; border-radius: 999px; white-space: nowrap;
   background: rgba(17, 17, 19, .94);
   border: 1px solid rgba(120, 182, 255, .5);
-  box-shadow: 0 6px 22px rgba(0, 0, 0, .45), 0 0 18px rgba(58, 146, 255, .35);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, .4), 0 0 10px rgba(58, 146, 255, .35); /* fits the 16px margin around it */
   animation: pop .28s cubic-bezier(.22, 1, .36, 1) both;
 }
 @keyframes pop { from { opacity: 0; scale: .92; } }
