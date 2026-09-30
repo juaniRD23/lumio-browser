@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Your account · Lumio</title>
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#070708">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body class="app">
+  <header class="app-head">
+    <a class="brand" href="/" aria-label="Lumio home">
+      <svg class="mark" viewBox="0 0 64 64" width="22" height="22" aria-hidden="true"><path d="M35 12a21 21 0 1 0 17 19" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><circle cx="48" cy="17" r="5" fill="#86b7ff"/></svg>
+      <span>Lumio</span>
+    </a>
+    <nav aria-label="Main"><a href="/chat">Chat</a><a href="/#download">Lumio Browser</a><a href="/account" aria-current="page">Account</a></nav>
+    <span class="spacer"></span>
+    <a class="btn small" href="/chat">Open Chat</a>
+  </header>
+
+  <main class="page" id="page" hidden>
+    <h1>Your account</h1>
+    <div class="notice ok" id="welcome" hidden></div>
+    <div class="notice err" id="error" hidden></div>
+
+    <section class="panel profile" aria-label="Profile">
+      <span class="avatar" id="avatar"></span>
+      <div><div class="name" id="name"></div><div class="email" id="email"></div></div>
+      <div class="actions">
+        <button class="btn small" id="billing" hidden>Manage billing</button>
+        <button class="btn small danger" id="sign-out">Sign out</button>
+      </div>
+    </section>
+
+    <section class="panel" id="plan-panel" aria-label="Plan and usage">
+      <h2>Plan and usage</h2>
+      <div class="plan-now"><span class="plan-name" id="plan-name">Free</span><span class="pill" id="plan-status" hidden></span><span class="email" id="renews"></span></div>
+      <div class="meters" id="meters"></div>
+      <p class="email" style="margin:16px 0 0">Lumio Chat and Lumio Browser share this allowance. It refills continuously: the weekly limit counts the last 7 days.</p>
+    </section>
+
+    <section class="panel" id="plans" aria-label="Plans">
+      <h2>Plans</h2>
+      <div class="plans" id="plan-cards"></div>
+    </section>
+  </main>
+
+  <script type="module" src="/account.js"></script>
+</body>
+</html>

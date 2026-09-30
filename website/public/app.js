@@ -31,6 +31,16 @@
       .catch(() => {});
   }
 
+  // ---- signed in? show the account instead of "Sign in" ----
+  fetch('/api/account').then((r) => (r.ok ? r.json() : null)).then((a) => {
+    if (!a?.signedIn) return;
+    const link = $('#nav-account');
+    const name = a.profile?.name || a.email || '';
+    const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    link.href = '/account';
+    link.innerHTML = `<span class="avatar">${a.profile?.picture ? `<img src="${esc(a.profile.picture)}" alt="" referrerpolicy="no-referrer">` : esc(name.trim()[0]?.toUpperCase() || '?')}</span>Account`;
+  }).catch(() => {});
+
   // ---- latest version from GitHub ----
   fetch('https://api.github.com/repos/juaniRD23/lumio-browser/releases/latest', { headers: { Accept: 'application/vnd.github+json' } })
     .then((r) => (r.ok ? r.json() : null))
@@ -51,7 +61,7 @@
   show('0');
 
   // ---- fade sections in as they scroll into view ----
-  const targets = $$('.section-head, .mode, .rules li, .tile, .card, .dl, .install, .oss-inner, .faq-list');
+  const targets = $$('.section-head, .mode, .rules li, .tile, .card, .price, .dl, .install, .oss-inner, .faq-list');
   targets.forEach((el) => el.classList.add('fade'));
   const fader = new IntersectionObserver((entries) => {
     entries.forEach((e) => {

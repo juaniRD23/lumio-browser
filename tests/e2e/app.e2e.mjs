@@ -316,7 +316,7 @@ test('out of allowance, the chat offers an upgrade', async () => {
   const before = await L.main(() => global.lumio.tabs.tabs.length);
   await L.shell(`[...document.querySelectorAll('.notice')].at(-1).querySelector('button').click(); true`);
   await until(async () => (await L.main(() => global.lumio.tabs.tabs.length)) === before + 1);
-  assert.equal(await L.main(() => global.lumio.tabs.active.url), `${lumio.base}/?settings=upgrade`);
+  assert.equal(await L.main(() => global.lumio.tabs.active.url), `${lumio.base}/account#plans`);
   await L.main(() => global.lumio.cmd.closeTab());
 });
 

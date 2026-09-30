@@ -1,16 +1,24 @@
-// lumio-browser-api: Lumio Browser's AI on the person's Lumio plan.
-// Deploy: npx wrangler deploy   ·   Schema: npm run schema
-// The OpenRouter key is a secret: npx wrangler secret put OPENROUTER_API_KEY
+// Lumio (lumio-usa.online): website, accounts, Stripe plans, web Chat and
+// Lumio Browser's AI, in one Worker.
+//   Deploy:  npx wrangler deploy
+//   Schema:  npx wrangler d1 execute lumio --remote --file schema.sql
+//   Secrets: node scripts/setup.mjs --host <host>   (OpenRouter, Google, Stripe)
 {
-  "name": "lumio-browser-api",
+  "name": "lumio",
   "main": "src/index.ts",
   "compatibility_date": "2026-09-01",
   "observability": { "enabled": true },
+  "assets": {
+    "directory": "../website/public",
+    "binding": "ASSETS",
+    "not_found_handling": "404-page",
+    "run_worker_first": ["/api/*", "/v1/*", "/health"]
+  },
   "d1_databases": [
-    { "binding": "DB", "database_name": "lumio-browser-api", "database_id": "f3534cf9-1aaf-4917-b909-2c73243ca2fd" }
+    { "binding": "DB", "database_name": "lumio", "database_id": "b79bae52-d26e-4cec-ac8e-1d1870fca3f0" }
   ],
   "vars": {
-    "LUMIO_BASE": "https://lumio-usa.online",
+    "GOOGLE_CLIENT_ID": "",
     "FREE_DAILY_CAP_USD": "3"
   }
 }

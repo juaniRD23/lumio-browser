@@ -3,10 +3,10 @@
 // they usually do (Google, email). When the site's session cookie shows up in
 // the browser's normal profile (main.js watches for it), we check that session
 // with /api/account and keep it as the account's token, stored encrypted with
-// safeStorage. Profile comes from the site; the plan and the Lumio AI
-// allowance come from lumio-browser-api, which runs the AI.
+// safeStorage. Profile, plan and the Lumio AI allowance come from the same
+// server (server/ in this repo), which also runs the AI.
 const BASE = (process.env.LUMIO_ACCOUNT_BASE || 'https://lumio-usa.online').replace(/\/$/, '');
-const AI_BASE = (process.env.LUMIO_AI_BASE || 'https://lumio-browser-api.gw607953.workers.dev').replace(/\/$/, '');
+const AI_BASE = (process.env.LUMIO_AI_BASE || BASE).replace(/\/$/, '');
 const SECRET = 'lumio-session';
 const SIGN_IN_MS = 15 * 60 * 1000;
 
@@ -47,7 +47,7 @@ class LumioAccount {
     return { status: res.status, ok: res.ok, data };
   }
 
-  // lumio-browser-api (the AI server), with the session as a bearer token.
+  // The AI routes (/v1), with the session as a bearer token.
   async ai(path) {
     const res = await this.fetch(AI_BASE + path, { headers: { Authorization: `Bearer ${this.token()}` }, signal: AbortSignal.timeout(15000) });
     let data = null;
@@ -121,7 +121,7 @@ class LumioAccount {
   async refresh() {
     if (!this.token()) { this.info = null; this.usage = null; this.changed(); return this.state(); }
     try {
-      // The allowance shown in the browser is Lumio AI's (from lumio-browser-api).
+      // The allowance shown in the browser is Lumio AI's (shared with Lumio Chat).
       const [account, usage] = await Promise.all([this.api('/api/account'), this.ai('/v1/usage').catch(() => ({ ok: false }))]);
       if (account.status === 401 || (account.ok && !account.data?.signedIn)) {
         // The session expired or was signed out on the website.

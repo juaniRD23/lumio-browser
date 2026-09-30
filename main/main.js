@@ -317,7 +317,7 @@ function makeDefaultBrowser() {
 // ---------------------------------------------------------------- account + profile
 // GPL: the About section links to the source code.
 const SOURCE_URL = 'https://github.com/juaniRD23/lumio-browser';
-const ACCOUNT_PAGES = { manage: '/?settings=account', upgrade: '/?settings=upgrade', billing: '/?settings=subscription', home: '/' };
+const ACCOUNT_PAGES = { manage: '/account', upgrade: '/account#plans', billing: '/account', home: '/' };
 
 // Signing in happens on lumio-usa.online in a normal tab. When the site's
 // session cookie appears in the normal profile, the account adopts it

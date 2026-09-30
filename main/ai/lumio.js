@@ -1,5 +1,5 @@
-// Runs the AI panel on the person's Lumio plan through lumio-browser-api
-// (server/ in this repo), authenticated with the Lumio session. Each model
+// Runs the AI panel on the person's Lumio plan through lumio-usa.online's
+// /v1/agent (server/ in this repo), authenticated with the Lumio session. Each model
 // call is one "step" (task = chat, run = one send, step = counter). The server
 // owns the model, system prompt and tool definitions; we send the
 // conversation, the tool names we can run, the reasoning level and a little

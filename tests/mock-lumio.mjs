@@ -1,6 +1,6 @@
 // A small stand-in used by the tests for both lumio-usa.online (the sign-in
 // page that sets the site's session cookie, /api/account, /api/usage, logout)
-// and lumio-browser-api (/v1/agent streaming NDJSON, /v1/usage), behaving like
+// and its AI routes (/v1/agent streaming NDJSON, /v1/usage), behaving like
 // the real services.
 import http from 'node:http';
 import crypto from 'node:crypto';
@@ -16,7 +16,7 @@ export async function startMockLumio({ plan = 'plus' } = {}) {
   const state = { plan, agentRequests: [], agentScript: null };
   const json = (res, status, data) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(data)); };
   const readBody = async (req) => { let b = ''; for await (const c of req) b += c; return b; };
-  // The website reads its session cookie; lumio-browser-api reads a bearer token.
+  // The website reads its session cookie; the AI routes read a bearer token.
   const who = (req) => {
     const m = /(?:^|;\s*)(?:__Host-)?lumio_session=([a-f0-9]{64})/.exec(req.headers.cookie || '');
     return m ? sessions.get(m[1]) : null;
@@ -69,7 +69,7 @@ export async function startMockLumio({ plan = 'plus' } = {}) {
         if (!u) return json(res, 200, { usage: { plan: 'free', planName: 'Free', remaining: 0, limit: 0, windows: [] } });
         return json(res, 200, { usage: allowance() });
       }
-      // ---- lumio-browser-api
+      // ---- AI routes (/v1)
       if (url.pathname === '/v1/usage') {
         if (!bearer(req)) return json(res, 401, { error: 'Sign in to your Lumio account.', code: 'sign_in_required' });
         return json(res, 200, { usage: allowance() });

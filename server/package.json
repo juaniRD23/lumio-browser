@@ -7,5 +7,9 @@
     "test": "node --test test/*.test.mjs",
     "deploy": "npx wrangler deploy",
     "schema": "npx wrangler d1 execute lumio-browser-api --remote --file schema.sql"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260930.2",
+    "typescript": "^7.0.2"
   }
 }
