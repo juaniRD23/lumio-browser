@@ -32,7 +32,14 @@ function snapshot(opts) {
       const t = by.split(/\s+/).map((id) => document.getElementById(id)?.innerText || '').join(' ');
       if (clean(t)) return clean(t);
     }
-    if (el.labels && el.labels.length) { const t = clean(el.labels[0].innerText); if (t) return t; }
+    if (el.labels && el.labels.length) {
+      // A label wrapped around its control would otherwise also read out the
+      // control's own text (every option of a <select>, for example).
+      const label = el.labels[0].cloneNode(true);
+      label.querySelectorAll('select, textarea, input, button, datalist').forEach((c) => c.remove());
+      const t = clean(label.textContent);
+      if (t) return t;
+    }
     const tag = el.tagName;
     if (tag === 'INPUT' && /^(submit|button|reset)$/i.test(el.type)) return clean(el.value);
     if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {

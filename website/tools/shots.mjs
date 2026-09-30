@@ -36,10 +36,26 @@ async function save(name) {
   console.log('saved', name);
 }
 const go = async (url, title) => { await L.main((_e, u) => global.lumio.tabs.navigate(u), url); await until(async () => (await L.main(() => global.lumio.tabs.wc().getTitle())).includes(title)); await L.wait(400); };
-const ask = (t) => L.shell(`(() => { const p = document.getElementById('prompt'); p.value = ${JSON.stringify(t)}; p.dispatchEvent(new Event('input')); document.getElementById('send').click(); return true })()`);
+// Sends a prompt and waits until the agent has actually started.
+const ask = async (t) => {
+  await L.shell(`(() => { const p = document.getElementById('prompt'); p.value = ${JSON.stringify(t)}; p.dispatchEvent(new Event('input')); document.getElementById('send').click(); return true })()`);
+  await until(() => L.main(() => global.lumio.ai.isRunning()), 5000);
+};
 const blur = () => L.shell(`document.activeElement?.blur(); true`);
 
 await until(() => L.main(() => !!global.lumio?.tabs?.active), 20000);
+// Serve the demo pages at made-up https addresses (.demo isn't a real
+// domain), so the address bar looks normal instead of showing 127.0.0.1.
+const DEMO_HOSTS = { 'osteria-luna.demo': 'osteria.html', 'thelongread.demo': 'article.html' };
+const demo = (host) => `https://${host}/`;
+await L.main(({ net }, { base, hosts }) => {
+  global.lumio.profiles.normal.session.protocol.handle('https', (req) => {
+    const u = new URL(req.url);
+    const file = hosts[u.hostname];
+    if (!file) return net.fetch(req, { bypassCustomProtocolHandlers: true });
+    return net.fetch(`${base}${u.pathname === '/' ? '/' + file : u.pathname}`, { bypassCustomProtocolHandlers: true });
+  });
+}, { base, hosts: DEMO_HOSTS });
 await L.main(() => global.lumio.ai.setKey('sk-or-demo-key'));
 await L.main(() => global.lumio.store.setSetting('aiSource', 'openrouter'));
 await L.main(() => global.lumio.store.setSetting('profile', { name: 'Sam', color: '#86b7ff', photo: null, theme: 'blue' }));
@@ -55,7 +71,7 @@ await L.main(() => {
 });
 
 // 1. The agent booking a table, paused on an approval.
-await go(`${base}/osteria.html`, 'Osteria');
+await go(demo('osteria-luna.demo'), 'Osteria');
 await blur();
 await ask('Book a table for 2 tonight at 8pm under Sam Rivera, sam@example.com');
 let approvals = 0;
@@ -73,7 +89,7 @@ await save('agent-done');
 
 // 2. Summarize an article.
 await L.main(() => { global.lumio.tabs.create('about:blank'); });
-await go(`${base}/article.html`, 'Night Skies');
+await go(demo('thelongread.demo'), 'Night Skies');
 await L.shell(`document.getElementById('newchat-btn').click(); true`);
 await ask('Summarize this page');
 await until(async () => !(await L.main(() => global.lumio.ai.isRunning())));
@@ -91,7 +107,7 @@ const id = await until(() => L.main(() => global.lumio.account.pending?.id));
 await fetch(lumio.base + '/api/auth/desktop', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'approve', id }) });
 await until(() => L.main(() => global.lumio.account.state().signedIn));
 await L.main(() => { const w = global.lumio.current; w.tabs.close(w.tabs.tabs.find((t) => (t.url || '').includes('desktop-connect'))?.id); });
-await go(`${base}/article.html`, 'Night Skies');
+await go(demo('thelongread.demo'), 'Night Skies');
 await L.shell(`document.getElementById('account-btn').click(); true`);
 await until(() => L.main(() => global.lumio.current.overlayKind === 'account'));
 await save('account');
@@ -128,6 +144,26 @@ await L.main(() => global.lumio.createWindow({ incognito: true }));
 await until(() => L.main(() => global.lumio.current.incognito));
 await L.wait(1200);
 await save('incognito');
+
+// Tighter crops for the small feature tiles and cards. Boxes are
+// [x, y, width, height] as fractions of the window.
+async function crop(name, box) {
+  const src = path.join(OUT, name + '.jpg');
+  const b64 = await L.main(({ nativeImage }, { src, box }) => {
+    const img = nativeImage.createFromPath(src);
+    const { width, height } = img.getSize();
+    const [x, y, w, h] = box;
+    return img.crop({ x: Math.round(x * width), y: Math.round(y * height), width: Math.round(w * width), height: Math.round(h * height) }).toJPEG(84).toString('base64');
+  }, { src, box });
+  fs.writeFileSync(path.join(OUT, name + '-tile.jpg'), Buffer.from(b64, 'base64'));
+  console.log('cropped', name);
+}
+await crop('passwords', [0.08, 0.15, 0.57, 0.5]);
+await crop('extensions', [0.04, 0.13, 0.5, 0.49]);
+await crop('incognito', [0.1, 0.21, 0.56, 0.55]);
+await crop('models', [0.5, 0.49, 0.5, 0.49]);
+await crop('history', [0.08, 0.15, 0.56, 0.55]);
+await crop('account', [0.48, 0.08, 0.52, 0.46]);
 
 await L.close();
 site.close(); model.server.close(); lumio.server.close();
