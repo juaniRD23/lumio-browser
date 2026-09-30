@@ -39,16 +39,15 @@ if (data.incognito) {
   document.querySelector('.brand .word').textContent = 'Incognito';
   document.title = 'New Incognito Tab';
 }
-$('#hint').textContent = data.hasKey
+$('#hint').textContent = data.aiReady
   ? `↵ searches ${data.engine} · ⌘↵ asks Lumio`
-  : '';
-if (!data.hasKey) $('#hint').innerHTML = 'Lumio AI needs an OpenRouter key — add it in the Lumio panel or <a href="lumio://settings/">Settings</a>.';
+  : `↵ searches ${data.engine} · Sign in to Lumio (top right) to ask Lumio AI. It’s free to start.`;
 
 const sites = data.incognito ? [] : data.topSites.length ? data.topSites : [
   { url: 'https://www.google.com/', title: 'Google' },
   { url: 'https://www.youtube.com/', title: 'YouTube' },
   { url: 'https://github.com/', title: 'GitHub' },
-  { url: 'https://openrouter.ai/', title: 'OpenRouter' },
+  { url: 'https://lumio-usa.online/', title: 'Lumio' },
 ];
 $('#sites').innerHTML = sites.map((s) => `<a class="site" href="${esc(s.url)}" title="${esc(s.title)}">${icon(s.url, 'ico')}<span class="name">${esc(host(s.url))}</span></a>`).join('');
 fixIcons($('#sites'));

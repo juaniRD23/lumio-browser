@@ -50,7 +50,7 @@
             <button class="btn" id="cancel-sign-in">Cancel</button>
           </div>
           <div class="row" id="account-error" hidden><div class="desc err"></div></div>
-          <div class="row"><div class="desc">Signing in uses the same account as lumio-usa.online. Your Lumio plan can then run the AI in this browser, so you don’t need an OpenRouter key.</div></div>
+          <div class="row"><div class="desc">Signing in uses the same account as lumio-usa.online. Lumio AI in this browser runs on your Lumio plan.</div></div>
         </div>
       </section>
 
@@ -88,34 +88,15 @@
       <!-- Lumio AI -->
       <section id="ai">
         <h2>Lumio AI</h2>
-        <div class="card modes" id="ai-source">
-          <label class="row"><input type="radio" name="source" value="auto" /><div class="grow"><div class="title">Automatic</div><div class="desc">Use your Lumio plan when you’re signed in on Plus, Pro or Max. Otherwise use your OpenRouter key.</div></div></label>
-          <label class="row"><input type="radio" name="source" value="lumio" /><div class="grow"><div class="title">Lumio plan</div><div class="desc">Always use your Lumio plan’s allowance.</div></div></label>
-          <label class="row"><input type="radio" name="source" value="openrouter" /><div class="grow"><div class="title">My OpenRouter key</div><div class="desc">Always use your own OpenRouter account and credits.</div></div></label>
-          <div class="row"><div class="desc" id="source-status"></div></div>
+        <div class="card">
+          <div class="row"><div class="grow"><div class="title">Runs on your Lumio plan</div><div class="desc" id="ai-status">Lumio AI uses GPT-6 Luna, a fast, inexpensive model that can read and use web pages and your computer. Every plan includes some use each week, Free too; Plus, Pro and Max include much more.</div></div></div>
         </div>
 
-        <div class="card" style="margin-top:12px">
-          <div class="row">
-            <div class="grow">
-              <div class="title">OpenRouter API key</div>
-              <div class="desc" id="key-status">Used when the AI runs on your OpenRouter account. Stored encrypted with your system keychain.</div>
-            </div>
-            <span class="pill" id="key-pill">Not connected</span>
-          </div>
-          <div class="row">
-            <input id="key" class="field grow" type="password" placeholder="sk-or-v1-…" spellcheck="false" autocomplete="off" />
-            <button class="btn primary" id="key-save">Save key</button>
-            <button class="btn danger" id="key-clear" hidden>Remove</button>
-          </div>
-          <div class="row"><div class="desc">Don’t have one? <a href="https://openrouter.ai/keys">Create a key at openrouter.ai/keys</a>.</div></div>
-        </div>
-
-        <div class="card" style="margin-top:12px">
-          <div class="row">
-            <div class="grow"><div class="title">Model</div><div class="desc">Models that are good at operating web pages and your computer. You can also switch under the chat box.</div></div>
-            <select id="model" class="field" style="max-width:320px"></select>
-          </div>
+        <h3>Reasoning</h3>
+        <div class="card modes" id="reasoning">
+          <label class="row"><input type="radio" name="reasoning" value="low" /><div class="grow"><div class="title">Low</div><div class="desc">Fastest, and uses the least of your plan. Good for quick questions and simple pages.</div></div></label>
+          <label class="row"><input type="radio" name="reasoning" value="medium" /><div class="grow"><div class="title">Medium</div><div class="desc">Balanced. Good for most tasks.</div></div></label>
+          <label class="row"><input type="radio" name="reasoning" value="high" /><div class="grow"><div class="title">High</div><div class="desc">Thinks longer before each step. Better on hard, multi-step tasks, and uses more of your plan.</div></div></label>
         </div>
 
         <h3>Approvals</h3>

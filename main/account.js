@@ -2,7 +2,7 @@
 // site's desktop hand-off. We send a hash of a secret "verifier", the person
 // approves the request on the website (which shows the same short code we
 // do), and polling with the verifier returns a session token. The token is
-// stored encrypted like the OpenRouter key. Profile and plan come from the
+// stored encrypted with safeStorage. Profile and plan come from the
 // site's /api/account and /api/usage.
 const crypto = require('crypto');
 

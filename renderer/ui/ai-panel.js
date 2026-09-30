@@ -2,7 +2,9 @@
 // model picker, chat history. All model/tool work happens in the main process.
 import { marked } from '/vendor/marked.js';
 import DOMPurify from '/vendor/purify.js';
-import { icons, markSvg, makerLogos } from './icons.js';
+import { icons, markSvg, levelBars } from './icons.js';
+
+const LEVEL = { low: 1, medium: 2, high: 3 }; // reasoning level -> bars
 
 const SUGGESTIONS = [
   { title: 'Summarize this page', text: 'Summarize this page in a few bullet points.', page: true },
@@ -27,13 +29,12 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   const sendBtn = $('#send');
   const chip = $('#context-chip');
 
-  let ai = { hasKey: false, ready: false, source: 'openrouter', lumio: {}, model: '', modelName: '', mode: 'ask', running: false, vision: true };
+  let ai = { ready: false, lumio: {}, model: '', modelName: '', reasoning: 'medium', reasoningName: 'Medium', reasoningLevels: [], mode: 'ask', running: false, vision: true };
   let chatId = null;
   let panelOpen = true;
   let includePage = true;
   const includedUrl = new Map(); // chatId -> last page URL sent as context
   let live = null; // { textEl, textBuf, thinkingEl, steps: Map }
-  let models = null;
   let plan = null; // the current chat's checklist from update_plan
 
   // ------------------------------------------------------------ chrome
@@ -104,9 +105,10 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
 
   // ------------------------------------------------------------ state
   function renderState() {
-    $('#model-name').textContent = ai.modelShort || ai.modelName || 'Model';
-    $('#model-logo').innerHTML = makerLogos[ai.modelMaker]?.(13) || '';
-    $('#model-btn').title = `Model: ${ai.modelName}`;
+    const level = LEVEL[ai.reasoning] || 2;
+    $('#reasoning-bars').innerHTML = levelBars(level);
+    $('#reasoning-name').textContent = ai.reasoningName || 'Medium';
+    $('#reasoning-btn').title = `Reasoning: ${ai.reasoningName || 'Medium'} (${ai.modelName})`;
     document.querySelectorAll('#mode button').forEach((b) => b.classList.toggle('on', b.dataset.mode === ai.mode));
     const running = ai.running && ai.runChatId === chatId;
     sendBtn.classList.toggle('stop', running);
@@ -157,11 +159,12 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   }
 
   api.on('ai-state', (s) => {
-    const before = `${ai.ready}|${ai.source}|${JSON.stringify(ai.lumio || {})}`;
+    const key = (x) => `${x.ready}|${!!x.lumio?.signedIn}|${!!x.lumio?.connecting}`;
+    const before = key(ai);
     ai = s;
     renderState();
-    // Signing in, upgrading or adding a key changes the empty panel's setup card.
-    if (messages.querySelector('.empty') && before !== `${ai.ready}|${ai.source}|${JSON.stringify(ai.lumio || {})}`) renderEmpty();
+    // Signing in or out changes the empty panel's card.
+    if (messages.querySelector('.empty') && before !== key(ai)) renderEmpty();
   });
 
   document.querySelectorAll('#mode button').forEach((b) => b.addEventListener('click', async () => {
@@ -237,46 +240,17 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     const el = document.createElement('div');
     el.className = 'empty';
     if (!ai.ready) {
-      // Two ways in: a paid Lumio plan, or the person's own OpenRouter key.
+      // Lumio AI runs on the person's Lumio plan. Free includes a little.
       const l = ai.lumio || {};
-      const plan = l.connecting
-        ? `<p>Approve the sign-in in the tab that opened on lumio-usa.online.</p>`
-        : l.signedIn && !l.paid
-          ? `<p>Your Lumio plan is ${esc(l.planName || 'Free')}. Lumio AI in the browser needs Plus, Pro or Max.</p><button class="btn primary" id="lumio-upgrade">Upgrade your plan</button>`
-          : !l.signedIn
-            ? `<p>Use your Lumio plan: no key needed on Plus, Pro or Max.</p><button class="btn primary" id="lumio-sign-in">Sign in to Lumio</button>`
-            : '';
-      const keyHint = ai.source === 'lumio' && l.signedIn && l.paid ? '' : `<div class="or"><span>or use your own OpenRouter key</span></div>`;
       el.innerHTML = `
         <div class="hero-mark">${markSvg(26)}</div>
-        <h2>Set up Lumio AI</h2>
-        ${plan}
-        ${keyHint}
-        <div class="keycard">
-          <label for="key-input">OpenRouter API key</label>
-          <p class="hint">Stored encrypted with your system keychain. <span class="link" data-href="https://openrouter.ai/keys">Get a key →</span></p>
-          <div class="row"><input id="key-input" type="password" placeholder="sk-or-v1-…" spellcheck="false" autocomplete="off"><button class="btn primary" id="key-save">Connect</button></div>
-          <div class="err" hidden></div>
-        </div>`;
+        <h2>Sign in to use Lumio AI</h2>
+        ${l.connecting
+    ? '<p>Approve the sign-in in the tab that opened on lumio-usa.online.</p>'
+    : `<p>Lumio AI runs on your Lumio account. It’s free to start, and Plus, Pro or Max give you much more.</p>
+        <button class="btn primary" id="lumio-sign-in">Sign in to Lumio</button>`}`;
       messages.append(el);
       el.querySelector('#lumio-sign-in')?.addEventListener('click', () => api.send('account:sign-in'));
-      el.querySelector('#lumio-upgrade')?.addEventListener('click', () => api.send('account:open', 'upgrade'));
-      const input = el.querySelector('#key-input');
-      const save = async () => {
-        const btn = el.querySelector('#key-save');
-        btn.disabled = true;
-        btn.textContent = 'Checking…';
-        const res = await api.invoke('ai:set-key', input.value);
-        btn.disabled = false;
-        btn.textContent = 'Connect';
-        if (!res.ok) { const err = el.querySelector('.err'); err.hidden = false; err.textContent = res.error; return; }
-        ai = await api.invoke('ai:state');
-        renderEmpty();
-        renderState();
-        prompt.focus();
-      };
-      el.querySelector('#key-save').addEventListener('click', save);
-      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
       return;
     }
     el.innerHTML = `
@@ -381,6 +355,18 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   }
 
 
+  // Out of Lumio allowance: offer the upgrade right in the chat.
+  function limitNotice(text) {
+    const el = notice(text, 'info');
+    const b = document.createElement('button');
+    b.className = 'btn primary';
+    b.style.marginLeft = '8px';
+    b.textContent = 'Upgrade';
+    b.addEventListener('click', () => api.send('account:open', 'upgrade'));
+    el.append(b);
+    return el;
+  }
+
   function permissionHint(summary) {
     if (!summary) return;
     const which = /screen recording/i.test(summary) ? 'screen' : /accessibility/i.test(summary) ? 'accessibility' : null;
@@ -402,7 +388,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
       else if (d.kind === 'step') messages.append(stepEl(d));
       else if (d.kind === 'approval' && !d.decision) messages.append(approvalEl(d));
       else if (d.kind === 'note') notice(d.text, 'info');
-      else if (d.kind === 'error') notice(d.text);
+      else if (d.kind === 'error') { if (d.code === 'usage_limit') limitNotice(d.text); else notice(d.text); }
     }
     scrollDown(true);
   }
@@ -526,7 +512,8 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
       case 'error':
         endText();
         thinking(false);
-        notice(ev.message);
+        if (ev.code === 'usage_limit') limitNotice(ev.message);
+        else notice(ev.message);
         break;
       case 'end':
         endText();
@@ -552,39 +539,41 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     if (/^https?:\/\//i.test(href)) api.send('open-url', href);
   });
 
-  // ------------------------------------------------------------ model menu
-  const modelMenu = $('#model-menu');
-  const modelBtn = $('#model-btn');
-  const modelList = $('#model-list');
+  // ------------------------------------------------------------ reasoning menu
+  // One model; people choose how hard it thinks. The menu also shows how much
+  // of their Lumio plan is left, with a way to get more.
+  const modelMenu = $('#reasoning-menu');
+  const modelBtn = $('#reasoning-btn');
+  const modelList = $('#reasoning-list');
 
-  function price(m) {
-    if (m.prompt == null) return '';
-    const f = (n) => (n >= 1 ? String(+n.toFixed(2)) : n.toFixed(2));
-    return `$${f(m.prompt)} / $${f(m.completion)} per 1M tokens`;
+  function allowance() {
+    const l = ai.lumio || {};
+    const u = l.usage;
+    const pct = u && u.limit ? Math.max(0, Math.min(100, Math.round((u.remaining / u.limit) * 100))) : null;
+    const plan = l.planName ? `Lumio ${esc(l.planName)}` : 'Your Lumio plan';
+    const left = pct == null ? '' : ` · ${pct}% left`;
+    const more = l.plan !== 'max' ? '<button class="link" id="reasoning-upgrade" type="button">Get more</button>' : '';
+    return `<span>${plan}${left}</span>${more}`;
   }
   function renderModels() {
-    if (!models) { modelList.innerHTML = '<div class="list-empty">Loading…</div>'; return; }
-    modelList.innerHTML = models.map((m) => {
-      const off = m.available === false;
-      const sub = m.lumio ? [m.maker, m.note].filter(Boolean).join(' · ')
-        : off ? 'Not available on OpenRouter right now' : [m.maker, price(m)].filter(Boolean).join(' · ');
-      return `<button class="list-item model-row ${m.id === ai.model ? 'current' : ''} ${off ? 'unavailable' : ''}" role="option" aria-selected="${m.id === ai.model}" data-id="${esc(m.id)}">
-        <span class="logo">${makerLogos[m.maker]?.(18) || ''}</span>
-        <span class="li-main"><span class="li-title">${esc(m.name)}</span><span class="li-sub">${esc(sub)}</span></span>
-        <span class="check">${m.id === ai.model ? icons.check : ''}</span>
-      </button>`;
-    }).join('');
+    const levels = ai.reasoningLevels || [];
+    modelList.innerHTML = levels.map((r) => `
+      <button class="list-item model-row ${r.id === ai.reasoning ? 'current' : ''}" role="option" aria-selected="${r.id === ai.reasoning}" data-id="${esc(r.id)}">
+        <span class="logo bars">${levelBars(LEVEL[r.id] || 2, 16)}</span>
+        <span class="li-main"><span class="li-title">${esc(r.name)}</span><span class="li-sub">${esc(r.desc)}</span></span>
+        <span class="check">${r.id === ai.reasoning ? icons.check : ''}</span>
+      </button>`).join('');
+    $('#reasoning-foot').innerHTML = allowance();
+    $('#reasoning-upgrade')?.addEventListener('click', () => { closeModels(); api.send('account:open', 'upgrade'); });
   }
   function closeModels() {
     modelMenu.hidden = true;
     modelBtn.setAttribute('aria-expanded', 'false');
   }
-  async function openModels() {
+  function openModels() {
     $('#chat-menu').hidden = true;
     modelMenu.hidden = false;
     modelBtn.setAttribute('aria-expanded', 'true');
-    renderModels();
-    models = await api.invoke('ai:models').catch(() => models);
     renderModels();
     (modelList.querySelector('.current') || modelList.querySelector('button'))?.focus();
   }
@@ -599,7 +588,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   modelList.addEventListener('click', async (e) => {
     const id = e.target.closest('[data-id]')?.dataset.id;
     if (!id) return;
-    ai = await api.invoke('ai:set-model', id);
+    ai = await api.invoke('ai:set-reasoning', id);
     closeModels();
     renderState();
     prompt.focus();
@@ -664,7 +653,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   }
   $('#newchat-btn').addEventListener('click', () => { chatMenu.hidden = true; newChat(); });
   document.addEventListener('mousedown', (e) => {
-    if (!modelMenu.hidden && !e.target.closest('#model-menu, #model-btn')) closeModels();
+    if (!modelMenu.hidden && !e.target.closest('#reasoning-menu, #reasoning-btn')) closeModels();
     if (!e.target.closest('#chat-menu, #chats-btn')) chatMenu.hidden = true;
   });
 

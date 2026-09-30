@@ -243,17 +243,17 @@ const ask = async (text) => {
   await until(async () => !(await L.main(() => global.lumio.ai.isRunning())), 20_000);
 };
 
-test('signed in on Plus, the AI runs on the Lumio plan with no OpenRouter key', async () => {
+test('signed in on Plus, the AI runs on the Lumio plan', async () => {
   await L.main(() => global.lumio.tabs.create('lumio://newtab/'));
   await signInQuietly();
   const st = await until(() => L.main(() => global.lumio.ai.state().ready && global.lumio.ai.state()));
-  assert.equal(st.source, 'lumio');
-  assert.equal(st.hasKey, false);
+  assert.equal(st.lumio.planName, 'Plus');
   await L.shell(`document.getElementById('newchat-btn').click(); true`);
   await ask('hello');
-  assert.match(await L.shell(`[...document.querySelectorAll('.msg.ai')].at(-1)?.innerText || ''`), /Hello from your Lumio plan/);
+  assert.match(await L.shell(`[...document.querySelectorAll('.msg.ai')].at(-1)?.innerText || ''`), /mock model/);
   const req = lumio.state.agentRequests.at(-1);
-  assert.equal(req.model, 'anthropic/claude-sonnet-5.5');
+  assert.equal(req.model, 'openai/gpt-6-luna');
+  assert.equal(req.reasoning, 'medium');
   assert.ok(req.tools.includes('read_page') && !req.tools.some((t) => t.startsWith('mac_')));
   assert.equal(req.context.platform, 'mac');
   assert.ok(!req.messages.some((m) => m.role === 'system'), 'the server owns the system prompt');
@@ -277,14 +277,17 @@ test('tool steps on the Lumio plan share one run and number their steps', async 
   lumio.state.agentScript = null;
 });
 
-test('on the Free plan the panel offers to upgrade or use a key', async () => {
+test('the Free plan runs the AI too; signed out, the panel asks to sign in', async () => {
   lumio.state.plan = 'free';
   await L.main(() => global.lumio.account.refresh());
-  assert.ok(await until(async () => !(await L.main(() => global.lumio.ai.state().ready))));
+  assert.ok(await until(async () => (await L.main(() => global.lumio.account.state().planName)) === 'Free'));
+  assert.equal(await L.main(() => global.lumio.ai.state().ready), true);
   await L.shell(`document.getElementById('newchat-btn').click(); true`);
-  assert.ok(await until(() => L.shell(`!!document.getElementById('lumio-upgrade')`)));
-  assert.match(await L.shell(`document.querySelector('.empty').innerText`), /Your Lumio plan is Free[\s\S]*or use your own OpenRouter key/);
-  await shot('26-free-plan-panel');
+  await ask('hello');
+  assert.match(await L.shell(`[...document.querySelectorAll('.msg.ai')].at(-1)?.innerText || ''`), /mock model/);
+  await L.main(() => global.lumio.account.signOut());
+  await L.shell(`document.getElementById('newchat-btn').click(); true`);
+  assert.ok(await until(() => L.shell(`document.querySelector('#messages .empty h2')?.textContent === 'Sign in to use Lumio AI'`)));
+  await shot('26-signed-out-panel');
   lumio.state.plan = 'plus';
-  await L.main(() => global.lumio.account.refresh());
 });

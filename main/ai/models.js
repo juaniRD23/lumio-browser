@@ -1,16 +1,15 @@
-// The only models Lumio offers. Each one supports tools and can see
-// screenshots, which the agent needs to operate pages and the Mac.
-// Prices come from OpenRouter at runtime when it's reachable.
-const MODELS = [
-  { id: 'anthropic/claude-opus-5.5', name: 'Claude Opus 5.5', short: 'Opus 5.5', maker: 'Anthropic' },
-  { id: 'anthropic/claude-sonnet-5.5', name: 'Claude Sonnet 5.5', short: 'Sonnet 5.5', maker: 'Anthropic' },
-  { id: 'openai/gpt-6-astra', name: 'GPT-6 Astra', short: 'Astra 6', maker: 'OpenAI' },
-  { id: 'openai/gpt-6.1-sol', name: 'GPT-6.1 Sol', short: 'Sol 6.1', maker: 'OpenAI' },
-  { id: 'openai/gpt-5.6-sol', name: 'GPT-5.6 Sol', short: 'Sol 5.6', maker: 'OpenAI' },
-  { id: 'openai/gpt-5.6-terra', name: 'GPT-5.6 Terra', short: 'Terra 5.6', maker: 'OpenAI' },
+// Lumio Browser's AI: one inexpensive model that supports tools and can see
+// screenshots, run on the person's Lumio plan (every plan, Free included, has
+// a weekly allowance). People choose how hard it thinks.
+const MODEL = { id: 'openai/gpt-6-luna', name: 'GPT-6 Luna', short: 'Luna', maker: 'OpenAI' };
+
+const REASONING = [
+  { id: 'low', name: 'Low', desc: 'Fastest, and uses the least of your plan' },
+  { id: 'medium', name: 'Medium', desc: 'Balanced: good for most tasks' },
+  { id: 'high', name: 'High', desc: 'Thinks longer on hard tasks, and uses more' },
 ];
-const DEFAULT_MODEL = 'anthropic/claude-sonnet-5.5';
+const DEFAULT_REASONING = 'medium';
 
-const findModel = (id) => MODELS.find((m) => m.id === id) || null;
+const findReasoning = (id) => REASONING.find((r) => r.id === id) || null;
 
-module.exports = { MODELS, DEFAULT_MODEL, findModel };
+module.exports = { MODEL, REASONING, DEFAULT_REASONING, findReasoning };

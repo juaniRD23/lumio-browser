@@ -3,6 +3,12 @@
 // endpoint (NDJSON), all behaving like the real site.
 import http from 'node:http';
 import crypto from 'node:crypto';
+import { scriptedTurn, turnEvents } from './mock-scripts.mjs';
+
+// The tools the real server owns (lib/browser-agent.ts).
+const TOOLS = ['read_page', 'click', 'type', 'select_option', 'press_key', 'scroll', 'navigate', 'go_back', 'screenshot_tab', 'click_at',
+  'list_tabs', 'open_tab', 'switch_tab', 'close_tab', 'wait', 'computer_screenshot', 'computer_click', 'computer_move', 'computer_drag',
+  'computer_scroll', 'computer_type', 'computer_key', 'open_app', 'list_apps', 'run_shell', 'update_plan', 'run_applescript'];
 
 export async function startMockLumio({ plan = 'plus' } = {}) {
   const logins = new Map(); // id -> { challenge, approved, expiresAt }
@@ -68,27 +74,28 @@ export async function startMockLumio({ plan = 'plus' } = {}) {
       if (url.pathname === '/api/browser/agent' && req.method === 'GET') {
         const u = who(req);
         if (!u) return json(res, 401, { enabled: false });
-        const order = ['free', 'go', 'plus', 'pro', 'max'];
-        const models = [['anthropic/claude-opus-5.5', 'plus'], ['anthropic/claude-sonnet-5.5', 'plus'], ['openai/gpt-6-astra', 'pro'], ['openai/gpt-6.1-sol', 'plus'], ['openai/gpt-5.6-sol', 'plus'], ['openai/gpt-5.6-terra', 'plus']]
-          .map(([id, minimumPlan]) => ({ id, minimumPlan, available: order.indexOf(state.plan) >= order.indexOf(minimumPlan) }));
-        return json(res, 200, { version: 1, enabled: order.indexOf(state.plan) >= 2, plan: state.plan, models });
+        // Like the real endpoint: one model on every plan, the server's tools, reasoning levels.
+        return json(res, 200, {
+          version: 1, enabled: true, plan: state.plan,
+          models: [{ id: 'openai/gpt-6-luna', name: 'GPT-6 Luna', minimumPlan: 'free', available: true }],
+          tools: TOOLS, reasoning: { levels: ['low', 'medium', 'high'], default: 'medium' },
+        });
       }
       if (url.pathname === '/api/browser/agent' && req.method === 'POST') {
         const u = who(req);
         if (!u) return json(res, 401, { error: 'Sign in to your Lumio account first.', code: 'sign_in_required' });
-        if (!['plus', 'pro', 'max'].includes(state.plan)) return json(res, 403, { error: 'Lumio AI in the browser needs Plus, Pro or Max.', code: 'browser_plan_required' });
         const body = JSON.parse(await readBody(req));
         // The same shape checks as the real endpoint's validation.
         const bad = body.version !== 1 || !body.taskId || !body.runId || !body.stepId || !body.context
-          || !Array.isArray(body.tools) || body.tools.some((t) => typeof t !== 'string')
+          || body.model !== 'openai/gpt-6-luna' || !['low', 'medium', 'high'].includes(body.reasoning ?? 'medium')
+          || !Array.isArray(body.tools) || body.tools.some((t) => typeof t !== 'string' || !TOOLS.includes(t))
           || body.messages.some((m) => m.role === 'system') || body.messages[0]?.role !== 'user';
         if (bad) return json(res, 400, { error: 'Invalid browser step.', code: 'invalid_request' });
         state.agentRequests.push(body);
+        const turn = state.agentScript ? null : scriptedTurn(body.messages);
+        if (turn?.fail) return json(res, turn.fail.status, turn.fail.body);
         res.writeHead(200, { 'content-type': 'application/x-ndjson' });
-        const events = state.agentScript ? state.agentScript(body) : [
-          { type: 'delta', content: 'Hello from your **Lumio plan**.' },
-          { type: 'result', message: { role: 'assistant', content: 'Hello from your **Lumio plan**.' }, finishReason: 'stop', usage: { input: 10, output: 5, total: 15 } },
-        ];
+        const events = state.agentScript ? state.agentScript(body) : turnEvents(turn);
         for (const e of events) res.write(JSON.stringify({ version: 1, taskId: body.taskId, runId: body.runId, stepId: body.stepId, ...e }) + '\n');
         res.end();
         return;

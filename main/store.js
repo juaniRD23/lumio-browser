@@ -1,5 +1,5 @@
 // Small JSON-file stores in userData, written atomically and debounced.
-// Secrets (the OpenRouter key) are encrypted with safeStorage (Keychain).
+// Secrets (the Lumio session) are encrypted with safeStorage (Keychain).
 const fs = require('fs');
 const path = require('path');
 
@@ -32,7 +32,7 @@ class JsonFile {
 
 const DEFAULT_SETTINGS = {
   searchEngine: 'google',
-  model: 'anthropic/claude-sonnet-5.5',
+  reasoning: 'medium', // how hard Lumio AI thinks: 'low', 'medium' or 'high'
   approvalMode: 'ask',
   panelOpen: true,
   panelWidth: 380,
@@ -48,7 +48,6 @@ const DEFAULT_SETTINGS = {
   askDownload: false, // ask where to save each file
   offerPasswords: true,
   autofillPasswords: true,
-  aiSource: 'auto', // 'auto' (Lumio plan when signed in on a paid plan), 'lumio' or 'openrouter'
 };
 
 const HISTORY_DAYS = 90;
@@ -74,6 +73,13 @@ class Store {
     this.downloadsFile = new JsonFile(dir, 'downloads.json', []);
     this.chatsFile = new JsonFile(dir, 'chats.json', []);
     this.secretsFile = new JsonFile(dir, 'secrets.json', {});
+    // Since 0.4 the AI only runs on Lumio plans: drop the old key and model settings.
+    if (this.secretsFile.data.openrouter) { delete this.secretsFile.data.openrouter; this.secretsFile.save(); }
+    if ('model' in this.settings || 'aiSource' in this.settings) {
+      delete this.settings.model;
+      delete this.settings.aiSource;
+      this.settingsFile.save();
+    }
   }
 
   get settings() { return this.settingsFile.data; }

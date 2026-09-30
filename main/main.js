@@ -576,10 +576,7 @@ function registerIpc() {
 
   // ---- AI panel ----
   handle('ai:state', (w) => w.ai.state());
-  handle('ai:set-key', (w, key) => w.ai.setKey(key));
-  handle('ai:clear-key', (w) => w.ai.clearKey());
-  handle('ai:models', (w, force) => w.ai.models(force));
-  handle('ai:set-model', (w, id) => w.ai.setModel(id));
+  handle('ai:set-reasoning', (w, id) => w.ai.setReasoning(id));
   handle('ai:set-mode', (w, mode) => w.ai.setMode(mode));
   handle('ai:send', (w, payload) => w.ai.send(payload));
   handle('ai:chats', (w) => w.ai.listChats());
@@ -596,7 +593,7 @@ function registerIpc() {
     topSites: w.incognito ? [] : topSites(store.history(), 8),
     bookmarks: store.bookmarks().slice(-12).reverse(),
     engine: (SEARCH_ENGINES[store.settings.searchEngine] || SEARCH_ENGINES.google).name,
-    hasKey: w.ai.state().hasKey,
+    aiReady: w.ai.state().ready,
     incognito: w.incognito,
   }));
   internalHandle('page:navigate', ALL_PAGES, ({ w, tab }, input) => w.tabs.navigate(input, tab.id));
@@ -666,7 +663,6 @@ function registerIpc() {
     askDownload: !!store.settings.askDownload,
     offerPasswords: store.settings.offerPasswords !== false,
     autofillPasswords: store.settings.autofillPasswords !== false,
-    aiSource: store.settings.aiSource || 'auto',
     platform: process.platform,
     searchEngine: store.settings.searchEngine,
     engines: Object.entries(SEARCH_ENGINES).map(([id, e]) => ({ id, name: e.name })),
@@ -685,25 +681,21 @@ function registerIpc() {
   internalHandle('page:set-setting', ['settings', 'passwords'], ({ w }, key, value) => {
     if (key === 'searchEngine' && SEARCH_ENGINES[value]) store.setSetting('searchEngine', value);
     if (key === 'approvalMode') w.ai.setMode(value);
-    if (key === 'model') w.ai.setModel(value);
+    if (key === 'reasoning') w.ai.setReasoning(value);
     if (key === 'showBookmarksBar') setBookmarksBar(!!value);
     if (key === 'startup' && ['restore', 'newtab'].includes(value)) store.setSetting('startup', value);
     if (key === 'askDownload') store.setSetting('askDownload', !!value);
     if (key === 'offerPasswords') store.setSetting('offerPasswords', !!value);
     if (key === 'autofillPasswords') store.setSetting('autofillPasswords', !!value);
-    if (key === 'aiSource' && ['auto', 'lumio', 'openrouter'].includes(value)) store.setSetting('aiSource', value);
     services.broadcastAIState();
   });
   internalHandle('page:set-site-permission', ['settings'], (_ctx, origin, permission, value) => {
     if (typeof origin !== 'string' || typeof permission !== 'string') return;
     normal.permissions.set(origin, permission, value === 'allow' ? true : value === 'block' ? false : undefined);
   });
-  internalHandle('page:set-key', ['settings'], ({ w }, key) => w.ai.setKey(key));
-  internalHandle('page:clear-key', ['settings'], ({ w }) => { w.ai.clearKey(); });
   internalHandle('page:make-default', ['settings'], () => makeDefaultBrowser());
   internalHandle('page:mac-permissions', ['settings'], ({ w }) => w.ai.macPermissions());
   internalHandle('page:mac-permissions-open', ['settings'], ({ w }, which) => w.ai.openMacPermissionSettings(which));
-  internalHandle('page:models', ['settings'], ({ w }, force) => w.ai.models(force));
   internalHandle('page:passwords', ['passwords'], () => passwords.pageState());
   internalHandle('page:password-reveal', ['passwords'], ({ w }, id) => passwords.reveal(w, String(id)));
   internalHandle('page:password-copy', ['passwords'], ({ w }, id) => passwords.copy(w, String(id)));
@@ -837,7 +829,7 @@ app.whenReady().then(async () => {
 
   account = new LumioAccount({
     store,
-    onChange: (state) => { alive().forEach((w) => w.emit('account', state)); services.broadcastAIState(); },
+    onChange: (state) => { alive().forEach((w) => { w.emit('account', state); w.ai.capsCache = null; }); services.broadcastAIState(); },
   });
   account.refresh();
   setInterval(() => { if (account.token()) account.refresh(); }, 10 * 60 * 1000).unref?.();

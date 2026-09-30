@@ -1,5 +1,6 @@
 // End-to-end tests: launch the real app (throwaway profile), drive it, and
-// check the browser, the AI panel and the agent against a mock OpenRouter.
+// check the browser, the AI panel and the agent against a stand-in Lumio
+// server (the AI runs on the person's Lumio plan; here, the Free plan).
 // Run: npm run test:e2e   (set LUMIO_SHOTS=/some/dir to save screenshots)
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -7,14 +8,14 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { launch, root } from '../../scripts/launch.mjs';
-import { startMockOpenRouter } from '../mock-openrouter.mjs';
+import { startMockLumio } from '../mock-lumio.mjs';
 
 const FIX = path.join(root, 'tests', 'fixtures');
 const SHOTS = process.env.LUMIO_SHOTS;
 let L;
 let site;
 let siteUrl;
-let mock;
+let lumio;
 
 const shot = async (name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await L.shot(path.join(SHOTS, name + '.png')); } };
 const until = async (fn, ms = 10_000) => {
@@ -42,8 +43,8 @@ before(async () => {
   });
   await new Promise((r) => site.listen(0, '127.0.0.1', r));
   siteUrl = `http://127.0.0.1:${site.address().port}`;
-  mock = await startMockOpenRouter();
-  L = await launch({ env: { LUMIO_OPENROUTER_BASE: mock.base } });
+  lumio = await startMockLumio({ plan: 'free' });
+  L = await launch({ env: { LUMIO_ACCOUNT_BASE: lumio.base } });
   await until(() => L.main(() => !!global.lumio.tabs?.active), 15_000);
   await L.wait(800);
 });
@@ -51,7 +52,7 @@ before(async () => {
 after(async () => {
   await L?.close();
   site?.close();
-  mock?.server.close();
+  lumio?.server.close();
 });
 
 test('opens on the Lumio new tab page with the AI panel', async () => {
@@ -129,56 +130,50 @@ test('bookmarks and history are recorded', async () => {
   assert.ok(hist.length >= 2);
 });
 
-test('OpenRouter key: rejects a bad key, accepts a good one', async () => {
-  const bad = await L.main(() => global.lumio.ai.setKey('sk-or-nope'));
-  assert.equal(bad.ok, false);
-  const notOr = await L.main(() => global.lumio.ai.setKey('hello'));
-  assert.match(notOr.error, /OpenRouter key/);
-  const good = await L.main(() => global.lumio.ai.setKey('sk-or-test-e2e'));
-  assert.equal(good.ok, true);
-  const state = await L.main(() => global.lumio.ai.state());
-  assert.equal(state.hasKey, true);
-  // The key never reaches the UI in full.
-  assert.ok(!state.keyHint.includes('test-e2e'));
-  await until(() => L.shell(`!!document.querySelector('.suggestion')`));
+test('signed out, the panel asks to sign in; on the Free plan the AI is ready', async () => {
+  assert.ok(await until(() => L.shell(`document.querySelector('#messages .empty h2')?.textContent === 'Sign in to use Lumio AI'`)));
+  assert.equal(await L.shell(`!!document.getElementById('lumio-sign-in') && !document.querySelector('#messages input')`), true, 'a sign-in button, no key field');
+  const refused = await L.main(() => global.lumio.ai.send({ text: 'hi' }));
+  assert.match(refused.error, /Sign in to Lumio/);
+  await L.main(() => global.lumio.account.startSignIn());
+  const id = await until(() => L.main(() => global.lumio.account.pending?.id));
+  await fetch(lumio.base + '/api/auth/desktop', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'approve', id }) });
+  assert.ok(await until(() => L.main(() => global.lumio.account.state().signedIn), 15_000));
+  assert.equal((await L.main(() => global.lumio.ai.state())).ready, true, 'Free is enough');
+  assert.ok(await until(() => L.shell(`!!document.querySelector('.suggestion')`)));
 });
 
-test('model picker sits under the chat box and only offers the six models', async () => {
-  assert.equal(await L.shell(`!!document.querySelector('#composer .composer-row #model-btn') && !document.querySelector('#panel-head #model-btn')`), true);
-  assert.equal(await L.shell(`document.getElementById('model-name').textContent`), 'Sonnet 5.5');
-  await L.shell(`document.getElementById('model-btn').click(); true`);
-  await until(() => L.shell(`document.querySelectorAll('#model-list [data-id]').length === 6 && document.querySelector('#model-list .li-sub').textContent.includes('$')`));
-  assert.deepEqual(await L.shell(`[...document.querySelectorAll('#model-list [data-id]')].map((b) => b.dataset.id)`), [
-    'anthropic/claude-opus-5.5', 'anthropic/claude-sonnet-5.5', 'openai/gpt-6-astra', 'openai/gpt-6.1-sol', 'openai/gpt-5.6-sol', 'openai/gpt-5.6-terra',
-  ]);
-  // The menu opens upward, above the chat box.
-  assert.equal(await L.shell(`document.getElementById('model-menu').getBoundingClientRect().bottom <= document.getElementById('composer').getBoundingClientRect().top`), true);
-  // The mock doesn't list GPT-6 Astra, so it shows as unavailable.
-  assert.match(await L.shell(`document.querySelector('[data-id="openai/gpt-6-astra"]').textContent`), /Not available/);
-  assert.match(await L.shell(`document.querySelector('[data-id="anthropic/claude-opus-5.5"]').textContent`), /\$4 \/ \$20 per 1M/);
-  // Maker logos: Claude on the Anthropic models, OpenAI on the GPT models.
-  assert.equal(await L.shell(`[...document.querySelectorAll('#model-list .logo svg')].length`), 6);
-  assert.equal(await L.shell(`document.querySelector('[data-id="anthropic/claude-opus-5.5"] .logo svg').getAttribute('fill')`), '#d97757');
-  assert.equal(await L.shell(`!!document.querySelector('#model-logo svg')`), true);
-  await shot('05-model-menu');
-  await L.shell(`document.querySelector('[data-id="openai/gpt-6.1-sol"]').click(); true`);
-  await until(async () => (await L.shell(`document.getElementById('model-name').textContent`)) === 'Sol 6.1');
-  assert.equal(await L.shell(`document.getElementById('model-menu').hidden`), true);
-  assert.equal(await L.main(() => global.lumio.store.settings.model), 'openai/gpt-6.1-sol');
-  // Anything outside the list is refused, from the panel or Settings.
-  await L.main(() => global.lumio.ai.setModel('x-ai/grok-4.7'));
-  assert.equal(await L.main(() => global.lumio.store.settings.model), 'openai/gpt-6.1-sol');
+test('one model; the reasoning picker under the chat box sets how hard it thinks', async () => {
+  assert.equal(await L.shell(`!!document.querySelector('#composer .composer-row #reasoning-btn')`), true);
+  assert.equal(await L.shell(`document.getElementById('reasoning-name').textContent`), 'Medium');
+  assert.equal(await L.shell(`document.querySelectorAll('#reasoning-bars rect').length`), 3);
+  await L.shell(`document.getElementById('reasoning-btn').click(); true`);
+  assert.deepEqual(await L.shell(`[...document.querySelectorAll('#reasoning-list [data-id]')].map((b) => b.dataset.id)`), ['low', 'medium', 'high']);
+  assert.equal(await L.shell(`document.querySelector('#reasoning-list .current').dataset.id`), 'medium');
+  // It opens upward, above the chat box, and shows what's left of the plan.
+  assert.equal(await L.shell(`document.getElementById('reasoning-menu').getBoundingClientRect().bottom <= document.getElementById('composer').getBoundingClientRect().top`), true);
+  assert.match(await L.shell(`document.getElementById('reasoning-foot').textContent`), /Lumio Free · \d+% left\s*Get more/);
+  await L.wait(400);
+  await shot('05-reasoning-menu');
+  await L.shell(`document.querySelector('[data-id="high"]').click(); true`);
+  await until(async () => (await L.shell(`document.getElementById('reasoning-name').textContent`)) === 'High');
+  assert.equal(await L.shell(`document.getElementById('reasoning-menu').hidden`), true);
+  assert.equal(await L.main(() => global.lumio.store.settings.reasoning), 'high');
+  // Anything else is refused.
+  await L.main(() => global.lumio.ai.setReasoning('extreme'));
+  assert.equal(await L.main(() => global.lumio.store.settings.reasoning), 'high');
 });
 
 test('chat streams markdown and includes the page when asked', async () => {
   await ask('summarize this page');
   await idle();
   assert.match(await lastReply(), /Keepers ran them/);
-  const req = mock.log.at(-1);
+  const req = lumio.state.agentRequests.at(-1);
   assert.ok(req.messages.some((m) => Array.isArray(m.content) && m.content.some((p) => /<current_page/.test(p.text || ''))));
-  assert.equal(req.stream, true);
-  assert.equal(req.model, 'openai/gpt-6.1-sol');
-  assert.ok(req.tools.some((t) => t.function.name === 'read_page'));
+  assert.equal(req.model, 'openai/gpt-6-luna');
+  assert.equal(req.reasoning, 'high', 'the chosen reasoning level');
+  assert.ok(req.tools.includes('read_page'));
+  await L.main(() => global.lumio.ai.setReasoning('medium'));
   await shot('02-chat');
 });
 
@@ -262,7 +257,7 @@ test('multi-step tasks show a Task progress checklist', async () => {
   await idle();
   assert.equal(await L.shell(`document.getElementById('plan-count').textContent`), '3/3');
   assert.ok(await until(() => L.shell(`document.getElementById('plan').classList.contains('collapsed')`), 4000), 'folds away when done');
-  assert.ok(mock.log.at(-1).tools.some((t) => t.function.name === 'update_plan'));
+  assert.ok(lumio.state.agentRequests.at(-1).tools.includes('update_plan'));
   // The plan is saved with the chat.
   const saved = await L.main(() => { const c = global.lumio.ai.chatStore.list()[0]; return global.lumio.ai.getChat(c.id).plan; });
   assert.deepEqual(saved.map((x) => x.status), ['done', 'done', 'done']);
@@ -309,10 +304,17 @@ test('while Lumio controls the computer the screen glows, and the Stop pill stop
   await L.main(() => global.lumio.ai.setMode('ask'));
 });
 
-test('API errors show a friendly message', async () => {
-  await ask('please fail');
+test('out of allowance, the chat offers an upgrade', async () => {
+  await ask('you are out of allowance');
   await idle();
-  assert.match(await L.shell(`[...document.querySelectorAll('.notice')].at(-1).textContent`), /out of credits/);
+  const note = await L.shell(`(() => { const n = [...document.querySelectorAll('.notice')].at(-1); return { text: n.textContent, button: n.querySelector('button')?.textContent } })()`);
+  assert.match(note.text, /allowance/);
+  assert.equal(note.button, 'Upgrade');
+  const before = await L.main(() => global.lumio.tabs.tabs.length);
+  await L.shell(`[...document.querySelectorAll('.notice')].at(-1).querySelector('button').click(); true`);
+  await until(async () => (await L.main(() => global.lumio.tabs.tabs.length)) === before + 1);
+  assert.equal(await L.main(() => global.lumio.tabs.active.url), `${lumio.base}/?settings=upgrade`);
+  await L.main(() => global.lumio.cmd.closeTab());
 });
 
 test('chats are saved without screenshots', async () => {

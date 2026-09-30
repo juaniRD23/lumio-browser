@@ -84,7 +84,7 @@ function renderAccount() {
   $('#account-error').hidden = !a.error;
   $('#account-error .desc').textContent = a.error || '';
   renderPlan();
-  renderSource();
+  renderAiStatus();
   clearTimeout(pollTimer);
   if (a.connecting) pollTimer = setTimeout(async () => { s.account = await page.invoke('page:account'); renderAccount(); }, 1500);
 }
@@ -153,64 +153,15 @@ function renderPlan() {
   $('#plan-card').querySelectorAll('[data-open]').forEach((b) => { b.onclick = () => page.invoke('page:account-open', b.dataset.open); });
 }
 
-// ------------------------------------------------------------ AI source
-function renderSource() {
-  document.querySelectorAll('input[name=source]').forEach((r) => { r.checked = r.value === s.aiSource; });
+// ------------------------------------------------------------ Lumio AI: plan + reasoning + approvals
+function renderAiStatus() {
   const a = s.account;
-  let text;
-  const usesLumio = s.aiSource === 'lumio' || (s.aiSource === 'auto' && a.signedIn && a.paid);
-  if (usesLumio) {
-    text = !a.signedIn ? 'Sign in to Lumio to use your plan.' : !a.paid ? `Your plan is ${a.planName || 'Free'}. The browser AI needs Plus, Pro or Max.` : `The AI is using your Lumio ${a.planName} plan.`;
-  } else {
-    text = s.ai.hasKey ? 'The AI is using your OpenRouter key.' : 'Add an OpenRouter key below, or sign in to Lumio on a paid plan.';
-  }
-  $('#source-status').textContent = text;
+  if (!a.signedIn) $('#ai-status').textContent = 'Lumio AI uses GPT-6 Luna and runs on your Lumio account. Sign in to start: every plan includes some use each week, Free too.';
+  else $('#ai-status').textContent = `Lumio AI uses GPT-6 Luna on your Lumio ${a.planName || 'Free'} plan.${a.plan === 'max' ? '' : ' Upgrade for more use each week.'}`;
 }
-document.querySelectorAll('input[name=source]').forEach((r) => r.addEventListener('change', async () => {
-  await page.invoke('page:set-setting', 'aiSource', r.value);
-  s.aiSource = r.value;
-  renderSource();
-}));
-
-// ------------------------------------------------------------ OpenRouter key + model + approvals
-function renderKey() {
-  const ai = s.ai;
-  $('#key-pill').textContent = ai.hasKey ? 'Connected' : 'Not connected';
-  $('#key-pill').className = 'pill ' + (ai.hasKey ? 'ok' : '');
-  $('#key-clear').hidden = !ai.hasKey;
-  $('#key').placeholder = ai.hasKey ? `Saved (${ai.keyHint}). Paste a new key to replace it.` : 'sk-or-v1-…';
-}
-$('#key-save').addEventListener('click', async () => {
-  const key = $('#key').value.trim();
-  if (!key) return;
-  $('#key-save').disabled = true;
-  $('#key-save').textContent = 'Checking…';
-  const res = await page.invoke('page:set-key', key);
-  $('#key-save').disabled = false;
-  $('#key-save').textContent = 'Save key';
-  if (res.ok) { $('#key').value = ''; s = await page.invoke('page:settings'); renderKey(); renderSource(); loadModels(true); }
-  else { $('#key-status').textContent = res.error; $('#key-status').classList.add('err'); }
-});
-$('#key-clear').addEventListener('click', async () => {
-  await page.invoke('page:clear-key');
-  s = await page.invoke('page:settings');
-  renderKey();
-  renderSource();
-});
-
-async function loadModels(force) {
-  const sel = $('#model');
-  const current = s.ai.model;
-  sel.innerHTML = `<option value="${esc(current)}">${esc(s.ai.modelName || current)}</option>`;
-  try {
-    const models = await page.invoke('page:models', force);
-    sel.innerHTML = models.map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('');
-    sel.value = current;
-  } catch { /* offline: keep the current model */ }
-}
-$('#model').addEventListener('change', async (e) => {
-  await page.invoke('page:set-setting', 'model', e.target.value);
-  s.ai.model = e.target.value;
+document.querySelectorAll('input[name=reasoning]').forEach((r) => {
+  r.checked = r.value === s.ai.reasoning;
+  r.addEventListener('change', () => page.invoke('page:set-setting', 'reasoning', r.value));
 });
 document.querySelectorAll('input[name=mode]').forEach((r) => {
   r.checked = r.value === s.approvalMode;
@@ -339,9 +290,7 @@ const spy = new IntersectionObserver((entries) => {
 }, { rootMargin: '-10% 0px -80% 0px' });
 document.querySelectorAll('main section').forEach((sec) => spy.observe(sec));
 
-renderKey();
 renderProfile();
 renderSites();
-loadModels(false);
 perms();
 if (location.hash) document.querySelector(location.hash)?.scrollIntoView();

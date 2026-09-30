@@ -1,16 +1,15 @@
 // AIController: one per browser window. It runs the Lumio agent on that
-// window's tabs (one run at a time) using the shared key, model choice and
-// chat list. Everything the AI panel does goes through here (via IPC in
-// main.js). Pending approvals live only in this process, so a renderer
-// can't forge tool calls or approvals for itself.
+// window's tabs (one run at a time) on the person's Lumio plan, with the shared
+// reasoning setting and chat list. Everything the AI panel does goes through
+// here (via IPC in main.js). Pending approvals live only in this process, so a
+// renderer can't forge tool calls or approvals for itself.
 const { shell } = require('electron');
 const crypto = require('crypto');
-const { checkKey, listModels, streamChat } = require('./openrouter');
 const { lumioChat, lumioCapabilities } = require('./lumio');
 const { runAgent, repairHistory } = require('./agent');
 const { buildSystemPrompt } = require('./prompts');
 const { MODES } = require('./policy');
-const { MODELS, DEFAULT_MODEL, findModel } = require('./models');
+const { MODEL, REASONING, DEFAULT_REASONING, findReasoning } = require('./models');
 const browser = require('./tools/browser');
 const mac = require('./tools/mac');
 const plan = require('./tools/plan');
@@ -19,7 +18,6 @@ const screenAura = require('./screen-aura');
 const HELPER_TOOLS = new Set(['computer_screenshot', 'computer_click', 'computer_move', 'computer_drag', 'computer_scroll', 'computer_type', 'computer_key', 'list_apps']);
 // Tools that look at or drive the computer itself: while one runs, the screen glows.
 const CONTROLS_COMPUTER = new Set(['computer_screenshot', 'computer_click', 'computer_move', 'computer_drag', 'computer_scroll', 'computer_type', 'computer_key', 'open_app', 'run_applescript']);
-const MODEL_TTL = 10 * 60 * 1000;
 const CAPS_TTL = 10 * 60 * 1000;
 
 
@@ -34,23 +32,12 @@ class AIController {
     this.helper = helper;
     this.onSettingsChanged = onSettingsChanged; // lets every window refresh its panel
     this.run = null;
-    this.modelCache = null;
     this.capsCache = null; // { at, tools } from the Lumio server
     this.refs = new Map();
-    if (!findModel(store.settings.model)) store.setSetting('model', DEFAULT_MODEL);
+    if (!findReasoning(store.settings.reasoning)) store.setSetting('reasoning', DEFAULT_REASONING);
   }
 
   // ------------------------------------------------------------ settings
-  key() { return this.store.getSecret('openrouter'); }
-
-  // Where the AI runs this time: the person's Lumio plan or their OpenRouter key.
-  aiSource() {
-    const pref = this.store.settings.aiSource || 'auto';
-    if (pref === 'lumio' || pref === 'openrouter') return pref;
-    const a = this.account?.state() || {};
-    return a.signedIn && a.paid ? 'lumio' : 'openrouter';
-  }
-
   lumioContext() {
     const tab = this.tabs.active;
     return {
@@ -63,25 +50,21 @@ class AIController {
     };
   }
 
-  currentModel() {
-    return findModel(this.store.settings.model) || findModel(DEFAULT_MODEL);
-  }
+  reasoning() { return findReasoning(this.store.settings.reasoning) || findReasoning(DEFAULT_REASONING); }
 
   state() {
-    const key = this.key();
-    const m = this.currentModel();
-    const source = this.aiSource();
     const a = this.account?.state() || {};
+    const r = this.reasoning();
     return {
-      source,
-      ready: source === 'lumio' ? !!(a.signedIn && a.paid) : !!key,
-      lumio: { signedIn: !!a.signedIn, paid: !!a.paid, planName: a.planName || null, connecting: !!a.connecting },
-      hasKey: !!key,
-      keyHint: key ? `${key.slice(0, 9)}…${key.slice(-4)}` : '',
-      model: m.id,
-      modelName: m.name,
-      modelShort: m.short,
-      modelMaker: m.maker,
+      // The AI runs on the person's Lumio plan; every plan has an allowance.
+      ready: !!a.signedIn,
+      lumio: { signedIn: !!a.signedIn, paid: !!a.paid, plan: a.plan || null, planName: a.planName || null, connecting: !!a.connecting, usage: a.usage || null },
+      model: MODEL.id,
+      modelName: MODEL.name,
+      modelMaker: MODEL.maker,
+      reasoning: r.id,
+      reasoningName: r.name,
+      reasoningLevels: REASONING,
       vision: true,
       mode: this.store.settings.approvalMode,
       running: !!this.run,
@@ -93,55 +76,8 @@ class AIController {
 
   emitState() { this.emit('ai-state', this.state()); }
 
-  async setKey(raw) {
-    const key = String(raw || '').trim();
-    if (!key) return { ok: false, error: 'Paste your OpenRouter key.' };
-    if (!/^sk-or-/.test(key)) return { ok: false, error: 'That doesn\'t look like an OpenRouter key (they start with "sk-or-").' };
-    let res;
-    try { res = await checkKey(key); } catch { return { ok: false, error: "Couldn't reach OpenRouter to check the key. Are you online?" }; }
-    if (!res.ok) return res;
-    this.store.setSecret('openrouter', key);
-    this.modelCache = null;
-    this.onSettingsChanged();
-    this.models(true).then(() => this.emitState()).catch(() => {});
-    return { ok: true };
-  }
-
-  clearKey() {
-    this.store.setSecret('openrouter', '');
-    this.onSettingsChanged();
-    return { ok: true };
-  }
-
-  // The fixed model list, with live prices and availability from OpenRouter
-  // when it answers (the list still works offline).
-  async models(force = false) {
-    if (this.aiSource() === 'lumio') {
-      // On a Lumio plan there are no per-token prices; some models need a higher plan.
-      const caps = await lumioCapabilities(this.account).catch(() => null);
-      const plan = this.account.state().planName || 'your plan';
-      return MODELS.map((m) => {
-        const c = caps?.models?.find((x) => x.id === m.id);
-        const available = c ? c.available : true;
-        return { ...m, vision: true, lumio: true, available, note: available ? `Included in Lumio ${plan}` : `Needs Lumio ${c.minimumPlan === 'pro' ? 'Pro' : c.minimumPlan}` };
-      });
-    }
-    if (force || !this.modelCache || Date.now() - this.modelCache.at > MODEL_TTL) {
-      try {
-        this.modelCache = { at: Date.now(), list: await listModels(this.key()) };
-      } catch {
-        if (!this.modelCache) return MODELS.map((m) => ({ ...m, vision: true }));
-      }
-    }
-    return MODELS.map((m) => {
-      const live = this.modelCache.list.find((x) => x.id === m.id);
-      return { ...m, vision: true, available: !!live, prompt: live?.prompt, completion: live?.completion };
-    });
-  }
-
-  setModel(id) {
-    if (!findModel(id)) return this.state();
-    this.store.setSetting('model', id);
+  setReasoning(id) {
+    if (findReasoning(id)) this.store.setSetting('reasoning', id);
     this.onSettingsChanged();
     return this.state();
   }
@@ -182,9 +118,9 @@ class AIController {
       && (process.platform === 'darwin' || t.name !== 'run_applescript'));
   }
 
-  // On a Lumio plan the server owns the tool definitions and rejects names it
-  // doesn't know, so only offer the tools it lists. A server too old to list
-  // them gets everything except the newer update_plan.
+  // The server owns the tool definitions and rejects names it doesn't know,
+  // so only offer the tools it lists. A server too old to list them gets
+  // everything except the newer update_plan.
   async lumioTools() {
     if (!this.capsCache || Date.now() - this.capsCache.at > CAPS_TTL) {
       const caps = await lumioCapabilities(this.account).catch(() => null);
@@ -196,9 +132,7 @@ class AIController {
 
   async send({ chatId, text, includePage } = {}) {
     if (this.run) return { ok: false, error: 'Lumio is still working on the last request. Stop it first.' };
-    const source = this.aiSource();
-    if (source === 'openrouter' && !this.key()) return { ok: false, error: 'Add your OpenRouter key first, or sign in to Lumio on a paid plan.' };
-    if (source === 'lumio' && !this.account?.state().signedIn) return { ok: false, error: 'Sign in to Lumio first (account button, top right).' };
+    if (!this.account?.state().signedIn) return { ok: false, error: 'Sign in to Lumio first (account button, top right). It’s free.' };
     const clean = String(text || '').trim().slice(0, 20_000);
     if (!clean) return { ok: false, error: 'Empty message.' };
 
@@ -249,7 +183,6 @@ class AIController {
     this.emitState();
     this.emit('ai-event', { chatId: chat.id, type: 'start' });
 
-    const key = this.key();
     const record = (ev) => this.record(chat, run, ev);
     const ctx = {
       tabs: this.tabs,
@@ -264,15 +197,15 @@ class AIController {
       onCapture: (wc, hidden) => this.indicator?.capture(wc, hidden),
       onToolRun: (tool) => { if (CONTROLS_COMPUTER.has(tool.name)) screenAura.acquire(this); },
     };
-    const lumio = this.aiSource() === 'lumio';
     const runId = crypto.randomUUID();
+    const reasoning = this.reasoning().id;
     let stepNo = 0;
 
     try {
       await runAgent({
-        model: this.currentModel().id,
+        model: MODEL.id,
         messages: chat.messages,
-        tools: lumio ? await this.lumioTools() : this.tools(),
+        tools: await this.lumioTools(),
         systemPrompt: () => {
           const tab = this.tabs.active;
           return buildSystemPrompt({
@@ -282,9 +215,7 @@ class AIController {
             mode: this.store.settings.approvalMode,
           });
         },
-        chat: lumio
-          ? (opts) => lumioChat({ account: this.account, ...opts, context: this.lumioContext(), ids: { taskId: chat.id, runId, stepId: `s${++stepNo}` } })
-          : (opts) => streamChat({ key, ...opts }),
+        chat: (opts) => lumioChat({ account: this.account, ...opts, reasoning, context: this.lumioContext(), ids: { taskId: chat.id, runId, stepId: `s${++stepNo}` } }),
         approve: (id) => new Promise((resolve) => run.pending.set(id, resolve)),
         getMode: () => this.store.settings.approvalMode,
         emit: record,
@@ -294,7 +225,7 @@ class AIController {
       });
     } catch (err) {
       if (err.name === 'AbortError' || abort.signal.aborted) record({ type: 'stopped' });
-      else record({ type: 'error', message: err.message || String(err) });
+      else record({ type: 'error', message: err.message || String(err), code: err.code || null });
     } finally {
       for (const resolve of run.pending.values()) resolve('stop');
       repairHistory(chat.messages);
@@ -356,7 +287,7 @@ class AIController {
         break;
       case 'error':
         run.text = null;
-        d.push({ kind: 'error', text: ev.message });
+        d.push({ kind: 'error', text: ev.message, code: ev.code || null });
         break;
       default:
         break;
