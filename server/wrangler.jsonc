@@ -1,0 +1,16 @@
+// lumio-browser-api: Lumio Browser's AI on the person's Lumio plan.
+// Deploy: npx wrangler deploy   ·   Schema: npm run schema
+// The OpenRouter key is a secret: npx wrangler secret put OPENROUTER_API_KEY
+{
+  "name": "lumio-browser-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "observability": { "enabled": true },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "lumio-browser-api", "database_id": "f3534cf9-1aaf-4917-b909-2c73243ca2fd" }
+  ],
+  "vars": {
+    "LUMIO_BASE": "https://lumio-usa.online",
+    "FREE_DAILY_CAP_USD": "3"
+  }
+}

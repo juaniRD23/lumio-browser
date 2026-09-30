@@ -44,7 +44,7 @@ before(async () => {
   await new Promise((r) => site.listen(0, '127.0.0.1', r));
   siteUrl = `http://127.0.0.1:${site.address().port}`;
   lumio = await startMockLumio({ plan: 'free' });
-  L = await launch({ env: { LUMIO_ACCOUNT_BASE: lumio.base } });
+  L = await launch({ env: { LUMIO_ACCOUNT_BASE: lumio.base, LUMIO_AI_BASE: lumio.base } });
   await until(() => L.main(() => !!global.lumio.tabs?.active), 15_000);
   await L.wait(800);
 });
@@ -135,10 +135,13 @@ test('signed out, the panel asks to sign in; on the Free plan the AI is ready', 
   assert.equal(await L.shell(`!!document.getElementById('lumio-sign-in') && !document.querySelector('#messages input')`), true, 'a sign-in button, no key field');
   const refused = await L.main(() => global.lumio.ai.send({ text: 'hi' }));
   assert.match(refused.error, /Sign in to Lumio/);
-  await L.main(() => global.lumio.account.startSignIn());
-  const id = await until(() => L.main(() => global.lumio.account.pending?.id));
-  await fetch(lumio.base + '/api/auth/desktop', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'approve', id }) });
+  // Signing in happens on the Lumio website, in a tab.
+  const tabsBefore = await L.main(() => global.lumio.tabs.tabs.length);
+  await L.shell(`document.getElementById('lumio-sign-in').click(); true`);
+  await until(async () => (await L.main(() => global.lumio.tabs.wc().getTitle())) === 'Sign in · Lumio');
+  await L.page(`document.getElementById('continue').click(); true`);
   assert.ok(await until(() => L.main(() => global.lumio.account.state().signedIn), 15_000));
+  assert.ok(await until(async () => (await L.main(() => global.lumio.tabs.tabs.length)) === tabsBefore), 'the sign-in tab closes');
   assert.equal((await L.main(() => global.lumio.ai.state())).ready, true, 'Free is enough');
   assert.ok(await until(() => L.shell(`!!document.querySelector('.suggestion')`)));
 });

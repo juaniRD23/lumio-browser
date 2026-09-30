@@ -319,15 +319,41 @@ function makeDefaultBrowser() {
 const SOURCE_URL = 'https://github.com/juaniRD23/lumio-browser';
 const ACCOUNT_PAGES = { manage: '/?settings=account', upgrade: '/?settings=upgrade', billing: '/?settings=subscription', home: '/' };
 
+// Signing in happens on lumio-usa.online in a normal tab. When the site's
+// session cookie appears in the normal profile, the account adopts it
+// (watchLumioCookie) and the sign-in tab closes.
+let signInTab = null; // { w, id }
 async function signIn(from) {
-  const res = await account.startSignIn();
-  if (res.ok) {
-    // Approve in a normal window (never incognito), next to the current tab.
-    const w = from && !from.incognito ? from : normalWin() || createWindow({ urls: [] });
-    w.tabs.create(res.url);
-    w.focus();
-  }
+  const res = account.startSignIn();
+  // Already logged in to lumio-usa.online in this browser? Use that session.
+  const [existing] = await normal.session.cookies.get({ url: account.base, name: account.cookieName }).catch(() => []);
+  if (existing && await account.adopt(existing.value)) return { ok: true };
+  const w = from && !from.incognito ? from : normalWin() || createWindow({ urls: [] });
+  signInTab = { w, id: w.tabs.create(res.url).id };
+  w.focus();
   return res;
+}
+
+function watchLumioCookie() {
+  normal.session.cookies.on('changed', (_e, cookie, _cause, removed) => {
+    if (removed || !account.pending || cookie.name !== account.cookieName) return;
+    if (cookie.domain.replace(/^\./, '') !== account.host) return;
+    account.adopt(cookie.value).then((ok) => {
+      if (!ok || !signInTab) return;
+      const { w, id } = signInTab;
+      signInTab = null;
+      const tab = !w.closed && w.tabs.get(id);
+      // Close the sign-in tab if it's still on the website.
+      if (tab && (() => { try { return new URL(w.tabs.displayUrl(tab)).hostname === account.host; } catch { return false; } })()) w.tabs.close(id);
+      if (!w.closed) w.emit('toast', { text: 'Signed in to Lumio' });
+    }).catch(() => {});
+  });
+}
+
+// Signing out ends the Lumio session and forgets the website's cookie too.
+async function signOutLumio() {
+  await account.signOut();
+  await normal.session.cookies.remove(account.base, account.cookieName).catch(() => {});
 }
 
 function openAccountPage(which, from) {
@@ -554,7 +580,7 @@ function registerIpc() {
   handle('account:state', () => account.state());
   on('account:sign-in', (w) => { w.hideOverlay(); signIn(w); });
   on('account:cancel', () => account.cancelSignIn());
-  on('account:sign-out', (w) => { w.hideOverlay(); account.signOut(); });
+  on('account:sign-out', (w) => { w.hideOverlay(); signOutLumio(); });
   on('account:open', (w, which) => { w.hideOverlay(); openAccountPage(which, w); });
   on('account:page', (w, which) => {
     w.hideOverlay();
@@ -710,7 +736,7 @@ function registerIpc() {
   internalHandle('page:account-refresh', ['settings'], () => account.refresh());
   internalHandle('page:account-sign-in', ['settings', 'newtab'], ({ w }) => signIn(w));
   internalHandle('page:account-cancel', ['settings'], () => { account.cancelSignIn(); return account.state(); });
-  internalHandle('page:account-sign-out', ['settings'], async () => { await account.signOut(); return account.state(); });
+  internalHandle('page:account-sign-out', ['settings'], async () => { await signOutLumio(); return account.state(); });
   internalHandle('page:account-open', ['settings', 'newtab'], ({ w }, which) => openAccountPage(String(which), w));
   internalHandle('page:set-profile', ['settings'], (_ctx, patch) => setProfile(patch || {}));
   internalHandle('page:profile-photo', ['settings'], ({ w }) => pickProfilePhoto(w));
@@ -832,6 +858,7 @@ app.whenReady().then(async () => {
     onChange: (state) => { alive().forEach((w) => { w.emit('account', state); w.ai.capsCache = null; }); services.broadcastAIState(); },
   });
   account.refresh();
+  watchLumioCookie();
   setInterval(() => { if (account.token()) account.refresh(); }, 10 * 60 * 1000).unref?.();
 
   passwords = new PasswordManager({
@@ -965,6 +992,7 @@ global.lumio = {
   get recentlyClosed() { return recentlyClosed; },
   screenAura,
   get updater() { return updater; },
+  signIn: (w) => signIn(w || cur()),
   focus: (w) => { lastFocused = w; },
   createWindow,
   openUrl,

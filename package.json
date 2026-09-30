@@ -2,7 +2,7 @@
   "name": "lumio-browser",
   "productName": "Lumio Browser",
   "version": "0.4.0",
-  "description": "Lumio Browser — a Chromium web browser with an AI that can read, act and control your computer.",
+  "description": "Lumio Browser \u2014 a Chromium web browser with an AI that can read, act and control your computer.",
   "homepage": "https://lumio-browser.gw607953.workers.dev",
   "repository": {
     "type": "git",
@@ -15,7 +15,7 @@
     "dev": "node scripts/build-preload.mjs && electron . --remote-debugging-port=9333",
     "native": "sh native/build.sh",
     "icon": "electron build/make-icon.cjs",
-    "test": "node --test tests/*.test.mjs",
+    "test": "node --test tests/*.test.mjs server/test/*.test.mjs",
     "test:e2e": "node --test --test-concurrency=1 tests/e2e/*.e2e.mjs",
     "build:app": "sh native/build.sh && node scripts/build-preload.mjs && node build/package.mjs",
     "install:app": "sh native/build.sh && node scripts/build-preload.mjs && node build/package.mjs --install",

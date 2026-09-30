@@ -1,0 +1,11 @@
+{
+  "name": "lumio-browser-api",
+  "private": true,
+  "type": "module",
+  "description": "Runs Lumio Browser's AI on the person's Lumio plan (Cloudflare Worker).",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "deploy": "npx wrangler deploy",
+    "schema": "npx wrangler d1 execute lumio-browser-api --remote --file schema.sql"
+  }
+}

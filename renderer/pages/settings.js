@@ -80,7 +80,6 @@ function renderAccount() {
   $('#manage').hidden = !a.signedIn;
   $('#sign-out').hidden = !a.signedIn;
   $('#connecting').hidden = !a.connecting;
-  $('#code').textContent = a.code || '';
   $('#account-error').hidden = !a.error;
   $('#account-error .desc').textContent = a.error || '';
   renderPlan();

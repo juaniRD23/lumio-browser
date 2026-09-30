@@ -33,6 +33,7 @@ const common = {
     /^\/native($|\/)/,
     /^\/build($|\/)/,
     /^\/website($|\/)/,
+    /^\/server($|\/)/,
     /\.DS_Store$/,
   ],
 };

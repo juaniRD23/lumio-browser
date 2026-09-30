@@ -26,7 +26,7 @@ await new Promise((r) => site.listen(0, '127.0.0.1', r));
 const base = `http://127.0.0.1:${site.address().port}`;
 const lumio = await startMockLumio({ plan: 'pro' });
 lumio.state.agentScript = (body) => turnEvents(demoTurn(body.messages));
-const L = await launch({ env: { LUMIO_ACCOUNT_BASE: lumio.base, LUMIO_TEST_AUTH: 'allow' } });
+const L = await launch({ env: { LUMIO_ACCOUNT_BASE: lumio.base, LUMIO_AI_BASE: lumio.base, LUMIO_TEST_AUTH: 'allow' } });
 
 const until = async (fn, ms = 15000) => { const end = Date.now() + ms; for (;;) { const v = await fn().catch(() => null); if (v || Date.now() > end) return v; await L.wait(150); } };
 async function save(name) {
@@ -71,9 +71,9 @@ await L.main(() => {
 });
 
 // Signed in to Lumio Pro; the AI runs on the plan.
-await L.main(() => global.lumio.account.startSignIn());
-const id = await until(() => L.main(() => global.lumio.account.pending?.id));
-await fetch(lumio.base + '/api/auth/desktop', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'approve', id }) });
+await L.main(() => global.lumio.signIn());
+await until(async () => (await L.main(() => global.lumio.tabs.wc().getTitle())) === 'Sign in · Lumio');
+await L.page(`document.getElementById('continue').click(); true`);
 await until(() => L.main(() => global.lumio.account.state().signedIn));
 
 // 1. The agent booking a table, paused on an approval.

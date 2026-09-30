@@ -76,9 +76,9 @@ function renderAccount({ account = {}, profile = {}, incognito }) {
   const plan = account.signedIn && account.planName ? `<span class="acc-plan">Lumio ${esc(account.planName)}</span>` : '';
   let status = '';
   if (account.connecting) {
-    status = `<div class="acc-box"><div class="acc-box-t">Approve on lumio-usa.online</div><div class="acc-box-s">Check that the page shows this code, then click Connect.</div><div class="acc-code">${esc(account.code || '')}</div><button class="acc-btn ghost" data-acc="cancel">Cancel</button></div>`;
+    status = `<div class="acc-box"><div class="acc-box-t">Finish signing in on lumio-usa.online</div><div class="acc-box-s">Log in on the Lumio tab that opened. Lumio Browser signs in with you.</div><button class="acc-btn ghost" data-acc="cancel">Cancel</button></div>`;
   } else if (!account.signedIn) {
-    status = `<div class="acc-box"><div class="acc-box-s">Sign in to see your Lumio plan and use it for the AI in this browser.</div><button class="acc-btn primary" data-acc="sign-in">Sign in to Lumio</button></div>`;
+    status = `<div class="acc-box"><div class="acc-box-s">Sign in to use Lumio AI in this browser. It’s free to start.</div><button class="acc-btn primary" data-acc="sign-in">Sign in to Lumio</button></div>`;
   }
   const error = account.error ? `<div class="acc-error">${esc(account.error)}</div>` : '';
   const w = (account.usage?.windows || []).find((x) => x.id === 'weekly') || account.usage;

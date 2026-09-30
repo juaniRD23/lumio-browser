@@ -1,37 +1,41 @@
-// Lumio account: the same account as lumio-usa.online, connected with the
-// site's desktop hand-off. We send a hash of a secret "verifier", the person
-// approves the request on the website (which shows the same short code we
-// do), and polling with the verifier returns a session token. The token is
-// stored encrypted with safeStorage. Profile and plan come from the
-// site's /api/account and /api/usage.
-const crypto = require('crypto');
-
+// Lumio account: the same account as lumio-usa.online. Signing in happens on
+// the website itself, in a normal Lumio Browser tab: the person logs in the way
+// they usually do (Google, email). When the site's session cookie shows up in
+// the browser's normal profile (main.js watches for it), we check that session
+// with /api/account and keep it as the account's token, stored encrypted with
+// safeStorage. Profile comes from the site; the plan and the Lumio AI
+// allowance come from lumio-browser-api, which runs the AI.
 const BASE = (process.env.LUMIO_ACCOUNT_BASE || 'https://lumio-usa.online').replace(/\/$/, '');
+const AI_BASE = (process.env.LUMIO_AI_BASE || 'https://lumio-browser-api.gw607953.workers.dev').replace(/\/$/, '');
 const SECRET = 'lumio-session';
-const POLL_MS = 2000;
+const SIGN_IN_MS = 15 * 60 * 1000;
 
 class LumioAccount {
   constructor({ store, onChange, fetchImpl = globalThis.fetch }) {
     this.store = store;
     this.onChange = onChange;
     this.fetch = fetchImpl;
-    this.pending = null; // { id, verifier, code, url, expiresAt }
+    this.pending = null; // { expiresAt } while waiting for the person to log in on the website
     this.info = null; // { email, name, username, publicUsername }
-    this.usage = null; // { plan, planName, remaining, limit, resetsAt, windows }
+    this.usage = null; // { plan, planName, remaining, limit, resetsAt, windows } (Lumio AI allowance)
     this.error = null;
     this.timer = null;
   }
 
   get base() { return BASE; }
+  get aiBase() { return AI_BASE; }
+  // The website's session cookie: __Host- prefixed on https (the real site).
+  get cookieName() { return BASE.startsWith('https:') ? '__Host-lumio_session' : 'lumio_session'; }
+  get host() { return new URL(BASE).hostname; }
   url(path = '/') { return BASE + path; }
   token() { return this.store.getSecret(SECRET); }
-  cookie() { return `${BASE.startsWith('https:') ? '__Host-lumio_session' : 'lumio_session'}=${this.token()}`; }
+  cookie(token = this.token()) { return `${this.cookieName}=${token}`; }
 
-  async api(path, { method = 'GET', body } = {}) {
+  async api(path, { method = 'GET', body, token = this.token() } = {}) {
     const res = await this.fetch(BASE + path, {
       method,
       headers: {
-        ...(this.token() ? { Cookie: this.cookie() } : {}),
+        ...(token ? { Cookie: this.cookie(token) } : {}),
         ...(body ? { 'Content-Type': 'application/json' } : {}),
       },
       body: body ? JSON.stringify(body) : undefined,
@@ -43,13 +47,20 @@ class LumioAccount {
     return { status: res.status, ok: res.ok, data };
   }
 
+  // lumio-browser-api (the AI server), with the session as a bearer token.
+  async ai(path) {
+    const res = await this.fetch(AI_BASE + path, { headers: { Authorization: `Bearer ${this.token()}` }, signal: AbortSignal.timeout(15000) });
+    let data = null;
+    try { data = await res.json(); } catch { /* empty */ }
+    return { status: res.status, ok: res.ok, data };
+  }
+
   state() {
     const signedIn = !!this.token() && !!this.info;
     return {
       base: BASE,
       signedIn,
       connecting: !!this.pending,
-      code: this.pending?.code || null,
       email: this.info?.email || null,
       name: this.info?.name || null,
       username: this.info?.publicUsername || this.info?.username || null,
@@ -69,72 +80,40 @@ class LumioAccount {
   changed() { this.onChange?.(this.state()); }
 
   // ---------------------------------------------------------------- sign in
-  async startSignIn() {
-    this.cancelSignIn(false);
-    this.error = null;
-    const verifier = crypto.randomBytes(32).toString('hex');
-    const challenge = crypto.createHash('sha256').update(verifier).digest('hex');
-    let res;
-    try {
-      res = await this.api('/api/auth/desktop', { method: 'POST', body: { action: 'start', challenge } });
-    } catch {
-      this.error = "Couldn't reach Lumio. Check your connection.";
-      this.changed();
-      return { ok: false, error: this.error };
-    }
-    const id = res.data?.id;
-    if (!res.ok || !/^[a-f0-9]{64}$/.test(id || '')) {
-      this.error = res.data?.error || "Couldn't start signing in. Try again.";
-      this.changed();
-      return { ok: false, error: this.error };
-    }
-    // Build the approval link ourselves so it always points at Lumio.
-    this.pending = {
-      id,
-      verifier,
-      code: id.slice(0, 6).toUpperCase(),
-      url: `${BASE}/desktop-connect?request=${id}`,
-      expiresAt: res.data.expiresAt || Date.now() + 5 * 60 * 1000,
-    };
-    this.changed();
-    this.schedulePoll();
-    return { ok: true, url: this.pending.url, code: this.pending.code };
-  }
-
-  schedulePoll() {
+  // Starts waiting for a login on the website. main.js opens the sign-in page
+  // and hands us the session cookie when it appears (adopt).
+  startSignIn() {
     clearTimeout(this.timer);
-    this.timer = setTimeout(() => this.poll().catch(() => this.schedulePoll()), POLL_MS);
-  }
-
-  async poll() {
-    const p = this.pending;
-    if (!p) return;
-    if (Date.now() > p.expiresAt) {
+    this.error = null;
+    this.pending = { expiresAt: Date.now() + SIGN_IN_MS };
+    this.timer = setTimeout(() => {
+      if (!this.pending) return;
       this.pending = null;
       this.error = 'Sign-in timed out. Try again.';
       this.changed();
-      return;
-    }
-    const res = await this.api('/api/auth/desktop', { method: 'POST', body: { action: 'poll', id: p.id, verifier: p.verifier } });
-    if (this.pending !== p) return; // cancelled meanwhile
-    if (res.status === 202) { this.schedulePoll(); return; }
-    if (res.ok && /^[a-f0-9]{64}$/.test(res.data?.token || '')) {
-      this.store.setSecret(SECRET, res.data.token);
-      this.pending = null;
-      this.error = null;
-      await this.refresh();
-      return;
-    }
-    this.pending = null;
-    this.error = res.data?.error || 'Sign-in didn’t finish. Try again.';
+    }, SIGN_IN_MS);
     this.changed();
+    return { ok: true, url: `${BASE}/signin` };
+  }
+
+  // A session cookie from the website: keep it if it's a signed-in account.
+  async adopt(token) {
+    if (!this.pending || typeof token !== 'string' || !/^[A-Za-z0-9._~+/=-]{16,512}$/.test(token)) return false;
+    let res;
+    try { res = await this.api('/api/account', { token }); } catch { return false; }
+    if (!res.ok || !res.data?.signedIn || res.data.authMethod === 'guest') return false; // not logged in yet
+    if (!this.pending) return false; // cancelled meanwhile
+    clearTimeout(this.timer);
+    this.store.setSecret(SECRET, token);
+    this.pending = null;
+    this.error = null;
+    await this.refresh();
+    return true;
   }
 
   cancelSignIn(notify = true) {
     clearTimeout(this.timer);
-    const p = this.pending;
     this.pending = null;
-    if (p) this.api('/api/auth/desktop', { method: 'POST', body: { action: 'cancel', id: p.id, verifier: p.verifier } }).catch(() => {});
     if (notify) this.changed();
   }
 
@@ -142,7 +121,8 @@ class LumioAccount {
   async refresh() {
     if (!this.token()) { this.info = null; this.usage = null; this.changed(); return this.state(); }
     try {
-      const [account, usage] = await Promise.all([this.api('/api/account'), this.api('/api/usage')]);
+      // The allowance shown in the browser is Lumio AI's (from lumio-browser-api).
+      const [account, usage] = await Promise.all([this.api('/api/account'), this.ai('/v1/usage').catch(() => ({ ok: false }))]);
       if (account.status === 401 || (account.ok && !account.data?.signedIn)) {
         // The session expired or was signed out on the website.
         this.store.setSecret(SECRET, '');
@@ -173,4 +153,4 @@ class LumioAccount {
   }
 }
 
-module.exports = { LumioAccount, LUMIO_BASE: BASE };
+module.exports = { LumioAccount, LUMIO_BASE: BASE, LUMIO_AI_BASE: AI_BASE };

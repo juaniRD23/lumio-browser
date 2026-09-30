@@ -246,7 +246,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
         <div class="hero-mark">${markSvg(26)}</div>
         <h2>Sign in to use Lumio AI</h2>
         ${l.connecting
-    ? '<p>Approve the sign-in in the tab that opened on lumio-usa.online.</p>'
+    ? '<p>Log in on the lumio-usa.online tab that opened. Lumio Browser signs in with you.</p>'
     : `<p>Lumio AI runs on your Lumio account. It’s free to start, and Plus, Pro or Max give you much more.</p>
         <button class="btn primary" id="lumio-sign-in">Sign in to Lumio</button>`}`;
       messages.append(el);

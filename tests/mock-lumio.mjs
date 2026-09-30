@@ -1,6 +1,7 @@
-// A small stand-in for lumio-usa.online used by the tests: the desktop
-// sign-in hand-off, /api/account, /api/usage, logout, and the browser agent
-// endpoint (NDJSON), all behaving like the real site.
+// A small stand-in used by the tests for both lumio-usa.online (the sign-in
+// page that sets the site's session cookie, /api/account, /api/usage, logout)
+// and lumio-browser-api (/v1/agent streaming NDJSON, /v1/usage), behaving like
+// the real services.
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { scriptedTurn, turnEvents } from './mock-scripts.mjs';
@@ -11,45 +12,44 @@ const TOOLS = ['read_page', 'click', 'type', 'select_option', 'press_key', 'scro
   'computer_scroll', 'computer_type', 'computer_key', 'open_app', 'list_apps', 'run_shell', 'update_plan', 'run_applescript'];
 
 export async function startMockLumio({ plan = 'plus' } = {}) {
-  const logins = new Map(); // id -> { challenge, approved, expiresAt }
-  const sessions = new Map(); // token -> { email, plan }
+  const sessions = new Map(); // token -> { email, name }
   const state = { plan, agentRequests: [], agentScript: null };
-  const sha = (v) => crypto.createHash('sha256').update(v).digest('hex');
   const json = (res, status, data) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(data)); };
   const readBody = async (req) => { let b = ''; for await (const c of req) b += c; return b; };
+  // The website reads its session cookie; lumio-browser-api reads a bearer token.
   const who = (req) => {
     const m = /(?:^|;\s*)(?:__Host-)?lumio_session=([a-f0-9]{64})/.exec(req.headers.cookie || '');
     return m ? sessions.get(m[1]) : null;
+  };
+  const bearer = (req) => {
+    const m = /^Bearer ([a-f0-9]{64})$/.exec(req.headers.authorization || '');
+    return m ? sessions.get(m[1]) : null;
+  };
+  const allowance = () => {
+    const names = { free: 'Free', go: 'Go', plus: 'Plus', pro: 'Pro', max: 'Max' };
+    const week = { id: 'weekly', label: 'Weekly usage limit', limit: 1000, used: 380, held: 0, remaining: 620, resetsAt: Date.now() + 3 * 86400000 };
+    return { plan: state.plan, planName: names[state.plan], remaining: 620, limit: 1000, resetsAt: week.resetsAt, windows: [week] };
   };
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
     try {
-      if (url.pathname === '/api/auth/desktop' && req.method === 'POST') {
-        const body = JSON.parse(await readBody(req));
-        if (body.action === 'start') {
-          if (!/^[a-f0-9]{64}$/.test(body.challenge || '')) return json(res, 400, { error: 'Invalid request.' });
-          const id = crypto.randomBytes(32).toString('hex');
-          logins.set(id, { challenge: body.challenge, approved: false, expiresAt: Date.now() + 300000 });
-          return json(res, 201, { id, expiresAt: Date.now() + 300000, url: 'https://lumio-usa.online/desktop-connect?request=' + id });
-        }
-        const login = logins.get(body.id);
-        if (body.action === 'approve') { if (!login) return json(res, 409, { error: 'expired' }); login.approved = true; return json(res, 200, { approved: true }); }
-        if (!login || sha(body.verifier || '') !== login.challenge) return json(res, 410, { error: 'Sign-in expired. Start again.' });
-        if (body.action === 'cancel') { logins.delete(body.id); return json(res, 200, { cancelled: true }); }
-        if (body.action === 'poll') {
-          if (!login.approved) return json(res, 202, { pending: true });
-          logins.delete(body.id);
-          const token = crypto.randomBytes(32).toString('hex');
-          sessions.set(token, { email: 'tester@lumio.test', name: 'Test Person' });
-          return json(res, 200, { token, expiresAt: Date.now() + 86400000 });
-        }
-      }
-      if (url.pathname === '/desktop-connect') {
-        const id = url.searchParams.get('request') || '';
+      // The website's own sign-in page: "Continue" logs in and sets the session cookie.
+      if (url.pathname === '/signin') {
         res.writeHead(200, { 'content-type': 'text/html' });
-        res.end(`<title>Connect Lumio</title><h1>Connect your app</h1><p id="code">${id.slice(0, 6).toUpperCase()}</p>
-          <button id="connect" onclick="fetch('/api/auth/desktop',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'approve',id:'${id}'})}).then(()=>{document.body.dataset.done='1'})">Connect</button>`);
+        res.end(`<title>Sign in · Lumio</title><h1>Sign in to Lumio</h1><form method="post" action="/signin/continue"><button id="continue">Continue with Google</button></form>`);
+        return;
+      }
+      if (url.pathname === '/signin/continue' && req.method === 'POST') {
+        const token = crypto.randomBytes(32).toString('hex');
+        sessions.set(token, { email: 'tester@lumio.test', name: 'Test Person' });
+        res.writeHead(302, { location: '/', 'set-cookie': `lumio_session=${token}; Path=/; HttpOnly; SameSite=Lax` });
+        res.end();
+        return;
+      }
+      if (url.pathname === '/') {
+        res.writeHead(200, { 'content-type': 'text/html' });
+        res.end('<title>Lumio</title><h1>Lumio</h1>');
         return;
       }
       if (url.pathname === '/api/auth' && req.method === 'POST') {
@@ -62,27 +62,30 @@ export async function startMockLumio({ plan = 'plus' } = {}) {
       }
       if (url.pathname === '/api/account') {
         const u = who(req);
-        return json(res, 200, u ? { signedIn: true, email: u.email, username: null, publicUsername: 'tester', authMethod: 'lumio', profile: { name: u.name } } : { signedIn: false });
+        return json(res, 200, u ? { signedIn: true, ownerId: 'account:tester', email: u.email, username: null, publicUsername: 'tester', authMethod: 'lumio', profile: { name: u.name } } : { signedIn: false, ownerId: 'guest:x', authMethod: 'guest' });
       }
       if (url.pathname === '/api/usage') {
         const u = who(req);
         if (!u) return json(res, 200, { usage: { plan: 'free', planName: 'Free', remaining: 0, limit: 0, windows: [] } });
-        const names = { free: 'Free', plus: 'Plus', pro: 'Pro', max: 'Max' };
-        const week = { id: 'weekly', label: 'Weekly usage limit', limit: 1000, used: 380, held: 0, remaining: 620, resetsAt: Date.now() + 3 * 86400000 };
-        return json(res, 200, { usage: { plan: state.plan, planName: names[state.plan], remaining: 620, limit: 1000, resetsAt: week.resetsAt, windows: [week] } });
+        return json(res, 200, { usage: allowance() });
       }
-      if (url.pathname === '/api/browser/agent' && req.method === 'GET') {
-        const u = who(req);
+      // ---- lumio-browser-api
+      if (url.pathname === '/v1/usage') {
+        if (!bearer(req)) return json(res, 401, { error: 'Sign in to your Lumio account.', code: 'sign_in_required' });
+        return json(res, 200, { usage: allowance() });
+      }
+      if (url.pathname === '/v1/agent' && req.method === 'GET') {
+        const u = bearer(req);
         if (!u) return json(res, 401, { enabled: false });
         // Like the real endpoint: one model on every plan, the server's tools, reasoning levels.
         return json(res, 200, {
           version: 1, enabled: true, plan: state.plan,
           models: [{ id: 'openai/gpt-6-luna', name: 'GPT-6 Luna', minimumPlan: 'free', available: true }],
-          tools: TOOLS, reasoning: { levels: ['low', 'medium', 'high'], default: 'medium' },
+          tools: TOOLS, reasoning: { levels: ['low', 'medium', 'high'], default: 'medium' }, usage: allowance(),
         });
       }
-      if (url.pathname === '/api/browser/agent' && req.method === 'POST') {
-        const u = who(req);
+      if (url.pathname === '/v1/agent' && req.method === 'POST') {
+        const u = bearer(req);
         if (!u) return json(res, 401, { error: 'Sign in to your Lumio account first.', code: 'sign_in_required' });
         const body = JSON.parse(await readBody(req));
         // The same shape checks as the real endpoint's validation.

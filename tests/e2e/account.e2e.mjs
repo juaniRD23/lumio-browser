@@ -76,7 +76,7 @@ before(async () => {
   await new Promise((res) => site.listen(0, '127.0.0.1', res));
   base = `http://127.0.0.1:${site.address().port}`;
   lumio = await startMockLumio();
-  L = await launch({ env: { LUMIO_ACCOUNT_BASE: lumio.base, LUMIO_TEST_AUTH: 'allow' } });
+  L = await launch({ env: { LUMIO_ACCOUNT_BASE: lumio.base, LUMIO_AI_BASE: lumio.base, LUMIO_TEST_AUTH: 'allow' } });
   await until(() => L.main(() => !!global.lumio.tabs?.active), 15_000);
   await L.wait(500);
 });
@@ -88,19 +88,20 @@ after(async () => {
 });
 
 // ------------------------------------------------------------ account
-test('account button signs in to Lumio with a matching code and shows the plan', async () => {
+test('account button signs in on the Lumio website and shows the plan', async () => {
   assert.equal(await L.shell(`!!document.querySelector('#account-btn .avatar')`), true);
   await L.shell(`document.getElementById('account-btn').click(); true`);
   assert.ok(await until(async () => (await overlayKind()) === 'account'));
   assert.match(await L.main(() => global.lumio.current.overlay.webContents.executeJavaScript('document.body.innerText')), /Not signed in[\s\S]*Sign in to Lumio/);
+  const tabsBefore = await L.main(() => global.lumio.tabs.tabs.length);
   await overlayClick('[data-acc="sign-in"]');
-  const code = await until(() => L.main(() => global.lumio.account.state().code));
-  assert.match(code, /^[0-9A-F]{6}$/);
-  // The approval page opened in a tab and shows the same code.
-  await until(async () => (await title()) === 'Connect Lumio');
-  assert.equal(await L.page(`document.getElementById('code').textContent`), code);
-  await L.page(`document.getElementById('connect').click(); true`);
+  // The website's own sign-in page opens in a tab; log in there as usual.
+  await until(async () => (await title()) === 'Sign in · Lumio');
+  assert.equal(await L.main(() => global.lumio.account.state().connecting), true);
+  await L.page(`document.getElementById('continue').click(); true`);
   const state = await until(() => L.main(() => global.lumio.account.state().signedIn && global.lumio.account.state()), 15_000);
+  // Signed in: the sign-in tab closes by itself.
+  assert.ok(await until(async () => (await L.main(() => global.lumio.tabs.tabs.length)) === tabsBefore), 'sign-in tab closed');
   assert.equal(state.email, 'tester@lumio.test');
   assert.equal(state.planName, 'Plus');
   assert.equal(state.paid, true);
@@ -146,6 +147,8 @@ test('signing out ends the Lumio session', async () => {
   await L.page(`document.getElementById('sign-out').click(); true`);
   assert.ok(await until(async () => !(await L.main(() => global.lumio.account.state().signedIn))));
   assert.equal(lumio.sessions.size, 0, 'the server session was removed');
+  const siteCookies = () => L.main(async (_e, u) => (await global.lumio.profiles.normal.session.cookies.get({ url: u, name: 'lumio_session' })).length, lumio.base);
+  assert.ok(await until(async () => (await siteCookies()) === 0), 'the website cookie is gone too');
 });
 
 // ------------------------------------------------------------ passwords
@@ -232,9 +235,9 @@ test('suggestions can be turned off', async () => {
 
 // ------------------------------------------------------------ AI on the Lumio plan
 async function signInQuietly() {
-  await L.main(() => global.lumio.account.startSignIn());
-  const id = await until(() => L.main(() => global.lumio.account.pending?.id));
-  await fetch(lumio.base + '/api/auth/desktop', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'approve', id }) });
+  await L.main(() => global.lumio.signIn());
+  await until(async () => (await title()) === 'Sign in · Lumio');
+  await L.page(`document.getElementById('continue').click(); true`);
   assert.ok(await until(() => L.main(() => global.lumio.account.state().signedIn), 15_000));
 }
 const ask = async (text) => {

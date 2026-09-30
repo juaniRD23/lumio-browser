@@ -1,9 +1,10 @@
-// Runs the AI panel on the person's Lumio plan through lumio-usa.online's
-// /api/browser/agent. Each model call is one "step" (task = chat, run = one
-// send, step = counter). The server owns the system prompt and tool
-// definitions; we send the conversation, the tool names we can run, and a
-// little context. Replies stream back as NDJSON events. Retrying the same
-// step ID replays its saved result instead of charging again.
+// Runs the AI panel on the person's Lumio plan through lumio-browser-api
+// (server/ in this repo), authenticated with the Lumio session. Each model
+// call is one "step" (task = chat, run = one send, step = counter). The server
+// owns the model, system prompt and tool definitions; we send the
+// conversation, the tool names we can run, the reasoning level and a little
+// context. Replies stream back as NDJSON events. Retrying the same step ID
+// replays its saved result instead of charging again.
 const MAX_MESSAGES = 150;
 
 // Server-side limit: at most 160 messages, starting with a real user message.
@@ -46,9 +47,9 @@ async function* lumioChat({ account, model, reasoning = 'medium', messages, tool
   for (;;) {
     let res;
     try {
-      res = await account.fetch(account.url('/api/browser/agent'), {
+      res = await account.fetch(`${account.aiBase}/v1/agent`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Cookie: account.cookie() },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${account.token()}` },
         body: JSON.stringify(body),
         redirect: 'manual',
         signal,
@@ -104,7 +105,7 @@ async function* lumioChat({ account, model, reasoning = 'medium', messages, tool
 
 // Which models the plan allows (from GET /api/browser/agent).
 async function lumioCapabilities(account) {
-  const res = await account.fetch(account.url('/api/browser/agent'), { headers: { Cookie: account.cookie() }, redirect: 'manual', signal: AbortSignal.timeout(15000) });
+  const res = await account.fetch(`${account.aiBase}/v1/agent`, { headers: { Authorization: `Bearer ${account.token()}` }, redirect: 'manual', signal: AbortSignal.timeout(15000) });
   let data = null;
   try { data = await res.json(); } catch { /* ignore */ }
   return data;
