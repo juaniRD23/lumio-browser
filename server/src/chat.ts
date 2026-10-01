@@ -9,6 +9,7 @@ import { DOC_FORMATS, type DocFormat, type FileRow, filesFor, imageDataUrl, MAX_
 import { type Aspect, IMAGE_MODEL, makeImage } from './images.ts';
 import { CHAT_DEFAULT, MODELS, canUse, findModel, publicModel } from './models.ts';
 import { complete, ndjsonStream, type Reply } from './openrouter.ts';
+import { verifyNow } from './spend.ts';
 import { costOf, LimitError, reserve, settle } from './usage.ts';
 import { AgentError, type Env, json, randomHex, sha256 } from './util.ts';
 
@@ -165,6 +166,7 @@ export async function send(request: Request, env: Env, ctx: ExecutionContext, us
   ctx.waitUntil((async () => {
     let content = '';
     const made: FileRow[] = [];
+    const checks: { key: string; ids: string[] }[] = []; // calls to match with OpenRouter's records
     try {
       await out.send({ type: 'chat', chatId, title });
       let call: { key: string; inputTokens: number; gen: AsyncGenerator<string, Reply>; ids: string[] } | null = first;
@@ -181,6 +183,8 @@ export async function send(request: Request, env: Env, ctx: ExecutionContext, us
         } catch (err) {
           await settle(env, call.key, reply?.usage ? costOf(reply.usage, call.inputTokens, model) : 0, 'failed', null, call.ids);
           throw err;
+        } finally {
+          checks.push({ key: call.key, ids: call.ids });
         }
         if (!reply.calls.length) break;
         // Run what it asked for, then let it continue with the results.
@@ -189,7 +193,7 @@ export async function send(request: Request, env: Env, ctx: ExecutionContext, us
           type: 'function', function: { name: c.name, arguments: c.args || '{}' },
         }));
         const results = [];
-        for (const c of calls) results.push({ role: 'tool', tool_call_id: c.id, content: await runTool(env, user, chatId, c, made, out, tools) });
+        for (const c of calls) results.push({ role: 'tool', tool_call_id: c.id, content: await runTool(env, user, chatId, c, made, out, tools, checks) });
         messages = [...messages, { role: 'assistant', content: reply.content || null, tool_calls: calls }, ...results];
         if (content && !content.endsWith('\n')) { content += '\n\n'; await out.send({ type: 'delta', content: '\n\n' }); }
         call = await round(n + 1 >= ROUNDS - 1);
@@ -209,12 +213,13 @@ export async function send(request: Request, env: Env, ctx: ExecutionContext, us
     } finally {
       await out.close();
     }
+    await verifyNow(env, checks); // after the reply is sent, so nobody waits for it
   })());
   return out.response;
 }
 
 // Runs one of Chat's tools and returns what the model is told.
-async function runTool(env: Env, user: User, chatId: string, call: NativeToolCall, made: FileRow[], out: ReturnType<typeof ndjsonStream>, tools: { type: 'function'; function: { name: string; description: string; parameters: unknown } }[]): Promise<string> {
+async function runTool(env: Env, user: User, chatId: string, call: NativeToolCall, made: FileRow[], out: ReturnType<typeof ndjsonStream>, tools: { type: 'function'; function: { name: string; description: string; parameters: unknown } }[], checks: { key: string; ids: string[] }[]): Promise<string> {
   const definition = tools.find((t) => t.function.name === call.function.name);
   if (!definition) return `Error: there is no tool named "${call.function.name.slice(0, 60)}".`;
   let args: Record<string, unknown>;
@@ -234,6 +239,7 @@ async function runTool(env: Env, user: User, chatId: string, call: NativeToolCal
     await out.send({ type: 'making', what: 'image' });
     try {
       const img = await makeImage(env, user, prompt, (args.aspect as Aspect) || 'square');
+      checks.push(img.check);
       const row = await saveImage(env, user.id, img.bytes, { name: `${slug(prompt).split(' ').slice(0, 6).join(' ').replace(/[.,;:]+$/, '')}.${img.mime.split('/')[1].replace('jpeg', 'jpg')}`, chatId, meta: { generated: true, prompt: prompt.slice(0, 1000), model: IMAGE_MODEL.name } });
       made.push(row);
       await out.send({ type: 'file', file: publicFile(row) });

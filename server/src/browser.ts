@@ -9,6 +9,7 @@ import type { User } from './auth.ts';
 import { appForTool, connectedApps, runConnectionTool, toolsFor } from './connections.ts';
 import { BROWSER_BACKUP, BROWSER_DEFAULT, browserModels, canUse, findModel, publicModel } from './models.ts';
 import { complete, ndjsonStream, type Reply, type Usage } from './openrouter.ts';
+import { verifyNow } from './spend.ts';
 import { allowance, costOf, planName, reserve, settle } from './usage.ts';
 import { AgentError, type Env, fail, json, sha256 } from './util.ts';
 
@@ -151,6 +152,7 @@ export async function step(request: Request, env: Env, ctx: ExecutionContext, us
     } finally {
       await out.close();
     }
+    await verifyNow(env, [{ key, ids }]); // after the reply is sent, so nobody waits for it
   })());
   return out.response;
 }

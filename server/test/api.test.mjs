@@ -10,7 +10,7 @@ import worker from '../src/index.ts';
 import { BROWSER_DEFAULT, CHAT_DEFAULT, ceiling, findModel } from '../src/models.ts';
 import { IMAGE_MODEL } from '../src/images.ts';
 import { PLANS, weeklyBudget } from '../src/usage.ts';
-import { verifySpend } from '../src/spend.ts';
+import { liveCheck, verifySpend } from '../src/spend.ts';
 
 const SITE = 'https://lumio.test';
 const OR = 'https://openrouter.test/api/v1';
@@ -23,7 +23,7 @@ const MS_TOKEN = 'https://ms.test/token';
 const GAPI = 'https://gapi.test';
 const GRAPH = 'https://graph.test/v1.0';
 
-let sql, env, calls, reply, imageReply, apiReply, pending, stripeState, r2, generations, orKey;
+let sql, env, calls, reply, imageReply, apiReply, pending, stripeState, r2, generations, unrecorded, orKey;
 
 function d1(db) {
   return {
@@ -41,14 +41,14 @@ function d1(db) {
 }
 
 const sse = (chunks) => new Response(chunks.map((c) => `data: ${typeof c === 'string' ? c : JSON.stringify(c)}\n\n`).join(''), { status: 200, headers: { 'content-type': 'text/event-stream' } });
-let genN = 0; // OpenRouter generation IDs, one per reply
-const textReply = (text, cost = 0.000321, id = `gen-${++genN}-test`) => sse([
+let genN = 0; // OpenRouter generation IDs, one per reply; OpenRouter keeps a record of each one's cost
+const textReply = (text, cost = 0.000321, id = `gen-${++genN}-test`) => (generations[id] ??= cost, sse([
   ': OPENROUTER PROCESSING',
   { id, choices: [{ index: 0, delta: { content: text.slice(0, 5) } }] },
   { id, choices: [{ index: 0, delta: { content: text.slice(5) }, finish_reason: 'stop' }] },
   { id, choices: [], usage: { prompt_tokens: 3000, completion_tokens: 40, total_tokens: 3040, cost } },
   '[DONE]',
-]);
+]));
 // A tiny PNG and an R2 stand-in.
 const PNG = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='), (c) => c.charCodeAt(0));
 const PNG_URL = 'data:image/png;base64,' + Buffer.from(PNG).toString('base64');
@@ -77,11 +77,13 @@ beforeEach(() => {
     GOOGLE_API: GAPI, GRAPH_API: GRAPH, CONNECTIONS_KEY: Buffer.from(crypto.randomBytes(32)).toString('base64'),
   };
   calls = { or: [], orGet: [], google: [], stripe: [], api: [], revoked: [] };
-  generations = {}; // what OpenRouter's records say each generation cost
+  generations = { 'gen-img-test': 0.0094 }; // what OpenRouter's records say each generation cost
+  unrecorded = new Set(); // generations OpenRouter hasn't recorded yet
+  liveCheck.delays = [0, 0, 0];
   orKey = { usage: 0, usage_daily: 0, usage_weekly: 0, usage_monthly: 0, limit: null, limit_remaining: null };
   apiReply = () => Response.json({}, { status: 404 });
   reply = () => textReply('Hello from Luna.');
-  imageReply = () => Response.json({ choices: [{ message: { role: 'assistant', content: '', images: [{ type: 'image_url', image_url: { url: PNG_URL } }] } }], usage: { prompt_tokens: 20, completion_tokens: 1100, cost: 0.0094 } });
+  imageReply = () => Response.json({ id: 'gen-img-test', choices: [{ message: { role: 'assistant', content: '', images: [{ type: 'image_url', image_url: { url: PNG_URL } }] } }], usage: { prompt_tokens: 20, completion_tokens: 1100, cost: 0.0094 } });
   pending = [];
   stripeState = { subscriptions: {} };
   globalThis.fetch = async (url, opts = {}) => {
@@ -95,7 +97,7 @@ beforeEach(() => {
       calls.orGet.push({ url: u, auth: opts.headers?.authorization });
       if (u === `${OR}/key`) return Response.json({ data: { label: 'Lumio', ...orKey } });
       const id = new URL(u).searchParams.get('id');
-      return id in generations ? Response.json({ data: { id, total_cost: generations[id] } }) : Response.json({ error: { code: 404, message: 'Generation not found' } }, { status: 404 });
+      return id in generations && !unrecorded.has(id) ? Response.json({ data: { id, total_cost: generations[id] } }) : Response.json({ error: { code: 404, message: 'Generation not found' } }, { status: 404 });
     }
     if (u === GOOGLE_TOKEN || u === MS_TOKEN) {
       const body = Object.fromEntries(new URLSearchParams(String(opts.body)));
@@ -556,36 +558,57 @@ test('browser: over the model budget, older results shrink first and the newest 
 });
 
 // ---------------------------------------------------------------- spend
-test('spend: every AI call is checked against OpenRouter’s record, and usage follows it', async () => {
+test('spend: each AI call is checked against OpenRouter’s record right after it ends, and usage follows it', async () => {
   const { token } = await signIn();
+  const row = (kind) => ({ ...sql.prepare('SELECT cost_microusd, billed_microusd, verified_at, gen_ids FROM steps WHERE kind = ?').get(kind) });
+  // OpenRouter's record says a little more than the reply reported.
+  reply = () => textReply('Hello from Luna.', 0.000321, 'gen-live-1');
+  generations['gen-live-1'] = 0.0004;
   await events(await call('/v1/agent', { token, method: 'POST', body: step() }));
   await settled();
-  const row = () => ({ ...sql.prepare("SELECT cost_microusd, billed_microusd, verified_at, gen_ids FROM steps WHERE kind = 'browser'").get() });
-  const [id] = JSON.parse(row().gen_ids);
-  assert.match(id, /^gen-\d+-test$/, 'OpenRouter’s ID is kept');
-  assert.equal(row().cost_microusd, 321, 'the cost the reply reported');
-  generations[id] = 0.0004; // OpenRouter's record says a little more
-  const now = Date.now();
-  assert.deepEqual(await verifySpend(env, now), { checked: 0, fixed: 0 }, 'too soon: OpenRouter needs a minute');
-  assert.deepEqual(await verifySpend(env, now + 2 * 60_000), { checked: 1, fixed: 1 });
-  assert.equal(row().cost_microusd, 400);
-  assert.equal(row().billed_microusd, 400);
+  assert.deepEqual(JSON.parse(row('browser').gen_ids), ['gen-live-1'], 'OpenRouter’s ID is kept');
+  assert.equal(row('browser').cost_microusd, 400, 'checked live, right after the reply');
+  assert.equal(row('browser').billed_microusd, 400);
   assert.equal((await (await call('/v1/usage', { token })).json()).usage.used, 400, 'the user’s usage is OpenRouter’s number');
-  assert.deepEqual(await verifySpend(env, now + 3 * 60_000), { checked: 0, fixed: 0 }, 'checked once');
   assert.ok(calls.orGet.every((c) => c.auth === 'Bearer sk-or-test'));
 
-  // Chat replies and pictures are checked too; one OpenRouter can't find yet waits, then keeps its cost after an hour.
-  await events(await call('/api/chat', { cookie: token, method: 'POST', body: { text: 'hi' } }));
+  // Chat replies and the pictures they make are checked live too.
+  reply = (body) => (body.messages.at(-1).role === 'tool' ? textReply('Here it is.') : sse([{ id: 'gen-chat-1', choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_p', type: 'function', function: { name: 'generate_image', arguments: '{"prompt":"a red fox"}' } }] }, finish_reason: 'tool_calls' }] }, { id: 'gen-chat-1', choices: [], usage: { cost: 0.0002 } }]));
+  generations['gen-chat-1'] = 0.0002;
+  sql.prepare("UPDATE users SET plan = 'plus'").run();
+  await events(await call('/api/chat', { cookie: token, method: 'POST', body: { text: 'draw a fox' } }));
   await settled();
-  const chat = () => ({ ...sql.prepare("SELECT cost_microusd, billed_microusd, verified_at FROM steps WHERE kind = 'chat'").get() });
-  assert.deepEqual(await verifySpend(env, now + 5 * 60_000), { checked: 0, fixed: 0 });
-  assert.equal(chat().verified_at, null, 'tried again next time');
-  await verifySpend(env, now + 2 * 60 * 60_000);
-  assert.ok(chat().verified_at > 0);
-  assert.equal(chat().billed_microusd, null);
-  assert.equal(chat().cost_microusd, 321, 'keeps the cost the reply reported');
+  assert.deepEqual(sql.prepare("SELECT kind, billed_microusd FROM steps WHERE kind != 'browser' ORDER BY created_at, kind").all().map((r) => [r.kind, r.billed_microusd]).sort(), [['chat', 200], ['chat', 321], ['image', 9400]]);
 
-  // The cron trigger runs the same check.
+  // OpenRouter hasn't recorded a call yet: the live check tries 3 times, then the 5-minute backup run finds it.
+  sql.prepare("UPDATE users SET plan = 'free'").run();
+  reply = () => textReply('Hi there.', 0.000321, 'gen-slow-1');
+  unrecorded.add('gen-slow-1');
+  await events(await call('/v1/agent', { token, method: 'POST', body: step({ stepId: 's2' }) }));
+  await settled();
+  const slow = () => ({ ...sql.prepare("SELECT cost_microusd, billed_microusd, verified_at FROM steps WHERE gen_ids LIKE '%gen-slow-1%'").get() });
+  assert.equal(calls.orGet.filter((c) => c.url.includes('gen-slow-1')).length, 3, 'tried 3 times');
+  assert.equal(slow().verified_at, null);
+  const now = Date.now();
+  assert.deepEqual(await verifySpend(env, now), { checked: 0, fixed: 0 }, 'the backup waits a minute');
+  unrecorded.delete('gen-slow-1');
+  generations['gen-slow-1'] = 0.0005;
+  assert.deepEqual(await verifySpend(env, now + 2 * 60_000), { checked: 1, fixed: 1 });
+  assert.equal(slow().cost_microusd, 500);
+  assert.deepEqual(await verifySpend(env, now + 3 * 60_000), { checked: 0, fixed: 0 }, 'checked once');
+
+  // One OpenRouter never records keeps the cost the reply reported, after an hour.
+  reply = () => textReply('Again.', 0.000321, 'gen-lost-1');
+  unrecorded.add('gen-lost-1');
+  await events(await call('/v1/agent', { token, method: 'POST', body: step({ stepId: 's3' }) }));
+  await settled();
+  await verifySpend(env, now + 2 * 60 * 60_000);
+  const lost = { ...sql.prepare("SELECT cost_microusd, billed_microusd, verified_at FROM steps WHERE gen_ids LIKE '%gen-lost-1%'").get() };
+  assert.ok(lost.verified_at > 0);
+  assert.equal(lost.billed_microusd, null);
+  assert.equal(lost.cost_microusd, 321);
+
+  // The cron trigger runs the backup check.
   sql.prepare("INSERT INTO steps (key, owner, plan, kind, request_hash, status, held_microusd, cost_microusd, created_at, gen_ids) VALUES ('cron', ?, 'free', 'chat', 'h', 'done', 0, 100, ?, '[\"gen-cron-1\"]')").run(userRow().id, Date.now() - 10 * 60_000);
   generations['gen-cron-1'] = 0.000123;
   await worker.scheduled({}, env, ctx);
@@ -603,11 +626,11 @@ test('spend page: only the owner sees OpenRouter’s charges next to what Lumio 
   orKey = { usage: 12.5, usage_daily: 0.000321, usage_weekly: 0.5, usage_monthly: 2.25, limit: 50, limit_remaining: 37.5 };
   const d = await (await call('/api/admin/spend', { token })).json();
   assert.deepEqual(d.openrouter, { today: 0.000321, week: 0.5, month: 2.25, total: 12.5, limit: 50, limitRemaining: 37.5 });
-  assert.deepEqual(d.lumio.today, { total: 0.000321, free: 0.000321, paid: 0, byKind: { browser: 0.000321, chat: 0, image: 0 }, calls: 1, checked: 0 });
+  assert.deepEqual(d.lumio.today, { total: 0.000321, free: 0.000321, paid: 0, byKind: { browser: 0.000321, chat: 0, image: 0 }, calls: 1, checked: 1 });
   assert.deepEqual(d.people, { free: 1 });
   assert.equal(d.monthlyRevenue, 0);
   assert.deepEqual(d.freeCap, { usedToday: 0.000321, cap: 3 });
-  assert.equal(d.waitingForCheck, 1);
+  assert.equal(d.waitingForCheck, 0, 'checked live');
   // A paying account counts toward revenue.
   sql.prepare("UPDATE users SET plan = 'plus', plan_status = 'active'").run();
   assert.equal((await (await call('/api/admin/spend', { token })).json()).monthlyRevenue, 20);

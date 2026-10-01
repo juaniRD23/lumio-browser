@@ -96,6 +96,9 @@ body.app { min-height: 100svh; display: flex; flex-direction: column; }
 /* Spend (owner only): OpenRouter charges next to what Lumio counted */
 .spend .spend-top { display: grid; gap: 8px; }
 .spend .sub { color: var(--dim); font-size: 15px; }
+.spend .live { display: inline-block; width: 7px; height: 7px; margin: 0 7px 1px 4px; border-radius: 50%; background: #7ee2a8; box-shadow: 0 0 0 0 #7ee2a866; animation: live 2s ease-out infinite; vertical-align: middle; }
+@keyframes live { 70% { box-shadow: 0 0 0 7px #7ee2a800; } 100% { box-shadow: 0 0 0 0 #7ee2a800; } }
+@media (prefers-reduced-motion: reduce) { .spend .live { animation: none; } }
 .spend-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 .spend-card { border: 1px solid var(--line); border-radius: 20px; background: var(--card); padding: 22px; display: grid; gap: 4px; align-content: start; }
 .spend-card .label { font: 500 11px var(--mono); text-transform: uppercase; letter-spacing: .12em; color: var(--dim); margin-bottom: 6px; }

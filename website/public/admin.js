@@ -3,6 +3,7 @@
 // gets data; everyone else sees a short note.
 const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const NOTE = 'Days, weeks and months are in UTC, like OpenRouter (weeks start on Monday). OpenRouter’s numbers cover everything billed to Lumio’s key.';
 const money = (n) => (n == null ? '—' : `$${Math.abs(n) < 1 && n !== 0 ? n.toFixed(4) : n.toFixed(2)}`);
 
 function status(text, cls = '') {
@@ -44,7 +45,7 @@ function render(d) {
     ['Browser', money(m.byKind.browser)], ['Chat', money(m.byKind.chat)], ['Pictures', money(m.byKind.image)],
     ['Free users', money(m.free)], ['Paying users', money(m.paid)], ['AI calls', m.calls.toLocaleString()],
   ].map(([k, v]) => `<div><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('');
-  $('#checked').textContent = `${m.checked.toLocaleString()} of ${m.calls.toLocaleString()} calls this month matched to OpenRouter’s records${d.waitingForCheck ? `, ${d.waitingForCheck} waiting (checked every 5 minutes)` : ''}.`;
+  $('#checked').textContent = `${m.checked.toLocaleString()} of ${m.calls.toLocaleString()} calls this month matched to OpenRouter’s records${d.waitingForCheck ? `, ${d.waitingForCheck} waiting for OpenRouter to record them` : ''}. Each call is checked seconds after it ends.`;
 
   const p = d.people || {};
   const aiMonth = or?.month ?? m.total;
@@ -61,12 +62,15 @@ function render(d) {
   $('#cap-bar').style.width = `${Math.min(100, (cap.usedToday / cap.cap) * 100)}%`;
 
   $('#note').hidden = false;
-  if (or?.limitRemaining != null) $('#note').textContent += ` The key’s own limit has ${money(or.limitRemaining)} left.`;
-  $('#updated').textContent = `Updated ${new Date(d.at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}.`;
+  $('#note').textContent = NOTE + (or?.limitRemaining != null ? ` The key’s own limit has ${money(or.limitRemaining)} left.` : '');
+  $('#updated').innerHTML = `<span class="live" aria-hidden="true"></span>Live · updated ${esc(new Date(d.at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' }))}`;
   status(d.openrouterError ? esc(d.openrouterError) : '', d.openrouterError ? 'err' : '');
 }
 
+let loading = false;
 async function load() {
+  if (loading) return;
+  loading = true;
   $('#refresh').disabled = true;
   try {
     const res = await fetch('/api/admin/spend', { cache: 'no-store' });
@@ -76,10 +80,15 @@ async function load() {
   } catch {
     status('Couldn’t load the numbers. Check your connection and try again.', 'err');
   } finally {
+    loading = false;
     $('#refresh').disabled = false;
   }
 }
 
+// Live: every AI call is matched to OpenRouter's record seconds after it ends,
+// so the page refreshes every 15 seconds while it's open (and right away when
+// you come back to the tab).
 $('#refresh').addEventListener('click', load);
-setInterval(() => { if (!document.hidden) load(); }, 120_000);
+setInterval(() => { if (!document.hidden) load(); }, 15_000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
 load();

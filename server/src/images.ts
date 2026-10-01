@@ -4,6 +4,7 @@
 // (Gemini 2.5 Flash Image $0.039, GPT-5 Image Mini $0.042 and ~40 s).
 import type { Plan } from './agent.ts';
 import { GEN_ID, ProviderError } from './openrouter.ts';
+import { verifyNow } from './spend.ts';
 import { hold, LimitError, limits, settle, toMicro } from './usage.ts';
 import { AgentError, type Env, fail, json, randomHex, sha256 } from './util.ts';
 
@@ -16,7 +17,8 @@ export const IMAGE_MODEL = {
 export const ASPECTS = { square: '1:1', portrait: '2:3', landscape: '3:2' } as const;
 export type Aspect = keyof typeof ASPECTS;
 
-export type Made = { bytes: Uint8Array; mime: string; cost: number; text: string };
+// `check`: the step and OpenRouter's ID for it, for the live cost check (spend.ts).
+export type Made = { bytes: Uint8Array; mime: string; cost: number; text: string; check: { key: string; ids: string[] } };
 
 function fromDataUrl(url: string) {
   const m = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(url);
@@ -63,7 +65,7 @@ export async function makeImage(env: Env, user: { id: string; plan: Plan }, prom
     const img = (msg?.images || []).map((i: any) => fromDataUrl(String(i?.image_url?.url || ''))).find(Boolean);
     if (!img) throw new AgentError('The image model didn’t return a picture. Try describing it differently.', 422, 'image_refused');
     await settle(env, key, cost || Math.ceil(IMAGE_MODEL.hold * 1_000_000), 'done', null, ids);
-    return { ...img, cost, text: typeof msg?.content === 'string' ? msg.content : '' };
+    return { ...img, cost, text: typeof msg?.content === 'string' ? msg.content : '', check: { key, ids } };
   } catch (err) {
     await settle(env, key, cost, 'failed', null, ids);
     throw err;
@@ -78,7 +80,7 @@ export const b64 = (bytes: Uint8Array) => {
 
 // POST /v1/images (Lumio Browser): { prompt, aspect } -> the picture as a data URL.
 // The browser saves it on the computer; nothing is kept here.
-export async function imageForBrowser(request: Request, env: Env, user: { id: string; plan: Plan }) {
+export async function imageForBrowser(request: Request, env: Env, user: { id: string; plan: Plan }, ctx: ExecutionContext) {
   const body = await request.json<{ prompt?: unknown; aspect?: unknown }>().catch(() => null);
   const prompt = typeof body?.prompt === 'string' ? body.prompt.trim() : '';
   if (!prompt || prompt.length > 4000) return fail('Describe the picture (up to 4,000 characters).', 400, 'invalid_request');
@@ -86,5 +88,6 @@ export async function imageForBrowser(request: Request, env: Env, user: { id: st
   const recent = await env.DB.prepare("SELECT COUNT(*) AS n FROM steps WHERE owner = ?1 AND kind = 'image' AND created_at >= ?2").bind(user.id, Date.now() - 60_000).first<{ n: number }>();
   if ((recent?.n ?? 0) >= 6) return fail('Slow down a little: too many pictures in the last minute.', 429, 'rate_limited');
   const img = await makeImage(env, user, prompt, aspect);
+  ctx.waitUntil(verifyNow(env, [img.check]));
   return json({ image: `data:${img.mime};base64,${b64(img.bytes)}`, mime: img.mime, model: IMAGE_MODEL.name });
 }

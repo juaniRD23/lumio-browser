@@ -96,7 +96,7 @@ function routeFor(path: string, method: string): Route | null {
   if (path === '/v1/agent' && method === 'GET') return (_r, env, _c, user) => capabilities(env, user);
   if (path === '/v1/agent' && method === 'POST') return step;
   if (path === '/v1/usage' && method === 'GET') return async (_r, env, _c, user) => json({ usage: await allowance(env, user.id, user.plan) });
-  if (path === '/v1/images' && method === 'POST') return (r, env, _c, user) => imageForBrowser(r, env, user);
+  if (path === '/v1/images' && method === 'POST') return (r, env, c, user) => imageForBrowser(r, env, user, c);
   if (path === '/api/files' && method === 'POST') return (r, env, _c, user) => upload(r, env, user);
   if (path === '/v1/tools/run' && method === 'POST') return (r, env, _c, user) => runTool(r, env, user);
   if (path === '/v1/extract' && method === 'POST') return (r) => extract(r);

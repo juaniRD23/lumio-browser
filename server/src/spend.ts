@@ -1,10 +1,12 @@
 // What Lumio spends on AI, checked against OpenRouter's own records.
 //
-// verifySpend (every 5 minutes, from the cron trigger): looks up each recent
-// AI call on OpenRouter by its generation ID and sets the step's cost to
-// OpenRouter's official total, so everyone's usage is exactly what we paid.
-// The cost already comes from OpenRouter at the end of each reply; this
-// catches the rare call where that number was missing or the reply broke off.
+// verifyNow (live, right after each call): looks the call up on OpenRouter by
+// its generation ID and sets the step's cost to OpenRouter's official total,
+// so everyone's usage is exactly what we paid. The cost already comes from
+// OpenRouter at the end of each reply; this catches the rare call where that
+// number was missing or the reply broke off.
+// verifySpend (every 5 minutes, from the cron trigger): the backup, for calls
+// OpenRouter hadn't recorded yet during the live check.
 //
 // spendReport (GET /api/admin/spend, owner only): what OpenRouter charged on
 // Lumio's key today, this week and this month, next to what Lumio counted,
@@ -28,9 +30,46 @@ async function openRouter(env: Env, path: string): Promise<{ status: number; dat
   }
 }
 
-// At most `maxLookups` OpenRouter requests per run (Workers allow 50 on the
-// free plan). Calls are looked up a minute after they finish (OpenRouter needs
-// a moment); one that still can't be found after an hour keeps its cost.
+// OpenRouter's total for a step's calls in microUSD, or null if any of them
+// isn't recorded yet.
+async function billedFor(env: Env, ids: string[]): Promise<number | null> {
+  let billed = 0;
+  for (const id of ids) {
+    const r = await openRouter(env, `/generation?id=${encodeURIComponent(id)}`);
+    const cost = r.data?.data?.total_cost;
+    if (r.status !== 200 || typeof cost !== 'number' || !(cost >= 0)) return null;
+    billed += toMicro(cost);
+  }
+  return billed;
+}
+
+async function recordBilled(env: Env, key: string, billed: number, now = Date.now()) {
+  await env.DB.prepare('UPDATE steps SET cost_microusd = ?2, billed_microusd = ?2, verified_at = ?3 WHERE key = ?1').bind(key, billed, now).run();
+}
+
+// OpenRouter usually has its record a second or two after a reply ends: try
+// after 1, 4 and 12 seconds (background work may run 30 seconds after the
+// response). Whatever is still missing is left for the backup run.
+export const liveCheck = { delays: [1_000, 3_000, 8_000] };
+export async function verifyNow(env: Env, steps: { key: string; ids: string[] }[]) {
+  if (!env.OPENROUTER_API_KEY) return;
+  let left = steps.filter((s) => s.ids.length);
+  for (const delay of liveCheck.delays) {
+    if (!left.length) return;
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    const missing = [];
+    for (const s of left) {
+      const billed = await billedFor(env, s.ids);
+      if (billed === null) missing.push(s);
+      else await recordBilled(env, s.key, billed);
+    }
+    left = missing;
+  }
+}
+
+// The backup: at most `maxLookups` OpenRouter requests per run (Workers allow
+// 50 on the free plan), for calls finished over a minute ago that the live
+// check couldn't match. One still missing after an hour keeps its cost.
 export async function verifySpend(env: Env, now = Date.now(), maxLookups = 40) {
   if (!env.OPENROUTER_API_KEY) return { checked: 0, fixed: 0 };
   const { results } = await env.DB.prepare(`SELECT key, cost_microusd, gen_ids, created_at FROM steps
@@ -43,17 +82,10 @@ export async function verifySpend(env: Env, now = Date.now(), maxLookups = 40) {
     let ids: string[] = [];
     try { ids = (JSON.parse(row.gen_ids) as unknown[]).filter((id): id is string => typeof id === 'string' && GEN_ID.test(id)); } catch { /* unreadable: give up below */ }
     if (lookups + ids.length > maxLookups) break;
-    let billed = 0;
-    let found = ids.length > 0;
-    for (const id of ids) {
-      lookups++;
-      const r = await openRouter(env, `/generation?id=${encodeURIComponent(id)}`);
-      const cost = r.data?.data?.total_cost;
-      if (r.status !== 200 || typeof cost !== 'number' || !(cost >= 0)) { found = false; break; }
-      billed += toMicro(cost);
-    }
-    if (found) {
-      await env.DB.prepare('UPDATE steps SET cost_microusd = ?2, billed_microusd = ?2, verified_at = ?3 WHERE key = ?1').bind(row.key, billed, now).run();
+    lookups += ids.length;
+    const billed = ids.length ? await billedFor(env, ids) : null;
+    if (billed !== null) {
+      await recordBilled(env, row.key, billed, now);
       checked++;
       if (billed !== row.cost_microusd) fixed++;
     } else if (now - row.created_at > HOUR) {
