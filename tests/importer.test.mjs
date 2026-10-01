@@ -69,8 +69,9 @@ test('exported bookmark files (Netscape HTML from Safari, Chrome, Firefox)', () 
 <DL><p><DT><A HREF="https://apple.com/" ADD_DATE="1700000000">Apple &amp; Co</A>
 <DT><A HREF="javascript:alert(1)">Not a site</A>
 <DT><A HREF="https://example.com/?a=1&amp;b=2"></A></DL></DL>`;
-  assert.deepEqual(parseBookmarksHtml(html), [
-    { url: 'https://apple.com/', title: 'Apple & Co', time: 1700000000000 },
-    { url: 'https://example.com/?a=1&b=2', title: 'https://example.com/?a=1&b=2', time: parseBookmarksHtml(html)[1].time },
-  ]);
+  const got = parseBookmarksHtml(html);
+  assert.deepEqual(got[0], { url: 'https://apple.com/', title: 'Apple & Co', time: 1700000000000 });
+  assert.deepEqual([got[1].url, got[1].title], ['https://example.com/?a=1&b=2', 'https://example.com/?a=1&b=2']);
+  assert.ok(Math.abs(got[1].time - Date.now()) < 60000, 'no date: now');
+  assert.equal(got.length, 2, 'javascript: links are skipped');
 });
