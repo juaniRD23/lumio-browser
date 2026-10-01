@@ -28,7 +28,7 @@
     <h2>What we collect</h2>
     <ul>
       <li><b>Account:</b> from Google sign-in, your name, email address, profile picture and Google account ID.</li>
-      <li><b>Lumio Chat:</b> your chats and messages, so you can come back to them. Deleting a chat deletes its messages.</li>
+      <li><b>Lumio Chat:</b> your chats and messages, the files you attach (pictures, and the text of documents) and the pictures and documents Lumio makes for you, so you can come back to them. Deleting a chat deletes its messages and files. Attachments you never send are deleted after a day.</li>
       <li><b>Usage:</b> when you use Lumio AI and what it cost, to apply your plan’s allowance.</li>
       <li><b>Billing:</b> Stripe processes payments. We keep your Stripe customer ID and plan status; we never see or store your card number.</li>
     </ul>
@@ -36,8 +36,12 @@
     <h2>Lumio Browser</h2>
     <p>Your browsing history, bookmarks, passwords and settings stay on your computer. When you ask Lumio AI to help, the messages, page content and screenshots it needs for that request are sent to our server and the AI model to answer; we don’t keep browser page content after the request, except a short-lived copy used to avoid charging twice for a retried step.</p>
 
+    <h2>Connected apps</h2>
+    <p>If you connect Google (Drive, Gmail, Calendar) or Microsoft (Outlook, OneDrive), Lumio gets read-only access. It reads your email, calendar or files only when you ask it to in a chat, and only what it needs to answer. The access tokens are stored encrypted. We don’t use this data for anything else, don’t sell it, and don’t use it to train AI models. Content Lumio reads becomes part of that chat (so you can see what it used) until you delete the chat. You can disconnect anytime on <a href="/account#connections">your account page</a>, and also remove Lumio’s access in your Google or Microsoft account settings.</p>
+    <p>Lumio’s use and transfer of information received from Google APIs adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
+
     <h2>AI processing</h2>
-    <p>To answer, your messages go to our AI model provider (OpenRouter, which routes to the model’s maker, such as OpenAI). They process them to produce the reply under their own terms and policies.</p>
+    <p>To answer, your messages (and any files or connected-app content they include) go to our AI model provider (OpenRouter, which routes to the model’s maker, such as OpenAI, Google or Anthropic). We only use providers that don’t keep or train on what you send. They process it to produce the reply under their own terms and policies.</p>
 
     <h2>Cookies</h2>
     <p>We use one essential cookie to keep you signed in. No tracking or advertising cookies.</p>

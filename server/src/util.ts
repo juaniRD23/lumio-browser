@@ -3,6 +3,7 @@ import { AgentError } from './agent.ts';
 
 export interface Env {
   DB: D1Database;
+  FILES?: R2Bucket; // attachments and made images
   ASSETS?: Fetcher; // the website (website/public)
   OPENROUTER_API_KEY?: string;
   OPENROUTER_BASE?: string; // tests point this at a stand-in
@@ -14,6 +15,14 @@ export interface Env {
   STRIPE_WEBHOOK_SECRET?: string;
   STRIPE_API?: string; // tests
   FREE_DAILY_CAP_USD?: string; // total Free-plan AI spend per day, across everyone
+  // Connections (Google Drive/Gmail/Calendar, Microsoft Outlook/OneDrive)
+  MICROSOFT_CLIENT_ID?: string;
+  MICROSOFT_CLIENT_SECRET?: string;
+  CONNECTIONS_KEY?: string; // base64 of 32 random bytes: encrypts connection tokens
+  MICROSOFT_AUTH_URL?: string; // tests
+  MICROSOFT_TOKEN_URL?: string; // tests
+  GOOGLE_API?: string; // tests
+  GRAPH_API?: string; // tests
 }
 
 export { AgentError };

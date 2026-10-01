@@ -3,18 +3,20 @@
 // picks tools by name. Retries of the same step replay its saved result.
 import {
   BROWSER_AGENT_VERSION, BROWSER_REASONING, browserAgentTools, browserInputEstimate,
-  browserSystemPrompt, ToolArgumentsError, validateBrowserStep, validateBrowserToolCall, type AgentMessage, type NativeToolCall,
+  browserSystemPrompt, parseToolArgs, ToolArgumentsError, validateBrowserStep, validateBrowserToolCall, type AgentMessage, type NativeToolCall,
 } from './agent.ts';
 import type { User } from './auth.ts';
+import { appForTool, connectedApps, runConnectionTool, toolsFor } from './connections.ts';
 import { BROWSER_DEFAULT, browserModels, canUse, findModel, publicModel } from './models.ts';
 import { complete, ndjsonStream, type Reply, type Usage } from './openrouter.ts';
 import { allowance, costOf, planName, reserve, settle } from './usage.ts';
 import { AgentError, type Env, fail, json, sha256 } from './util.ts';
 
-const MAX_BODY = 6_000_000;
+const MAX_BODY = 24_000_000; // up to 12 pictures and long attached documents
 const STEPS_PER_MINUTE = 40;
 
 export async function capabilities(env: Env, user: User) {
+  const connected = toolsFor(await connectedApps(env, user.id));
   return json({
     version: BROWSER_AGENT_VERSION,
     enabled: true,
@@ -22,7 +24,9 @@ export async function capabilities(env: Env, user: User) {
     planName: planName(user.plan),
     model: publicModel(findModel(BROWSER_DEFAULT)!, user.plan),
     models: browserModels().map((m) => publicModel(m, user.plan)),
-    tools: browserAgentTools.map((t) => t.function.name),
+    tools: [...browserAgentTools, ...connected].map((t) => t.function.name),
+    // Tools the browser runs by asking the server (POST /v1/tools/run): the person's connected apps.
+    remoteTools: connected.map((t) => ({ name: t.function.name, app: appForTool(t.function.name)?.name || '' })),
     reasoning: { levels: BROWSER_REASONING, default: 'medium' },
     usage: await allowance(env, user.id, user.plan),
   });
@@ -33,7 +37,8 @@ export async function step(request: Request, env: Env, ctx: ExecutionContext, us
   if (raw.length > MAX_BODY) return fail('This request is too large. Start a new chat.', 413, 'context_too_large');
   let body: unknown;
   try { body = JSON.parse(raw); } catch { return fail('Invalid request.', 400, 'invalid_request'); }
-  const s = validateBrowserStep(body);
+  const extra = toolsFor(await connectedApps(env, user.id));
+  const s = validateBrowserStep(body, extra);
   const now = Date.now();
   // The browser sends the model the server listed; anything else gets the default.
   const asked = findModel(s.model);
@@ -56,7 +61,7 @@ export async function step(request: Request, env: Env, ctx: ExecutionContext, us
 
   const inputTokens = browserInputEstimate(s);
   const { maxOutput } = await reserve(env, { key, owner: user.id, plan: user.plan, requestHash, kind: 'browser', inputTokens, model, now });
-  const tools = browserAgentTools.filter((t) => s.tools.includes(t.function.name));
+  const tools = [...browserAgentTools, ...extra].filter((t) => s.tools.includes(t.function.name));
   const call = (messages: unknown[]) => complete(env, model, {
     messages,
     ...(tools.length ? { tools, tool_choice: 'auto' } : {}),
@@ -103,7 +108,7 @@ export async function step(request: Request, env: Env, ctx: ExecutionContext, us
         let bad: { index: number; error: ToolArgumentsError } | null = null;
         toolCalls = [];
         for (let i = 0; i < raw.length && !bad; i++) {
-          try { toolCalls.push(validateBrowserToolCall(raw[i], s.tools)); } catch (err) {
+          try { toolCalls.push(validateBrowserToolCall(raw[i], s.tools, extra)); } catch (err) {
             if (err instanceof ToolArgumentsError) bad = { index: i, error: err }; else throw err;
           }
         }
@@ -136,4 +141,19 @@ export async function step(request: Request, env: Env, ctx: ExecutionContext, us
     }
   })());
   return out.response;
+}
+
+// POST /v1/tools/run { name, arguments }: a connected-app tool, run for Lumio Browser.
+export async function runTool(request: Request, env: Env, user: User) {
+  const body = await request.json<{ name?: unknown; arguments?: unknown }>().catch(() => null);
+  const name = typeof body?.name === 'string' ? body.name : '';
+  const definition = toolsFor(await connectedApps(env, user.id)).find((t) => t.function.name === name);
+  if (!definition) return fail('That app isn’t connected. Connect it from the + menu.', 400, 'tool_not_allowed');
+  const recent = await env.DB.prepare("SELECT COUNT(*) AS n FROM steps WHERE owner = ?1 AND created_at >= ?2").bind(user.id, Date.now() - 60_000).first<{ n: number }>();
+  if ((recent?.n ?? 0) >= STEPS_PER_MINUTE * 2) return fail('Slow down a little.', 429, 'rate_limited');
+  let args: Record<string, unknown>;
+  try { args = parseToolArgs(definition, typeof body?.arguments === 'string' ? body.arguments : JSON.stringify(body?.arguments ?? {})); } catch (err) {
+    return fail(err instanceof AgentError ? err.message : 'Invalid arguments.', 400, 'invalid_tool_arguments');
+  }
+  return json({ text: await runConnectionTool(env, user.id, name, args) });
 }

@@ -29,6 +29,8 @@ export function estimateInput(messages: { role: string; content: unknown }[]): n
 }
 
 export const BROWSER_AGENT_VERSION=1;
+// Up to 10 attached pictures plus the two newest screenshots.
+export const MAX_STEP_IMAGES=12;
 // One inexpensive model with tools and screenshots; people choose how hard it thinks.
 export const BROWSER_REASONING=['low','medium','high'] as const;
 export type BrowserReasoning=typeof BROWSER_REASONING[number];
@@ -45,8 +47,16 @@ const TAB=int(1,1_000_000,'Tab id (defaults to the active tab)');
 const PLAN_STEPS:Schema={type:'array',minItems:1,maxItems:12,items:{type:'object',properties:{title:str(100,1,'A short step, like "Compare prices"'),status:oneOf(['pending','in_progress','done'])},required:['title','status'],additionalProperties:false}};
 const tool=(name:string,description:string,properties:Record<string,Schema>,required:string[]=[])=>({type:'function' as const,function:{name,description,parameters:{type:'object' as const,properties,required,additionalProperties:false as const}}});
 
+// Making pictures and files (Chat runs these on the server; Lumio Browser
+// runs them itself and saves the result to the computer).
+export const generateImageTool=tool('generate_image','Make a picture from a description: a photo, illustration, logo, icon, poster, diagram-like art. Only when the user asks for an image. It uses the user’s plan, so make one image per request unless they ask for more. Write a detailed prompt (subject, style, setting, colors, text to include).',{prompt:str(4000,1,'A detailed description of the image'),aspect:oneOf(['square','portrait','landscape'])},['prompt']);
+export const createDocumentTool=tool('create_document','Create a file the user can download: a PDF, Word document (docx), PowerPoint deck (pptx), Markdown, plain text, CSV (for spreadsheets/Excel) or HTML page. Use it when they ask for a document, report, letter, résumé, contract, presentation, table or any file. Write the complete content: Markdown for pdf/docx/md/html (headings, lists, tables, bold); for pptx, Markdown where each ## heading is one slide title (no “Slide 1:” numbering) with 3-6 short bullet points under it, starting with a # heading and one subtitle line for the title slide; plain text for txt; CSV rows for csv. After creating it, reply with a short note instead of repeating the content.',{title:str(120,1,'File title, like "Q3 Sales Report"'),format:oneOf(['pdf','docx','pptx','md','txt','csv','html']),content:str(200000,1,'The full content')},['title','format','content']);
+export const chatTools=[generateImageTool,createDocumentTool];
+
 // Definitions belong to the server. The browser can only choose a subset by name.
 export const browserAgentTools=[
+ generateImageTool,
+ createDocumentTool,
  tool('read_page','Read the current page: title, URL, visible text, and a numbered list of interactive elements ([ref] numbers). Call this before clicking or typing, and again after the page changes.',{tab_id:TAB,include_text:bool('Include page text (default true). Set false for just the elements.')}),
  tool('click','Click an element by its [ref] from read_page.',{ref:int(1,100000,'Element ref from read_page'),double:bool('Double-click'),tab_id:TAB},['ref']),
  tool('type','Type text into a field by its [ref]. Replaces what is there unless clear=false. Set submit=true to press Enter afterwards. Refuses password, payment and ID fields.',{ref:int(1,100000),text:str(20000),submit:bool('Press Enter after typing'),clear:bool('Replace existing text (default true)'),tab_id:TAB},['ref','text']),
@@ -147,9 +157,20 @@ export class ToolArgumentsError extends AgentError{
  tool:string;detail:string;
  constructor(tool:string,detail:string){super('The model returned invalid tool arguments.',400,'invalid_tool_arguments');this.tool=tool;this.detail=detail}
 }
-export function validateBrowserToolCall(value:unknown,allowed:string[]):NativeToolCall{
+// Parses (and fixes small slips in) one tool call's arguments for a definition.
+export function parseToolArgs(definition:{function:{name:string;parameters:unknown}},raw:string):Record<string,unknown>{
+ let args:unknown;try{args=parseArgs(raw)}catch{throw new ToolArgumentsError(definition.function.name,'the arguments are not valid JSON')}
+ args=repairArgs(args,definition.function.parameters as Schema);
+ const problem=schemaError(args,definition.function.parameters as Schema);
+ if(problem)throw new ToolArgumentsError(definition.function.name,problem);
+ return args as Record<string,unknown>;
+}
+
+// `extra`: more tool definitions this person may use (their connected apps).
+type ToolDef={type:'function';function:{name:string;description:string;parameters:unknown}};
+export function validateBrowserToolCall(value:unknown,allowed:string[],extra:ToolDef[]=[]):NativeToolCall{
  if(!object(value)||Object.keys(value).some(key=>!['id','type','function'].includes(key))||!validId(value.id)||value.type!=='function'||!object(value.function)||Object.keys(value.function).some(key=>!['name','arguments'].includes(key))||typeof value.function.name!=='string'||typeof value.function.arguments!=='string'||value.function.arguments.length>100000)throw new AgentError('Invalid tool call.',400,'invalid_tool_call');
- const definition=browserAgentTools.find(item=>item.function.name===(value.function as {name:string}).name);
+ const definition=[...browserAgentTools,...extra].find(item=>item.function.name===(value.function as {name:string}).name);
  if(!definition||!allowed.includes(definition.function.name))throw new ToolArgumentsError(String((value.function as {name:string}).name).slice(0,80),`there is no tool named "${String((value.function as {name:string}).name).slice(0,80)}" right now`);
  let args:unknown;try{args=parseArgs(value.function.arguments)}catch{throw new ToolArgumentsError(definition.function.name,'the arguments are not valid JSON')}
  args=repairArgs(args,definition.function.parameters as Schema);
@@ -174,14 +195,14 @@ function readContext(value:unknown):BrowserContext{
 }
 
 // Mirrors validateDesktopStep, with the browser's tools and context.
-export function validateBrowserStep(value:unknown):BrowserStep{
+export function validateBrowserStep(value:unknown,extra:ToolDef[]=[]):BrowserStep{
  if(!object(value)||Object.keys(value).some(key=>!['version','taskId','runId','stepId','model','messages','tools','context','reasoning'].includes(key))||value.version!==BROWSER_AGENT_VERSION||!validId(value.taskId)||!validId(value.runId)||!validId(value.stepId)||typeof value.model!=='string')throw new AgentError('Invalid browser step.');
  const context=readContext(value.context);
- const possible=browserAgentTools.map(item=>item.function.name).filter(name=>(context.computer||!computerTools.has(name))&&(context.platform==='mac'||name!=='run_applescript'));
+ const possible=[...browserAgentTools.map(item=>item.function.name).filter(name=>(context.computer||!computerTools.has(name))&&(context.platform==='mac'||name!=='run_applescript')),...extra.map(item=>item.function.name)];
  if(!Array.isArray(value.tools)||value.tools.length>possible.length||!value.tools.every(name=>typeof name==='string'&&possible.includes(name))||new Set(value.tools).size!==value.tools.length)throw new AgentError('Invalid tool capabilities.',400,'tool_not_allowed');
  const tools=value.tools as string[];
  if(!Array.isArray(value.messages)||!value.messages.length||value.messages.length>160)throw new AgentError('Compact this conversation before continuing.',413,'context_too_large');
- const history=browserAgentTools.map(item=>item.function.name);
+ const history=[...browserAgentTools,...extra].map(item=>item.function.name);
  const messages:AgentMessage[]=[],pending=new Set<string>(),seen=new Set<string>();let images=0;
  for(const raw of value.messages){
   if(!object(raw)||Object.keys(raw).some(key=>!['role','content','tool_calls','tool_call_id'].includes(key))||!['user','assistant','tool'].includes(String(raw.role)))throw new AgentError('Invalid message role.');
@@ -195,9 +216,9 @@ export function validateBrowserStep(value:unknown):BrowserStep{
   let content:AgentMessage['content'];
   if(typeof raw.content==='string'&&raw.content.length<=(role==='user'?32000:64000))content=raw.content;
   else if(raw.content===null&&role==='assistant'&&Array.isArray(raw.tool_calls)&&raw.tool_calls.length)content=null;
-  else if(role==='user'&&Array.isArray(raw.content)&&raw.content.length>0&&raw.content.length<=8){
+  else if(role==='user'&&Array.isArray(raw.content)&&raw.content.length>0&&raw.content.length<=32){
    content=raw.content.map(part=>{
-    if(object(part)&&part.type==='text'&&typeof part.text==='string'&&part.text.length<=32000&&Object.keys(part).every(key=>['type','text'].includes(key)))return {type:'text' as const,text:part.text};
+    if(object(part)&&part.type==='text'&&typeof part.text==='string'&&part.text.length<=300000&&Object.keys(part).every(key=>['type','text'].includes(key)))return {type:'text' as const,text:part.text}; // attached documents can be long
     if(object(part)&&part.type==='image_url'&&object(part.image_url)&&Object.keys(part).every(key=>['type','image_url'].includes(key))&&Object.keys(part.image_url).every(key=>key==='url')&&typeof part.image_url.url==='string'&&part.image_url.url.length<=2_000_000&&/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(part.image_url.url)){images++;return {type:'image_url' as const,image_url:{url:part.image_url.url}}}
     throw new AgentError('Invalid image or text content.');
    });
@@ -205,13 +226,13 @@ export function validateBrowserStep(value:unknown):BrowserStep{
   let calls:NativeToolCall[]|undefined;
   if(raw.tool_calls!==undefined){
    if(role!=='assistant'||!Array.isArray(raw.tool_calls)||!raw.tool_calls.length||raw.tool_calls.length>12)throw new AgentError('Invalid assistant tool calls.');
-   calls=raw.tool_calls.map(call=>validateBrowserToolCall(call,history));
+   calls=raw.tool_calls.map(call=>validateBrowserToolCall(call,history,extra));
    for(const call of calls){if(seen.has(call.id))throw new AgentError('Duplicate tool call ID.');seen.add(call.id);pending.add(call.id)}
   }
   messages.push({role,content,...(calls?{tool_calls:calls}:{})});
  }
  if(messages[0].role!=='user'||pending.size||messages.at(-1)!.role==='assistant')throw new AgentError('End with a user message or complete tool results.',400,'invalid_tool_sequence');
- if(images>2)throw new AgentError('Send at most two screenshots per step.',400,'image_not_supported');
+ if(images>MAX_STEP_IMAGES)throw new AgentError(`Send at most ${MAX_STEP_IMAGES} pictures per step.`,400,'image_not_supported');
  if(value.reasoning!==undefined&&!BROWSER_REASONING.includes(value.reasoning as BrowserReasoning))throw new AgentError('Invalid reasoning level.');
  const reasoning=(value.reasoning??'medium') as BrowserReasoning;
  const step:BrowserStep={version:1,taskId:value.taskId,runId:value.runId,stepId:value.stepId,model:value.model,messages,tools,workflow:'build',context,reasoning};

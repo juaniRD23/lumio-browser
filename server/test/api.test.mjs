@@ -8,6 +8,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import worker from '../src/index.ts';
 import { BROWSER_DEFAULT, CHAT_DEFAULT, ceiling, findModel } from '../src/models.ts';
+import { IMAGE_MODEL } from '../src/images.ts';
+import { PLANS, weeklyBudget } from '../src/usage.ts';
 
 const SITE = 'https://lumio.test';
 const OR = 'https://openrouter.test/api/v1';
@@ -15,8 +17,12 @@ const GOOGLE_TOKEN = 'https://google.test/token';
 const STRIPE = 'https://stripe.test';
 const CLIENT_ID = 'client-123.apps.googleusercontent.com';
 const WHSEC = 'whsec_test_secret';
+const MS_AUTH = 'https://ms.test/authorize';
+const MS_TOKEN = 'https://ms.test/token';
+const GAPI = 'https://gapi.test';
+const GRAPH = 'https://graph.test/v1.0';
 
-let sql, env, calls, reply, pending, stripeState;
+let sql, env, calls, reply, imageReply, apiReply, pending, stripeState, r2;
 
 function d1(db) {
   return {
@@ -41,30 +47,59 @@ const textReply = (text, cost = 0.000321) => sse([
   { choices: [], usage: { prompt_tokens: 3000, completion_tokens: 40, total_tokens: 3040, cost } },
   '[DONE]',
 ]);
+// A tiny PNG and an R2 stand-in.
+const PNG = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='), (c) => c.charCodeAt(0));
+const PNG_URL = 'data:image/png;base64,' + Buffer.from(PNG).toString('base64');
+function bucket() {
+  const store = new Map();
+  return {
+    store,
+    async put(key, value, opts) { store.set(key, { bytes: new Uint8Array(value), type: opts?.httpMetadata?.contentType }); },
+    async get(key) {
+      const o = store.get(key);
+      return o ? { body: new Blob([o.bytes]).stream(), arrayBuffer: async () => o.bytes.buffer.slice(o.bytes.byteOffset, o.bytes.byteOffset + o.bytes.byteLength) } : null;
+    },
+    async delete(keys) { for (const k of [].concat(keys)) store.delete(k); },
+  };
+}
 const jwt = (claims) => ['e30', Buffer.from(JSON.stringify(claims)).toString('base64url'), 'sig'].join('.');
 
 beforeEach(() => {
   sql = new DatabaseSync(':memory:');
   sql.exec(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'));
   env = {
-    DB: d1(sql), OPENROUTER_API_KEY: 'sk-or-test', OPENROUTER_BASE: OR,
+    DB: d1(sql), FILES: (r2 = bucket()), OPENROUTER_API_KEY: 'sk-or-test', OPENROUTER_BASE: OR,
     GOOGLE_CLIENT_ID: CLIENT_ID, GOOGLE_CLIENT_SECRET: 'google-secret', GOOGLE_AUTH_URL: 'https://google.test/auth', GOOGLE_TOKEN_URL: GOOGLE_TOKEN,
     STRIPE_SECRET_KEY: 'rk_test_123', STRIPE_WEBHOOK_SECRET: WHSEC, STRIPE_API: STRIPE,
+    MICROSOFT_CLIENT_ID: 'ms-client', MICROSOFT_CLIENT_SECRET: 'ms-secret', MICROSOFT_AUTH_URL: MS_AUTH, MICROSOFT_TOKEN_URL: MS_TOKEN,
+    GOOGLE_API: GAPI, GRAPH_API: GRAPH, CONNECTIONS_KEY: Buffer.from(crypto.randomBytes(32)).toString('base64'),
   };
-  calls = { or: [], google: [], stripe: [] };
+  calls = { or: [], google: [], stripe: [], api: [], revoked: [] };
+  apiReply = () => Response.json({}, { status: 404 });
   reply = () => textReply('Hello from Luna.');
+  imageReply = () => Response.json({ choices: [{ message: { role: 'assistant', content: '', images: [{ type: 'image_url', image_url: { url: PNG_URL } }] } }], usage: { prompt_tokens: 20, completion_tokens: 1100, cost: 0.0094 } });
   pending = [];
   stripeState = { subscriptions: {} };
   globalThis.fetch = async (url, opts = {}) => {
     const u = String(url);
-    if (u === `${OR}/chat/completions`) { calls.or.push({ headers: opts.headers, body: JSON.parse(opts.body) }); return reply(); }
-    if (u === GOOGLE_TOKEN) {
+    if (u === `${OR}/chat/completions`) {
+      const body = JSON.parse(opts.body);
+      calls.or.push({ headers: opts.headers, body });
+      return body.model === IMAGE_MODEL.id ? imageReply(body) : reply(body);
+    }
+    if (u === GOOGLE_TOKEN || u === MS_TOKEN) {
       const body = Object.fromEntries(new URLSearchParams(String(opts.body)));
       calls.google.push(body);
+      const ms = u === MS_TOKEN;
+      if (body.grant_type === 'refresh_token') return Response.json({ access_token: `${ms ? 'm' : 'g'}-access-${calls.google.filter((c) => c.grant_type === 'refresh_token').length + 1}`, expires_in: 3600 });
+      if (body.code === 'conn-google') return Response.json({ access_token: 'g-access-1', refresh_token: 'g-refresh', expires_in: 3600, scope: 'openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.readonly', id_token: jwt({ email: 'sam@gmail.com' }) });
+      if (body.code === 'conn-ms') return Response.json({ access_token: 'm-access-1', refresh_token: 'm-refresh', expires_in: 3600, scope: 'Files.Read User.Read openid email', id_token: jwt({ preferred_username: 'sam@outlook.com' }) });
       const who = { good: { sub: 'g-111', email: 'Sam@Example.com', name: 'Sam Tester' }, other: { sub: 'g-222', email: 'lee@example.com', name: 'Lee' } }[body.code];
       if (!who || body.client_secret !== 'google-secret' || !body.code_verifier) return Response.json({ error: 'invalid_grant' }, { status: 400 });
       return Response.json({ id_token: jwt({ iss: 'https://accounts.google.com', aud: CLIENT_ID, email_verified: true, exp: Math.floor(Date.now() / 1000) + 3600, ...who }) });
     }
+    if (u.startsWith(GAPI) || u.startsWith(GRAPH)) { calls.api.push({ url: u, auth: opts.headers?.authorization }); return apiReply(u, opts); }
+    if (u.startsWith('https://oauth2.googleapis.com/revoke')) { calls.revoked.push(u); return new Response('', { status: 200 }); }
     if (u.startsWith(STRIPE)) {
       const path = new URL(u).pathname;
       const params = opts.method === 'POST' ? Object.fromEntries(new URLSearchParams(String(opts.body))) : Object.fromEntries(new URL(u).searchParams);
@@ -91,10 +126,10 @@ function call(path, { cookie, token, method = 'GET', body, origin = SITE, header
     headers: {
       ...(cookie ? { cookie: `__Host-lumio_session=${cookie}` } : {}),
       ...(token ? { authorization: `Bearer ${token}` } : {}),
-      ...(body && method !== 'GET' ? { 'content-type': 'application/json', origin } : {}),
+      ...(body && method !== 'GET' ? { 'content-type': body instanceof Uint8Array ? 'application/octet-stream' : 'application/json', origin } : {}),
       ...headers,
     },
-    body: body ? (typeof body === 'string' ? body : JSON.stringify(body)) : undefined,
+    body: body ? (typeof body === 'string' || body instanceof Uint8Array ? body : JSON.stringify(body)) : undefined,
   }), env, ctx);
 }
 const events = async (res) => (await res.text()).trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
@@ -196,7 +231,7 @@ test('the signed webhook sets the plan from the subscription, and ignores other 
   assert.deepEqual(await (await hook(completed)).json(), { ok: true, duplicate: true });
   const usage = (await (await call('/api/usage', { cookie: token })).json()).usage;
   assert.equal(usage.planName, 'Pro');
-  assert.deepEqual(usage.windows.map((w) => [w.id, w.limit]), [['weekly', 13750000]]);
+  assert.deepEqual(usage.windows.map((w) => [w.id, w.limit]), [['weekly', Math.floor(PLANS.pro.weekly * 1e6)]]);
   // A Fifty Sites payment on the same Stripe account changes nothing here.
   const other = { id: 'evt_2', type: 'checkout.session.completed', data: { object: { mode: 'payment', customer: 'cus_9', metadata: {} } } };
   assert.deepEqual(await (await hook(other)).json(), { ok: true, result: 'ignored' });
@@ -257,7 +292,7 @@ test('web Chat streams a reply, saves the conversation, and bills the allowance'
 
 test('out of allowance, Chat and the browser are refused before any model call', async () => {
   const { token } = await signIn();
-  sql.prepare("INSERT INTO steps (key, owner, plan, kind, request_hash, status, held_microusd, cost_microusd, created_at) VALUES ('old', ?, 'free', 'chat', 'h', 'done', 0, 7130, ?)").run(userRow().id, Date.now() - 1000);
+  sql.prepare("INSERT INTO steps (key, owner, plan, kind, request_hash, status, held_microusd, cost_microusd, created_at) VALUES ('old', ?, 'free', 'chat', 'h', 'done', 0, 49950, ?)").run(userRow().id, Date.now() - 1000);
   const res = await call('/api/chat', { cookie: token, method: 'POST', body: { text: 'hi' } });
   assert.equal(res.status, 429);
   const body = await res.json();
@@ -275,7 +310,7 @@ test('browser: capabilities, a streamed step, tool calls, replays and the Free d
   assert.equal(caps.model.id, BROWSER_DEFAULT);
   assert.ok(caps.models.every((m) => m.available));
   assert.ok(caps.tools.includes('update_plan'));
-  assert.deepEqual(caps.usage.windows.map((w) => [w.id, w.limit]), [['fiveHour', 7142], ['weekly', 50000]]);
+  assert.deepEqual(caps.usage.windows.map((w) => [w.id, w.limit]), [['weekly', 50000]], 'no 5-hour limit');
 
   const ev = await events(await call('/v1/agent', { token, method: 'POST', body: step({ reasoning: 'high' }) }));
   await settled();
@@ -394,4 +429,235 @@ test('browser: a model that is not a browser model gets the browser default', as
   await events(await call('/v1/agent', { token, method: 'POST', body: step({ model: 'anthropic/claude-opus-5.5' }) }));
   await settled();
   assert.equal(calls.or[0].body.model, BROWSER_DEFAULT);
+});
+
+// ---------------------------------------------------------------- plans, files, pictures, documents
+test('plan budgets leave 15% profit after fees, with no 5-hour limit on any plan', async () => {
+  // Price - 15% profit - Stripe (3.6% + $0.30) - OpenRouter's 5.5% fee, per week.
+  assert.equal(weeklyBudget(20), 3.48);
+  assert.equal(weeklyBudget(100), 17.67);
+  assert.equal(weeklyBudget(200), 35.42);
+  for (const id of ['plus', 'pro', 'max']) {
+    const p = PLANS[id];
+    const monthlyAi = p.weekly * (365.25 / 12 / 7) * 1.055;
+    const fees = p.price * 0.036 + 0.3;
+    const profit = p.price - monthlyAi - fees;
+    assert.ok(profit >= p.price * 0.15 && profit < p.price * 0.151, `${id}: ${profit}`);
+  }
+  const plans = (await (await call('/api/billing/plans')).json()).plans;
+  assert.deepEqual(plans.map((p) => p.weeklyUsd), [0.05, 3.48, 17.67, 35.42]);
+});
+
+test('Chat: attach pictures and documents; the model sees them; only the owner can read them', async () => {
+  const { token } = await signIn();
+  const up = await call('/api/files', { cookie: token, method: 'POST', body: PNG, headers: { 'content-type': 'image/png', 'x-file-name': encodeURIComponent('cat photo.png') } });
+  const pic = (await up.json()).file;
+  assert.equal(pic.kind, 'image');
+  assert.equal(pic.url, `/api/files/${pic.id}`);
+  assert.ok(r2.store.has(`files/${pic.id}`));
+  const doc = (await (await call('/api/files', { cookie: token, method: 'POST', body: { name: 'notes.pdf', mime: 'application/pdf', text: 'Budget: $4,200', pages: 3 } })).json()).file;
+  assert.deepEqual({ kind: doc.kind, name: doc.name, pages: doc.pages }, { kind: 'text', name: 'notes.pdf', pages: 3 });
+  // Not a picture, or too many files: refused.
+  assert.equal((await call('/api/files', { cookie: token, method: 'POST', body: 'hello', headers: { 'content-type': 'image/png' } })).status, 415);
+  assert.equal((await call('/api/chat', { cookie: token, method: 'POST', body: { text: 'hi', files: Array.from({ length: 11 }, (_, i) => `f_${String(i).padStart(24, '0')}`) } })).status, 400);
+
+  const ev = await events(await call('/api/chat', { cookie: token, method: 'POST', body: { text: 'What is in these?', files: [pic.id, doc.id] } }));
+  await settled();
+  assert.equal(ev.at(-1).type, 'done');
+  const userMsg = calls.or[0].body.messages.at(-1);
+  assert.equal(userMsg.role, 'user');
+  assert.ok(userMsg.content.some((p) => p.type === 'image_url' && p.image_url.url === PNG_URL));
+  assert.ok(userMsg.content.some((p) => p.type === 'text' && p.text.includes('<file name="notes.pdf" pages="3">') && p.text.includes('Budget: $4,200')));
+  assert.equal(userMsg.content.at(-1).text, 'What is in these?');
+  const chat = await (await call(`/api/chats/${ev[0].chatId}`, { cookie: token })).json();
+  assert.deepEqual(chat.messages[0].files.map((f) => f.id), [pic.id, doc.id]);
+  // The picture is the owner's only; a used attachment can't move to another chat.
+  assert.equal((await call(pic.url, { cookie: token })).headers.get('content-type'), 'image/png');
+  const other = await signIn('other');
+  assert.equal((await call(pic.url, { cookie: other.token })).status, 404);
+  assert.equal((await call('/api/chat', { cookie: other.token, method: 'POST', body: { text: 'mine?', files: [pic.id] } })).status, 400);
+  // Deleting the chat deletes its files.
+  await call(`/api/chats/${ev[0].chatId}`, { cookie: token, method: 'DELETE', body: {} });
+  assert.equal(r2.store.size, 0);
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM files').get().n, 0);
+});
+
+test('Chat: Lumio makes a picture (cheapest image model, billed) and writes a document', async () => {
+  const { token } = await signIn();
+  sql.prepare("UPDATE users SET plan = 'plus'").run();
+  const toolCall = (name, args) => sse([{ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_t', type: 'function', function: { name, arguments: JSON.stringify(args) } }] }, finish_reason: 'tool_calls' }] }, { choices: [], usage: { prompt_tokens: 50, completion_tokens: 20, cost: 0.00001 } }]);
+  let n = 0;
+  reply = () => (n++ === 0 ? toolCall('generate_image', { prompt: 'A red fox in snow, watercolor', aspect: 'landscape' }) : textReply('Here is your fox.'));
+  const ev = await events(await call('/api/chat', { cookie: token, method: 'POST', body: { text: 'Draw a fox' } }));
+  await settled();
+  const img = calls.or.find((c) => c.body.model === IMAGE_MODEL.id).body;
+  assert.deepEqual(img.modalities, ['image', 'text']);
+  assert.equal(img.image_config.aspect_ratio, '3:2');
+  assert.equal(img.provider.data_collection, 'deny');
+  const file = ev.find((e) => e.type === 'file').file;
+  assert.equal(file.kind, 'image');
+  assert.equal(file.generated, true);
+  assert.equal(ev.at(-1).type, 'done');
+  assert.match(ev.filter((e) => e.type === 'delta').map((e) => e.content).join(''), /Here is your fox/);
+  assert.ok(calls.or[0].body.tools.some((t) => t.function.name === 'generate_image'));
+  assert.equal(calls.or.at(-1).body.messages.at(-1).role, 'tool');
+  assert.equal(sql.prepare("SELECT cost_microusd FROM steps WHERE kind = 'image'").get().cost_microusd, 9400);
+  const saved = await (await call(`/api/chats/${ev[0].chatId}`, { cookie: token })).json();
+  assert.equal(saved.messages[1].files[0].id, file.id);
+
+  // A document: kept as its content, downloadable as text by the page (which builds the PDF).
+  n = 0;
+  reply = () => (n++ === 0 ? toolCall('create_document', { title: 'Trip Plan', format: 'pdf', content: '# Lisbon\n\n- Day 1' }) : textReply('Your PDF is ready.'));
+  const ev2 = await events(await call('/api/chat', { cookie: token, method: 'POST', body: { chatId: ev[0].chatId, text: 'Make it a PDF' } }));
+  await settled();
+  const docFile = ev2.find((e) => e.type === 'file').file;
+  assert.deepEqual({ kind: docFile.kind, name: docFile.name, format: docFile.format }, { kind: 'document', name: 'Trip Plan.pdf', format: 'pdf' });
+  const got = await (await call(`/api/files/${docFile.id}`, { cookie: token })).json();
+  assert.equal(got.text, '# Lisbon\n\n- Day 1');
+  // The next turn tells the model what it made.
+  reply = () => textReply('ok');
+  await events(await call('/api/chat', { cookie: token, method: 'POST', body: { chatId: ev[0].chatId, text: 'thanks' } }));
+  await settled();
+  assert.ok(calls.or.at(-1).body.messages.some((m) => m.role === 'assistant' && /You made a picture \(“A red fox/.test(m.content)));
+});
+
+test('pictures: out of allowance is a plain refusal; Lumio Browser gets the picture inline', async () => {
+  const { token } = await signIn();
+  sql.prepare("INSERT INTO steps (key, owner, plan, kind, request_hash, status, held_microusd, cost_microusd, created_at) VALUES ('x', ?, 'free', 'chat', 'h', 'done', 0, 40000, ?)").run(userRow().id, Date.now() - 1000);
+  const refused = await call('/v1/images', { token, method: 'POST', body: { prompt: 'a cat' } });
+  assert.equal(refused.status, 429);
+  assert.equal((await refused.json()).code, 'usage_limit');
+  sql.prepare("UPDATE users SET plan = 'plus'").run();
+  const ok = await (await call('/v1/images', { token, method: 'POST', body: { prompt: 'a cat', aspect: 'portrait' } })).json();
+  assert.equal(ok.image, PNG_URL);
+  assert.equal(calls.or.at(-1).body.image_config.aspect_ratio, '2:3');
+  // The model refusing is a clear message, and nothing is charged.
+  imageReply = () => Response.json({ error: { message: 'Request blocked by safety system' } }, { status: 400 });
+  const no = await call('/v1/images', { token, method: 'POST', body: { prompt: 'something' } });
+  assert.equal((await no.json()).code, 'image_refused');
+  assert.equal(sql.prepare("SELECT cost_microusd FROM steps WHERE kind = 'image' AND status = 'failed'").get().cost_microusd, 0);
+});
+
+// ---------------------------------------------------------------- connections
+// A ZIP with stored (uncompressed) entries, enough for the Office reader.
+function zip(files) {
+  const enc = new TextEncoder();
+  const parts = [], central = [];
+  let offset = 0;
+  for (const [name, text] of Object.entries(files)) {
+    const n = enc.encode(name), d = enc.encode(text);
+    const local = new Uint8Array(30 + n.length);
+    const lv = new DataView(local.buffer);
+    lv.setUint32(0, 0x04034b50, true); lv.setUint32(18, d.length, true); lv.setUint32(22, d.length, true); lv.setUint16(26, n.length, true);
+    local.set(n, 30);
+    const c = new Uint8Array(46 + n.length);
+    const cv = new DataView(c.buffer);
+    cv.setUint32(0, 0x02014b50, true); cv.setUint32(20, d.length, true); cv.setUint32(24, d.length, true); cv.setUint16(28, n.length, true); cv.setUint32(42, offset, true);
+    c.set(n, 46);
+    parts.push(local, d); central.push(c);
+    offset += local.length + d.length;
+  }
+  const size = central.reduce((a, c) => a + c.length, 0);
+  const end = new Uint8Array(22);
+  const ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true); ev.setUint16(8, central.length, true); ev.setUint16(10, central.length, true); ev.setUint32(12, size, true); ev.setUint32(16, offset, true);
+  const all = [...parts, ...central, end];
+  const out = new Uint8Array(all.reduce((a, p) => a + p.length, 0));
+  let at = 0; for (const p of all) { out.set(p, at); at += p.length; }
+  return out;
+}
+const DOCX = zip({ 'word/document.xml': '<w:document><w:body><w:p><w:r><w:t>Quarterly plan</w:t></w:r></w:p><w:p><w:r><w:t>Grow sales &amp; hire</w:t></w:r></w:p></w:body></w:document>' });
+
+async function connect(token, app, code, provider) {
+  const start = await call(`/api/connect/${app}/start?next=/chat`, { cookie: token });
+  assert.equal(start.status, 302);
+  const auth = new URL(start.headers.get('location'));
+  const back = await call(`/api/connect/${provider}/callback?code=${code}&state=${auth.searchParams.get('state')}`, { cookie: token });
+  return { auth, location: back.headers.get('location') };
+}
+
+test('connections: connect Gmail with Google; tokens are encrypted; Chat searches mail; tokens refresh', async () => {
+  const { token } = await signIn();
+  const before = (await (await call('/api/connections', { cookie: token })).json()).apps;
+  assert.ok(before.length >= 9 && before.every((a) => a.available && !a.connected));
+  const { auth, location } = await connect(token, 'gmail', 'conn-google', 'google');
+  assert.equal(auth.origin + auth.pathname, 'https://google.test/auth');
+  assert.match(auth.searchParams.get('scope'), /gmail\.readonly/);
+  assert.equal(auth.searchParams.get('access_type'), 'offline');
+  assert.equal(auth.searchParams.get('redirect_uri'), `${SITE}/api/connect/google/callback`);
+  assert.equal(location, '/chat?connected=gmail');
+  const row = sql.prepare('SELECT * FROM connections').get();
+  assert.equal(row.account, 'sam@gmail.com');
+  assert.ok(!row.tokens.includes('g-access-1') && !row.tokens.includes('g-refresh'), 'tokens are encrypted');
+  const apps = (await (await call('/api/connections', { cookie: token })).json()).apps;
+  assert.deepEqual(apps.filter((a) => a.connected).map((a) => a.id), ['gmail']);
+
+  // Chat: the model gets Gmail tools and reads the inbox.
+  let n = 0;
+  reply = () => (n++ === 0 ? sse([{ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_g', type: 'function', function: { name: 'gmail_search', arguments: '{"query":"from:boss"}' } }] }, finish_reason: 'tool_calls' }] }]) : textReply('Your boss sent the Q3 numbers.'));
+  let first401 = true;
+  apiReply = (u, opts) => {
+    if (first401) { first401 = false; return new Response('', { status: 401 }); } // expired: refresh and retry
+    if (u.includes('/gmail/v1/users/me/messages?')) return Response.json({ messages: [{ id: 'm1' }] });
+    if (u.includes('/messages/m1?format=metadata')) return Response.json({ id: 'm1', snippet: 'See attached', payload: { headers: [{ name: 'From', value: 'Boss <boss@co.com>' }, { name: 'Subject', value: 'Q3 numbers' }, { name: 'Date', value: 'Tue' }] } });
+    if (u.includes('/messages/m1?format=full')) return Response.json({ payload: { headers: [{ name: 'Subject', value: 'Q3 numbers' }], parts: [{ mimeType: 'text/plain', body: { data: Buffer.from('Revenue up 12%').toString('base64url') } }] } });
+    return Response.json({}, { status: 404 });
+  };
+  const ev = await events(await call('/api/chat', { cookie: token, method: 'POST', body: { text: 'Anything from my boss?' } }));
+  await settled();
+  assert.ok(calls.or[0].body.tools.some((t) => t.function.name === 'gmail_search'));
+  assert.match(calls.or[0].body.messages[0].content, /Connected apps.*Gmail/);
+  assert.deepEqual(ev.find((e) => e.type === 'using'), { type: 'using', app: 'gmail', name: 'Gmail', tool: 'gmail_search' });
+  assert.match(calls.or[1].body.messages.at(-1).content, /Subject: Q3 numbers/);
+  assert.ok(calls.google.some((c) => c.grant_type === 'refresh_token' && c.refresh_token === 'g-refresh'));
+  assert.equal(calls.api.at(-1).auth, 'Bearer g-access-2');
+  // Turned off for this chat: no Gmail tools.
+  reply = () => textReply('ok');
+  await events(await call('/api/chat', { cookie: token, method: 'POST', body: { text: 'hi', apps: [] } }));
+  await settled();
+  assert.ok(!calls.or.at(-1).body.tools.some((t) => t.function.name.startsWith('gmail')));
+
+  // Lumio Browser runs the same tools through the server.
+  const caps = await (await call('/v1/agent', { token })).json();
+  assert.ok(caps.tools.includes('gmail_read'));
+  assert.deepEqual(caps.remoteTools.map((t) => t.app), ['Gmail', 'Gmail']);
+  const read = await (await call('/v1/tools/run', { token, method: 'POST', body: { name: 'gmail_read', arguments: '{"message_id":"m1"}' } })).json();
+  assert.match(read.text, /Revenue up 12%/);
+  assert.equal((await call('/v1/tools/run', { token, method: 'POST', body: { name: 'drive_search', arguments: '{"query":"x"}' } })).status, 400, 'Drive isn’t connected');
+
+  // Disconnecting the last Google app revokes and forgets the tokens.
+  const after = (await (await call('/api/connections/gmail/disconnect', { cookie: token, method: 'POST', body: {} })).json()).apps;
+  assert.ok(after.every((a) => !a.connected));
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM connections').get().n, 0);
+  assert.equal(calls.revoked.length, 1);
+});
+
+test('connections: Microsoft OneDrive (Word, PowerPoint, Excel) reads a Word file; Office uploads are read too', async () => {
+  const { token } = await signIn();
+  const { auth, location } = await connect(token, 'word', 'conn-ms', 'microsoft');
+  assert.equal(auth.origin + auth.pathname, MS_AUTH);
+  assert.match(auth.searchParams.get('scope'), /Files\.Read/);
+  assert.match(auth.searchParams.get('scope'), /offline_access/);
+  assert.equal(location, '/chat?connected=word');
+  const apps = (await (await call('/api/connections', { cookie: token })).json()).apps;
+  assert.deepEqual(apps.filter((a) => a.connected).map((a) => a.id), ['onedrive', 'word', 'powerpoint', 'excel']);
+  apiReply = (u) => {
+    if (u.endsWith('/content')) return new Response(DOCX);
+    if (u.includes('/me/drive/items/item1')) return Response.json({ id: 'item1', name: 'Plan.docx', size: DOCX.length, webUrl: 'https://onedrive.test/plan', file: { mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' } });
+    return Response.json({}, { status: 404 });
+  };
+  const read = await (await call('/v1/tools/run', { token, method: 'POST', body: { name: 'onedrive_read', arguments: { item_id: 'item1' } } })).json();
+  assert.match(read.text, /File: Plan\.docx[\s\S]*Quarterly plan\nGrow sales & hire/);
+  assert.equal(calls.api.at(-1).auth, 'Bearer m-access-1');
+  // A Word file attached in Chat is read on the server.
+  const up = await (await call('/api/files', { cookie: token, method: 'POST', body: DOCX, headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'x-file-name': 'Plan.docx' } })).json();
+  assert.equal(up.file.kind, 'text');
+  const doc = await (await call(`/api/files/${up.file.id}`, { cookie: token })).json();
+  assert.equal(doc.text, 'Quarterly plan\nGrow sales & hire');
+  // Someone else's callback can't land on this account.
+  const other = await signIn('other');
+  const start = await call('/api/connect/outlook/start?next=/chat', { cookie: token });
+  const state = new URL(start.headers.get('location')).searchParams.get('state');
+  const stolen = await call(`/api/connect/microsoft/callback?code=conn-ms&state=${state}`, { cookie: other.token });
+  assert.match(stolen.headers.get('location'), /connect_error=expired/);
 });

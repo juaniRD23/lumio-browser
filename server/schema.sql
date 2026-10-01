@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS steps (
   key TEXT PRIMARY KEY,
   owner TEXT NOT NULL,
   plan TEXT NOT NULL,
-  kind TEXT NOT NULL DEFAULT 'browser',  -- browser | chat
+  kind TEXT NOT NULL DEFAULT 'browser',  -- browser | chat | image
   request_hash TEXT NOT NULL,
   status TEXT NOT NULL,                  -- running | done | failed
   held_microusd INTEGER NOT NULL,
@@ -64,9 +64,49 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   chat_id TEXT NOT NULL,
   role TEXT NOT NULL,                    -- user | assistant
   content TEXT NOT NULL,
+  files TEXT,                            -- JSON array of file ids (attached, or made by Lumio)
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS chat_messages_chat ON chat_messages (chat_id, id);
+
+-- Files in Chat: pictures (bytes in R2 at files/<id>), attached documents (their
+-- text) and documents Lumio wrote (their content). chat_id is set once sent.
+CREATE TABLE IF NOT EXISTS files (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  chat_id TEXT,
+  kind TEXT NOT NULL,                    -- image | text | document
+  name TEXT NOT NULL,
+  mime TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  text TEXT,
+  meta TEXT,                             -- JSON: pages, prompt, format...
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS files_user ON files (user_id, created_at);
+CREATE INDEX IF NOT EXISTS files_chat ON files (chat_id);
+
+-- Connected apps (Google, Microsoft): the services allowed and the OAuth
+-- tokens, encrypted with CONNECTIONS_KEY.
+CREATE TABLE IF NOT EXISTS connections (
+  user_id TEXT NOT NULL,
+  provider TEXT NOT NULL,                -- google | microsoft
+  account TEXT,                          -- the connected account's email
+  services TEXT NOT NULL,                -- JSON: drive, gmail, calendar | mail, calendar, files
+  tokens TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, provider)
+);
+CREATE TABLE IF NOT EXISTS connect_states (
+  state TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  app TEXT NOT NULL,
+  verifier TEXT NOT NULL,
+  next TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
 
 -- Stripe webhook events already handled.
 CREATE TABLE IF NOT EXISTS stripe_events (

@@ -38,9 +38,26 @@
       <h1 id="title">New chat</h1>
     </header>
     <div class="thread" id="thread" aria-live="polite"></div>
+    <div class="drop" id="drop" hidden><div>Drop files to attach them</div></div>
     <form class="composer" id="composer">
+      <div class="tray" id="tray" hidden></div>
       <textarea id="prompt" rows="1" placeholder="Message Lumio" aria-label="Message Lumio"></textarea>
       <div class="composer-row">
+        <div class="pick">
+          <button type="button" class="round-btn" id="plus-btn" aria-haspopup="menu" aria-expanded="false" title="Add files and connections" aria-label="Add files and connections">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+          <div class="pop plus-pop" id="plus-pop" role="menu" aria-label="Add" hidden>
+            <button type="button" class="menu-row" id="add-files" role="menuitem">
+              <span class="mi"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 11-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg></span>
+              <span class="mt"><b>Add photos &amp; files</b><small>Pictures, PDFs, Word, PowerPoint, Excel, text — up to 10</small></span>
+            </button>
+            <div class="group">Connections</div>
+            <div id="apps" class="apps"><div class="apps-empty">Loading…</div></div>
+            <a class="pop-foot" href="/account#connections">Manage connections</a>
+          </div>
+          <input type="file" id="file-input" multiple hidden>
+        </div>
         <div class="pick">
           <button type="button" class="chip" id="effort-btn" aria-haspopup="dialog" aria-expanded="false" title="Thinking effort">
             <span class="bars" id="effort-bars" data-level="2" aria-hidden="true"><i></i><i></i><i></i></span>
@@ -63,6 +80,12 @@
           <div class="pop model-pop" id="model-pop" role="listbox" aria-label="Model" hidden></div>
         </div>
         <span class="spacer"></span>
+        <div class="pick">
+          <button type="button" class="round-btn ring-btn" id="usage-btn" aria-haspopup="dialog" aria-expanded="false" title="Usage" aria-label="Usage">
+            <svg class="ring" viewBox="0 0 24 24" aria-hidden="true"><circle class="ring-bg" cx="12" cy="12" r="8.5"/><circle class="ring-fg" id="ring-fg" cx="12" cy="12" r="8.5"/></svg>
+          </button>
+          <div class="pop usage-pop" id="usage-pop" role="dialog" aria-label="Usage" hidden></div>
+        </div>
         <button class="send" id="send" type="submit" aria-label="Send" disabled>
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
         </button>

@@ -1,12 +1,13 @@
-// The account page: profile, plan and allowance, plans with upgrade/switch
-// (Stripe Checkout or the billing portal), billing and sign-out.
+// The account page: profile, plan and allowance, connections, plans with
+// upgrade/switch (Stripe Checkout or the billing portal), billing and sign-out.
+import { appLogo } from '/applook.js';
 const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const DESCS = {
   free: 'Try Lumio AI in Chat and the browser. A few tasks each week.',
-  plus: '75× Free, plus Claude Sonnet, GPT-6.1 Sol, Gemini and Grok in Chat.',
-  pro: '275× Free, no 5-hour limit, and every model, including Claude Opus and GPT-6 Astra.',
-  max: '550× Free, no 5-hour limit, and every model.',
+  plus: '70× Free, plus Claude Sonnet, GPT-6.1 Sol, Gemini and Grok in Chat.',
+  pro: '350× Free, and every model, including Claude Opus and GPT-6 Astra.',
+  max: '700× Free, and every model.',
 };
 const ORDER = ['free', 'plus', 'pro', 'max'];
 
@@ -26,10 +27,25 @@ function avatar(el, a) {
 
 function renderUsage(u) {
   $('#plan-name').textContent = `Lumio ${u.planName}`;
+  const when = (t) => new Date(t).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   $('#meters').innerHTML = (u.windows || []).map((w) => {
     const left = w.limit ? Math.max(0, Math.round((w.remaining / w.limit) * 100)) : 0;
-    return `<div class="meter"><div class="row"><span>${esc(w.label)}</span><span>${left}% left</span></div><div class="bar"><i style="width:${left}%"></i></div></div>`;
+    const full = w.used > 0 && w.fullAt ? ` · fully refilled by ${esc(when(w.fullAt))}` : '';
+    return `<div class="meter"><div class="row"><span>${esc(w.label)}</span><span>${left}% left${full}</span></div><div class="bar"><i style="width:${left}%"></i></div></div>`;
   }).join('');
+}
+
+// Connections: Google Drive, Gmail, Calendar; Outlook, OneDrive (Word, PowerPoint, Excel).
+async function renderConnections() {
+  const data = await fetch('/api/connections').then((r) => r.json()).catch(() => null);
+  const apps = data?.apps || [];
+  $('#conn-list').innerHTML = apps.map((a) => `<div class="conn">${appLogo(a.id)}<span class="cn"><b>${esc(a.name)}</b><small>${esc(a.connected ? `Connected${a.account ? ` as ${a.account}` : ''}` : a.blurb)}</small></span>
+    ${a.connected ? `<button class="btn small" data-off="${a.id}">Disconnect</button>` : a.available ? `<a class="btn small" href="/api/connect/${a.id}/start?next=${encodeURIComponent('/account')}">Connect</a>` : '<span class="email">Soon</span>'}</div>`).join('') || '<div class="email">Couldn’t load connections.</div>';
+  $('#conn-list').querySelectorAll('[data-off]').forEach((b) => b.addEventListener('click', async () => {
+    b.disabled = true;
+    await post(`/api/connections/${b.dataset.off}/disconnect`).catch((err) => showError(err.message));
+    renderConnections();
+  }));
 }
 
 function renderPlans(plans, current, wanted) {
@@ -94,6 +110,13 @@ $('#sign-out').addEventListener('click', async () => {
   const q = new URLSearchParams(location.search);
   let u = await renderAll();
   if (!u) return;
+  renderConnections();
+  if (q.has('connected') || q.has('connect_error')) {
+    $('#welcome').hidden = false;
+    $('#welcome').textContent = q.has('connected') ? 'Connected. Lumio can use it in Chat and in Lumio Browser when you ask.' : 'That app wasn’t connected. Try again, and allow access when asked.';
+    history.replaceState(null, '', '/account#connections');
+    document.getElementById('connections').scrollIntoView({ behavior: 'smooth' });
+  }
   if (q.has('upgraded') || q.has('changed')) {
     // Stripe tells us about the new plan a moment later; wait for it.
     const before = u.plan;

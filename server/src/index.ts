@@ -10,15 +10,22 @@
 //   POST /api/billing/checkout | /api/billing/portal
 //   POST /api/stripe/webhook
 //   GET  /api/chats, GET|DELETE /api/chats/:id, POST /api/chat, GET /api/chat/models   (web Chat)
-//   GET  /v1/agent, POST /v1/agent, GET /v1/usage                 (Lumio Browser)
+//   POST /api/files, GET /api/files/:id                            (Chat attachments, made images and files)
+//   GET  /api/connections, GET /api/connect/:app/start, GET /api/connect/:provider/callback,
+//   POST /api/connections/:app/disconnect                          (connected apps)
+//   GET  /v1/agent, POST /v1/agent, GET /v1/usage, POST /v1/images, POST /v1/tools/run,
+//   POST /v1/extract                                               (Lumio Browser)
 //
 // Website requests use the session cookie; Lumio Browser sends the same
 // session as a bearer token. Cookie-authenticated POSTs must come from our own
 // pages (Origin check).
 import { accountJson, currentUser, googleCallback, googleStart, logout, readToken, type User } from './auth.ts';
 import { checkout, portal, webhook } from './billing.ts';
-import { capabilities, step } from './browser.ts';
+import { capabilities, runTool, step } from './browser.ts';
+import { connectCallback, connectStart, disconnect, listConnections } from './connections.ts';
 import { chatModels, deleteChat, getChat, listChats, send } from './chat.ts';
+import { download, extract, upload } from './files.ts';
+import { imageForBrowser } from './images.ts';
 import { PLANS, allowance } from './usage.ts';
 import { AgentError, type Env, fail, json, sameOrigin } from './util.ts';
 
@@ -44,6 +51,8 @@ export default {
       const user = await currentUser(request, env);
 
       if (path === '/api/account' && method === 'GET') return json(accountJson(user));
+      const cb = /^\/api\/connect\/(google|microsoft)\/callback$/.exec(path);
+      if (cb && method === 'GET') return await connectCallback(request, env, user, cb[1] as 'google' | 'microsoft');
       if (path === '/api/auth' && method === 'POST') {
         const body = await request.clone().json<{ action?: string }>().catch(() => null);
         if (body?.action === 'logout') return await logout(request, env);
@@ -78,6 +87,17 @@ function routeFor(path: string, method: string): Route | null {
   if (path === '/v1/agent' && method === 'GET') return (_r, env, _c, user) => capabilities(env, user);
   if (path === '/v1/agent' && method === 'POST') return step;
   if (path === '/v1/usage' && method === 'GET') return async (_r, env, _c, user) => json({ usage: await allowance(env, user.id, user.plan) });
+  if (path === '/v1/images' && method === 'POST') return (r, env, _c, user) => imageForBrowser(r, env, user);
+  if (path === '/api/files' && method === 'POST') return (r, env, _c, user) => upload(r, env, user);
+  if (path === '/v1/tools/run' && method === 'POST') return (r, env, _c, user) => runTool(r, env, user);
+  if (path === '/v1/extract' && method === 'POST') return (r) => extract(r);
+  if (path === '/api/connections' && method === 'GET') return (_r, env, _c, user) => listConnections(env, user);
+  const cs = /^\/api\/connect\/([a-z_]{2,40})\/start$/.exec(path);
+  if (cs && method === 'GET') return (r, env, _c, user) => connectStart(r, env, user, cs[1]);
+  const cd = /^\/api\/connections\/([a-z_]{2,40})\/disconnect$/.exec(path);
+  if (cd && method === 'POST') return (_r, env, _c, user) => disconnect(env, user, cd[1]);
+  const f = /^\/api\/files\/(f_[a-f0-9]{24})$/.exec(path);
+  if (f && method === 'GET') return (_r, env, _c, user) => download(env, user, f[1]);
   if (path === '/api/billing/checkout' && method === 'POST') return (r, env, _c, user) => checkout(r, env, user);
   if (path === '/api/billing/portal' && method === 'POST') return (r, env, _c, user) => portal(r, env, user);
   if (path === '/api/chats' && method === 'GET') return (_r, env, _c, user) => listChats(env, user);

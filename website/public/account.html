@@ -42,7 +42,13 @@
       <h2>Plan and usage</h2>
       <div class="plan-now"><span class="plan-name" id="plan-name">Free</span><span class="pill" id="plan-status" hidden></span><span class="email" id="renews"></span></div>
       <div class="meters" id="meters"></div>
-      <p class="email" style="margin:16px 0 0">Lumio Chat and Lumio Browser share this allowance. It refills continuously: the weekly limit counts the last 7 days.</p>
+      <p class="email" style="margin:16px 0 0" id="usage-note">Lumio Chat, pictures and Lumio Browser share this allowance. It counts the last 7 days, so it refills bit by bit. No 5-hour limits.</p>
+    </section>
+
+    <section class="panel" id="connections" aria-label="Connections">
+      <h2>Connections</h2>
+      <p class="email" style="margin:-6px 0 14px">Let Lumio read your email, calendar and files when you ask, in Chat and in Lumio Browser. Read-only, and you can disconnect anytime.</p>
+      <div class="conn-list" id="conn-list"><div class="email">Loading…</div></div>
     </section>
 
     <section class="panel" id="plans" aria-label="Plans">

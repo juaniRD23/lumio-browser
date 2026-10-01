@@ -4,8 +4,10 @@
 // Cloudflare Worker secret. With a Stripe key it also creates Lumio's plans
 // (Plus $20, Pro $100, Max $200 a month), its own billing-portal settings and
 // the webhook, all tagged app=lumio, and stores the webhook's signing secret.
+// It also creates the key that encrypts connected apps' tokens (once).
 // Keys only go to Cloudflare (wrangler) and Stripe; nothing is printed or saved.
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import crypto from 'node:crypto';
 import readline from 'node:readline';
 
 const host = (process.argv[process.argv.indexOf('--host') + 1] || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
@@ -118,5 +120,16 @@ const stripeKey = await ask('Stripe secret key (sk_test_… to try it first, sk_
 if (stripeKey) {
   if (!/^(sk|rk)_(test|live)_/.test(stripeKey)) { console.error('That doesn’t look like a Stripe secret key.'); process.exit(1); }
   await stripeSetup(stripeKey);
+}
+const microsoft = await ask('Microsoft app client secret (for Outlook/OneDrive connections): ');
+if (microsoft) { await putSecret('MICROSOFT_CLIENT_SECRET', microsoft); console.log('  ✓ Microsoft client secret stored'); }
+
+// Connections need a key to encrypt people's Google/Microsoft tokens. Made
+// once, here; never shown. (Replacing it would disconnect everyone.)
+let existing = '';
+try { existing = execFileSync('npx', ['--yes', 'wrangler', 'secret', 'list'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { /* not deployed yet */ }
+if (!existing.includes('"CONNECTIONS_KEY"')) {
+  await putSecret('CONNECTIONS_KEY', crypto.randomBytes(32).toString('base64'));
+  console.log('  ✓ Connections encryption key created');
 }
 console.log('\nDone.');

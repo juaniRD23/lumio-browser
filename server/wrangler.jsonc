@@ -17,8 +17,14 @@
   "d1_databases": [
     { "binding": "DB", "database_name": "lumio", "database_id": "b79bae52-d26e-4cec-ac8e-1d1870fca3f0" }
   ],
+  // Files people attach in Chat and images Lumio makes (private; served by /api/files/:id).
+  "r2_buckets": [
+    { "binding": "FILES", "bucket_name": "lumio-files" }
+  ],
   "vars": {
     "GOOGLE_CLIENT_ID": "1034095196731-3gfal3tuf9goo6ejtnhgi07h3pgtkhdr.apps.googleusercontent.com",
-    "FREE_DAILY_CAP_USD": "3"
+    "FREE_DAILY_CAP_USD": "3",
+    // Microsoft Entra app (Outlook, OneDrive connections); its secret is set by scripts/setup.mjs.
+    "MICROSOFT_CLIENT_ID": ""
   }
 }
