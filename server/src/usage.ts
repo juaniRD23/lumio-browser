@@ -100,12 +100,18 @@ export async function reserve(env: Env, { key, owner, plan, requestHash, kind, i
   return { maxOutput: output };
 }
 
+// USD to whole microUSD, rounding up but not over float noise
+// (0.000123 * 1e6 is 123.00000000000001).
+export const toMicro = (usd: number) => Math.ceil(usd * 1_000_000 - 1e-6);
+
 // What a call cost: OpenRouter's reported cost, or the model's list price.
 export function costOf(usage: { prompt_tokens?: number; completion_tokens?: number; cost?: number } | null, inputEstimate: number, model: Model) {
-  if (usage && typeof usage.cost === 'number' && usage.cost >= 0) return Math.ceil(usage.cost * 1_000_000);
+  if (usage && typeof usage.cost === 'number' && usage.cost >= 0) return toMicro(usage.cost);
   return Math.ceil((usage?.prompt_tokens ?? inputEstimate) * model.price.input + (usage?.completion_tokens ?? 0) * model.price.output);
 }
 
-export async function settle(env: Env, key: string, cost: number, status: 'done' | 'failed', result: string | null = null) {
-  await env.DB.prepare('UPDATE steps SET status = ?2, cost_microusd = ?3, result = ?4 WHERE key = ?1').bind(key, status, cost, result).run();
+// `genIds` are OpenRouter's IDs for the calls, so verifySpend (spend.ts) can check the cost.
+export async function settle(env: Env, key: string, cost: number, status: 'done' | 'failed', result: string | null = null, genIds: string[] = []) {
+  await env.DB.prepare('UPDATE steps SET status = ?2, cost_microusd = ?3, result = ?4, gen_ids = ?5 WHERE key = ?1')
+    .bind(key, status, cost, result, genIds.length ? JSON.stringify(genIds) : null).run();
 }

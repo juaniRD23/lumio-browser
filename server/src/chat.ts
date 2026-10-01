@@ -145,13 +145,14 @@ export async function send(request: Request, env: Env, ctx: ExecutionContext, us
     const key = await sha256(`chat|${user.id}|${randomHex(8)}`);
     const inputTokens = estimateInput(messages as { role: string; content: unknown }[]) + JSON.stringify(tools).length;
     const { maxOutput } = await reserve(env, { key, owner: user.id, plan: user.plan, requestHash: key, kind: 'chat', inputTokens, model, maxOutput: 16384, minOutput: 512 });
+    const ids: string[] = [];
     const gen = complete(env, model, {
       messages,
       ...(last ? {} : { tools, tool_choice: 'auto' }),
       max_tokens: maxOutput,
       reasoning: { effort: reasoning, exclude: true },
-    });
-    return { key, inputTokens, gen };
+    }, ids);
+    return { key, inputTokens, gen, ids };
   };
   let first = await round(false);
 
@@ -166,7 +167,7 @@ export async function send(request: Request, env: Env, ctx: ExecutionContext, us
     const made: FileRow[] = [];
     try {
       await out.send({ type: 'chat', chatId, title });
-      let call: { key: string; inputTokens: number; gen: AsyncGenerator<string, Reply> } | null = first;
+      let call: { key: string; inputTokens: number; gen: AsyncGenerator<string, Reply>; ids: string[] } | null = first;
       for (let n = 0; call; n++) {
         let reply: Reply | null = null;
         try {
@@ -176,9 +177,9 @@ export async function send(request: Request, env: Env, ctx: ExecutionContext, us
             content += r.value;
             await out.send({ type: 'delta', content: r.value });
           }
-          await settle(env, call.key, costOf(reply.usage, call.inputTokens, model), 'done');
+          await settle(env, call.key, costOf(reply.usage, call.inputTokens, model), 'done', null, call.ids);
         } catch (err) {
-          await settle(env, call.key, reply?.usage ? costOf(reply.usage, call.inputTokens, model) : 0, 'failed');
+          await settle(env, call.key, reply?.usage ? costOf(reply.usage, call.inputTokens, model) : 0, 'failed', null, call.ids);
           throw err;
         }
         if (!reply.calls.length) break;

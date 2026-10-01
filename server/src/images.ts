@@ -3,8 +3,8 @@
 // 2026-09-30: Gemini 3.1 Flash Lite Image $0.034 and ~3 s per picture
 // (Gemini 2.5 Flash Image $0.039, GPT-5 Image Mini $0.042 and ~40 s).
 import type { Plan } from './agent.ts';
-import { ProviderError } from './openrouter.ts';
-import { hold, LimitError, limits, settle } from './usage.ts';
+import { GEN_ID, ProviderError } from './openrouter.ts';
+import { hold, LimitError, limits, settle, toMicro } from './usage.ts';
 import { AgentError, type Env, fail, json, randomHex, sha256 } from './util.ts';
 
 export const IMAGE_MODEL = {
@@ -31,6 +31,7 @@ export async function makeImage(env: Env, user: { id: string; plan: Plan }, prom
   const key = await sha256(`image|${user.id}|${randomHex(8)}`);
   await hold(env, { key, owner: user.id, plan: user.plan, requestHash: key, kind: 'image', held: Math.ceil(IMAGE_MODEL.hold * 1_000_000) });
   let cost = 0;
+  const ids: string[] = []; // OpenRouter's ID for the call, for the cost double-check
   try {
     const base = (env.OPENROUTER_BASE || 'https://openrouter.ai/api/v1').replace(/\/$/, '');
     let res: Response;
@@ -51,7 +52,8 @@ export async function makeImage(env: Env, user: { id: string; plan: Plan }, prom
       throw new ProviderError('Couldn’t reach the image model. Try again.');
     }
     const data = await res.json<any>().catch(() => null);
-    if (typeof data?.usage?.cost === 'number') cost = Math.ceil(data.usage.cost * 1_000_000);
+    if (typeof data?.id === 'string' && GEN_ID.test(data.id)) ids.push(data.id);
+    if (typeof data?.usage?.cost === 'number') cost = toMicro(data.usage.cost);
     if (!res.ok || data?.error) {
       const msg = String(data?.error?.message || '');
       if (/safety|policy|moderation|content/i.test(msg)) throw new AgentError('The image model declined that request. Try describing it differently.', 422, 'image_refused');
@@ -60,10 +62,10 @@ export async function makeImage(env: Env, user: { id: string; plan: Plan }, prom
     const msg = data?.choices?.[0]?.message;
     const img = (msg?.images || []).map((i: any) => fromDataUrl(String(i?.image_url?.url || ''))).find(Boolean);
     if (!img) throw new AgentError('The image model didn’t return a picture. Try describing it differently.', 422, 'image_refused');
-    await settle(env, key, cost || Math.ceil(IMAGE_MODEL.hold * 1_000_000), 'done');
+    await settle(env, key, cost || Math.ceil(IMAGE_MODEL.hold * 1_000_000), 'done', null, ids);
     return { ...img, cost, text: typeof msg?.content === 'string' ? msg.content : '' };
   } catch (err) {
-    await settle(env, key, cost, 'failed');
+    await settle(env, key, cost, 'failed', null, ids);
     throw err;
   }
 }

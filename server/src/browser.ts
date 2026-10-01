@@ -62,12 +62,13 @@ export async function step(request: Request, env: Env, ctx: ExecutionContext, us
   const inputTokens = browserInputEstimate(s, extra);
   const { maxOutput } = await reserve(env, { key, owner: user.id, plan: user.plan, requestHash, kind: 'browser', inputTokens, model, now });
   const tools = [...browserAgentTools, ...extra].filter((t) => s.tools.includes(t.function.name));
+  const ids: string[] = []; // OpenRouter generation IDs, for the cost double-check
   const call = (messages: unknown[]) => complete(env, model, {
     messages,
     ...(tools.length ? { tools, tool_choice: 'auto' } : {}),
     max_tokens: maxOutput,
     reasoning: { effort: s.reasoning, exclude: true },
-  });
+  }, ids);
   // The unchanging start first (cached by the provider), what changes last.
   let messages: unknown[] = [{ role: 'system', content: browserSystemPrompt(s) }, ...withContextNote(s.messages, browserContextNote(s, maxOutput))];
   let gen = call(messages);
@@ -87,7 +88,7 @@ export async function step(request: Request, env: Env, ctx: ExecutionContext, us
       first = await gen.next();
     }
   } catch (err) {
-    await settle(env, key, 0, 'failed');
+    await settle(env, key, 0, 'failed', null, ids);
     throw err;
   }
 
@@ -142,11 +143,11 @@ export async function step(request: Request, env: Env, ctx: ExecutionContext, us
         finishReason: toolCalls.length ? 'tool_calls' : finish || 'stop',
         usage: { input: total.prompt_tokens, output: total.completion_tokens, total: total.total_tokens },
       }, true);
-      await settle(env, key, cost, 'done', out.saved());
+      await settle(env, key, cost, 'done', out.saved(), ids);
     } catch (err) {
       const e = err instanceof AgentError ? err : new AgentError('Lumio AI’s reply was cut off. Try again.', 502, 'provider_error');
       await out.send({ type: 'error', code: e.code, message: e.message });
-      await settle(env, key, cost, 'failed');
+      await settle(env, key, cost, 'failed', null, ids);
     } finally {
       await out.close();
     }

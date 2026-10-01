@@ -10,7 +10,12 @@ export class ProviderError extends AgentError {
   constructor(message: string, status = 502) { super(message, status, 'provider_unavailable'); }
 }
 
-export async function* complete(env: Env, model: Model, body: Record<string, unknown>): AsyncGenerator<string, Reply> {
+// OpenRouter's ID for one generation, used to look up its official cost later.
+export const GEN_ID = /^gen-[0-9A-Za-z-]{1,123}$/;
+
+// `ids` collects the generation's ID as soon as it arrives (even if the reply
+// breaks off later), so its cost can be checked against OpenRouter's records.
+export async function* complete(env: Env, model: Model, body: Record<string, unknown>, ids?: string[]): AsyncGenerator<string, Reply> {
   if (!env.OPENROUTER_API_KEY) throw new AgentError('Lumio AI isn’t connected to its model right now.', 503, 'model_not_connected');
   const base = (env.OPENROUTER_BASE || 'https://openrouter.ai/api/v1').replace(/\/$/, '');
   let res: Response;
@@ -49,6 +54,7 @@ export async function* complete(env: Env, model: Model, body: Record<string, unk
       if (data === '[DONE]') continue;
       let chunk: any;
       try { chunk = JSON.parse(data); } catch { continue; }
+      if (ids && typeof chunk.id === 'string' && GEN_ID.test(chunk.id) && !ids.includes(chunk.id)) ids.push(chunk.id);
       if (chunk.error) throw new ProviderError(chunk.error.message || 'The model stopped with an error.');
       if (chunk.usage) out.usage = chunk.usage;
       const choice = chunk.choices?.[0];

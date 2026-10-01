@@ -15,6 +15,10 @@
 //   POST /api/connections/:app/disconnect                          (connected apps)
 //   GET  /v1/agent, POST /v1/agent, GET /v1/usage, POST /v1/images, POST /v1/tools/run,
 //   POST /v1/extract                                               (Lumio Browser)
+//   GET  /api/admin/spend   AI spend vs OpenRouter (the owner only; the /admin page)
+//
+// Every 5 minutes (cron trigger) recent AI calls are checked against
+// OpenRouter's records of what they cost (spend.ts).
 //
 // Website requests use the session cookie; Lumio Browser sends the same
 // session as a bearer token. Cookie-authenticated POSTs must come from our own
@@ -26,6 +30,7 @@ import { connectCallback, connectStart, disconnect, listConnections } from './co
 import { chatModels, deleteChat, getChat, listChats, send } from './chat.ts';
 import { download, extract, upload } from './files.ts';
 import { imageForBrowser } from './images.ts';
+import { spendReport, verifySpend } from './spend.ts';
 import { PLANS, allowance } from './usage.ts';
 import { AgentError, type Env, fail, json, sameOrigin } from './util.ts';
 
@@ -79,6 +84,10 @@ export default {
       return fail('Lumio hit a problem. Try again.', 500, 'server_error');
     }
   },
+
+  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(verifySpend(env).then((r) => { if (r.fixed) console.log('lumio spend: corrected', r.fixed, 'of', r.checked, 'calls'); }));
+  },
 };
 
 type Route = (request: Request, env: Env, ctx: ExecutionContext, user: User) => Promise<Response>;
@@ -103,6 +112,7 @@ function routeFor(path: string, method: string): Route | null {
   if (path === '/api/chats' && method === 'GET') return (_r, env, _c, user) => listChats(env, user);
   if (path === '/api/chat' && method === 'POST') return send;
   if (path === '/api/chat/models' && method === 'GET') return async (_r, _env, _c, user) => chatModels(user);
+  if (path === '/api/admin/spend' && method === 'GET') return (_r, env, _c, user) => spendReport(env, user);
   const m = /^\/api\/chats\/(c_[a-f0-9]{20})$/.exec(path);
   if (m && method === 'GET') return (_r, env, _c, user) => getChat(env, user, m[1]);
   if (m && method === 'DELETE') return (_r, env, _c, user) => deleteChat(env, user, m[1]);

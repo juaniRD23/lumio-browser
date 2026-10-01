@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Spend · Lumio</title>
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#070708">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body class="app">
+  <header class="app-head">
+    <a class="brand" href="/" aria-label="Lumio home">
+      <svg class="mark" viewBox="0 0 64 64" width="22" height="22" aria-hidden="true"><path d="M35 12a21 21 0 1 0 17 19" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><circle cx="48" cy="17" r="5" fill="#86b7ff"/></svg>
+      <span>Lumio</span>
+    </a>
+    <nav aria-label="Main"><a href="/chat">Chat</a><a href="/account">Account</a><a href="/admin" aria-current="page">Spend</a></nav>
+    <span class="spacer"></span>
+    <button class="btn small" id="refresh" type="button">Refresh</button>
+  </header>
+
+  <main class="page spend" id="page">
+    <div class="spend-top">
+      <h1>Spend</h1>
+      <p class="sub">What Lumio AI costs you on OpenRouter, next to what Lumio counted for your users. <span id="updated"></span></p>
+    </div>
+    <div class="notice" id="status">Loading…</div>
+
+    <section class="spend-cards" id="cards" aria-label="OpenRouter charges" hidden></section>
+
+    <section class="panel" id="month" aria-label="This month" hidden>
+      <h2>This month</h2>
+      <div class="split" id="month-split"></div>
+      <p class="fine" id="checked"></p>
+    </section>
+
+    <section class="panel" id="money" aria-label="Plans and revenue" hidden>
+      <h2>Plans and revenue</h2>
+      <div class="split" id="money-split"></div>
+      <p class="fine">Revenue uses plan prices before Stripe fees. Each plan’s allowance already leaves room for fees and your 15% profit, so AI cost should stay well under revenue.</p>
+    </section>
+
+    <section class="panel" id="cap" aria-label="Free safety cap" hidden>
+      <h2>Free safety cap</h2>
+      <div class="meter"><div class="row"><span id="cap-label"></span><span id="cap-left"></span></div><div class="bar"><i id="cap-bar"></i></div></div>
+      <p class="fine">All Free accounts together, over the last 24 hours. When it’s full, Free users see “at capacity” until it frees up.</p>
+    </section>
+
+    <p class="fine" id="note" hidden>Days, weeks and months are in UTC, like OpenRouter (weeks start on Monday). OpenRouter’s numbers cover everything billed to Lumio’s key.</p>
+  </main>
+  <script type="module" src="/admin.js"></script>
+</body>
+</html>

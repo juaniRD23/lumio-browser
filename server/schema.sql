@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS users (
   plan_renews_at INTEGER,
   subscription_id TEXT,
   stripe_customer_id TEXT,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  role TEXT                              -- 'owner' can see the Spend page
 );
 CREATE INDEX IF NOT EXISTS users_customer ON users (stripe_customer_id);
 
@@ -45,9 +46,13 @@ CREATE TABLE IF NOT EXISTS steps (
   held_microusd INTEGER NOT NULL,
   cost_microusd INTEGER,
   result TEXT,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  gen_ids TEXT,                          -- OpenRouter generation IDs (JSON) for the double-check
+  verified_at INTEGER,                   -- when OpenRouter's record was looked up
+  billed_microusd INTEGER                -- OpenRouter's official cost (null if it couldn't be found)
 );
 CREATE INDEX IF NOT EXISTS steps_owner_time ON steps (owner, created_at);
+CREATE INDEX IF NOT EXISTS steps_unverified ON steps (verified_at, created_at);
 CREATE INDEX IF NOT EXISTS steps_plan_time ON steps (plan, created_at);
 
 -- Web Chat.

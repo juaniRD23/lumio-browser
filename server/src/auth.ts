@@ -11,6 +11,7 @@ export type User = {
   id: string; email: string; name: string | null; picture: string | null;
   plan: Plan; plan_status: string | null; plan_renews_at: number | null;
   stripe_customer_id: string | null; subscription_id: string | null; created_at: number;
+  role?: string | null; // 'owner' sees the Spend page
 };
 
 export function cookieName(url: URL) { return url.protocol === 'https:' ? '__Host-lumio_session' : 'lumio_session'; }

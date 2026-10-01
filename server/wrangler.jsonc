@@ -21,6 +21,8 @@
   "r2_buckets": [
     { "binding": "FILES", "bucket_name": "lumio-files" }
   ],
+  // Checks recent AI calls against OpenRouter's records of what they cost (src/spend.ts).
+  "triggers": { "crons": ["*/5 * * * *"] },
   "vars": {
     "GOOGLE_CLIENT_ID": "1034095196731-3gfal3tuf9goo6ejtnhgi07h3pgtkhdr.apps.googleusercontent.com",
     "FREE_DAILY_CAP_USD": "3",

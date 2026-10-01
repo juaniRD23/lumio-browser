@@ -92,3 +92,25 @@ body.app { min-height: 100svh; display: flex; flex-direction: column; }
 .doc h2 { font: 600 18px var(--sans); margin: 30px 0 8px; }
 .doc p, .doc li { color: var(--dim); line-height: 1.7; }
 .doc a { color: var(--accent); }
+
+/* Spend (owner only): OpenRouter charges next to what Lumio counted */
+.spend .spend-top { display: grid; gap: 8px; }
+.spend .sub { color: var(--dim); font-size: 15px; }
+.spend-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.spend-card { border: 1px solid var(--line); border-radius: 20px; background: var(--card); padding: 22px; display: grid; gap: 4px; align-content: start; }
+.spend-card .label { font: 500 11px var(--mono); text-transform: uppercase; letter-spacing: .12em; color: var(--dim); margin-bottom: 6px; }
+.spend-card .big { font: 400 44px/1 var(--serif); letter-spacing: -.02em; }
+.spend-card .dim { color: var(--dim); font-size: 13px; }
+.spend-card .counted { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 14px; display: grid; gap: 2px; }
+.spend-card .counted span { color: var(--dim); font-size: 12.5px; }
+.spend-card .match { justify-self: start; margin-top: 12px; padding: 4px 10px; border-radius: 999px; font-size: 12.5px; background: #ffffff0d; color: var(--dim); }
+.spend-card .match.ok { background: #7ee2a81a; color: #9ff0c0; }
+.spend-card .match.warn { background: #ffb86b1a; color: #ffcf99; cursor: help; }
+.spend .split { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.spend .split div { display: grid; gap: 2px; padding: 12px 14px; border-radius: 14px; background: #ffffff06; border: 1px solid var(--line); }
+.spend .split span { color: var(--dim); font-size: 12.5px; }
+.spend .split b { font-weight: 600; font-size: 17px; font-variant-numeric: tabular-nums; }
+.spend .fine { color: var(--dim); font-size: 13px; margin-top: 12px; }
+.spend #note { margin-top: 0; }
+@media (max-width: 760px) { .spend-cards, .spend .split { grid-template-columns: 1fr 1fr; } .spend-cards .spend-card:last-child { grid-column: 1 / -1; } }
+@media (max-width: 480px) { .spend-cards, .spend .split { grid-template-columns: 1fr; } }
