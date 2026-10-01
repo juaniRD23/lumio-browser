@@ -7,7 +7,7 @@ import {
 } from './agent.ts';
 import type { User } from './auth.ts';
 import { appForTool, connectedApps, runConnectionTool, toolsFor } from './connections.ts';
-import { BROWSER_DEFAULT, browserModels, canUse, findModel, publicModel } from './models.ts';
+import { BROWSER_BACKUP, BROWSER_DEFAULT, browserModels, canUse, findModel, publicModel } from './models.ts';
 import { complete, ndjsonStream, type Reply, type Usage } from './openrouter.ts';
 import { allowance, costOf, planName, reserve, settle } from './usage.ts';
 import { AgentError, type Env, fail, json, sha256 } from './util.ts';
@@ -42,7 +42,7 @@ export async function step(request: Request, env: Env, ctx: ExecutionContext, us
   const now = Date.now();
   // The browser sends the model the server listed; anything else gets the default.
   const asked = findModel(s.model);
-  const model = asked?.browser && canUse(user.plan, asked) ? asked : findModel(BROWSER_DEFAULT)!;
+  let model = asked?.browser && canUse(user.plan, asked) ? asked : findModel(BROWSER_DEFAULT)!;
 
   // Retries of the same step replay its saved result instead of charging again.
   const key = await sha256(`${user.id}|${s.taskId}|${s.runId}|${s.stepId}`);
@@ -71,10 +71,20 @@ export async function step(request: Request, env: Env, ctx: ExecutionContext, us
   let messages: unknown[] = [{ role: 'system', content: browserSystemPrompt(s, maxOutput) }, ...s.messages];
   let gen = call(messages);
 
-  // Fail fast (with a plain error response) if the provider refuses outright.
+  // Fail fast (with a plain error response) if the provider refuses outright,
+  // after letting the backup model answer when the main one is down or busy.
+  // (The hold was sized for the pricier model, so it covers the backup.)
   let first: IteratorResult<string, Reply>;
   try {
-    first = await gen.next();
+    try {
+      first = await gen.next();
+    } catch (err) {
+      const backup = findModel(BROWSER_BACKUP)!;
+      if (!(err instanceof AgentError && err.code === 'provider_unavailable') || model.id === backup.id) throw err;
+      model = backup;
+      gen = call(messages);
+      first = await gen.next();
+    }
   } catch (err) {
     await settle(env, key, 0, 'failed');
     throw err;

@@ -20,11 +20,15 @@ export type Model = {
 };
 
 export const MODELS: Model[] = [
-  // Lumio Browser's model: in our tests on real pages (forms, shopping, canvas
-  // clicks, a desktop screenshot) it matched GPT-6 Luna at about a third of the
-  // cost per task. maxPrice lets DeepInfra serve it when Novita is down.
-  { id: 'inclusionai/ling-3.0-flash-vl', name: 'Ling 3.0 Flash', maker: 'inclusionAI', blurb: 'Fast and light. Goes the furthest on your plan.', price: { input: 0.021, output: 0.062 }, maxPrice: { input: 0.06, output: 0.18 }, minimumPlan: 'free', browser: true },
-  { id: 'openai/gpt-6-luna', name: 'GPT-6 Luna', maker: 'OpenAI', blurb: 'OpenAI’s fast everyday model.', price: { input: 0.1, output: 0.5 }, minimumPlan: 'free' },
+  // The cheapest model that reads screenshots and uses tools well; Lumio
+  // Browser's backup when GPT-6 Luna is down. maxPrice lets DeepInfra serve it
+  // when Novita is down.
+  { id: 'inclusionai/ling-3.0-flash-vl', name: 'Ling 3.0 Flash', maker: 'inclusionAI', blurb: 'Fast and light. Goes the furthest on your plan.', price: { input: 0.021, output: 0.062 }, maxPrice: { input: 0.06, output: 0.18 }, minimumPlan: 'free' },
+  // Lumio Browser's model on every plan: in our tests on real pages (forms,
+  // shopping, canvas clicks, a desktop screenshot) it passed every task; Ling
+  // missed a few at about a third of the cost. Reliability wins for a first
+  // impression.
+  { id: 'openai/gpt-6-luna', name: 'GPT-6 Luna', maker: 'OpenAI', blurb: 'OpenAI’s fast everyday model.', price: { input: 0.1, output: 0.5 }, minimumPlan: 'free', browser: true },
   { id: 'deepseek/deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', maker: 'DeepSeek', blurb: 'Quick answers, good at code.', price: { input: 0.02, output: 0.4 }, maxPrice: { input: 0.15, output: 0.6 }, minimumPlan: 'free' },
   { id: 'google/gemini-3.8-flash', name: 'Gemini 3.8 Flash', maker: 'Google', blurb: 'Smart and quick, with a huge memory.', price: { input: 0.75, output: 3.75 }, minimumPlan: 'plus' },
   { id: 'x-ai/grok-4.7', name: 'Grok 4.7', maker: 'xAI', blurb: 'Sharp reasoning, direct answers.', price: { input: 2, output: 6 }, minimumPlan: 'plus' },
@@ -35,7 +39,9 @@ export const MODELS: Model[] = [
 ];
 
 export const CHAT_DEFAULT = 'inclusionai/ling-3.0-flash-vl';
-export const BROWSER_DEFAULT = 'inclusionai/ling-3.0-flash-vl';
+export const BROWSER_DEFAULT = 'openai/gpt-6-luna';
+// Answers a browser step when the default model's providers are down or busy, so people don't see an error.
+export const BROWSER_BACKUP = 'inclusionai/ling-3.0-flash-vl';
 
 export const findModel = (id: unknown) => MODELS.find((m) => m.id === id) || null;
 export const browserModels = () => MODELS.filter((m) => m.browser);

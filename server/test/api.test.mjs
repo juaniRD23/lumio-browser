@@ -424,6 +424,25 @@ test('web Chat: people pick a model; bigger ones need a paid plan', async () => 
   assert.equal(calls.or.at(-1).body.model, plus.id);
 });
 
+test('browser: GPT-6 Luna on every plan; if it is down, Ling answers instead of an error', async () => {
+  const { token } = await signIn();
+  assert.equal(BROWSER_DEFAULT, 'openai/gpt-6-luna');
+  const caps = await (await call('/v1/agent', { token })).json();
+  assert.equal(caps.model.id, 'openai/gpt-6-luna', 'Free gets Luna too');
+  // An older browser still asking for Ling gets Luna.
+  await events(await call('/v1/agent', { token, method: 'POST', body: step({ model: 'inclusionai/ling-3.0-flash-vl' }) }));
+  await settled();
+  assert.equal(calls.or.at(-1).body.model, 'openai/gpt-6-luna');
+  // Luna's providers are busy: the same step is answered by Ling.
+  reply = (body) => (body.model === 'openai/gpt-6-luna' ? new Response('{"error":{"message":"overloaded"}}', { status: 429 }) : textReply('Answered by the backup.'));
+  const ev = await events(await call('/v1/agent', { token, method: 'POST', body: step({ stepId: 's2' }) }));
+  await settled();
+  assert.equal(ev.at(-1).type, 'result');
+  assert.equal(ev.at(-1).message.content, 'Answered by the backup.');
+  assert.deepEqual(calls.or.slice(-2).map((c) => c.body.model), ['openai/gpt-6-luna', 'inclusionai/ling-3.0-flash-vl']);
+  assert.deepEqual(calls.or.at(-1).body.provider.max_price, ceiling(findModel('inclusionai/ling-3.0-flash-vl')));
+});
+
 test('browser: a model that is not a browser model gets the browser default', async () => {
   const { token } = await signIn();
   await events(await call('/v1/agent', { token, method: 'POST', body: step({ model: 'anthropic/claude-opus-5.5' }) }));
