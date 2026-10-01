@@ -292,7 +292,7 @@ test('web Chat streams a reply, saves the conversation, and bills the allowance'
 
 test('out of allowance, Chat and the browser are refused before any model call', async () => {
   const { token } = await signIn();
-  sql.prepare("INSERT INTO steps (key, owner, plan, kind, request_hash, status, held_microusd, cost_microusd, created_at) VALUES ('old', ?, 'free', 'chat', 'h', 'done', 0, 19950, ?)").run(userRow().id, Date.now() - 1000);
+  sql.prepare("INSERT INTO steps (key, owner, plan, kind, request_hash, status, held_microusd, cost_microusd, created_at) VALUES ('old', ?, 'free', 'chat', 'h', 'done', 0, 99950, ?)").run(userRow().id, Date.now() - 1000);
   const res = await call('/api/chat', { cookie: token, method: 'POST', body: { text: 'hi' } });
   assert.equal(res.status, 429);
   const body = await res.json();
@@ -310,7 +310,7 @@ test('browser: capabilities, a streamed step, tool calls, replays and the Free d
   assert.equal(caps.model.id, BROWSER_DEFAULT);
   assert.ok(caps.models.every((m) => m.available));
   assert.ok(caps.tools.includes('update_plan'));
-  assert.deepEqual(caps.usage.windows.map((w) => [w.id, w.limit]), [['weekly', 20000]], 'no 5-hour limit');
+  assert.deepEqual(caps.usage.windows.map((w) => [w.id, w.limit]), [['weekly', 100000]], 'no 5-hour limit');
 
   const ev = await events(await call('/v1/agent', { token, method: 'POST', body: step({ reasoning: 'high' }) }));
   await settled();
@@ -523,7 +523,7 @@ test('plan budgets: Plus leaves 15% profit after fees; Pro and Max are set highe
   assert.equal(weeklyBudget(20), 3.48);
   assert.equal(weeklyBudget(100), 17.67);
   assert.equal(weeklyBudget(200), 35.42);
-  assert.deepEqual([PLANS.free.weekly, PLANS.plus.weekly, PLANS.pro.weekly, PLANS.max.weekly], [0.02, 3.48, 20, 40]);
+  assert.deepEqual([PLANS.free.weekly, PLANS.plus.weekly, PLANS.pro.weekly, PLANS.max.weekly], [0.1, 3.48, 20, 40]);
   // No paid plan loses money even at 100% use.
   for (const id of ['plus', 'pro', 'max']) {
     const p = PLANS[id];
@@ -537,7 +537,7 @@ test('plan budgets: Plus leaves 15% profit after fees; Pro and Max are set highe
     assert.ok(profit >= p.price * 0.15 && profit < p.price * 0.151, `${id}: ${profit}`);
   }
   const plans = (await (await call('/api/billing/plans')).json()).plans;
-  assert.deepEqual(plans.map((p) => p.weeklyUsd), [0.02, 3.48, 20, 40]);
+  assert.deepEqual(plans.map((p) => p.weeklyUsd), [0.1, 3.48, 20, 40]);
 });
 
 test('Chat: attach pictures and documents; the model sees them; only the owner can read them', async () => {

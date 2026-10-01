@@ -5,7 +5,7 @@ const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const DESCS = {
   free: 'Try Lumio AI in Chat and the browser, a little every week.',
-  plus: 'Thousands of messages and browser tasks a week, about 100 pictures, and Claude Sonnet, GPT-6.1 Sol, Gemini and Grok in Chat.',
+  plus: 'Thousands of messages and hundreds of browser tasks a week, about 100 pictures, and Claude Sonnet, GPT-6.1 Sol, Gemini and Grok in Chat.',
   pro: 'About 6× Plus, and every model, including Claude Opus and GPT-6 Astra.',
   max: 'About 11× Plus, and every model.',
 };

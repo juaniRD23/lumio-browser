@@ -27,7 +27,7 @@ export function weeklyBudget(monthlyPrice: number) {
 // purpose, but never at a loss: at 100% use Pro keeps ~4% ($4.36) and Max
 // ~4.5% ($9.02); at typical use both keep far more.
 export const PLANS: Record<Plan, { name: string; weekly: number; price: number }> = {
-  free: { name: 'Free', weekly: 0.02, price: 0 },
+  free: { name: 'Free', weekly: 0.1, price: 0 }, // about 6 website tasks or 200 chats with GPT-6 Luna
   go: { name: 'Go', weekly: weeklyBudget(9), price: 9 }, // legacy; not sold
   plus: { name: 'Plus', weekly: weeklyBudget(20), price: 20 },
   pro: { name: 'Pro', weekly: 20, price: 100 },
