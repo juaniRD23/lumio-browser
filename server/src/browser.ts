@@ -71,7 +71,7 @@ export async function step(request: Request, env: Env, ctx: ExecutionContext, us
     reasoning: { effort: s.reasoning, exclude: true },
   }, ids);
   // The unchanging start first (cached by the provider), what changes last.
-  let messages: unknown[] = [{ role: 'system', content: browserSystemPrompt(s) }, ...withContextNote(s.messages, browserContextNote(s, maxOutput))];
+  let messages: unknown[] = [{ role: 'system', content: browserSystemPrompt(s) }, ...withContextNote(s.messages, browserContextNote(s))];
   let gen = call(messages);
 
   // Fail fast (with a plain error response) if the provider refuses outright,

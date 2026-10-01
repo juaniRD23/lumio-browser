@@ -120,22 +120,20 @@ test('bad JSON arguments and unknown tools become errors, not crashes', async ()
   assert.match(tools[1], /no tool named/);
 });
 
-test('screenshots are sent as images, and only the newest two are kept', async () => {
+test('screenshots are sent as images; older ones are dropped 4 at a time so each request starts with the previous one', async () => {
   const shot = tool('screenshot_tab', 'read', () => ({ text: 'shot', image: 'data:image/jpeg;base64,AAAA' }));
-  const { opts, chat } = setup({
-    turns: [
-      { calls: [{ id: '1', name: 'screenshot_tab', arguments: '{}' }] },
-      { calls: [{ id: '2', name: 'screenshot_tab', arguments: '{}' }] },
-      { calls: [{ id: '3', name: 'screenshot_tab', arguments: '{}' }] },
-      { text: 'seen' },
-    ],
-    tools: [shot],
-  });
+  const turns = Array.from({ length: 7 }, (_, i) => ({ calls: [{ id: String(i + 1), name: 'screenshot_tab', arguments: '{}' }] }));
+  const { opts, chat } = setup({ turns: [...turns, { text: 'seen' }], tools: [shot] });
   await runAgent(opts);
-  const last = chat.seen.at(-1);
-  const images = last.flatMap((m) => (Array.isArray(m.content) ? m.content : [])).filter((p) => p.type === 'image_url');
-  assert.equal(images.length, 2);
-  assert.equal(last[0].role, 'system');
+  const images = (req) => req.flatMap((m) => (Array.isArray(m.content) ? m.content : [])).filter((p) => p.type === 'image_url').length;
+  // Requests 2-6 see 1-5 screenshots; at 6 the oldest 4 go (2 left), then 3 at the 7th.
+  assert.deepEqual(chat.seen.map(images), [0, 1, 2, 3, 4, 5, 2, 3]);
+  assert.equal(chat.seen.at(-1)[0].role, 'system');
+  // Except right after a batch is dropped, each request starts with the whole previous one.
+  for (let i = 1; i < chat.seen.length; i++) {
+    if (i === 6) continue;
+    assert.deepEqual(chat.seen[i].slice(0, chat.seen[i - 1].length), chat.seen[i - 1], `request ${i + 1}`);
+  }
 });
 
 test('prepareMessages keeps plain messages untouched', () => {

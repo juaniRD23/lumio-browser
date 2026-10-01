@@ -5,6 +5,7 @@ const { needsApproval } = require('./policy');
 
 const MAX_STEPS = 30;
 const KEEP_IMAGES = 2;
+const SHOT_BATCH = 4;
 const MAX_TOOL_TEXT = 24_000;
 
 function abortError() {
@@ -14,27 +15,33 @@ function abortError() {
 }
 
 // Only the newest screenshots are sent back to the model; older ones become a
-// short placeholder so long tasks don't blow up the context window. Pictures
-// the person attached are kept (the newest 10).
+// short placeholder so long tasks don't blow up the context window. They're
+// dropped 4 at a time (2 to 5 stay), so earlier messages don't change on
+// every step: the model provider only gives the cached-input discount (about
+// 10x cheaper) when each request starts with the whole previous one.
+// Pictures the person attached are kept (the newest 10).
 const isScreenshots = (m) => m.role === 'user' && Array.isArray(m.content) && /^Screenshot\(s\) from the tool call/.test(m.content[0]?.text || '');
 function prepareMessages(system, messages, keepImages = KEEP_IMAGES, keepAttached = 10) {
-  let shots = 0;
+  const out = messages.slice();
+  // Attached pictures: the newest 10.
   let attached = 0;
-  const out = [];
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (!Array.isArray(m.content)) { out.unshift(m); continue; }
-    const screenshot = isScreenshots(m);
+  for (let i = out.length - 1; i >= 0; i--) {
+    const m = out[i];
+    if (!Array.isArray(m.content) || isScreenshots(m)) continue;
     const parts = [];
     for (let j = m.content.length - 1; j >= 0; j--) {
       const p = m.content[j];
-      if (p.type === 'image_url' && (screenshot ? ++shots > keepImages : ++attached > keepAttached)) {
-        parts.unshift({ type: 'text', text: screenshot ? '[older screenshot removed]' : '[older attached picture removed]' });
-        continue;
-      }
-      parts.unshift(p);
+      parts.unshift(p.type === 'image_url' && ++attached > keepAttached ? { type: 'text', text: '[older attached picture removed]' } : p);
     }
-    out.unshift({ ...m, content: parts });
+    out[i] = { ...m, content: parts };
+  }
+  // Screenshots: the oldest go in batches.
+  const shots = out.reduce((n, m) => n + (isScreenshots(m) ? m.content.filter((p) => p.type === 'image_url').length : 0), 0);
+  let drop = shots <= keepImages ? 0 : Math.floor((shots - keepImages) / SHOT_BATCH) * SHOT_BATCH;
+  for (let i = 0; i < out.length && drop > 0; i++) {
+    const m = out[i];
+    if (!isScreenshots(m)) continue;
+    out[i] = { ...m, content: m.content.map((p) => (p.type === 'image_url' && drop > 0 && drop-- ? { type: 'text', text: '[older screenshot removed]' } : p)) };
   }
   return [{ role: 'system', content: system }, ...out];
 }

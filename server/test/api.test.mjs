@@ -498,8 +498,9 @@ test('browser: long tasks keep going; older page readings are shortened instead 
   await events(await call('/v1/agent', { token, method: 'POST', body: step({ stepId: 's2', messages: more }) }));
   await settled();
   const after = calls.or.at(-1).body.messages;
-  assert.deepEqual(after.slice(0, before.length - 1), before.slice(0, -1), 'same start, so the provider cache keeps working');
-  assert.match(JSON.stringify(after.at(-1).content), /Page 7[\s\S]*\[Lumio Browser, not the user\] Now:/, 'the note is on the newest result');
+  // The provider only gives the cached-input discount when the whole previous request starts the next one.
+  assert.deepEqual(after.slice(0, before.length), before, 'each step’s request starts with the whole previous one');
+  assert.doesNotMatch(JSON.stringify(after), /\[Lumio Browser, not the user\]/, 'no note in the middle of a task');
   assert.equal(calls.or.at(-1).body.messages.filter((m) => Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url')).length, 2, 'both screenshots kept');
   // It's billed and held at a realistic size, not the old bytes-as-tokens count.
   const held = sql.prepare("SELECT held_microusd FROM steps WHERE kind = 'browser'").get().held_microusd;
@@ -519,8 +520,18 @@ test('browser: every step starts the same (cached by the provider); the time and
   assert.equal(first[0].role, 'system');
   assert.equal(second[0].content, first[0].content, 'same instructions on every step');
   assert.doesNotMatch(first[0].content, /apple\.com|Now:|output tokens/);
-  // The note rides on the newest message instead of being a turn of its own.
+  assert.match(first[0].content, /Today is \w+day, \w+ \d+, \d{4} \(America\/New_York\)\./);
+  // The note rides on the person's message instead of being a turn of its own.
   assert.equal(second.length, 2);
+  // Later steps of the same request don't add it again (the browser doesn't keep it), and a note the browser already wrote isn't doubled.
+  const later = [{ role: 'user', content: 'Summarize this page' }, ...readTurn(0, 'Page 0')];
+  await events(await call('/v1/agent', { token, method: 'POST', body: step({ stepId: 's3', messages: later }) }));
+  await settled();
+  assert.doesNotMatch(JSON.stringify(calls.or.at(-1).body.messages), /Lumio Browser, not the user/);
+  const own = 'Find a hotel\n\n[Lumio Browser, not the user] Now: Wednesday, October 1, 2026 at 2:30 PM (America/New_York). No tab is open.';
+  await events(await call('/v1/agent', { token, method: 'POST', body: step({ stepId: 's4', messages: [{ role: 'user', content: own }] }) }));
+  await settled();
+  assert.equal(calls.or.at(-1).body.messages.at(-1).content, own);
   assert.match(second.at(-1).content, /^Summarize this page\n\n\[Lumio Browser, not the user\] Now: .+\(America\/New_York\)\. The user is looking at tab 3: "iPhone 18 Pro Max" — https:\/\/www\.apple\.com\/shop\/buy-iphone\/iphone-18-pro\/6\.9-inch-display-2tb\. 1 tab\(s\) open\.$/);
 });
 
@@ -540,7 +551,7 @@ test('browser: over the model budget, older results shrink first and the newest 
   const body = calls.or.at(-1).body.messages;
   const out = (k) => body.find((m) => m.tool_call_id === `tabs_${k}`).content;
   assert.match(out(0), /Older result, shortened to save space/);
-  assert.ok(out(11).startsWith(big(11) + '\n\n[Lumio Browser, not the user] Now:'), 'the latest result is whole (plus the time and tab note)');
+  assert.equal(out(11), big(11), 'the latest result is whole');
   assert.equal(body[1].content, 'Compare my last 12 orders', 'the request is whole');
   const bytes = Buffer.byteLength(JSON.stringify(body));
   assert.ok(bytes / 3 < 160_000, `fits the budget (${bytes} bytes)`);

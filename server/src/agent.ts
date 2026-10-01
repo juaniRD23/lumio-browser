@@ -35,8 +35,9 @@ export function estimateInput(messages: { role: string; content: unknown; tool_c
 }
 
 export const BROWSER_AGENT_VERSION=1;
-// Up to 10 attached pictures plus the two newest screenshots.
-export const MAX_STEP_IMAGES=12;
+// Up to 10 attached pictures plus the newest screenshots (Lumio Browser keeps
+// 2 to 5, dropping older ones 4 at a time so earlier messages stay the same).
+export const MAX_STEP_IMAGES=16;
 // One inexpensive model with tools and screenshots; people choose how hard it thinks.
 export const BROWSER_REASONING=['low','medium','high'] as const;
 export type BrowserReasoning=typeof BROWSER_REASONING[number];
@@ -321,16 +322,22 @@ export function fitBrowserMessages(messages:AgentMessage[],fixed:number,budget=B
  return out;
 }
 
-// The same text on every step of a task (no time, page or limits in it), so
-// the model provider can reuse its cached copy of the start of the
-// conversation: about 10x cheaper for most steps. What changes goes in
-// browserContextNote, at the end.
-export function browserSystemPrompt(step:BrowserStep){
+// Model providers only give the cached-input discount (about 10x cheaper)
+// when the previous step's whole request is the start of the next one. So
+// the instructions don't change during a task (the date, but no time, page
+// or limits), and nothing is added at the end of a step that the next step
+// won't also send: the time-and-tab note goes only on the person's own
+// message (withContextNote). Getting this wrong made every step full price.
+export function browserSystemPrompt(step:BrowserStep,now=new Date()){
  const c=step.context,os=c.platform==='mac'?'Mac':'Windows PC';
+ let day;
+ try{day=now.toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric',timeZone:c.timeZone})}catch{day=now.toUTCString().slice(0,16)}
  return `You are Lumio, the AI assistant built into Lumio Browser, a web browser on the user's ${os}. You sit in a side panel next to the page. You can answer questions, and you can act for the user: operate web pages in the browser and, when needed, control the computer itself.
 
+Today is ${day} (${c.timeZone}).
+
 How to work:
-- The newest message ends with a note from Lumio Browser (not from the user) giving the current time and the tab the user is looking at.
+- When the user writes to you, Lumio Browser adds a short note to their message (not from the user) with the time and the tab they were looking at. After that, your tools show where you are.
 - Just answer when the user asks a question you can answer. Use tools only when they help.
 - For anything on the web, use the browser tools (they are faster and more reliable than controlling the screen). Call read_page to see a page and get element refs like [12], then click/type using those refs. Refs are renumbered on every read_page, so read again after the page changes.
 - If an element isn't in the list, scroll or use screenshot_tab + click_at for things like canvases.
@@ -350,20 +357,24 @@ Safety rules (always):
 Style: concise and friendly. Use Markdown lightly (short lists, **bold** for key facts). Reply in the user's language.`;
 }
 
-// What changes from step to step, added to the end of the newest message: the time, the
-// tab the user is looking at (its title comes from the page, so it's quoted
-// as data) and, when the plan is nearly used up, a shorter reply limit.
-export function browserContextNote(step:BrowserStep,maxOutput=8192,now=new Date()){
+// The time and the tab the user is looking at (its title comes from the
+// page, so it's quoted as data), for the person's own message.
+export function browserContextNote(step:BrowserStep,now=new Date()){
  const c=step.context;
  let date;
  try{date=now.toLocaleString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric',hour:'numeric',minute:'2-digit',timeZone:c.timeZone})}catch{date=now.toUTCString()}
  const tab=c.activeTab?`The user is looking at tab ${c.activeTab.id}: "${c.activeTab.title.replace(/"/g,"'").slice(0,200)}" — ${(c.activeTab.url||'new tab page').slice(0,500)}. ${c.tabCount} tab(s) open.`:'No tab is open.';
- return `[Lumio Browser, not the user] Now: ${date} (${c.timeZone}). ${tab}${maxOutput<8192?` Keep this reply under ${maxOutput} tokens.`:''}`;
+ return `[Lumio Browser, not the user] Now: ${date} (${c.timeZone}). ${tab}`;
 }
-// The conversation with the note added to its newest message (the request, a
-// tool result or screenshots), rather than as a turn of its own.
+const NOTE='[Lumio Browser, not the user]';
+const hasNote=(m:AgentMessage)=>typeof m.content==='string'?m.content.includes(NOTE):Array.isArray(m.content)&&m.content.some(p=>p.type==='text'&&p.text.includes(NOTE));
+// The note goes on the person's message when it's the newest one (the first
+// step of a request), unless the browser already put it there. Later steps
+// of the same request don't repeat it, so each step's request starts with the
+// whole previous one.
 export function withContextNote(messages:AgentMessage[],note:string):AgentMessage[]{
  const last=messages.at(-1)!;
+ if(last.role!=='user'||isToolPictures(last)||hasNote(last))return messages;
  const content=Array.isArray(last.content)?[...last.content,{type:'text' as const,text:note}]:`${last.content??''}\n\n${note}`;
  return [...messages.slice(0,-1),{...last,content}];
 }
