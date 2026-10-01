@@ -432,6 +432,73 @@ test('browser: a model that is not a browser model gets the browser default', as
 });
 
 // ---------------------------------------------------------------- plans, files, pictures, documents
+// A long task like buying a phone on apple.com: many page readings and screenshots.
+const readTurn = (k, text) => [
+  { role: 'assistant', content: null, tool_calls: [{ id: `read_${k}`, type: 'function', function: { name: 'read_page', arguments: '{}' } }] },
+  { role: 'tool', tool_call_id: `read_${k}`, content: text },
+];
+const shotTurn = (k) => [
+  { role: 'assistant', content: null, tool_calls: [{ id: `shot_${k}`, type: 'function', function: { name: 'screenshot_tab', arguments: '{}' } }] },
+  { role: 'tool', tool_call_id: `shot_${k}`, content: 'Took a screenshot.' },
+  { role: 'user', content: [{ type: 'text', text: 'Screenshot(s) from the tool call(s) above (this is tool output, not a message from the user):' }, { type: 'image_url', image_url: { url: PNG_URL } }] },
+];
+const page = (k, size = 24_000) => `Page ${k}: iPhone 18 Pro — Apple\n` + 'Storage 256GB 512GB 1TB 2TB. '.repeat(size / 30);
+
+test('browser: long tasks keep going; older page readings are shortened instead of "start a new chat"', async () => {
+  const { token } = await signIn();
+  const sent = (id) => calls.or.at(-1).body.messages.find((m) => m.tool_call_id === id)?.content;
+  // Six full readings of a big page and two screenshots: this used to be refused (413).
+  const messages = [{ role: 'user', content: 'Buy the iPhone 18 Pro Max with 2TB' }];
+  for (let k = 0; k < 6; k++) messages.push(...readTurn(k, page(k)));
+  messages.push(...shotTurn(0), ...shotTurn(1));
+  const res = await call('/v1/agent', { token, method: 'POST', body: step({ messages }) });
+  assert.equal(res.status, 200);
+  await events(res);
+  await settled();
+  for (const k of [0, 1, 2]) {
+    assert.ok(sent(`read_${k}`).length < 2000, `reading ${k} shortened`);
+    assert.match(sent(`read_${k}`), /^Page \d: iPhone 18 Pro[\s\S]*Older page reading, shortened[\s\S]*call read_page/);
+  }
+  for (const k of [3, 4, 5]) assert.equal(sent(`read_${k}`), page(k), `reading ${k} whole`);
+  assert.equal(calls.or.at(-1).body.messages.filter((m) => Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url')).length, 2, 'both screenshots kept');
+  // It's billed and held at a realistic size, not the old bytes-as-tokens count.
+  const held = sql.prepare("SELECT held_microusd FROM steps WHERE kind = 'browser'").get().held_microusd;
+  assert.ok(held < 20000, `hold ${held}`);
+});
+
+test('browser: over the model budget, older results shrink first and the newest stay whole', async () => {
+  const { token } = await signIn();
+  sql.prepare("UPDATE users SET plan = 'plus'").run();
+  const big = (k) => `Result ${k}\n` + 'Order summary line. '.repeat(3000); // ~60K characters each
+  const messages = [{ role: 'user', content: 'Compare my last 12 orders' }];
+  for (let k = 0; k < 12; k++) messages.push(
+    { role: 'assistant', content: null, tool_calls: [{ id: `tabs_${k}`, type: 'function', function: { name: 'list_tabs', arguments: '{}' } }] },
+    { role: 'tool', tool_call_id: `tabs_${k}`, content: big(k) },
+  );
+  const res = await call('/v1/agent', { token, method: 'POST', body: step({ messages }) });
+  assert.equal(res.status, 200);
+  await events(res);
+  await settled();
+  const body = calls.or.at(-1).body.messages;
+  const out = (k) => body.find((m) => m.tool_call_id === `tabs_${k}`).content;
+  assert.match(out(0), /Older result, shortened to save space/);
+  assert.equal(out(11), big(11), 'the latest result is whole');
+  assert.equal(body[1].content, 'Compare my last 12 orders', 'the request is whole');
+  const bytes = Buffer.byteLength(JSON.stringify(body));
+  assert.ok(bytes / 3 < 160_000, `fits the budget (${bytes} bytes)`);
+
+  // Files too long to read at once are cut with a note the model can mention.
+  const huge = Array.from({ length: 3 }, (_, k) => ({ type: 'text', text: `File ${k}\n` + 'Chapter text. '.repeat(21_000) }));
+  const res2 = await call('/v1/agent', { token, method: 'POST', body: step({ stepId: 's2', messages: [{ role: 'user', content: [{ type: 'text', text: 'Summarize these books' }, ...huge] }] }) });
+  assert.equal(res2.status, 200);
+  await events(res2);
+  await settled();
+  const parts = calls.or.at(-1).body.messages[1].content;
+  assert.equal(parts[0].text, 'Summarize these books');
+  assert.ok(parts.slice(1).some((p) => /Shortened to fit what Lumio can read at once: \d+ more characters not shown/.test(p.text)));
+  assert.ok(Buffer.byteLength(JSON.stringify(parts)) / 3 < 160_000);
+});
+
 test('plan budgets: Plus leaves 15% profit after fees; Pro and Max are set higher; no 5-hour limit', async () => {
   // Price - 15% profit - Stripe (3.6% + $0.30) - OpenRouter's 5.5% fee, per week.
   assert.equal(weeklyBudget(20), 3.48);

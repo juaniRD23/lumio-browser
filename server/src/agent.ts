@@ -17,15 +17,21 @@ type ImagePart = { type: 'image_url'; image_url: { url: string } };
 export type AgentMessage = { role: 'user' | 'assistant' | 'tool'; content: string | null | (TextPart | ImagePart)[]; tool_calls?: NativeToolCall[]; tool_call_id?: string };
 type DesktopStep = { version: 1; taskId: string; runId: string; stepId: string; model: string; messages: AgentMessage[]; tools: string[]; workflow: 'plan' | 'build' };
 
-// Rough token count: UTF-8 bytes of text, plus a flat amount per image.
-export function estimateInput(messages: { role: string; content: unknown }[]): number {
-  const encoder = new TextEncoder(); let tokens = 128;
-  for (const message of messages) {
-    tokens += 32;
-    if (typeof message.content === 'string') tokens += encoder.encode(message.content).length;
-    else if (Array.isArray(message.content)) for (const part of message.content as (TextPart | ImagePart)[]) { if (part.type === 'text') tokens += encoder.encode(part.text).length; else if (part.type === 'image_url') tokens += 16_384; }
-  }
+// Tokens the model reads, estimated generously: about 3 bytes of text per
+// token (real text averages nearer 4) and 2,500 per picture (a 1280-pixel
+// screenshot is about 1,300). Used for allowance holds and the context budget.
+const encoder = new TextEncoder();
+export const textTokens = (text: string) => Math.ceil(encoder.encode(text).length / 3);
+const IMAGE_TOKENS = 2_500;
+export function messageTokens(message: { content: unknown; tool_calls?: unknown }): number {
+  let tokens = 8;
+  if (typeof message.content === 'string') tokens += textTokens(message.content);
+  else if (Array.isArray(message.content)) for (const part of message.content as (TextPart | ImagePart)[]) tokens += part.type === 'text' ? textTokens(part.text) : part.type === 'image_url' ? IMAGE_TOKENS : 0;
+  if (message.tool_calls) tokens += textTokens(JSON.stringify(message.tool_calls));
   return tokens;
+}
+export function estimateInput(messages: { role: string; content: unknown; tool_calls?: unknown }[]): number {
+  return messages.reduce((tokens, message) => tokens + messageTokens(message), 64);
 }
 
 export const BROWSER_AGENT_VERSION=1;
@@ -236,8 +242,84 @@ export function validateBrowserStep(value:unknown,extra:ToolDef[]=[]):BrowserSte
  if(value.reasoning!==undefined&&!BROWSER_REASONING.includes(value.reasoning as BrowserReasoning))throw new AgentError('Invalid reasoning level.');
  const reasoning=(value.reasoning??'medium') as BrowserReasoning;
  const step:BrowserStep={version:1,taskId:value.taskId,runId:value.runId,stepId:value.stepId,model:value.model,messages,tools,workflow:'build',context,reasoning};
- if(browserInputEstimate(step)>100000)throw new AgentError('Start a new chat to continue.',413,'context_too_large');
+ // Long tasks are made to fit the model's window instead of being refused.
+ step.messages=fitBrowserMessages(messages,browserFixedTokens(step,extra));
  return step;
+}
+
+// ---------------------------------------------------------------- fitting long tasks
+// How much a browser step may show the model, in estimated tokens. Ling 3.0
+// Flash reads 262K; this leaves room for the reply and the estimate's margin.
+export const BROWSER_CONTEXT_TOKENS=160_000;
+// Page readings go stale once the page changes (refs are renumbered), so only
+// the newest few stay whole and older ones keep their start (title, address,
+// top of the page). That keeps long tasks cheap and the model focused.
+const KEEP_PAGE_READS=3;
+const SHORT=1_200;
+const cut=(text:string,keep:number,note:string)=>text.length>keep+400?`${text.slice(0,keep)}\n…[${note}]`:text;
+const isToolPictures=(m:AgentMessage)=>m.role==='user'&&Array.isArray(m.content)&&m.content[0]?.type==='text'&&/^Screenshot\(s\) from the tool call/.test(m.content[0].text);
+// Long text fields inside an earlier tool call (like a document it wrote), keeping the arguments valid JSON.
+function shortenArgs(call:NativeToolCall):NativeToolCall{
+ if(call.function.arguments.length<=4000)return call;
+ let args:unknown;
+ try{args=JSON.parse(call.function.arguments)}catch{return call}
+ if(!object(args))return call;
+ const short=Object.fromEntries(Object.entries(args).map(([k,v])=>[k,typeof v==='string'?cut(v,SHORT,'shortened to save space'):v]));
+ return {...call,function:{...call.function,arguments:JSON.stringify(short)}};
+}
+
+export function fitBrowserMessages(messages:AgentMessage[],fixed:number,budget=BROWSER_CONTEXT_TOKENS):AgentMessage[]{
+ const out=messages.map(m=>Array.isArray(m.content)?{...m,content:[...m.content]}:{...m});
+ const sizes=out.map(messageTokens);
+ let total=fixed+sizes.reduce((a,b)=>a+b,0);
+ const set=(i:number,m:AgentMessage)=>{out[i]=m;const n=messageTokens(m);total+=n-sizes[i];sizes[i]=n};
+ const names=new Map(out.flatMap(m=>(m.tool_calls??[]).map(c=>[c.id,c.function.name] as const)));
+
+ // Always: older page readings.
+ let reads=0;
+ for(let i=out.length-1;i>=0;i--){
+  const m=out[i];
+  if(m.role!=='tool'||names.get(m.tool_call_id!)!=='read_page'||++reads<=KEEP_PAGE_READS)continue;
+  set(i,{...m,content:cut(m.content as string,SHORT,'Older page reading, shortened to save space. The page may have changed since: call read_page to see it now.')});
+ }
+ if(total<=budget)return out;
+
+ // Over the budget: shorten older material, least useful first, oldest first.
+ // The person's newest message and the latest model turn with its results stay whole.
+ const latest=out.findLastIndex(m=>m.role==='assistant');
+ const request=out.findLastIndex(m=>m.role==='user'&&!isToolPictures(m));
+ const older=(i:number)=>i<latest&&i!==request;
+ const passes:((m:AgentMessage)=>AgentMessage|null)[]=[
+  m=>m.role==='tool'&&(m.content as string).length>SHORT+400?{...m,content:cut(m.content as string,SHORT,'Older result, shortened to save space. Run the tool again if you need all of it.')}:null,
+  m=>Array.isArray(m.content)&&m.content.some(p=>p.type==='image_url')?{...m,content:m.content.map(p=>p.type==='image_url'?{type:'text' as const,text:'[Older picture removed to save space.]'}:p)}:null,
+  m=>m.tool_calls?.some(c=>c.function.arguments.length>4000)?{...m,tool_calls:m.tool_calls.map(shortenArgs)}:null,
+  m=>m.role==='assistant'&&typeof m.content==='string'&&m.content.length>4000?{...m,content:cut(m.content,2000,'Earlier reply, shortened to save space.')}:null,
+  m=>m.role!=='user'?null:typeof m.content==='string'?(m.content.length>4000?{...m,content:cut(m.content,2000,'Earlier message, shortened to save space.')}:null)
+   :Array.isArray(m.content)&&m.content.some(p=>p.type==='text'&&p.text.length>4000)?{...m,content:m.content.map(p=>p.type==='text'?{type:'text' as const,text:cut(p.text,2000,'Earlier attachment, shortened to save space.')}:p)}:null,
+ ];
+ for(const pass of passes)for(let i=0;i<out.length&&total>budget;i++){
+  if(!older(i))continue;
+  const next=pass(out[i]);
+  if(next)set(i,next);
+ }
+
+ // Still too much (very long files or results right now): shorten the longest text until it fits.
+ while(total>budget){
+  let best:{i:number;j:number;len:number}|null=null;
+  out.forEach((m,i)=>{
+   if(typeof m.content==='string'&&(!best||m.content.length>best.len))best={i,j:-1,len:m.content.length};
+   if(Array.isArray(m.content))m.content.forEach((p,j)=>{if(p.type==='text'&&(!best||p.text.length>best.len))best={i,j,len:p.text.length}});
+  });
+  const b=best as {i:number;j:number;len:number}|null;
+  if(!b||b.len<=4000)break;
+  const keep=Math.max(2000,b.len-Math.ceil((total-budget)*3)-400);
+  const note=`Shortened to fit what Lumio can read at once: ${b.len-keep} more characters not shown.`;
+  const m=out[b.i];
+  if(b.j<0)set(b.i,{...m,content:cut(m.content as string,keep,note)});
+  else set(b.i,{...m,content:(m.content as (TextPart|ImagePart)[]).map((p,j)=>j===b.j&&p.type==='text'?{type:'text' as const,text:cut(p.text,keep,note)}:p)});
+ }
+ if(total>budget)throw new AgentError('This is more than Lumio can read at once. Try a shorter message or fewer files.',413,'context_too_large');
+ return out;
 }
 
 export function browserSystemPrompt(step:BrowserStep,maxOutput=8192,now=new Date()){
@@ -270,8 +352,10 @@ Safety rules (always):
 Style: concise and friendly. Use Markdown lightly (short lists, **bold** for key facts). Reply in the user's language.`;
 }
 
-export function browserInputEstimate(step:BrowserStep){
- const messages=[{role:'system',content:browserSystemPrompt(step)},...step.messages];
- // Count tool definitions and tool-call arguments as well as text and images.
- return estimateInput(messages)+new TextEncoder().encode(JSON.stringify(browserAgentTools.filter(item=>step.tools.includes(item.function.name)))+JSON.stringify(step.messages.flatMap(message=>message.tool_calls??[]))).length;
+// The system prompt and the tool definitions, which every step carries.
+function browserFixedTokens(step:BrowserStep,extra:ToolDef[]=[]){
+ return 64+textTokens(browserSystemPrompt(step))+textTokens(JSON.stringify([...browserAgentTools,...extra].filter(item=>step.tools.includes(item.function.name))));
+}
+export function browserInputEstimate(step:BrowserStep,extra:ToolDef[]=[]){
+ return browserFixedTokens(step,extra)+step.messages.reduce((tokens,message)=>tokens+messageTokens(message),0);
 }

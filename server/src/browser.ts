@@ -59,7 +59,7 @@ export async function step(request: Request, env: Env, ctx: ExecutionContext, us
   const recent = await env.DB.prepare('SELECT COUNT(*) AS n FROM steps WHERE owner = ?1 AND created_at >= ?2').bind(user.id, now - 60_000).first<{ n: number }>();
   if ((recent?.n ?? 0) >= STEPS_PER_MINUTE) return fail('Slow down a little: too many steps in the last minute.', 429, 'rate_limited');
 
-  const inputTokens = browserInputEstimate(s);
+  const inputTokens = browserInputEstimate(s, extra);
   const { maxOutput } = await reserve(env, { key, owner: user.id, plan: user.plan, requestHash, kind: 'browser', inputTokens, model, now });
   const tools = [...browserAgentTools, ...extra].filter((t) => s.tools.includes(t.function.name));
   const call = (messages: unknown[]) => complete(env, model, {

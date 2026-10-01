@@ -7,10 +7,26 @@
 // replays its saved result instead of charging again.
 const MAX_MESSAGES = 150;
 
+// What the person asked (not screenshots the tools sent back as user messages).
+const isRequest = (m) => m.role === 'user' && !(Array.isArray(m.content) && /^Screenshot\(s\) from the tool call/.test(m.content[0]?.text || ''));
+
 // Server-side limit: at most 160 messages, starting with a real user message.
+// A run longer than that drops its oldest steps but keeps the request it's
+// working on, so Lumio doesn't forget the task.
 function trimForServer(messages) {
   let out = messages;
-  if (out.length > MAX_MESSAGES) out = out.slice(out.length - MAX_MESSAGES);
+  if (out.length > MAX_MESSAGES) {
+    const from = out.length - MAX_MESSAGES + 1; // room for the request
+    let request = -1;
+    for (let i = out.length - 1; i >= 0 && request < 0; i--) if (isRequest(out[i])) request = i;
+    if (request >= 0 && request < from) {
+      let k = from;
+      while (k < out.length && out[k].role !== 'assistant') k++; // start at a model turn, with its results
+      out = [out[request], ...out.slice(k)];
+    } else {
+      out = out.slice(out.length - MAX_MESSAGES);
+    }
+  }
   let start = 0;
   while (start < out.length && !(out[start].role === 'user')) start++;
   return out.slice(start);
@@ -26,7 +42,7 @@ function friendly(status, data) {
   if (status === 401 || code === 'sign_in_required') return 'Sign in to Lumio again (account button, top right).';
   if (code === 'browser_plan_required' || code === 'model_plan_required') return data?.error || 'Lumio AI isn’t available on your plan.';
   if (code === 'usage_limit' || status === 429) return data?.error || 'You’ve used your Lumio allowance for now. Upgrade for more, or try again when it resets.';
-  if (status === 413) return 'This chat got too long. Start a new chat.';
+  if (status === 413) return data?.error || 'This is more than Lumio can read at once. Start a new chat.';
   return data?.error || `Lumio couldn’t answer (HTTP ${status}).`;
 }
 
