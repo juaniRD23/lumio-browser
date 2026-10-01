@@ -3,6 +3,8 @@
 //   lumio://newtab/, settings, history, downloads, bookmarks, extensions,
 //   error                                     -> renderer/pages (tab sessions)
 //   */assets/*  -> renderer/assets,  */vendor/* -> whitelisted node_modules files
+//   shell/ai-files/* -> pictures Lumio made (userData/ai-files)
+//   shell/web/*      -> Lumio Chat's file code (docmaker, attach) and its libraries, copied at build
 const fs = require('fs');
 const path = require('path');
 
@@ -25,6 +27,8 @@ const MIME = {
   '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.webp': 'image/webp',
   '.woff2': 'font/woff2',
   '.json': 'application/json',
 };
@@ -53,6 +57,12 @@ function resolveFile(url, hosts) {
     return inside(ASSETS_DIR, f) ? f : null;
   }
   if (pathname.startsWith('/vendor/')) return VENDOR[pathname.slice(8)] || null;
+  // Pictures Lumio made in a chat (the panel only).
+  if (pathname.startsWith('/ai-files/') && UI_HOSTS.has(host)) {
+    const dir = path.join(require('electron').app.getPath('userData'), 'ai-files');
+    const f = path.join(dir, pathname.slice(10));
+    return inside(dir, f) ? f : null;
+  }
   const base = UI_HOSTS.has(host) ? UI_DIR : PAGES_DIR;
   if (pathname === '/' || pathname === '') return path.join(base, host + '.html');
   const f = path.join(base, pathname.slice(1));

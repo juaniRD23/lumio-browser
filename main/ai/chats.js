@@ -7,7 +7,7 @@ function stripForDisk(chat) {
     createdAt: chat.createdAt,
     updatedAt: chat.updatedAt,
     messages: chat.messages.map((m) => (Array.isArray(m.content)
-      ? { ...m, content: m.content.map((p) => (p.type === 'image_url' ? { type: 'text', text: '[screenshot]' } : p)) }
+      ? { ...m, content: m.content.map((p) => (p.type === 'image_url' ? { type: 'text', text: '[image not kept]' } : p)) }
       : m)),
     display: chat.display.map((d) => (d.thumb ? { ...d, thumb: undefined } : d)),
     ...(chat.plan ? { plan: chat.plan } : {}),

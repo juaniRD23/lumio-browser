@@ -8,6 +8,8 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { launch, root } from '../../scripts/launch.mjs';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
 import { startMockLumio } from '../mock-lumio.mjs';
 
 const FIX = path.join(root, 'tests', 'fixtures');
@@ -16,6 +18,7 @@ let L;
 let site;
 let siteUrl;
 let lumio;
+const DOWNLOADS = fs.mkdtempSync(path.join(fs.realpathSync(require('os').tmpdir()), 'lumio-dl-'));
 
 const shot = async (name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await L.shot(path.join(SHOTS, name + '.png')); } };
 const until = async (fn, ms = 10_000) => {
@@ -44,7 +47,7 @@ before(async () => {
   await new Promise((r) => site.listen(0, '127.0.0.1', r));
   siteUrl = `http://127.0.0.1:${site.address().port}`;
   lumio = await startMockLumio({ plan: 'free' });
-  L = await launch({ env: { LUMIO_ACCOUNT_BASE: lumio.base, LUMIO_AI_BASE: lumio.base } });
+  L = await launch({ env: { LUMIO_ACCOUNT_BASE: lumio.base, LUMIO_AI_BASE: lumio.base, LUMIO_DOWNLOADS: DOWNLOADS } });
   await until(() => L.main(() => !!global.lumio.tabs?.active), 15_000);
   await L.wait(800);
 });
@@ -53,6 +56,7 @@ after(async () => {
   await L?.close();
   site?.close();
   lumio?.server.close();
+  fs.rmSync(DOWNLOADS, { recursive: true, force: true });
 });
 
 test('opens on the Lumio new tab page with the AI panel', async () => {
@@ -325,6 +329,98 @@ test('while Lumio controls the computer the screen glows, and the Stop pill stop
   await L.main(() => global.lumio.ai.setMode('ask'));
 });
 
+test('the + menu attaches pictures and files (Office files read by the server), and the model gets them', async () => {
+  await L.shell(`document.getElementById('newchat-btn').click(); true`);
+  await L.shell(`document.getElementById('plus-btn').click(); true`);
+  assert.equal(await L.shell(`!document.getElementById('plus-menu').hidden`), true);
+  await until(async () => (await L.shell(`document.querySelectorAll('#apps .app-row').length`)) === 5);
+  assert.match(await L.shell(`document.getElementById('apps').innerText`), /Gmail[\s\S]*Connect/);
+  await L.wait(300);
+  await shot('40-plus-menu');
+  await L.shell(`document.getElementById('plus-btn').click(); true`);
+  await L.shell(`(async () => {
+    const c = document.createElement('canvas'); c.width = 320; c.height = 200;
+    const g = c.getContext('2d'); g.fillStyle = '#2f6fdd'; g.fillRect(0, 0, 320, 200);
+    const png = await new Promise((r) => c.toBlob(r, 'image/png'));
+    const dt = new DataTransfer();
+    dt.items.add(new File([png], 'blue.png', { type: 'image/png' }));
+    dt.items.add(new File(['Rent: 1200'], 'budget.txt', { type: 'text/plain' }));
+    dt.items.add(new File([new Uint8Array([80, 75, 3, 4, 9, 9])], 'Plan.docx', { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }));
+    const input = document.getElementById('file-input');
+    input.files = dt.files;
+    input.dispatchEvent(new Event('change'));
+    return true;
+  })()`);
+  await until(async () => (await L.shell(`document.querySelectorAll('#tray .att.ready').length`)) === 3, 10_000);
+  await shot('41-attachments');
+  await ask('What is in these files?');
+  await idle();
+  assert.match(await lastReply(), /1 picture\(s\) and these files: budget\.txt, Plan\.docx/);
+  const sent = lumio.state.agentRequests.at(-1).messages.at(-1).content;
+  assert.ok(sent.some((p) => p.type === 'text' && p.text.includes('Extracted Plan.docx (6 bytes)')), 'the Word file was read by the server');
+  assert.ok(sent.some((p) => p.type === 'image_url' && p.image_url.url.startsWith('data:image/')));
+  assert.equal(await L.shell(`document.querySelectorAll('.msg.user .files .att').length`), 3);
+  assert.equal(await L.shell(`document.getElementById('tray').hidden`), true);
+});
+
+test('Lumio makes a picture and a PDF: saved to Downloads and shown with Open', async () => {
+  await ask('Draw a fox');
+  await idle();
+  assert.equal(lumio.state.lastImagePrompt, 'A red fox in snow');
+  assert.equal(await L.shell(`!!document.querySelector('.made-img img')`), true);
+  const pic = fs.readdirSync(DOWNLOADS).find((f) => f.endsWith('.png'));
+  assert.ok(pic, 'picture saved to Downloads');
+  assert.ok(await L.shell(`document.querySelector('.made-img img').complete && document.querySelector('.made-img img').naturalWidth === 2`), 'shown from lumio://shell/ai-files');
+  await ask('Make a PDF of my trip');
+  await idle();
+  assert.match(await lastReply(), /Your PDF is ready/);
+  const pdf = path.join(DOWNLOADS, 'Trip Plan.pdf');
+  assert.ok(fs.existsSync(pdf), 'PDF saved to Downloads');
+  assert.equal(fs.readFileSync(pdf).subarray(0, 4).toString(), '%PDF');
+  assert.match(await L.shell(`document.querySelector('.doc-card').innerText`), /Trip Plan\.pdf[\s\S]*PDF document/);
+  await ask('Make a deck of my trip');
+  await idle();
+  assert.equal(fs.readFileSync(path.join(DOWNLOADS, 'Trip Plan.pptx')).subarray(0, 2).toString(), 'PK');
+  // The card only opens files Lumio made.
+  assert.equal(await L.main((_e, p) => global.lumio.ai.ownsFile(p), pdf), true);
+  assert.equal(await L.main(() => global.lumio.ai.ownsFile('/etc/hosts')), false);
+  await shot('42-made-files');
+});
+
+test('connections: connect Gmail from the + menu, then Lumio searches it through the server', async () => {
+  await L.shell(`document.getElementById('plus-btn').click(); true`);
+  await until(async () => (await L.shell(`document.querySelectorAll('#apps [data-connect]').length`)) === 5);
+  await L.shell(`document.querySelector('#apps [data-connect="gmail"]').click(); true`);
+  await until(async () => lumio.state.connected.has('gmail'));
+  await until(async () => (await L.main(() => global.lumio.tabs.wc().getURL())).includes('/account'));
+  await L.main(() => global.lumio.tabs.close(global.lumio.tabs.activeId));
+  await L.main(() => global.lumio.ai.refreshCapabilities());
+  await until(async () => (await L.main(() => global.lumio.ai.tools().map((t) => t.name))).includes('gmail_search'));
+  await ask('Anything in my email from my boss?');
+  await idle();
+  assert.match(await lastReply(), /From Gmail: Subject: Q3 numbers/);
+  assert.deepEqual(lumio.state.toolRuns.at(-1), { name: 'gmail_search', arguments: { query: 'from:boss' } });
+  // Turned off in the + menu: no Gmail tools.
+  await L.shell(`document.getElementById('plus-btn').click(); true`);
+  await until(async () => (await L.shell(`!!document.querySelector('#apps input[data-app="Gmail"]')`)));
+  await L.shell(`(() => { const i = document.querySelector('#apps input[data-app="Gmail"]'); i.checked = false; i.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  await until(async () => !(await L.main(() => global.lumio.ai.tools().map((t) => t.name))).includes('gmail_search'));
+  await L.main(() => global.lumio.ai.setApp('Gmail', true));
+  await L.shell(`document.getElementById('plus-btn').click(); true`);
+});
+
+test('the usage ring next to Send shows the plan, and opens the details', async () => {
+  assert.equal(await L.shell(`document.getElementById('usage-btn').hidden`), false);
+  const offset = await L.shell(`parseFloat(document.querySelector('#usage-btn .ring-fg').style.strokeDashoffset)`);
+  assert.ok(Math.abs(offset - 2 * Math.PI * 8.5 * 0.62) < 0.5, `38% used (${offset})`);
+  await L.shell(`document.getElementById('usage-btn').click(); true`);
+  const text = await L.shell(`document.getElementById('usage-pop').innerText`);
+  assert.match(text, /Lumio Free[\s\S]*Weekly usage[\s\S]*38% used[\s\S]*62% left[\s\S]*fully by[\s\S]*No 5-hour limits/i);
+  await L.wait(300);
+  await shot('43-usage');
+  await L.shell(`document.getElementById('usage-btn').click(); true`);
+});
+
 test('out of allowance, the chat offers an upgrade', async () => {
   await ask('you are out of allowance');
   await idle();
@@ -343,7 +439,10 @@ test('chats are saved without screenshots', async () => {
   assert.ok(chats.length >= 3);
   await L.main(() => global.lumio.store.chatsFile.flush());
   const raw = fs.readFileSync(path.join(L.userData, 'chats.json'), 'utf8');
-  assert.ok(!raw.includes('data:image/jpeg'));
+  const saved = JSON.parse(raw);
+  const parts = (Array.isArray(saved) ? saved : saved.chats || []).flatMap((c) => c.messages).flatMap((m) => (Array.isArray(m.content) ? m.content : []));
+  assert.ok(!parts.some((p) => p.type === 'image_url'), 'no screenshots or full pictures on disk');
+  assert.ok(!/data:image\/[a-z]+;base64,[A-Za-z0-9+/=]{80000}/.test(raw), 'only small thumbnails');
   const secrets = fs.readFileSync(path.join(L.userData, 'secrets.json'), 'utf8');
   assert.ok(!secrets.includes('sk-or-test-e2e'), 'key is encrypted at rest');
 });

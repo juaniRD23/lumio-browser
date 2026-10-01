@@ -73,6 +73,25 @@ export function scriptedTurn(msgs) {
     const hasPage = msgs.some((m) => /<current_page/.test(textOf(m)));
     return { text: hasPage ? '- Lighthouses are ancient.\n- Keepers ran them.\n- Most are automated now.' : 'I could not see the page.' };
   }
+  if (ask.includes('draw')) {
+    if (step === 0) return { calls: [{ name: 'generate_image', args: { prompt: 'A red fox in snow', aspect: 'square' } }] };
+    return { text: 'Here is your fox.' };
+  }
+  if (ask.includes('make a pdf') || ask.includes('make a deck')) {
+    const format = ask.includes('deck') ? 'pptx' : 'pdf';
+    if (step === 0) return { calls: [{ name: 'create_document', args: { title: 'Trip Plan', format, content: '# Trip Plan\n\nThree days in Lisbon.\n\n## Day 1\n\n- Alfama\n- Tram 28\n\n| Item | Cost |\n|---|---|\n| Hotel | €240 |' } }] };
+    return { text: `Your ${format.toUpperCase()} is ready.` };
+  }
+  if (ask.includes('my email')) {
+    if (step === 0) return { calls: [{ name: 'gmail_search', args: { query: 'from:boss' } }] };
+    return { text: `From Gmail: ${(lastTool?.content || '').split('|').pop().trim()}` };
+  }
+  if (ask.includes('these files')) {
+    const parts = msgs.flatMap((m) => (Array.isArray(m.content) ? m.content : []));
+    const pics = parts.filter((p) => p.type === 'image_url').length;
+    const files = parts.filter((p) => p.type === 'text' && p.text.startsWith('<file name=')).map((p) => p.text.match(/name="([^"]+)"/)[1]);
+    return { text: `I got ${pics} picture(s) and these files: ${files.join(', ')}.` };
+  }
   if (ask.includes('out of allowance')) {
     return { fail: { status: 429, body: { error: 'You’ve used this week’s Lumio AI allowance on the Free plan.', code: 'usage_limit' } } };
   }

@@ -11,11 +11,17 @@ const MODEL = { id: 'mock/agent-1', name: 'Mock Agent', maker: 'Lumio', minimumP
 // The tools the real server owns (server/src/agent.ts).
 const TOOLS = ['read_page', 'click', 'type', 'select_option', 'press_key', 'scroll', 'navigate', 'go_back', 'screenshot_tab', 'click_at',
   'list_tabs', 'open_tab', 'switch_tab', 'close_tab', 'wait', 'computer_screenshot', 'computer_click', 'computer_move', 'computer_drag',
-  'computer_scroll', 'computer_type', 'computer_key', 'open_app', 'list_apps', 'run_shell', 'update_plan', 'run_applescript'];
+  'computer_scroll', 'computer_type', 'computer_key', 'open_app', 'list_apps', 'run_shell', 'update_plan', 'run_applescript',
+  'generate_image', 'create_document'];
+// A 2x2 PNG for /v1/images.
+const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFklEQVR42mNkYPj/n4GBgYHhPwMDAwAt8gP9tA3e2wAAAABJRU5ErkJggg==';
 
 export async function startMockLumio({ plan = 'plus' } = {}) {
   const sessions = new Map(); // token -> { email, name }
-  const state = { plan, agentRequests: [], agentScript: null };
+  // connected: which apps are connected (the + menu); tools: what /v1/tools/run did.
+  const state = { plan, agentRequests: [], agentScript: null, connected: new Set(), toolRuns: [], images: 0 };
+  const APPS = [['google_drive', 'Google Drive', 'drive'], ['gmail', 'Gmail', 'gmail'], ['outlook', 'Outlook', 'mail'], ['onedrive', 'OneDrive', 'files'], ['word', 'Word', 'files']];
+  const remoteTools = () => (state.connected.has('gmail') ? [{ name: 'gmail_search', app: 'Gmail' }, { name: 'gmail_read', app: 'Gmail' }] : []);
   const json = (res, status, data) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(data)); };
   const readBody = async (req) => { let b = ''; for await (const c of req) b += c; return b; };
   // The website reads its session cookie; the AI routes read a bearer token.
@@ -29,8 +35,8 @@ export async function startMockLumio({ plan = 'plus' } = {}) {
   };
   const allowance = () => {
     const names = { free: 'Free', go: 'Go', plus: 'Plus', pro: 'Pro', max: 'Max' };
-    const week = { id: 'weekly', label: 'Weekly usage limit', limit: 1000, used: 380, held: 0, remaining: 620, resetsAt: Date.now() + 3 * 86400000 };
-    return { plan: state.plan, planName: names[state.plan], remaining: 620, limit: 1000, resetsAt: week.resetsAt, windows: [week] };
+    const week = { id: 'weekly', label: 'Weekly usage', limit: 1000, used: 380, remaining: 620, resetsAt: Date.now() + 3 * 86400000, fullAt: Date.now() + 3 * 86400000, refillsAt: Date.now() + 86400000 };
+    return { ...week, plan: state.plan, planName: names[state.plan], windows: [week] };
   };
 
   const server = http.createServer(async (req, res) => {
@@ -82,8 +88,8 @@ export async function startMockLumio({ plan = 'plus' } = {}) {
         // Like the real endpoint: the model it runs, the server's tools, reasoning levels.
         return json(res, 200, {
           version: 1, enabled: true, plan: state.plan,
-          model: MODEL, models: [MODEL],
-          tools: TOOLS, reasoning: { levels: ['low', 'medium', 'high'], default: 'medium' }, usage: allowance(),
+          model: MODEL, models: [MODEL], remoteTools: remoteTools(),
+          tools: [...TOOLS, ...remoteTools().map((t) => t.name)], reasoning: { levels: ['low', 'medium', 'high'], default: 'medium' }, usage: allowance(),
         });
       }
       if (url.pathname === '/v1/agent' && req.method === 'POST') {
@@ -93,7 +99,7 @@ export async function startMockLumio({ plan = 'plus' } = {}) {
         // The same shape checks as the real endpoint's validation.
         const bad = body.version !== 1 || !body.taskId || !body.runId || !body.stepId || !body.context
           || body.model !== MODEL.id || !['low', 'medium', 'high'].includes(body.reasoning ?? 'medium')
-          || !Array.isArray(body.tools) || body.tools.some((t) => typeof t !== 'string' || !TOOLS.includes(t))
+          || !Array.isArray(body.tools) || body.tools.some((t) => typeof t !== 'string' || ![...TOOLS, ...remoteTools().map((x) => x.name)].includes(t))
           || body.messages.some((m) => m.role === 'system') || body.messages[0]?.role !== 'user';
         if (bad) return json(res, 400, { error: 'Invalid browser step.', code: 'invalid_request' });
         state.agentRequests.push(body);
@@ -105,6 +111,37 @@ export async function startMockLumio({ plan = 'plus' } = {}) {
         res.end();
         return;
       }
+      // ---- pictures, Office files, connected apps
+      if (url.pathname === '/v1/images' && req.method === 'POST') {
+        if (!bearer(req)) return json(res, 401, { error: 'Sign in.', code: 'sign_in_required' });
+        const body = JSON.parse(await readBody(req));
+        state.images++;
+        state.lastImagePrompt = body.prompt;
+        return json(res, 200, { image: PNG, mime: 'image/png', model: 'Mock Image' });
+      }
+      if (url.pathname === '/v1/extract' && req.method === 'POST') {
+        if (!bearer(req)) return json(res, 401, { error: 'Sign in.', code: 'sign_in_required' });
+        const name = decodeURIComponent(req.headers['x-file-name'] || '');
+        const bytes = Buffer.from(await readBody(req), 'latin1');
+        return json(res, 200, { text: `Extracted ${name} (${bytes.length} bytes): Quarterly plan`, parts: 1, kind: 'docx' });
+      }
+      if (url.pathname === '/v1/tools/run' && req.method === 'POST') {
+        if (!bearer(req)) return json(res, 401, { error: 'Sign in.', code: 'sign_in_required' });
+        const body = JSON.parse(await readBody(req));
+        state.toolRuns.push(body);
+        if (!remoteTools().some((t) => t.name === body.name)) return json(res, 400, { error: 'That app isn’t connected.', code: 'tool_not_allowed' });
+        return json(res, 200, { text: '- id: m1 | Tue | From: Boss <boss@co.com> | Subject: Q3 numbers' });
+      }
+      if (url.pathname === '/api/connections') {
+        if (!who(req)) return json(res, 401, { error: 'Sign in.', code: 'sign_in_required' });
+        return json(res, 200, { apps: APPS.map(([id, name, service]) => ({ id, name, service, provider: 'x', blurb: `${name} blurb`, available: true, connected: state.connected.has(id), account: state.connected.has(id) ? 'tester@example.com' : null })) });
+      }
+      if (/^\/api\/connect\/[a-z_]+\/start$/.test(url.pathname)) {
+        state.connected.add(url.pathname.split('/')[3]);
+        res.writeHead(302, { location: '/account?connected=1' });
+        return res.end();
+      }
+      if (url.pathname === '/account') { res.writeHead(200, { 'content-type': 'text/html' }); return res.end('<title>Account</title><h1>Connected</h1>'); }
       json(res, 404, { error: 'Not found' });
     } catch (err) {
       json(res, 500, { error: String(err.message || err) });

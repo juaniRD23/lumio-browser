@@ -19,7 +19,7 @@ class LumioAccount {
     this.fetch = fetchImpl;
     this.pending = null; // { expiresAt } while waiting for the person to log in on the website
     this.info = null; // { email, name, username, publicUsername }
-    this.usage = null; // { plan, planName, remaining, limit, resetsAt, windows } (Lumio AI allowance)
+    this.usage = null; // { plan, planName, used, remaining, limit, fullAt, windows } (Lumio AI allowance)
     this.error = null;
     this.timer = null;
   }
@@ -72,8 +72,11 @@ class LumioAccount {
       usage: this.usage ? {
         remaining: this.usage.remaining,
         limit: this.usage.limit,
+        used: Number.isFinite(this.usage.used) ? this.usage.used : Math.max(0, (this.usage.limit || 0) - (this.usage.remaining || 0)),
         resetsAt: this.usage.resetsAt,
-        windows: (this.usage.windows || []).map((w) => ({ id: w.id, label: w.label, limit: w.limit, used: w.used, remaining: w.remaining, resetsAt: w.resetsAt })),
+        fullAt: this.usage.fullAt || null,
+        refillsAt: this.usage.refillsAt || null,
+        windows: (this.usage.windows || []).map((w) => ({ id: w.id, label: w.label, limit: w.limit, used: w.used, remaining: w.remaining, resetsAt: w.resetsAt, fullAt: w.fullAt || null })),
       } : null,
       error: this.error,
     };

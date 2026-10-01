@@ -14,17 +14,24 @@ function abortError() {
 }
 
 // Only the newest screenshots are sent back to the model; older ones become a
-// short placeholder so long tasks don't blow up the context window.
-function prepareMessages(system, messages, keepImages = KEEP_IMAGES) {
-  let seen = 0;
+// short placeholder so long tasks don't blow up the context window. Pictures
+// the person attached are kept (the newest 10).
+const isScreenshots = (m) => m.role === 'user' && Array.isArray(m.content) && /^Screenshot\(s\) from the tool call/.test(m.content[0]?.text || '');
+function prepareMessages(system, messages, keepImages = KEEP_IMAGES, keepAttached = 10) {
+  let shots = 0;
+  let attached = 0;
   const out = [];
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (!Array.isArray(m.content)) { out.unshift(m); continue; }
+    const screenshot = isScreenshots(m);
     const parts = [];
     for (let j = m.content.length - 1; j >= 0; j--) {
       const p = m.content[j];
-      if (p.type === 'image_url' && ++seen > keepImages) { parts.unshift({ type: 'text', text: '[older screenshot removed]' }); continue; }
+      if (p.type === 'image_url' && (screenshot ? ++shots > keepImages : ++attached > keepAttached)) {
+        parts.unshift({ type: 'text', text: screenshot ? '[older screenshot removed]' : '[older attached picture removed]' });
+        continue;
+      }
       parts.unshift(p);
     }
     out.unshift({ ...m, content: parts });

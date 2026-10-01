@@ -5,3 +5,4 @@ native/bin/
 preload/dist/
 website/.wrangler/
 *.log
+renderer/ui/web/

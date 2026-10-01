@@ -1,7 +1,7 @@
 {
   "name": "lumio-browser",
   "productName": "Lumio Browser",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Lumio Browser \u2014 a Chromium web browser with an AI that can read, act and control your computer.",
   "homepage": "https://lumio-browser.gw607953.workers.dev",
   "repository": {

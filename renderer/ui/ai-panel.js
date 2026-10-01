@@ -3,6 +3,7 @@
 import { marked } from '/vendor/marked.js';
 import DOMPurify from '/vendor/purify.js';
 import { icons, markSvg, levelBars } from './icons.js';
+import { initExtras, filesEl, madeEl } from './panel-extras.js';
 
 const LEVEL = { low: 1, medium: 2, high: 3 }; // reasoning level -> bars
 
@@ -36,6 +37,9 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   const includedUrl = new Map(); // chatId -> last page URL sent as context
   let live = null; // { textEl, textBuf, thinkingEl, steps: Map }
   let plan = null; // the current chat's checklist from update_plan
+
+  // + menu (files, connections), attachments tray, usage ring, made files.
+  const extras = initExtras({ api, getAi: () => ai, onChange: () => renderState(), notice: (t) => notice(t) });
 
   // ------------------------------------------------------------ chrome
   $('#panel-mark').innerHTML = markSvg(18);
@@ -115,7 +119,8 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     sendBtn.classList.toggle('stop', running);
     sendBtn.innerHTML = running ? icons.square : icons.send;
     sendBtn.title = running ? 'Stop (Esc)' : 'Send (↵)';
-    sendBtn.disabled = !running && (!prompt.value.trim() || !ai.ready);
+    sendBtn.disabled = !running && ((!prompt.value.trim() && !extras.ready()) || extras.busy() || !ai.ready);
+    extras.renderRing();
     setRunning(!!ai.running);
     spin(!!ai.running);
     planEl.classList.toggle('live', !!(ai.running && ai.runChatId === chatId));
@@ -207,15 +212,19 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
 
   async function submit(textOverride, forcePage) {
     const text = (textOverride ?? prompt.value).trim();
-    if (!text) return;
+    const useFiles = textOverride == null;
+    if (!text && !(useFiles && extras.ready())) return;
     if (!ai.ready) { renderEmpty(); $('#key-input')?.focus(); return; }
     if (ai.running) { notice('Lumio is still working. Press Stop first.'); return; }
+    if (useFiles && extras.busy()) { notice('Still reading your files. Send again in a moment.'); return; }
+    const attachments = useFiles ? extras.take() : [];
+    if (attachments === null) return;
     const t = getActiveTab();
     const url = t?.url || '';
     const web = /^https?:/.test(url);
     const wantPage = web && (forcePage || (includePage && includedUrl.get(chatId) !== url));
     if (textOverride == null) { prompt.value = ''; autosize(); }
-    const res = await api.invoke('ai:send', { chatId, text, includePage: wantPage });
+    const res = await api.invoke('ai:send', { chatId, text, includePage: wantPage, attachments });
     if (!res.ok) { notice(res.error); return; }
     if (wantPage) includedUrl.set(res.chatId, url);
   }
@@ -267,9 +276,10 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     }));
   }
 
-  function userEl(text, ctx) {
+  function userEl(text, ctx, files) {
     const el = document.createElement('div');
     el.className = 'msg user';
+    if (files?.length) el.append(filesEl(files));
     if (ctx?.title) {
       const c = document.createElement('div');
       c.className = 'ctx';
@@ -277,10 +287,12 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
       c.querySelector('span').textContent = ctx.title;
       el.append(c);
     }
-    const b = document.createElement('div');
-    b.className = 'bubble';
-    b.textContent = text;
-    el.append(b);
+    if (text) {
+      const b = document.createElement('div');
+      b.className = 'bubble';
+      b.textContent = text;
+      el.append(b);
+    }
     return el;
   }
 
@@ -384,7 +396,8 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   function renderChat(display) {
     messages.innerHTML = '';
     for (const d of display) {
-      if (d.kind === 'user') messages.append(userEl(d.text, d.ctx));
+      if (d.kind === 'user') messages.append(userEl(d.text, d.ctx, d.files));
+      else if (d.kind === 'made') messages.append(madeEl(d.file, api));
       else if (d.kind === 'ai') messages.append(aiEl(d.text));
       else if (d.kind === 'step') messages.append(stepEl(d));
       else if (d.kind === 'approval' && !d.decision) messages.append(approvalEl(d));
@@ -432,7 +445,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
         if (!chatId) messages.innerHTML = '';
         chatId = ev.chatId;
         showPlan(null); // each request starts fresh; the AI posts a new checklist if it needs one
-        messages.append(userEl(ev.text, ev.ctx));
+        messages.append(userEl(ev.text, ev.ctx, ev.files));
         scrollDown(true);
       }
       return;
@@ -469,6 +482,12 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
         scrollDown();
         break;
       }
+      case 'made':
+        endText();
+        thinking(false);
+        messages.append(madeEl(ev.file, api));
+        scrollDown(true);
+        break;
       case 'plan':
         showPlan(ev.items, { changed: true });
         break;

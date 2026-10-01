@@ -88,9 +88,20 @@
           <div class="ticks" id="effort-ticks"></div>
           <div id="reasoning-foot" class="menu-foot"></div>
         </div>
+        <div id="plus-menu" class="popover plus-menu" role="menu" aria-label="Add" hidden>
+          <button type="button" class="menu-row" id="add-files" role="menuitem">
+            <span class="mi"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 11-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg></span>
+            <span class="mt"><b>Add photos &amp; files</b><small>Pictures, PDFs, Word, PowerPoint, Excel, text · up to 10</small></span>
+          </button>
+          <div class="list-label conn-label">Connections</div>
+          <div id="apps" class="apps"></div>
+        </div>
+        <div id="usage-pop" class="popover usage-pop" role="dialog" aria-label="Usage" hidden></div>
+        <div id="tray" class="tray" hidden></div>
         <div id="context-chip" class="chip" hidden title="Lumio will read this page with your message"><i></i><span></span><button aria-label="Don't include this page">×</button></div>
         <textarea id="prompt" rows="1" placeholder="Ask Lumio, or tell it what to do…" spellcheck="true"></textarea>
         <div class="composer-row">
+          <button id="plus-btn" class="round-btn" title="Add files and connections" aria-label="Add files and connections" aria-haspopup="menu" aria-expanded="false"></button>
           <button id="reasoning-btn" class="model-btn" title="Thinking effort" aria-haspopup="dialog" aria-expanded="false"><span id="reasoning-bars"></span><span id="reasoning-name">Medium</span><i class="chev"></i></button>
           <div id="mode" class="segmented" role="radiogroup" aria-label="Approval mode">
             <button data-mode="ask" title="Ask before every action">Ask</button>
@@ -98,12 +109,14 @@
             <button data-mode="bypass" title="Never ask (use with care)">Bypass</button>
           </div>
           <span class="spacer"></span>
+          <button id="usage-btn" class="round-btn ring-btn" title="Usage" aria-label="Usage" aria-haspopup="dialog" aria-expanded="false" hidden></button>
           <button id="send" class="send" title="Send (↵)" aria-label="Send"></button>
         </div>
       </div>
     </aside>
   </main>
 
+  <input type="file" id="file-input" multiple hidden>
   <script type="module" src="shell.js"></script>
 </body>
 </html>

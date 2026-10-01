@@ -143,7 +143,7 @@ function renderPlan() {
   const windows = a.usage?.windows || [];
   const meters = windows.map((w) => {
     const left = w.limit ? Math.max(0, Math.round((w.remaining / w.limit) * 100)) : 0;
-    return `<div class="row"><div class="grow"><div class="title">${esc(w.label)}</div><div class="meter"><i style="width:${left}%"></i></div><div class="desc">${left}% left · resets ${esc(when(w.resetsAt))}</div></div></div>`;
+    return `<div class="row"><div class="grow"><div class="title">${esc(w.label)}</div><div class="meter"><i style="width:${left}%"></i></div><div class="desc">${left}% left${w.used > 0 && w.fullAt ? ` · fully refilled by ${esc(when(w.fullAt))}` : ''} · no 5-hour limits</div></div></div>`;
   }).join('');
   $('#plan-card').innerHTML = `<div class="plan-top"><div class="grow"><div class="desc">Your plan</div><div class="plan-name">Lumio ${esc(a.planName || 'Free')}</div></div>
       ${a.plan !== 'max' ? '<button class="btn primary" data-open="upgrade">Upgrade</button>' : ''}
