@@ -18,7 +18,7 @@
     { "binding": "DB", "database_name": "lumio", "database_id": "b79bae52-d26e-4cec-ac8e-1d1870fca3f0" }
   ],
   "vars": {
-    "GOOGLE_CLIENT_ID": "",
+    "GOOGLE_CLIENT_ID": "1034095196731-3gfal3tuf9goo6ejtnhgi07h3pgtkhdr.apps.googleusercontent.com",
     "FREE_DAILY_CAP_USD": "3"
   }
 }
