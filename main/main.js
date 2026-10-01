@@ -316,8 +316,6 @@ function makeDefaultBrowser() {
 }
 
 // ---------------------------------------------------------------- account + profile
-// GPL: the About section links to the source code.
-const SOURCE_URL = 'https://github.com/juaniRD23/lumio-browser';
 const ACCOUNT_PAGES = { manage: '/account', upgrade: '/account#plans', billing: '/account', home: '/' };
 
 // Signing in happens on lumio-usa.online in a normal tab. When the site's
@@ -366,6 +364,7 @@ function openAccountPage(which, from) {
 }
 
 function profileState() { return { ...store.settings.profile }; }
+const firstName = (name) => String(name || '').trim().split(/\s+/)[0].slice(0, 40) || null;
 
 const THEMES = ['blue', 'purple', 'green', 'orange', 'pink', 'mono'];
 const COLOR_RE = /^#[0-9a-f]{6}$/i;
@@ -502,6 +501,7 @@ function registerIpc() {
 
   on('layout:slot', (w, rect) => { w.tabs.setSlot(rect); w.indicator.place(); });
   on('aura:size', (w, size) => { if (w.indicator.bar?.webContents) w.indicator.resize(size); });
+  on('panel:full', (w, { on: covered, slot } = {}) => w.tabs.setCovered(!!covered, slot && Number.isFinite(slot.width) ? slot : null));
   on('panel:set', (_w, { open, width }) => {
     if (typeof open === 'boolean') store.setSetting('panelOpen', open);
     if (typeof width === 'number') store.setSetting('panelWidth', Math.round(Math.max(320, Math.min(760, width))));
@@ -646,10 +646,14 @@ function registerIpc() {
     engine: (SEARCH_ENGINES[store.settings.searchEngine] || SEARCH_ENGINES.google).name,
     aiReady: w.ai.state().ready,
     incognito: w.incognito,
+    // "Good morning, Juan": the profile name they chose, else their Lumio account name.
+    name: firstName(store.settings.profile?.name || account.state().name),
+    chats: w.incognito ? [] : w.ai.listChats().slice(0, 3),
   }));
+  internalHandle('page:open-chat', ['newtab'], ({ w }, id) => w.openChat(String(id || '')));
   internalHandle('page:navigate', ALL_PAGES, ({ w, tab }, input) => w.tabs.navigate(input, tab.id));
   internalHandle('page:open', ALL_PAGES, ({ w }, url, disposition) => openUrl(String(url || ''), disposition, w));
-  internalHandle('page:ask-ai', ['newtab'], ({ w }, text) => w.askAI(String(text || ''), { includePage: false }));
+  internalHandle('page:ask-ai', ['newtab'], ({ w }, text) => w.askAI(String(text || ''), { includePage: false, full: true }));
 
   internalHandle('page:history', ['history'], () => store.history().slice().reverse());
   internalHandle('page:history-delete', ['history'], (_ctx, what) => store.deleteHistory(what || {}));
@@ -722,7 +726,6 @@ function registerIpc() {
     ai: w.ai.state(),
     version: app.getVersion(),
     update: updater?.state || null,
-    sourceUrl: SOURCE_URL,
     isDefault: app.isDefaultProtocolClient('https'),
     importSources: importer.detect(),
     sitePermissions: Object.entries(normal.permissions.all()).map(([origin, perms]) => ({ origin, perms })),

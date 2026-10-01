@@ -22,6 +22,8 @@ export const icons = {
   square: '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2.5" fill="currentColor"/></svg>',
   chats: s('<path d="M4 5h16v11H9l-5 4z"/>', 'width="16" height="16"'),
   compose: s('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>', 'width="16" height="16"'),
+  expand: s('<path d="M14 4h6v6"/><path d="M20 4l-7 7"/><path d="M10 20H4v-6"/><path d="M4 20l7-7"/>', 'width="15" height="15"'),
+  shrink: s('<path d="M4 14h6v6"/><path d="M10 14l-7 7"/><path d="M20 10h-6V4"/><path d="M14 10l7-7"/>', 'width="15" height="15"'),
   panel: s('<rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M14.5 4.5v15"/>', 'width="16" height="16"'),
   volume: s('<path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M17 9a4 4 0 0 1 0 6"/>', 'width="13" height="13"'),
   muted: s('<path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M17 9l4 6M21 9l-4 6"/>', 'width="13" height="13"'),

@@ -358,6 +358,33 @@ body:is(.resizing, .no-anim) :is(#panel, #resizer, #panel-head, #messages, #comp
 }
 .mark.big { margin-right: 4px; }
 .panel-title { font-weight: 600; font-size: 13px; letter-spacing: -.15px; margin-left: 2px; }
+
+/* Full-size chat (Ask Lumio from the new tab page): the panel takes the whole
+   page area and reads like a chat page, in a centered column. The page view
+   underneath is hidden by the main process while this is on. */
+body.chat-full :is(#pagecol, #resizer) { display: none; }
+body.chat-full #panel {
+  flex: 1 1 auto; width: auto; align-items: center;
+  background: radial-gradient(ellipse 60% 42% at 50% -12%, #86b7ff12, #86b7ff06 45%, transparent 100%), var(--panel);
+  animation: full-in .4s var(--ease);
+}
+@keyframes full-in { from { opacity: 0; transform: scale(.99); } }
+body.chat-full #panel-head { width: 100%; border-bottom-color: transparent; }
+body.chat-full #messages { width: 100%; padding: 24px max(24px, calc((100% - 760px) / 2)) 12px; }
+body.chat-full :is(#composer, #plan) { width: min(760px, calc(100% - 48px)); margin-left: auto; margin-right: auto; }
+body.chat-full #composer { margin-bottom: 18px; }
+body.chat-full .msg { margin-bottom: 20px; }
+body.chat-full .msg.ai { font-size: 15px; line-height: 1.7; }
+body.chat-full .msg.ai h1, body.chat-full .msg.ai h2, body.chat-full .msg.ai h3 { font-size: 16.5px; }
+body.chat-full .msg.user .bubble { max-width: 72%; padding: 10px 16px; font-size: 15px; }
+body.chat-full #prompt { font-size: 15px; }
+body.chat-full #chat-menu { left: auto; width: min(380px, calc(100% - 20px)); }
+body.chat-full .empty { padding-top: 12vh; }
+body.chat-full .empty h2 { font-size: 40px; }
+body.chat-full .empty p { max-width: 440px; font-size: 14px; }
+body.chat-full .suggestions { grid-template-columns: repeat(2, 1fr); max-width: 640px; margin: 0 auto; }
+#expand-btn[aria-pressed="true"] { color: var(--text); }
+@media (prefers-reduced-motion: reduce) { body.chat-full #panel { animation: none; } }
 .chev { width: 6px; height: 6px; border-right: 1.5px solid var(--label); border-bottom: 1.5px solid var(--label); transform: rotate(45deg) translate(-1px, -1px); flex: none; }
 
 .popover {

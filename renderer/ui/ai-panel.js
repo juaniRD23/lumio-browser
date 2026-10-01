@@ -50,6 +50,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
 
   function setOpen(open, save = true) {
     panelOpen = open;
+    if (!open) setFull(false);
     body.classList.toggle('panel-closed', !open);
     $('#panel').inert = !open;
     $('#ai-toggle').classList.toggle('on', open);
@@ -65,6 +66,38 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   api.on('panel-toggle', () => setOpen(!panelOpen));
   api.on('panel-open', () => { if (!panelOpen) setOpen(true); });
   api.on('ai-focus', () => { if (!panelOpen) setOpen(true); prompt.focus(); });
+
+  // ------------------------------------------------------------ full-size chat
+  // Asking from the new tab page opens the chat over the whole page area, like
+  // a chat page. Switching tabs, going to another page, or Lumio starting to
+  // work on a page puts it back beside the page.
+  const PAGE_TOOLS = new Set(['read_page', 'click', 'click_at', 'type', 'press_key', 'scroll', 'select_option', 'navigate', 'go_back', 'open_tab', 'switch_tab', 'close_tab', 'screenshot_tab']);
+  let full = null; // { tabId, url } of the tab it covers, while full size
+  function setFull(on) {
+    if (!!full === !!on) return;
+    const t = getActiveTab();
+    full = on ? { tabId: t?.id ?? null, url: t?.url || '' } : null;
+    body.classList.toggle('chat-full', !!full);
+    renderFull();
+    if (full) { api.send('panel:full', { on: true }); return; }
+    // Show the page again where the slot is now, without a frame at the old size.
+    requestAnimationFrame(() => {
+      const r = $('#slot').getBoundingClientRect();
+      api.send('panel:full', { on: false, slot: { x: r.left, y: r.top, width: r.width, height: r.height } });
+    });
+  }
+  function renderFull() {
+    const b = $('#expand-btn');
+    b.innerHTML = full ? icons.shrink : icons.expand;
+    b.title = full ? 'Show the page' : 'Full-size chat';
+    b.setAttribute('aria-label', b.title);
+    b.setAttribute('aria-pressed', String(!!full));
+    const close = $('#panel-close');
+    close.innerHTML = full ? icons.x : icons.panel;
+    close.title = full ? 'Close chat (⌘⇧L)' : 'Hide (⌘⇧L)';
+  }
+  $('#expand-btn').addEventListener('click', () => setFull(!full));
+  renderFull();
 
   // resize
   const resizer = $('#resizer');
@@ -474,6 +507,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
         endText();
         break;
       case 'step': {
+        if (full && PAGE_TOOLS.has(ev.name)) setFull(false); // let them watch the page
         if (!live) break;
         endText();
         thinking(false);
@@ -718,14 +752,37 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   });
 
   // ------------------------------------------------------------ from main
-  api.on('ai-prefill', ({ text, includePage: page, send }) => {
+  api.on('ai-prefill', ({ text, includePage: page, send, full: wantFull }) => {
     setOpen(true);
+    if (wantFull) {
+      // From the new tab page: a fresh chat, full size.
+      chatMenu.hidden = true;
+      setFull(true);
+      if (ai.running) {
+        prompt.value = text;
+        autosize();
+        notice('Lumio is still working on another task. Press Stop, or send this when it’s done.', 'info');
+        return;
+      }
+      newChat();
+      if (!ai.ready) { prompt.value = text; autosize(); } // kept for after signing in
+      if (send) submit(text, false);
+      return;
+    }
     if (send) { submit(text, page); return; }
     prompt.value = text;
     autosize();
     if (page) { includePage = true; renderChip(); }
     prompt.focus();
     prompt.setSelectionRange(prompt.value.length, prompt.value.length);
+  });
+
+  api.on('ai-open-chat', async ({ id, full: wantFull }) => {
+    setOpen(true);
+    chatMenu.hidden = true;
+    if (wantFull) setFull(true);
+    await loadChat(id);
+    prompt.focus();
   });
 
   return {
@@ -741,7 +798,8 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     },
     open() { if (!panelOpen) setOpen(true); },
     sendText(text) { submit(text); },
-    onTabChange(_tab, switched) {
+    onTabChange(tab, switched) {
+      if (full && (switched || tab?.id !== full.tabId || (tab?.url || '') !== full.url)) setFull(false);
       if (switched) includePage = true;
       renderChip();
     },

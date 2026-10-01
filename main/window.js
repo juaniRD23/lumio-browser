@@ -166,10 +166,20 @@ class BrowserWin {
     }
   }
 
+  // full: open the chat full size, over the page (asked from the new tab page).
   askAI(text, opts = {}) {
     this.app.store.setSetting('panelOpen', true);
-    this.emit('ai-prefill', { text, includePage: !!opts.includePage, send: !opts.draft });
+    this.emit('ai-prefill', { text, includePage: !!opts.includePage, send: !opts.draft, full: !!opts.full });
     this.win.webContents.focus();
+  }
+
+  // A recent chat picked on the new tab page, opened full size.
+  openChat(id) {
+    if (!this.profile.chats.get(id)) return false;
+    this.app.store.setSetting('panelOpen', true);
+    this.emit('ai-open-chat', { id, full: true });
+    this.win.webContents.focus();
+    return true;
   }
 
   session() {

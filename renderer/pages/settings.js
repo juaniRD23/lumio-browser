@@ -8,7 +8,6 @@ const THEMES = { blue: '#86b7ff', purple: '#b58cff', green: '#7ee2a8', orange: '
 
 let s = await page.invoke('page:settings');
 $('#version').textContent = 'v' + s.version;
-if (s.sourceUrl) $('#source-link').href = s.sourceUrl; else $('#source-link').hidden = true;
 
 // ---- updates (About)
 function renderUpdate(u) {

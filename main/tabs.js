@@ -250,7 +250,7 @@ class TabManager {
     if (!tab) return;
     this.activeId = id;
     this.ensureView(tab);
-    for (const t of this.tabs) if (t.view) t.view.setVisible(t.id === id);
+    for (const t of this.tabs) if (t.view) { t.view.setVisible(t.id === id); t.view.lumioCovered = false; }
     // Keep the active page on top of the other tabs (and below any overlay).
     // Re-adding a view detaches it briefly, so skip it when it's already on top.
     const children = this.win.contentView.children.filter((v) => this.tabs.some((t) => t.view === v));
@@ -343,9 +343,20 @@ class TabManager {
     this.layout();
   }
 
+  // Full-size Lumio chat covers the page area: hide the page underneath.
+  setCovered(on, rect) {
+    this.covered = !!on;
+    if (rect) this.setSlot(rect);
+    else this.layout();
+  }
+
   layout() {
     const tab = this.active;
     if (!tab?.view) return;
+    if (tab.view.lumioCovered !== !!this.covered) {
+      tab.view.setVisible(!this.covered);
+      tab.view.lumioCovered = !!this.covered;
+    }
     const full = this.fullscreenTab === tab.id;
     if (full) {
       const [w, h] = this.win.getContentSize();
