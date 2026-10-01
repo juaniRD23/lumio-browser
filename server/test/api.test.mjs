@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import worker from '../src/index.ts';
+import { BROWSER_DEFAULT, CHAT_DEFAULT, ceiling, findModel } from '../src/models.ts';
 
 const SITE = 'https://lumio.test';
 const OR = 'https://openrouter.test/api/v1';
@@ -121,7 +122,7 @@ function signed(event) {
 }
 const hook = (event, header) => { const s = signed(event); return call('/api/stripe/webhook', { method: 'POST', body: s.payload, headers: { 'stripe-signature': header ?? s.header } }); };
 const context = { platform: 'mac', computer: true, mode: 'ask', timeZone: 'America/New_York', tabCount: 1 };
-const step = (extra = {}) => ({ version: 1, taskId: 'chat-1', runId: 'run-1', stepId: 's1', model: 'openai/gpt-6-luna', reasoning: 'medium', tools: ['read_page', 'click', 'update_plan'], context, messages: [{ role: 'user', content: 'Summarize this page' }], ...extra });
+const step = (extra = {}) => ({ version: 1, taskId: 'chat-1', runId: 'run-1', stepId: 's1', model: BROWSER_DEFAULT, reasoning: 'medium', tools: ['read_page', 'click', 'update_plan'], context, messages: [{ role: 'user', content: 'Summarize this page' }], ...extra });
 const userRow = () => sql.prepare('SELECT * FROM users').get();
 
 // ---------------------------------------------------------------- accounts
@@ -234,7 +235,7 @@ test('web Chat streams a reply, saves the conversation, and bills the allowance'
   assert.equal(ev.filter((e) => e.type === 'delta').map((e) => e.content).join(''), 'Hello from Luna.');
   assert.equal(ev.at(-1).type, 'done');
   assert.deepEqual(calls.or[0].body.reasoning, { effort: 'low', exclude: true });
-  assert.equal(calls.or[0].body.model, 'openai/gpt-6-luna');
+  assert.equal(calls.or[0].body.model, CHAT_DEFAULT);
   assert.equal(calls.or[0].body.messages[0].role, 'system');
   const chatId = ev[0].chatId;
   // Follow-up in the same chat sends the history.
@@ -256,7 +257,7 @@ test('web Chat streams a reply, saves the conversation, and bills the allowance'
 
 test('out of allowance, Chat and the browser are refused before any model call', async () => {
   const { token } = await signIn();
-  sql.prepare("INSERT INTO steps (key, owner, plan, kind, request_hash, status, held_microusd, cost_microusd, created_at) VALUES ('old', ?, 'free', 'chat', 'h', 'done', 0, 7000, ?)").run(userRow().id, Date.now() - 1000);
+  sql.prepare("INSERT INTO steps (key, owner, plan, kind, request_hash, status, held_microusd, cost_microusd, created_at) VALUES ('old', ?, 'free', 'chat', 'h', 'done', 0, 7130, ?)").run(userRow().id, Date.now() - 1000);
   const res = await call('/api/chat', { cookie: token, method: 'POST', body: { text: 'hi' } });
   assert.equal(res.status, 429);
   const body = await res.json();
@@ -271,7 +272,8 @@ test('browser: capabilities, a streamed step, tool calls, replays and the Free d
   const { token } = await signIn();
   assert.equal((await call('/v1/agent')).status, 401);
   const caps = await (await call('/v1/agent', { token })).json();
-  assert.deepEqual(caps.models.map((m) => m.id), ['openai/gpt-6-luna']);
+  assert.equal(caps.model.id, BROWSER_DEFAULT);
+  assert.ok(caps.models.every((m) => m.available));
   assert.ok(caps.tools.includes('update_plan'));
   assert.deepEqual(caps.usage.windows.map((w) => [w.id, w.limit]), [['fiveHour', 7142], ['weekly', 50000]]);
 
@@ -280,7 +282,8 @@ test('browser: capabilities, a streamed step, tool calls, replays and the Free d
   assert.equal(ev.at(-1).type, 'result');
   assert.equal(ev.at(-1).message.content, 'Hello from Luna.');
   assert.deepEqual(calls.or[0].body.reasoning, { effort: 'high', exclude: true });
-  assert.deepEqual(calls.or[0].body.provider.max_price, { prompt: 0.1, completion: 0.5 });
+  assert.equal(calls.or[0].body.model, BROWSER_DEFAULT);
+  assert.deepEqual(calls.or[0].body.provider.max_price, ceiling(findModel(BROWSER_DEFAULT)));
   assert.deepEqual(calls.or[0].body.tools.map((t) => t.function.name), ['read_page', 'click', 'update_plan']);
 
   const again = await call('/v1/agent', { token, method: 'POST', body: step({ reasoning: 'high' }) });
@@ -295,10 +298,15 @@ test('browser: capabilities, a streamed step, tool calls, replays and the Free d
   await settled();
   assert.deepEqual(tools.find((e) => e.type === 'tool_call').tool_call.function, { name: 'click', arguments: '{"ref":12}' });
 
+  // A tool the step didn't offer: the model is told, tries once more, then the step fails.
+  const before = calls.or.length;
   reply = () => sse([{ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_b', type: 'function', function: { name: 'run_shell', arguments: '{"command":"x","explanation":"x"}' } }] }, finish_reason: 'tool_calls' }] }]);
   const refused = await events(await call('/v1/agent', { token, method: 'POST', body: step({ stepId: 's3' }) }));
   await settled();
-  assert.equal(refused.at(-1).code, 'tool_not_allowed');
+  assert.equal(refused.at(-1).code, 'invalid_tool_arguments');
+  assert.equal(calls.or.length, before + 2);
+  assert.match(calls.or.at(-1).body.messages.at(-1).content, /no tool named "run_shell"/);
+  assert.ok(!refused.some((e) => e.type === 'tool_call'), 'nothing to run');
 
   env.FREE_DAILY_CAP_USD = '0.0001';
   const capped = await call('/v1/agent', { token, method: 'POST', body: step({ stepId: 's4' }) });
@@ -308,7 +316,7 @@ test('browser: capabilities, a streamed step, tool calls, replays and the Free d
 
 test('bad browser steps and provider failures', async () => {
   const { token } = await signIn();
-  for (const bad of [step({ model: 'anthropic/claude-opus-5.5' }), step({ reasoning: 'extreme' }), step({ tools: ['write_file'] }), { nope: true }]) {
+  for (const bad of [step({ reasoning: 'extreme' }), step({ tools: ['write_file'] }), { nope: true }]) {
     const res = await call('/v1/agent', { token, method: 'POST', body: bad });
     assert.ok(res.status >= 400 && res.status < 500);
   }
@@ -321,4 +329,69 @@ test('bad browser steps and provider failures', async () => {
   const ok = await events(await call('/v1/agent', { token, method: 'POST', body: step() }));
   await settled();
   assert.equal(ok.at(-1).message.content, 'Back again.');
+});
+
+test('browser: small slips in tool arguments are fixed, and a bad call gets one retry with the reason', async () => {
+  const { token } = await signIn();
+  const toolCall = (name, args, id = 'call_1') => sse([{ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id, type: 'function', function: { name, arguments: args } }] }, finish_reason: 'tool_calls' }] }, { choices: [], usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110, cost: 0.00001 } }]);
+  // "12" for 12, "false" for false, null for an optional field, a field the tool doesn't take, and a ```json fence.
+  reply = () => toolCall('click', '```json\n{"ref":"[12]","double":"false","tab_id":null,"why":"x"}\n```');
+  const fixed = await events(await call('/v1/agent', { token, method: 'POST', body: step() }));
+  await settled();
+  assert.deepEqual(fixed.find((e) => e.type === 'tool_call').tool_call.function, { name: 'click', arguments: '{"ref":12,"double":false}' });
+  assert.equal(calls.or.length, 1);
+  // Plan statuses in other words.
+  reply = () => toolCall('update_plan', '{"steps":[{"title":"Look","status":"completed"},{"title":"Buy","status":"In Progress"},{"title":"Pay","status":"todo"}]}');
+  const plan = await events(await call('/v1/agent', { token, method: 'POST', body: step({ stepId: 's2' }) }));
+  await settled();
+  assert.deepEqual(JSON.parse(plan.find((e) => e.type === 'tool_call').tool_call.function.arguments).steps.map((x) => x.status), ['done', 'in_progress', 'pending']);
+  // Missing a required argument: the model sees why and fixes it on the second try (both calls are billed).
+  let n = 0;
+  reply = () => (n++ === 0 ? toolCall('click', '{"double":true}', 'call_x') : toolCall('click', '{"ref":7}', 'call_y'));
+  const retried = await events(await call('/v1/agent', { token, method: 'POST', body: step({ stepId: 's3' }) }));
+  await settled();
+  const second = calls.or.at(-1).body.messages;
+  assert.equal(second.at(-2).role, 'assistant');
+  assert.equal(second.at(-2).tool_calls[0].id, 'call_x');
+  assert.deepEqual({ role: second.at(-1).role, id: second.at(-1).tool_call_id }, { role: 'tool', id: 'call_x' });
+  assert.match(second.at(-1).content, /missing "ref"/);
+  const result = retried.find((e) => e.type === 'result');
+  assert.deepEqual(result.message.tool_calls.map((c) => [c.id, c.function.arguments]), [['call_y', '{"ref":7}']]);
+  assert.equal(sql.prepare("SELECT cost_microusd FROM steps ORDER BY created_at DESC LIMIT 1").get().cost_microusd, 20);
+});
+
+test('web Chat: people pick a model; bigger ones need a paid plan', async () => {
+  const { token } = await signIn();
+  const list = await (await call('/api/chat/models', { cookie: token })).json();
+  assert.equal(list.default, CHAT_DEFAULT);
+  const free = list.models.filter((m) => m.available).map((m) => m.id);
+  assert.ok(free.includes(CHAT_DEFAULT));
+  assert.ok(list.models.every((m) => m.available === (m.minimumPlan === 'free')));
+  assert.ok(list.models.every((m) => m.cost >= 1 && m.cost <= 4 && m.name && m.maker && m.blurb));
+  // A free model works; its price ceiling goes to OpenRouter.
+  const pick = list.models.find((m) => m.available && m.id !== CHAT_DEFAULT);
+  await events(await call('/api/chat', { cookie: token, method: 'POST', body: { text: 'Hi', model: pick.id } }));
+  await settled();
+  assert.equal(calls.or[0].body.model, pick.id);
+  assert.deepEqual(calls.or[0].body.provider.max_price, ceiling(findModel(pick.id)));
+  // A Plus model on Free is refused before any model call; an unknown model too.
+  const plus = list.models.find((m) => m.minimumPlan === 'plus');
+  const locked = await call('/api/chat', { cookie: token, method: 'POST', body: { text: 'Hi', model: plus.id } });
+  assert.equal(locked.status, 403);
+  assert.deepEqual(await locked.json(), { error: `${plus.name} needs Lumio Plus or higher.`, code: 'model_plan_required', plan: 'plus' });
+  assert.equal((await call('/api/chat', { cookie: token, method: 'POST', body: { text: 'Hi', model: 'evil/model' } })).status, 400);
+  assert.equal(calls.or.length, 1);
+  // On Plus it unlocks.
+  sql.prepare("UPDATE users SET plan = 'plus'").run();
+  assert.ok((await (await call('/api/chat/models', { cookie: token })).json()).models.find((m) => m.id === plus.id).available);
+  await events(await call('/api/chat', { cookie: token, method: 'POST', body: { text: 'Hi', model: plus.id } }));
+  await settled();
+  assert.equal(calls.or.at(-1).body.model, plus.id);
+});
+
+test('browser: a model that is not a browser model gets the browser default', async () => {
+  const { token } = await signIn();
+  await events(await call('/v1/agent', { token, method: 'POST', body: step({ model: 'anthropic/claude-opus-5.5' }) }));
+  await settled();
+  assert.equal(calls.or[0].body.model, BROWSER_DEFAULT);
 });

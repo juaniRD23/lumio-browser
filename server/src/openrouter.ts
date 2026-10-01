@@ -1,7 +1,7 @@
 // Streams one OpenRouter chat completion: yields text as it arrives and
 // returns the whole reply (text, tool calls, finish reason, usage with cost).
 import { AgentError, type Env } from './util.ts';
-import { CEILING } from './usage.ts';
+import { ceiling, type Model } from './models.ts';
 
 export type Usage = { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; cost?: number };
 export type Reply = { content: string; calls: { id?: string; name: string; args: string }[]; finish: string | null; usage: Usage | null };
@@ -10,7 +10,7 @@ export class ProviderError extends AgentError {
   constructor(message: string, status = 502) { super(message, status, 'provider_unavailable'); }
 }
 
-export async function* complete(env: Env, body: Record<string, unknown>): AsyncGenerator<string, Reply> {
+export async function* complete(env: Env, model: Model, body: Record<string, unknown>): AsyncGenerator<string, Reply> {
   if (!env.OPENROUTER_API_KEY) throw new AgentError('Lumio AI isn’t connected to its model right now.', 503, 'model_not_connected');
   const base = (env.OPENROUTER_BASE || 'https://openrouter.ai/api/v1').replace(/\/$/, '');
   let res: Response;
@@ -20,10 +20,12 @@ export async function* complete(env: Env, body: Record<string, unknown>): AsyncG
       headers: { authorization: `Bearer ${env.OPENROUTER_API_KEY}`, 'content-type': 'application/json', 'HTTP-Referer': 'https://lumio-usa.online', 'X-Title': 'Lumio' },
       body: JSON.stringify({
         ...body,
+        model: model.id,
         stream: true,
         stream_options: { include_usage: true },
         usage: { include: true },
-        provider: { max_price: CEILING, require_parameters: true, allow_fallbacks: true },
+        // Only providers that don't keep or train on what people send.
+        provider: { max_price: ceiling(model), require_parameters: true, allow_fallbacks: true, data_collection: 'deny' },
       }),
     });
   } catch {

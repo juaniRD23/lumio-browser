@@ -41,15 +41,27 @@
     <form class="composer" id="composer">
       <textarea id="prompt" rows="1" placeholder="Message Lumio" aria-label="Message Lumio"></textarea>
       <div class="composer-row">
-        <label class="reasoning" title="How hard Lumio thinks">
-          <span class="bars" aria-hidden="true"><i></i><i></i><i></i></span>
-          <select id="reasoning" aria-label="Reasoning">
-            <option value="low">Low</option>
-            <option value="medium" selected>Medium</option>
-            <option value="high">High</option>
-          </select>
-        </label>
-        <span class="hint">GPT-6 Luna</span>
+        <div class="pick">
+          <button type="button" class="chip" id="effort-btn" aria-haspopup="dialog" aria-expanded="false" title="Thinking effort">
+            <span class="bars" id="effort-bars" data-level="2" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span id="effort-name">Medium</span>
+          </button>
+          <div class="pop effort-pop" id="effort-pop" role="dialog" aria-label="Thinking effort" hidden>
+            <div class="effort-head"><b id="effort-label">Medium</b><span id="effort-desc"></span></div>
+            <div class="slider" id="effort-slider" role="slider" tabindex="0" aria-label="Thinking effort" aria-valuemin="0" aria-valuemax="2" aria-valuenow="1">
+              <div class="s-track"><div class="s-fill"></div></div>
+              <div class="s-knob"></div>
+            </div>
+            <div class="ticks"><button type="button" data-i="0">Low</button><button type="button" data-i="1">Medium</button><button type="button" data-i="2">High</button></div>
+          </div>
+        </div>
+        <div class="pick">
+          <button type="button" class="chip" id="model-btn" aria-haspopup="listbox" aria-expanded="false" title="Model">
+            <span id="model-name">Lumio</span>
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <div class="pop model-pop" id="model-pop" role="listbox" aria-label="Model" hidden></div>
+        </div>
         <span class="spacer"></span>
         <button class="send" id="send" type="submit" aria-label="Send" disabled>
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>

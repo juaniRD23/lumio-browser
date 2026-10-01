@@ -9,7 +9,7 @@
 //   GET  /api/billing/plans the plans and prices
 //   POST /api/billing/checkout | /api/billing/portal
 //   POST /api/stripe/webhook
-//   GET  /api/chats, GET|DELETE /api/chats/:id, POST /api/chat   (web Chat)
+//   GET  /api/chats, GET|DELETE /api/chats/:id, POST /api/chat, GET /api/chat/models   (web Chat)
 //   GET  /v1/agent, POST /v1/agent, GET /v1/usage                 (Lumio Browser)
 //
 // Website requests use the session cookie; Lumio Browser sends the same
@@ -18,7 +18,7 @@
 import { accountJson, currentUser, googleCallback, googleStart, logout, readToken, type User } from './auth.ts';
 import { checkout, portal, webhook } from './billing.ts';
 import { capabilities, step } from './browser.ts';
-import { deleteChat, getChat, listChats, send } from './chat.ts';
+import { chatModels, deleteChat, getChat, listChats, send } from './chat.ts';
 import { PLANS, allowance } from './usage.ts';
 import { AgentError, type Env, fail, json, sameOrigin } from './util.ts';
 
@@ -82,6 +82,7 @@ function routeFor(path: string, method: string): Route | null {
   if (path === '/api/billing/portal' && method === 'POST') return (r, env, _c, user) => portal(r, env, user);
   if (path === '/api/chats' && method === 'GET') return (_r, env, _c, user) => listChats(env, user);
   if (path === '/api/chat' && method === 'POST') return send;
+  if (path === '/api/chat/models' && method === 'GET') return async (_r, _env, _c, user) => chatModels(user);
   const m = /^\/api\/chats\/(c_[a-f0-9]{20})$/.exec(path);
   if (m && method === 'GET') return (_r, env, _c, user) => getChat(env, user, m[1]);
   if (m && method === 'DELETE') return (_r, env, _c, user) => deleteChat(env, user, m[1]);

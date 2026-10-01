@@ -4,9 +4,9 @@ const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const DESCS = {
   free: 'Try Lumio AI in Chat and the browser. A few tasks each week.',
-  plus: '75× Free. Plenty for everyday use.',
-  pro: '275× Free, and no 5-hour limit.',
-  max: '550× Free, and no 5-hour limit.',
+  plus: '75× Free, plus Claude Sonnet, GPT-6.1 Sol, Gemini and Grok in Chat.',
+  pro: '275× Free, no 5-hour limit, and every model, including Claude Opus and GPT-6 Astra.',
+  max: '550× Free, no 5-hour limit, and every model.',
 };
 const ORDER = ['free', 'plus', 'pro', 'max'];
 

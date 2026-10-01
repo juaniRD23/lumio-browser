@@ -1,6 +1,7 @@
 // Each plan's Lumio AI allowance: a weekly budget (and a 5-hour one below Pro),
 // in microUSD of real model cost. Browser steps and web Chat replies share it.
 import { AgentError, type Plan } from './agent.ts';
+import { ceiling, type Model } from './models.ts';
 import type { Env } from './util.ts';
 
 export const PLANS: Record<Plan, { name: string; weekly: number; price: number }> = {
@@ -11,13 +12,6 @@ export const PLANS: Record<Plan, { name: string; weekly: number; price: number }
   max: { name: 'Max', weekly: 27.5, price: 200 },
 };
 export const planName = (p: Plan) => PLANS[p]?.name || 'Free';
-
-// Price ceiling sent to OpenRouter (2x GPT-6 Luna's list price), USD per million tokens.
-export const CEILING = { prompt: 0.1, completion: 0.5 };
-// Holds use the ceiling; microUSD per token.
-export const HOLD_RATE = { input: CEILING.prompt, output: CEILING.completion };
-// When OpenRouter doesn't report a cost: list price, microUSD per token.
-const LIST_RATE = { input: 0.05, output: 0.25 };
 
 const HOUR = 3600_000;
 export const WEEK = 7 * 24 * HOUR;
@@ -54,21 +48,23 @@ export class LimitError extends AgentError {
   constructor(message: string) { super(message, 429, 'usage_limit'); }
 }
 
-// Reserves room for one model call (input + output) and returns how many
-// output tokens it may use. Atomic across concurrent requests.
-export async function reserve(env: Env, { key, owner, plan, requestHash, kind, inputTokens, maxOutput = 8192, minOutput = 1024, now = Date.now() }:
-  { key: string; owner: string; plan: Plan; requestHash: string; kind: 'browser' | 'chat'; inputTokens: number; maxOutput?: number; minOutput?: number; now?: number }) {
+// Reserves room for one model call (input + output) at the model's price
+// ceiling and returns how many output tokens it may use. Atomic across
+// concurrent requests.
+export async function reserve(env: Env, { key, owner, plan, requestHash, kind, inputTokens, model, maxOutput = 8192, minOutput = 1024, now = Date.now() }:
+  { key: string; owner: string; plan: Plan; requestHash: string; kind: 'browser' | 'chat'; inputTokens: number; model: Model; maxOutput?: number; minOutput?: number; now?: number }) {
   if (plan === 'free') {
     const cap = Math.floor(Number(env.FREE_DAILY_CAP_USD || '3') * 1_000_000);
     const today = await env.DB.prepare(`SELECT ${SPENT} AS used FROM steps WHERE plan = 'free' AND created_at >= ?1`).bind(now - 24 * HOUR).first<{ used: number }>();
     if ((today?.used ?? 0) >= cap) throw new LimitError('Lumio AI is at capacity for Free accounts today. Try again later, or upgrade for more.');
   }
   const left = (await allowance(env, owner, plan, now)).remaining;
-  const inputHold = Math.ceil(inputTokens * HOLD_RATE.input);
-  const output = Math.min(maxOutput, Math.floor((left - inputHold) / HOLD_RATE.output));
+  const rate = ceiling(model); // USD per million tokens = microUSD per token
+  const inputHold = Math.ceil(inputTokens * rate.prompt);
+  const output = Math.min(maxOutput, Math.floor((left - inputHold) / rate.completion));
   const outOf = `You’ve used your Lumio AI allowance on the ${planName(plan)} plan for now.${plan === 'max' ? ' It refills over the week.' : ' Upgrade for more, or try again when it refills.'}`;
   if (output < minOutput) throw new LimitError(outOf);
-  const held = inputHold + Math.ceil(output * HOLD_RATE.output);
+  const held = inputHold + Math.ceil(output * rate.completion);
   const l = limits(plan);
   const ok = await env.DB.prepare(`INSERT INTO steps (key, owner, plan, kind, request_hash, status, held_microusd, created_at)
     SELECT ?1, ?2, ?3, ?11, ?4, 'running', ?5, ?6
@@ -79,9 +75,10 @@ export async function reserve(env: Env, { key, owner, plan, requestHash, kind, i
   return { maxOutput: output };
 }
 
-export function costOf(usage: { prompt_tokens?: number; completion_tokens?: number; cost?: number } | null, inputEstimate: number) {
+// What a call cost: OpenRouter's reported cost, or the model's list price.
+export function costOf(usage: { prompt_tokens?: number; completion_tokens?: number; cost?: number } | null, inputEstimate: number, model: Model) {
   if (usage && typeof usage.cost === 'number' && usage.cost >= 0) return Math.ceil(usage.cost * 1_000_000);
-  return Math.ceil((usage?.prompt_tokens ?? inputEstimate) * LIST_RATE.input + (usage?.completion_tokens ?? 0) * LIST_RATE.output);
+  return Math.ceil((usage?.prompt_tokens ?? inputEstimate) * model.price.input + (usage?.completion_tokens ?? 0) * model.price.output);
 }
 
 export async function settle(env: Env, key: string, cost: number, status: 'done' | 'failed', result: string | null = null) {

@@ -30,15 +30,9 @@ export function estimateInput(messages: { role: string; content: unknown }[]): n
 
 export const BROWSER_AGENT_VERSION=1;
 // One inexpensive model with tools and screenshots; people choose how hard it thinks.
-export const browserModelCatalog=[
- {id:'openai/gpt-6-luna',name:'GPT-6 Luna',minimumPlan:'free'},
-] as const satisfies readonly {id:string;name:string;minimumPlan:Plan}[];
 export const BROWSER_REASONING=['low','medium','high'] as const;
 export type BrowserReasoning=typeof BROWSER_REASONING[number];
 // Every plan can use it; each plan's weekly allowance decides how much.
-export const browserPlans:Plan[]=['free','go','plus','pro','max'];
-export function browserModel(id:unknown){return browserModelCatalog.find(model=>model.id===id)||null}
-export function canUseBrowserModel(plan:Plan,id:string){const model=browserModel(id);return !!model&&planOrder.indexOf(plan)>=planOrder.indexOf(model.minimumPlan)}
 
 // A small JSON-schema subset, including numbers, enums and the plan's array of steps used by the browser tools.
 type Schema={type:'string'|'integer'|'number'|'boolean'|'object'|'array';minLength?:number;maxLength?:number;minimum?:number;maximum?:number;enum?:readonly string[];description?:string;properties?:Record<string,Schema>;required?:string[];additionalProperties?:false;items?:Schema;minItems?:number;maxItems?:number};
@@ -85,21 +79,83 @@ const computerTools=new Set(['computer_screenshot','computer_click','computer_mo
 
 const object=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value);
 const validId=(value:unknown):value is string=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value);
-function schemaValid(value:unknown,schema:Schema):boolean{
- if(schema.type==='string')return typeof value==='string'&&value.length>=(schema.minLength??0)&&value.length<=(schema.maxLength??Infinity)&&!value.includes('\0')&&(!schema.enum||schema.enum.includes(value));
- if(schema.type==='integer')return typeof value==='number'&&Number.isSafeInteger(value)&&value>=(schema.minimum??-Infinity)&&value<=(schema.maximum??Infinity);
- if(schema.type==='number')return typeof value==='number'&&Number.isFinite(value)&&value>=(schema.minimum??-Infinity)&&value<=(schema.maximum??Infinity);
- if(schema.type==='boolean')return typeof value==='boolean';
- if(schema.type==='array')return Array.isArray(value)&&value.length>=(schema.minItems??0)&&value.length<=(schema.maxItems??Infinity)&&value.every(item=>schemaValid(item,schema.items!));
- return object(value)&&Object.keys(value).every(key=>Object.hasOwn(schema.properties!,key))&&(schema.required??[]).every(key=>Object.hasOwn(value,key))&&Object.entries(value).every(([key,item])=>schemaValid(item,schema.properties![key]));
+function schemaValid(value:unknown,schema:Schema):boolean{return schemaError(value,schema)===null}
+// Why a value doesn't match (null when it does), e.g. "ref: expected an integer".
+function schemaError(value:unknown,schema:Schema,at='arguments'):string|null{
+ if(schema.type==='string'){
+  if(typeof value!=='string'||value.includes('\0'))return `${at}: expected a string`;
+  if(schema.enum&&!schema.enum.includes(value))return `${at}: must be one of ${schema.enum.map(v=>JSON.stringify(v)).join(', ')}`;
+  if(value.length<(schema.minLength??0))return `${at}: must not be empty`;
+  if(value.length>(schema.maxLength??Infinity))return `${at}: too long (max ${schema.maxLength} characters)`;
+  return null;
+ }
+ if(schema.type==='integer'||schema.type==='number'){
+  if(typeof value!=='number'||!Number.isFinite(value)||(schema.type==='integer'&&!Number.isSafeInteger(value)))return `${at}: expected ${schema.type==='integer'?'an integer':'a number'}`;
+  if(value<(schema.minimum??-Infinity)||value>(schema.maximum??Infinity))return `${at}: must be between ${schema.minimum} and ${schema.maximum}`;
+  return null;
+ }
+ if(schema.type==='boolean')return typeof value==='boolean'?null:`${at}: expected true or false`;
+ if(schema.type==='array'){
+  if(!Array.isArray(value))return `${at}: expected an array`;
+  if(value.length<(schema.minItems??0)||value.length>(schema.maxItems??Infinity))return `${at}: needs ${schema.minItems}-${schema.maxItems} items`;
+  for(let i=0;i<value.length;i++){const e=schemaError(value[i],schema.items!,`${at}[${i}]`);if(e)return e}
+  return null;
+ }
+ if(!object(value))return `${at}: expected an object`;
+ const extra=Object.keys(value).find(key=>!Object.hasOwn(schema.properties!,key));
+ if(extra)return `${at}: unknown field "${extra}"`;
+ const missing=(schema.required??[]).find(key=>!Object.hasOwn(value,key));
+ if(missing)return `${at}: missing "${missing}"`;
+ for(const [key,item] of Object.entries(value)){const e=schemaError(item,schema.properties![key],at==='arguments'?key:`${at}.${key}`);if(e)return e}
+ return null;
+}
+
+// Small models often send "12" for 12, "[12]" for a ref, "true" for true, null
+// for optional fields or "completed" for "done". Fix those before checking.
+const ENUM_ALIASES:Record<string,string>={completed:'done',complete:'done',finished:'done',in_progress:'in_progress',inprogress:'in_progress',active:'in_progress',doing:'in_progress',current:'in_progress',started:'in_progress',todo:'pending',not_started:'pending',waiting:'pending'};
+function repairArgs(value:unknown,schema:Schema):unknown{
+ if((schema.type==='integer'||schema.type==='number')&&typeof value==='string'){
+  const m=/^\s*\[?\s*(-?\d+(?:\.\d+)?)\s*\]?\s*$/.exec(value);
+  if(m)value=Number(m[1]);
+ }
+ if(schema.type==='integer'&&typeof value==='number'&&Number.isFinite(value)&&Math.abs(value-Math.round(value))<1e-9)return Math.round(value);
+ if(schema.type==='boolean'&&typeof value==='string'&&/^(true|false)$/i.test(value.trim()))return value.trim().toLowerCase()==='true';
+ if(schema.type==='string'&&(typeof value==='number'||typeof value==='boolean'))value=String(value);
+ if(schema.type==='string'&&typeof value==='string'&&schema.enum&&!schema.enum.includes(value)){
+  const key=value.trim().toLowerCase().replace(/[\s-]+/g,'_');
+  const fixed=schema.enum.includes(key)?key:ENUM_ALIASES[key];
+  if(fixed&&schema.enum.includes(fixed))return fixed;
+ }
+ if(schema.type==='array'&&Array.isArray(value))return value.map(item=>repairArgs(item,schema.items!));
+ if(schema.type==='object'&&object(value)){
+  const out:Record<string,unknown>={};
+  for(const [key,item] of Object.entries(value)){
+   if(!Object.hasOwn(schema.properties!,key))continue; // drop fields the tool doesn't take
+   if(item===null&&!(schema.required??[]).includes(key))continue; // null for an optional field = not given
+   out[key]=repairArgs(item,schema.properties![key]);
+  }
+  return out;
+ }
+ return value;
+}
+function parseArgs(text:string):unknown{
+ const t=text.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'');
+ return t?JSON.parse(t):{};
+}
+
+export class ToolArgumentsError extends AgentError{
+ tool:string;detail:string;
+ constructor(tool:string,detail:string){super('The model returned invalid tool arguments.',400,'invalid_tool_arguments');this.tool=tool;this.detail=detail}
 }
 export function validateBrowserToolCall(value:unknown,allowed:string[]):NativeToolCall{
  if(!object(value)||Object.keys(value).some(key=>!['id','type','function'].includes(key))||!validId(value.id)||value.type!=='function'||!object(value.function)||Object.keys(value.function).some(key=>!['name','arguments'].includes(key))||typeof value.function.name!=='string'||typeof value.function.arguments!=='string'||value.function.arguments.length>100000)throw new AgentError('Invalid tool call.',400,'invalid_tool_call');
  const definition=browserAgentTools.find(item=>item.function.name===(value.function as {name:string}).name);
- if(!definition||!allowed.includes(definition.function.name))throw new AgentError('The model requested an unavailable tool.',400,'tool_not_allowed');
- let args:unknown;try{args=value.function.arguments.trim()?JSON.parse(value.function.arguments):{}}catch{throw new AgentError('Invalid tool arguments JSON.',400,'invalid_tool_arguments')}
- if(!schemaValid(args,definition.function.parameters as Schema))throw new AgentError('The model returned invalid tool arguments.',400,'invalid_tool_arguments');
- return {id:value.id,type:'function',function:{name:definition.function.name,arguments:value.function.arguments}};
+ if(!definition||!allowed.includes(definition.function.name))throw new ToolArgumentsError(String((value.function as {name:string}).name).slice(0,80),`there is no tool named "${String((value.function as {name:string}).name).slice(0,80)}" right now`);
+ let args:unknown;try{args=parseArgs(value.function.arguments)}catch{throw new ToolArgumentsError(definition.function.name,'the arguments are not valid JSON')}
+ args=repairArgs(args,definition.function.parameters as Schema);
+ const problem=schemaError(args,definition.function.parameters as Schema);
+ if(problem)throw new ToolArgumentsError(definition.function.name,problem);
+ return {id:value.id,type:'function',function:{name:definition.function.name,arguments:JSON.stringify(args)}};
 }
 
 export type BrowserContext={platform:'mac'|'windows';computer:boolean;mode:'ask'|'auto'|'bypass';timeZone:string;tabCount:number;activeTab?:{id:number;title:string;url:string}};
@@ -120,7 +176,6 @@ function readContext(value:unknown):BrowserContext{
 // Mirrors validateDesktopStep, with the browser's tools and context.
 export function validateBrowserStep(value:unknown):BrowserStep{
  if(!object(value)||Object.keys(value).some(key=>!['version','taskId','runId','stepId','model','messages','tools','context','reasoning'].includes(key))||value.version!==BROWSER_AGENT_VERSION||!validId(value.taskId)||!validId(value.runId)||!validId(value.stepId)||typeof value.model!=='string')throw new AgentError('Invalid browser step.');
- if(!browserModel(value.model))throw new AgentError('Choose a supported model.',400,'model_not_supported');
  const context=readContext(value.context);
  const possible=browserAgentTools.map(item=>item.function.name).filter(name=>(context.computer||!computerTools.has(name))&&(context.platform==='mac'||name!=='run_applescript'));
  if(!Array.isArray(value.tools)||value.tools.length>possible.length||!value.tools.every(name=>typeof name==='string'&&possible.includes(name))||new Set(value.tools).size!==value.tools.length)throw new AgentError('Invalid tool capabilities.',400,'tool_not_allowed');

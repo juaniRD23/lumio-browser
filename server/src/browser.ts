@@ -2,11 +2,12 @@
 // The server owns the model, tool definitions and system prompt; the browser
 // picks tools by name. Retries of the same step replay its saved result.
 import {
-  BROWSER_AGENT_VERSION, BROWSER_REASONING, browserAgentTools, browserInputEstimate, browserModelCatalog,
-  browserSystemPrompt, validateBrowserStep, validateBrowserToolCall, type NativeToolCall,
+  BROWSER_AGENT_VERSION, BROWSER_REASONING, browserAgentTools, browserInputEstimate,
+  browserSystemPrompt, ToolArgumentsError, validateBrowserStep, validateBrowserToolCall, type AgentMessage, type NativeToolCall,
 } from './agent.ts';
 import type { User } from './auth.ts';
-import { complete, ndjsonStream, type Reply } from './openrouter.ts';
+import { BROWSER_DEFAULT, browserModels, canUse, findModel, publicModel } from './models.ts';
+import { complete, ndjsonStream, type Reply, type Usage } from './openrouter.ts';
 import { allowance, costOf, planName, reserve, settle } from './usage.ts';
 import { AgentError, type Env, fail, json, sha256 } from './util.ts';
 
@@ -19,7 +20,8 @@ export async function capabilities(env: Env, user: User) {
     enabled: true,
     plan: user.plan,
     planName: planName(user.plan),
-    models: browserModelCatalog.map((m) => ({ id: m.id, name: m.name, minimumPlan: m.minimumPlan, available: true })),
+    model: publicModel(findModel(BROWSER_DEFAULT)!, user.plan),
+    models: browserModels().map((m) => publicModel(m, user.plan)),
     tools: browserAgentTools.map((t) => t.function.name),
     reasoning: { levels: BROWSER_REASONING, default: 'medium' },
     usage: await allowance(env, user.id, user.plan),
@@ -33,6 +35,9 @@ export async function step(request: Request, env: Env, ctx: ExecutionContext, us
   try { body = JSON.parse(raw); } catch { return fail('Invalid request.', 400, 'invalid_request'); }
   const s = validateBrowserStep(body);
   const now = Date.now();
+  // The browser sends the model the server listed; anything else gets the default.
+  const asked = findModel(s.model);
+  const model = asked?.browser && canUse(user.plan, asked) ? asked : findModel(BROWSER_DEFAULT)!;
 
   // Retries of the same step replay its saved result instead of charging again.
   const key = await sha256(`${user.id}|${s.taskId}|${s.runId}|${s.stepId}`);
@@ -50,15 +55,16 @@ export async function step(request: Request, env: Env, ctx: ExecutionContext, us
   if ((recent?.n ?? 0) >= STEPS_PER_MINUTE) return fail('Slow down a little: too many steps in the last minute.', 429, 'rate_limited');
 
   const inputTokens = browserInputEstimate(s);
-  const { maxOutput } = await reserve(env, { key, owner: user.id, plan: user.plan, requestHash, kind: 'browser', inputTokens, now });
+  const { maxOutput } = await reserve(env, { key, owner: user.id, plan: user.plan, requestHash, kind: 'browser', inputTokens, model, now });
   const tools = browserAgentTools.filter((t) => s.tools.includes(t.function.name));
-  const gen = complete(env, {
-    model: browserModelCatalog[0].id,
-    messages: [{ role: 'system', content: browserSystemPrompt(s, maxOutput) }, ...s.messages],
+  const call = (messages: unknown[]) => complete(env, model, {
+    messages,
     ...(tools.length ? { tools, tool_choice: 'auto' } : {}),
     max_tokens: maxOutput,
     reasoning: { effort: s.reasoning, exclude: true },
   });
+  let messages: unknown[] = [{ role: 'system', content: browserSystemPrompt(s, maxOutput) }, ...s.messages];
+  let gen = call(messages);
 
   // Fail fast (with a plain error response) if the provider refuses outright.
   let first: IteratorResult<string, Reply>;
@@ -71,30 +77,60 @@ export async function step(request: Request, env: Env, ctx: ExecutionContext, us
 
   const out = ndjsonStream({ version: 1, taskId: s.taskId, runId: s.runId, stepId: s.stepId });
   ctx.waitUntil((async () => {
-    let reply: Reply | null = null;
+    let cost = 0;
+    const total: Usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+    let content = '';
     try {
       let r = first;
-      while (!r.done) { await out.send({ type: 'delta', content: r.value }); r = await gen.next(); }
-      reply = r.value;
-      // Only tools this step offered, with arguments that match their schema.
-      const toolCalls: NativeToolCall[] = reply.calls.map((c, i) => validateBrowserToolCall({
-        id: c.id && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(c.id) ? c.id : `call_${i}_${crypto.randomUUID().slice(0, 8)}`,
-        type: 'function',
-        function: { name: c.name, arguments: c.args || '{}' },
-      }, s.tools));
+      let toolCalls: NativeToolCall[] = [];
+      let finish: string | null = null;
+      for (let attempt = 0; ; attempt++) {
+        while (!r.done) { await out.send({ type: 'delta', content: r.value }); r = await gen.next(); }
+        const reply = r.value;
+        cost += costOf(reply.usage, inputTokens, model);
+        total.prompt_tokens! += reply.usage?.prompt_tokens ?? 0;
+        total.completion_tokens! += reply.usage?.completion_tokens ?? 0;
+        total.total_tokens! += reply.usage?.total_tokens ?? 0;
+        content += reply.content;
+        finish = reply.finish;
+        const raw: NativeToolCall[] = reply.calls.map((c, i) => ({
+          id: c.id && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(c.id) ? c.id : `call_${i}_${crypto.randomUUID().slice(0, 8)}`,
+          type: 'function',
+          function: { name: c.name, arguments: c.args || '{}' },
+        }));
+        // Only tools this step offered, with arguments that match their schema
+        // (after fixing small slips like "12" for 12).
+        let bad: { index: number; error: ToolArgumentsError } | null = null;
+        toolCalls = [];
+        for (let i = 0; i < raw.length && !bad; i++) {
+          try { toolCalls.push(validateBrowserToolCall(raw[i], s.tools)); } catch (err) {
+            if (err instanceof ToolArgumentsError) bad = { index: i, error: err }; else throw err;
+          }
+        }
+        if (!bad) break;
+        if (attempt >= 1) throw bad.error;
+        // Tell the model what was wrong and let it try once more.
+        messages = [...messages,
+          { role: 'assistant', content: reply.content || null, tool_calls: raw } satisfies AgentMessage,
+          ...raw.map((c, i) => ({
+            role: 'tool', tool_call_id: c.id,
+            content: i === bad!.index ? `Error: ${bad!.error.detail}. Call ${bad!.error.tool} again with arguments that match its parameters.` : 'Not run, because another tool call in the same message was invalid.',
+          }))];
+        gen = call(messages);
+        r = await gen.next();
+      }
       for (const tool_call of toolCalls) await out.send({ type: 'tool_call', tool_call }, true);
-      const u = reply.usage;
       await out.send({
         type: 'result',
-        message: { role: 'assistant', content: reply.content || null, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) },
-        finishReason: toolCalls.length ? 'tool_calls' : reply.finish || 'stop',
-        usage: u ? { input: u.prompt_tokens ?? 0, output: u.completion_tokens ?? 0, total: u.total_tokens ?? 0 } : null,
+        message: { role: 'assistant', content: content || null, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) },
+        finishReason: toolCalls.length ? 'tool_calls' : finish || 'stop',
+        usage: { input: total.prompt_tokens, output: total.completion_tokens, total: total.total_tokens },
       }, true);
-      await settle(env, key, costOf(u, inputTokens), 'done', out.saved());
+      await settle(env, key, cost, 'done', out.saved());
     } catch (err) {
       const e = err instanceof AgentError ? err : new AgentError('Lumio AI’s reply was cut off. Try again.', 502, 'provider_error');
       await out.send({ type: 'error', code: e.code, message: e.message });
-      await settle(env, key, reply?.usage ? costOf(reply.usage, inputTokens) : 0, 'failed');
+      await settle(env, key, cost, 'failed');
     } finally {
       await out.close();
     }

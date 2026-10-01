@@ -9,7 +9,12 @@ const md = (text) => DOMPurify.sanitize(marked.parse(text || '', { breaks: true 
 const thread = $('#thread');
 const prompt = $('#prompt');
 const sendBtn = $('#send');
-const LEVEL = { low: 1, medium: 2, high: 3 };
+const EFFORT = [
+  { id: 'low', name: 'Low', desc: 'Quick answers. Uses the least of your plan.' },
+  { id: 'medium', name: 'Medium', desc: 'Balanced: good for most things.' },
+  { id: 'high', name: 'High', desc: 'Thinks longer on hard problems.' },
+];
+const PLAN_NAMES = { plus: 'Plus', pro: 'Pro', max: 'Max' };
 const IDEAS = [
   { title: 'Explain something', text: 'Explain how compound interest works, with a simple example.' },
   { title: 'Write for me', text: 'Write a friendly email asking my landlord to fix the heating.' },
@@ -21,11 +26,119 @@ let chatId = null;
 let busy = null; // AbortController while a reply streams
 
 // ---------------------------------------------------------------- setup
-const saved = (() => { try { return localStorage.getItem('lumio-reasoning'); } catch { return null; } })();
-if (saved && LEVEL[saved]) $('#reasoning').value = saved;
-function renderBars() { document.querySelector('.bars').dataset.level = LEVEL[$('#reasoning').value]; }
-$('#reasoning').addEventListener('change', () => { renderBars(); try { localStorage.setItem('lumio-reasoning', $('#reasoning').value); } catch { /* private mode */ } });
-renderBars();
+const remember = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
+const recall = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+
+// Popovers (effort, model): one open at a time; Esc or a click outside closes.
+function popover(btn, pop, onOpen) {
+  btn.addEventListener('click', () => (pop.hidden ? open() : close()));
+  function open() {
+    document.querySelectorAll('.pop').forEach((p) => { if (p !== pop) { p.hidden = true; p.previousElementSibling?.setAttribute('aria-expanded', 'false'); } });
+    pop.hidden = false;
+    btn.setAttribute('aria-expanded', 'true');
+    onOpen?.();
+  }
+  function close() { pop.hidden = true; btn.setAttribute('aria-expanded', 'false'); }
+  document.addEventListener('pointerdown', (e) => { if (!pop.hidden && !pop.contains(e.target) && !btn.contains(e.target)) close(); });
+  pop.addEventListener('keydown', (e) => { if (e.key === 'Escape') { close(); btn.focus(); } });
+  return { open, close };
+}
+
+// Thinking effort: a slider that snaps to Low / Medium / High.
+let effort = Math.max(0, EFFORT.findIndex((e) => e.id === recall('lumio-reasoning')));
+if (!recall('lumio-reasoning')) effort = 1;
+const slider = $('#effort-slider');
+function renderEffort(p = effort / (EFFORT.length - 1)) {
+  const e = EFFORT[effort];
+  slider.style.setProperty('--p', p);
+  slider.setAttribute('aria-valuenow', effort);
+  slider.setAttribute('aria-valuetext', e.name);
+  $('#effort-label').textContent = e.name;
+  $('#effort-desc').textContent = e.desc;
+  $('#effort-name').textContent = e.name;
+  $('#effort-bars').dataset.level = effort + 1;
+  document.querySelectorAll('.ticks button').forEach((b) => b.classList.toggle('on', Number(b.dataset.i) === effort));
+}
+function setEffort(i) {
+  effort = Math.max(0, Math.min(EFFORT.length - 1, i));
+  remember('lumio-reasoning', EFFORT[effort].id);
+  renderEffort();
+}
+const effortPop = popover($('#effort-btn'), $('#effort-pop'), () => slider.focus());
+slider.addEventListener('pointerdown', (e) => {
+  slider.setPointerCapture(e.pointerId);
+  slider.classList.add('dragging');
+  const at = (ev) => {
+    const r = slider.getBoundingClientRect();
+    const p = Math.max(0, Math.min(1, (ev.clientX - r.left - 15) / (r.width - 30)));
+    effort = Math.round(p * (EFFORT.length - 1));
+    renderEffort(p);
+  };
+  at(e);
+  const move = (ev) => at(ev);
+  const up = () => {
+    slider.classList.remove('dragging');
+    slider.removeEventListener('pointermove', move);
+    setEffort(effort);
+  };
+  slider.addEventListener('pointermove', move);
+  slider.addEventListener('pointerup', up, { once: true });
+  slider.addEventListener('pointercancel', up, { once: true });
+});
+slider.addEventListener('keydown', (e) => {
+  const step = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1 }[e.key];
+  if (step) { e.preventDefault(); setEffort(effort + step); }
+  else if (e.key === 'Home') setEffort(0);
+  else if (e.key === 'End') setEffort(EFFORT.length - 1);
+  else if (e.key === 'Enter') { effortPop.close(); prompt.focus(); }
+});
+document.querySelectorAll('.ticks button').forEach((b) => b.addEventListener('click', () => setEffort(Number(b.dataset.i))));
+renderEffort();
+
+// Models: the server lists them, with the ones above your plan locked.
+let models = [];
+let model = recall('lumio-model');
+const costBars = (c) => `<span class="cost" data-c="${c}" title="How fast it uses your plan" aria-label="Cost ${c} of 4"><i></i><i></i><i></i><i></i></span>`;
+function renderModels() {
+  const current = models.find((m) => m.id === model);
+  $('#model-name').textContent = current?.name || 'Lumio';
+  const group = (title, list) => list.length ? `<div class="group">${title}</div>` + list.map((m) => `
+    <button type="button" class="model ${m.available ? '' : 'locked'}" role="option" aria-selected="${m.id === model}" data-id="${esc(m.id)}">
+      <span class="m-name">${esc(m.name)} <small>${esc(m.maker)}</small></span>
+      <span class="m-blurb">${esc(m.blurb)}</span>
+      <span class="m-side">${m.available ? costBars(m.cost) : `<span class="lock">${PLAN_NAMES[m.minimumPlan] || 'Upgrade'}</span>`}<svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5 10 17 19 7"/></svg></span>
+    </button>`).join('') : '';
+  $('#model-pop').innerHTML = group('Your plan', models.filter((m) => m.available)) + group('Upgrade for more', models.filter((m) => !m.available))
+    + '<div class="foot">' + costBars(4) + 'Bigger models use your plan faster.</div>';
+}
+popover($('#model-btn'), $('#model-pop'), () => $('#model-pop [aria-selected="true"]')?.focus());
+$('#model-pop').addEventListener('click', (e) => {
+  const b = e.target.closest('.model');
+  if (!b) return;
+  const m = models.find((x) => x.id === b.dataset.id);
+  if (!m) return;
+  if (!m.available) { location.href = `/account?plan=${m.minimumPlan}#plans`; return; }
+  model = m.id;
+  remember('lumio-model', model);
+  renderModels();
+  $('#model-pop').hidden = true;
+  $('#model-btn').setAttribute('aria-expanded', 'false');
+  prompt.focus();
+});
+$('#model-pop').addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  e.preventDefault();
+  const all = [...$('#model-pop').querySelectorAll('.model')];
+  const i = all.indexOf(document.activeElement);
+  all[(i + (e.key === 'ArrowDown' ? 1 : -1) + all.length) % all.length]?.focus();
+});
+async function loadModels() {
+  const data = await fetch('/api/chat/models').then((r) => r.json()).catch(() => null);
+  if (!data?.models) return;
+  models = data.models;
+  if (!models.some((m) => m.id === model && m.available)) model = data.default;
+  renderModels();
+}
 
 function autosize() { prompt.style.height = 'auto'; prompt.style.height = Math.min(220, prompt.scrollHeight) + 'px'; sendBtn.disabled = !busy && !prompt.value.trim(); }
 prompt.addEventListener('input', autosize);
@@ -133,13 +246,13 @@ $('#composer').addEventListener('submit', async (e) => {
   try {
     const res = await fetch('/api/chat', {
       method: 'POST', headers: { 'content-type': 'application/json' }, signal: busy.signal,
-      body: JSON.stringify({ chatId, text, reasoning: $('#reasoning').value, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
+      body: JSON.stringify({ chatId, text, model, reasoning: EFFORT[effort].id, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       if (res.status === 401) { location.replace('/signin?next=/chat'); return; }
       thinking.remove();
-      notice(data.error || 'Lumio couldn’t answer. Try again.', data.code === 'usage_limit');
+      notice(data.error || 'Lumio couldn’t answer. Try again.', data.code === 'usage_limit' || data.code === 'model_plan_required');
       return;
     }
     const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
@@ -180,6 +293,7 @@ $('#composer').addEventListener('submit', async (e) => {
 // ---------------------------------------------------------------- start
 (async () => {
   if (!(await me())) return;
+  loadModels();
   const id = location.hash.slice(1);
   if (/^c_[a-f0-9]{20}$/.test(id)) await openChat(id);
   else newChat();
