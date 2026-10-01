@@ -118,10 +118,22 @@ beforeEach(() => {
       calls.stripe.push({ method: opts.method || 'GET', path, params });
       if (path === '/v1/customers') return Response.json({ id: 'cus_1' });
       if (path === '/v1/prices') return Response.json({ data: [{ id: 'price_plus', lookup_key: 'lumio_plus_monthly' }, { id: 'price_pro', lookup_key: 'lumio_pro_monthly' }, { id: 'price_max', lookup_key: 'lumio_max_monthly' }] });
-      if (path === '/v1/checkout/sessions') return Response.json({ id: 'cs_1', url: 'https://checkout.stripe.test/cs_1' });
+      if (path === '/v1/checkout/sessions') return Response.json(params.ui_mode === 'embedded' ? { id: 'cs_e1', client_secret: 'cs_e1_secret_abc' } : { id: 'cs_1', url: 'https://checkout.stripe.test/cs_1' });
+      const cs = /^\/v1\/checkout\/sessions\/(\w+)$/.exec(path);
+      if (cs && stripeState.sessions?.[cs[1]]) return Response.json(stripeState.sessions[cs[1]]);
       if (path === '/v1/billing_portal/sessions') return Response.json({ url: 'https://billing.stripe.test/p_1' });
       if (path === '/v1/billing_portal/configurations') return Response.json({ data: [{ id: 'bpc_default', metadata: {} }, { id: 'bpc_lumio', metadata: { app: 'lumio' } }] });
       const sub = /^\/v1\/subscriptions\/(\w+)$/.exec(path);
+      if (sub && stripeState.subscriptions[sub[1]] && opts.method === 'POST') {
+        // Switch, cancel or resume, like Stripe would.
+        if (stripeState.decline && params.payment_behavior === 'error_if_incomplete') return Response.json({ error: { type: 'card_error', message: 'Your card was declined.' } }, { status: 402 });
+        const s = structuredClone(stripeState.subscriptions[sub[1]]);
+        if (params['items[0][price]']) s.items.data[0].price = { id: params['items[0][price]'], lookup_key: `lumio_${params['items[0][price]'].replace('price_', '')}_monthly` };
+        if ('cancel_at_period_end' in params) s.cancel_at_period_end = params.cancel_at_period_end === 'true';
+        if (params['cancellation_details[feedback]']) s.cancellation_details = { feedback: params['cancellation_details[feedback]'], comment: params['cancellation_details[comment]'] || null };
+        stripeState.subscriptions[sub[1]] = s;
+        return Response.json(s);
+      }
       if (sub && stripeState.subscriptions[sub[1]]) return Response.json(stripeState.subscriptions[sub[1]]);
       return Response.json({ error: { message: 'No such thing' } }, { status: 404 });
     }
@@ -270,6 +282,82 @@ test('subscribed accounts change plans in the billing portal, never a second sub
   assert.equal(p.configuration, 'bpc_lumio', 'Lumio’s own portal settings, not the account default');
   assert.ok(!calls.stripe.some((c) => c.path === '/v1/checkout/sessions'));
   assert.deepEqual(await (await call('/api/billing/portal', { cookie: token, method: 'POST', body: {} })).json(), { url: 'https://billing.stripe.test/p_1' });
+});
+
+test('Lumio’s payment page: Stripe’s form shows inside Lumio, and the plan is set without waiting for the webhook', async () => {
+  const { token } = await signIn();
+  // Until the publishable key is set up, it falls back to Stripe's own page.
+  assert.deepEqual(await (await call('/api/billing/checkout', { cookie: token, method: 'POST', body: { plan: 'plus', embedded: true } })).json(), { url: 'https://checkout.stripe.test/cs_1' });
+  env.STRIPE_PUBLISHABLE_KEY = 'pk_test_123';
+  const res = await call('/api/billing/checkout', { cookie: token, method: 'POST', body: { plan: 'pro', embedded: true, app: true } });
+  assert.deepEqual(await res.json(), { clientSecret: 'cs_e1_secret_abc', publishableKey: 'pk_test_123' });
+  const p = calls.stripe.filter((c) => c.path === '/v1/checkout/sessions').at(-1).params;
+  assert.equal(p.ui_mode, 'embedded');
+  assert.equal(p.return_url, `${SITE}/checkout?session_id={CHECKOUT_SESSION_ID}&app=1`);
+  assert.equal(p['line_items[0][price]'], 'price_pro');
+  assert.equal(p['metadata[user_id]'], userRow().id);
+  assert.equal(p.success_url, undefined, 'no trip to Stripe’s page');
+  // Back on Lumio's page: the plan is set right away.
+  stripeState.subscriptions.sub_9 = { id: 'sub_9', customer: 'cus_1', status: 'active', metadata: { app: 'lumio', user_id: userRow().id }, items: { data: [{ id: 'si_9', price: { id: 'price_pro', lookup_key: 'lumio_pro_monthly' }, current_period_end: 1893456000 }] } };
+  stripeState.sessions = { cs_e1: { id: 'cs_e1', status: 'complete', subscription: 'sub_9', metadata: { app: 'lumio', user_id: userRow().id } }, cs_other: { id: 'cs_other', status: 'complete', subscription: 'sub_9', metadata: { app: 'lumio', user_id: 'u_someone_else' } } };
+  assert.deepEqual(await (await call('/api/billing/checkout-status?session_id=cs_e1', { cookie: token })).json(), { status: 'complete', plan: 'pro', planName: 'Pro' });
+  assert.deepEqual([userRow().plan, userRow().plan_status, userRow().subscription_id], ['pro', 'active', 'sub_9']);
+  assert.equal((await call('/api/billing/checkout-status?session_id=cs_other', { cookie: token })).status, 404, 'someone else’s checkout');
+  // Already subscribed: switch plans instead of paying twice.
+  const again = await call('/api/billing/checkout', { cookie: token, method: 'POST', body: { plan: 'max', embedded: true } });
+  assert.equal(again.status, 409);
+  assert.equal((await again.json()).code, 'already_subscribed');
+});
+
+test('managing the plan in Lumio: see it, switch in place, cancel with a reason, resume', async () => {
+  const { token } = await signIn();
+  const free = await (await call('/api/billing/subscription', { token })).json();
+  assert.equal(free.subscription, null);
+  assert.deepEqual(free.plans.map((p) => [p.id, p.price]), [['plus', 20], ['pro', 100], ['max', 200]]);
+  assert.ok(free.reasons.some((r) => r.id === 'too_expensive' && r.label === 'It costs too much'));
+
+  sql.prepare("UPDATE users SET plan = 'plus', plan_status = 'active', subscription_id = 'sub_1', stripe_customer_id = 'cus_1'").run();
+  stripeState.subscriptions.sub_1 = { id: 'sub_1', customer: 'cus_1', status: 'active', metadata: { app: 'lumio', user_id: userRow().id },
+    items: { data: [{ id: 'si_1', price: { id: 'price_plus', lookup_key: 'lumio_plus_monthly' }, current_period_end: 1893456000 }] },
+    default_payment_method: { card: { brand: 'visa', last4: '4242', exp_month: 12, exp_year: 2030 } } };
+  const mine = await (await call('/api/billing/subscription', { token })).json();
+  assert.deepEqual(mine.subscription, { status: 'active', canceling: false, periodEnd: 1893456000000, price: 20, card: { brand: 'visa', last4: '4242', expMonth: 12, expYear: 2030 } });
+
+  // Upgrade: pay the difference now; the plan changes right away.
+  assert.deepEqual(await (await call('/api/billing/change', { token, method: 'POST', body: { plan: 'pro' } })).json(), { ok: true, plan: 'pro' });
+  const up = calls.stripe.filter((c) => c.path === '/v1/subscriptions/sub_1' && c.method === 'POST').at(-1).params;
+  assert.deepEqual([up['items[0][id]'], up['items[0][price]'], up.proration_behavior, up.payment_behavior, up.cancel_at_period_end], ['si_1', 'price_pro', 'always_invoice', 'error_if_incomplete', 'false']);
+  assert.equal(userRow().plan, 'pro');
+  // A declined card changes nothing.
+  stripeState.decline = true;
+  const declined = await call('/api/billing/change', { token, method: 'POST', body: { plan: 'max' } });
+  assert.equal(declined.status, 402);
+  assert.deepEqual(await declined.json(), { error: 'Your card was declined. Nothing changed.', code: 'card_declined' });
+  assert.equal(userRow().plan, 'pro');
+  stripeState.decline = false;
+  // Downgrade: credit for the unused part, no charge now.
+  await call('/api/billing/change', { token, method: 'POST', body: { plan: 'plus' } });
+  const down = calls.stripe.filter((c) => c.path === '/v1/subscriptions/sub_1' && c.method === 'POST').at(-1).params;
+  assert.deepEqual([down.proration_behavior, down.payment_behavior], ['create_prorations', undefined]);
+  assert.equal(userRow().plan, 'plus');
+  assert.equal((await call('/api/billing/change', { token, method: 'POST', body: { plan: 'plus' } })).status, 400, 'already on it');
+
+  // Cancel: a reason is required; it goes to Stripe and to the owner's list.
+  assert.equal((await call('/api/billing/cancel', { token, method: 'POST', body: {} })).status, 400);
+  const canceled = await (await call('/api/billing/cancel', { token, method: 'POST', body: { reason: 'too_expensive', comment: '  Great app, just over my budget.  ' } })).json();
+  assert.deepEqual(canceled, { ok: true, endsAt: 1893456000000 });
+  const c = calls.stripe.filter((x) => x.path === '/v1/subscriptions/sub_1' && x.method === 'POST').at(-1).params;
+  assert.deepEqual([c.cancel_at_period_end, c['cancellation_details[feedback]'], c['cancellation_details[comment]']], ['true', 'too_expensive', 'Great app, just over my budget.']);
+  assert.deepEqual([userRow().plan, userRow().plan_status], ['plus', 'canceling'], 'keeps Plus until the period ends');
+  assert.equal((await (await call('/api/billing/subscription', { token })).json()).subscription.canceling, true);
+  sql.prepare("UPDATE users SET role = 'owner'").run();
+  const spend = await (await call('/api/admin/spend', { token })).json();
+  assert.deepEqual(spend.cancellations.last30Days, [{ reason: 'too_expensive', label: 'It costs too much', n: 1 }]);
+  assert.equal(spend.cancellations.recent[0].comment, 'Great app, just over my budget.');
+
+  // Changed their mind.
+  assert.deepEqual(await (await call('/api/billing/resume', { token, method: 'POST', body: {} })).json(), { ok: true, plan: 'plus' });
+  assert.deepEqual([userRow().plan, userRow().plan_status], ['plus', 'active']);
 });
 
 // ---------------------------------------------------------------- web Chat

@@ -91,7 +91,7 @@ $('#manage').addEventListener('click', () => page.invoke('page:account-open', 'm
 window.addEventListener('focus', async () => {
   if (!s.account.signedIn && !s.account.connecting) return;
   s.account = await page.invoke('page:account-refresh');
-  renderAccount();
+  renderAccount(); // reloads the subscription too
 });
 
 // ------------------------------------------------------------ profile
@@ -140,9 +140,150 @@ function renderPlan() {
       <div class="desc">${w.used > 0 && w.fullAt ? `Fully refilled by ${esc(when(w.fullAt))}` : 'All of this week’s usage is available'} · No 5-hour limits</div>
     </div>`;
   $('#plan-card').innerHTML = `<div class="plan-top"><div class="grow"><div class="desc">Your plan</div><div class="plan-name">Lumio ${esc(a.planName || 'Free')}</div></div>
-      ${a.plan !== 'max' ? '<button class="btn primary" data-open="upgrade">Upgrade</button>' : ''}
-      <button class="btn" data-open="billing">Manage billing</button></div>${usage}`;
-  $('#plan-card').querySelectorAll('[data-open]').forEach((b) => { b.onclick = () => page.invoke('page:account-open', b.dataset.open); });
+      ${a.plan === 'free' ? '<button class="btn primary" id="see-plans">See plans</button>' : ''}</div>${usage}`;
+  $('#see-plans')?.addEventListener('click', () => $('#billing').scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  loadBilling();
+}
+
+// ------------------------------------------------------------ subscription
+// Subscribe (Lumio's payment window, never a Stripe tab), switch plans,
+// cancel with a reason, resume, update the card. The Lumio server does the
+// Stripe side (main.js billingCall / openCheckout).
+const DESCS = {
+  plus: 'Thousands of messages and hundreds of browser tasks a week, about 100 pictures, and Claude Sonnet, GPT-6.1 Sol, Gemini and Grok in Chat.',
+  pro: 'About 6× Plus, and every model, including Claude Opus and GPT-6 Astra.',
+  max: 'About 11× Plus, and every model.',
+};
+const ORDER = ['free', 'plus', 'pro', 'max'];
+const BRANDS = { visa: 'Visa', mastercard: 'Mastercard', amex: 'American Express', discover: 'Discover', jcb: 'JCB', diners: 'Diners Club', unionpay: 'UnionPay' };
+const day = (t) => new Date(t).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: new Date(t).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
+let bill = null; // the last answer from page:billing
+let billOpen = null; // 'change' | 'cancel' | null
+let billNote = null; // { text, bad } shown at the top after an action
+let loadingBill = false;
+let reloadBill = false;
+
+async function loadBilling() {
+  if (!s.account.signedIn) { $('#billing').hidden = true; return; }
+  $('#billing').hidden = false;
+  if (loadingBill) { reloadBill = true; return; }
+  loadingBill = true;
+  if (!bill) $('#billing-card').innerHTML = '<div class="bill-msg">Loading your subscription…</div>';
+  try { bill = await page.invoke('page:billing'); } catch { bill = { ok: false, error: 'Couldn’t load your subscription.' }; }
+  loadingBill = false;
+  if (reloadBill) { reloadBill = false; loadBilling(); return; }
+  renderBilling();
+}
+
+function renderBilling() {
+  const card = $('#billing-card');
+  if (!bill?.ok) {
+    card.innerHTML = `<div class="bill-msg"><span class="err">${esc(bill?.error || 'Couldn’t load your subscription.')}</span> <button class="btn" id="bill-retry">Try again</button></div>`;
+    $('#bill-retry').onclick = () => { bill = null; loadBilling(); };
+    return;
+  }
+  const note = billNote ? `<div class="bill-note ${billNote.bad ? 'bad' : ''}" role="status">${esc(billNote.text)}</div>` : '';
+  const sub = bill.subscription;
+  $('#billing-title').textContent = sub ? 'Subscription' : 'Choose a plan';
+  if (!sub) {
+    card.innerHTML = `${note}<div class="bill-plans">${bill.plans.map((p) => `
+      <article class="bill-plan ${p.id === 'plus' ? 'pick' : ''}">
+        <div class="bp-name">${esc(p.name)}${p.id === 'plus' ? '<span class="pill">Most popular</span>' : ''}</div>
+        <div class="bp-price">$${p.price}<small> a month</small></div>
+        <p class="bp-desc">${esc(DESCS[p.id] || '')}</p>
+        <button class="btn ${p.id === 'plus' ? 'accent' : ''}" data-subscribe="${esc(p.id)}">Subscribe</button>
+      </article>`).join('')}</div>
+      <p class="bill-fine">You pay securely inside Lumio. Cancel anytime: you keep your plan until the end of the month you paid for.</p>`;
+    card.querySelectorAll('[data-subscribe]').forEach((b) => { b.onclick = () => subscribe(b.dataset.subscribe, b); });
+    return;
+  }
+
+  const name = `Lumio ${bill.planName}`;
+  const cardText = sub.card ? `${BRANDS[sub.card.brand] || sub.card.brand} ending ${sub.card.last4}` : '';
+  const state = sub.status === 'past_due' ? { pill: '<span class="pill bad">Payment problem</span>', desc: 'Your last payment didn’t go through. Update your card to keep your plan.' }
+    : sub.canceling ? { pill: '<span class="pill warn">Ending</span>', desc: `Ends on ${day(sub.periodEnd)}. After that you’re on Free.` }
+      : { pill: '<span class="pill ok">Active</span>', desc: `Renews on ${day(sub.periodEnd)}${cardText ? ` · ${cardText}` : ''}` };
+  const others = bill.plans.filter((p) => p.id !== bill.plan);
+  card.innerHTML = `${note}
+    <div class="bill-top">
+      <div class="grow"><div class="title">${esc(name)} · $${sub.price} a month</div><div class="desc">${esc(state.desc)}</div></div>
+      ${state.pill}
+    </div>
+    <div class="bill-actions">
+      ${sub.canceling ? `<button class="btn accent" id="bill-resume">Keep ${esc(name)}</button>` : ''}
+      <button class="btn ${billOpen === 'change' ? 'on' : ''}" id="bill-change">Change plan</button>
+      <button class="btn ${sub.status === 'past_due' ? 'accent' : ''}" id="bill-card">${sub.status === 'past_due' ? 'Update card' : 'Card and invoices'}</button>
+      <span class="spacer"></span>
+      ${sub.canceling ? '' : `<button class="btn danger ${billOpen === 'cancel' ? 'on' : ''}" id="bill-cancel">Cancel subscription</button>`}
+    </div>
+    ${billOpen === 'change' ? `<div class="bill-panel">${others.map((p) => {
+      const up = ORDER.indexOf(p.id) > ORDER.indexOf(bill.plan);
+      return `<div class="bill-row">
+        <div class="grow"><div class="title">${esc(p.name)} · $${p.price} a month</div><div class="desc">${esc(DESCS[p.id] || '')}</div>
+          <div class="desc confirm" hidden>${up ? 'You pay the difference for the rest of this month now, and the bigger allowance starts right away.' : 'Your weekly allowance gets smaller right away. The unused part of this month is credited to your next bill.'}</div></div>
+        <button class="btn ${up ? 'accent' : ''}" data-switch="${esc(p.id)}">${up ? 'Upgrade' : 'Switch'}</button>
+      </div>`;
+    }).join('')}</div>` : ''}
+    ${billOpen === 'cancel' ? `<form class="bill-panel bill-cancel" id="cancel-form">
+      <div class="title">Why are you canceling?</div>
+      <div class="desc">You keep ${esc(name)} until ${esc(day(sub.periodEnd))}, then you’re on Free. Your answer goes straight to the people who build Lumio.</div>
+      <div class="reasons">${bill.reasons.map((r) => `<label class="reason"><input type="radio" name="reason" value="${esc(r.id)}"><span>${esc(r.label)}</span></label>`).join('')}</div>
+      <textarea class="field" id="cancel-comment" rows="3" maxlength="1000" placeholder="Anything else you’d like to tell us? (optional)"></textarea>
+      <div class="bill-form-row"><span class="cancel-msg err" id="cancel-msg"></span><button type="button" class="btn" id="cancel-keep">Keep my plan</button><button type="submit" class="btn danger-fill" id="cancel-go">Cancel subscription</button></div>
+    </form>` : ''}`;
+
+  $('#bill-change').onclick = () => { billOpen = billOpen === 'change' ? null : 'change'; billNote = null; renderBilling(); };
+  $('#bill-cancel')?.addEventListener('click', () => { billOpen = billOpen === 'cancel' ? null : 'cancel'; billNote = null; renderBilling(); $('#cancel-form')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); });
+  $('#bill-card').onclick = async () => { await page.invoke('page:billing-card'); bill = null; loadBilling(); };
+  $('#bill-resume')?.addEventListener('click', () => act($('#bill-resume'), 'page:billing-resume', undefined, `You’re keeping ${name}. Nothing else changes.`));
+  card.querySelectorAll('[data-switch]').forEach((b) => {
+    b.onclick = () => {
+      // First click shows what happens; the second one switches.
+      if (!b.dataset.sure) { b.dataset.sure = '1'; b.closest('.bill-row').querySelector('.confirm').hidden = false; b.textContent = 'Confirm'; return; }
+      const p = bill.plans.find((x) => x.id === b.dataset.switch);
+      act(b, 'page:billing-change', p.id, `You’re on Lumio ${p.name} now.`);
+    };
+  });
+  $('#cancel-keep')?.addEventListener('click', () => { billOpen = null; renderBilling(); });
+  $('#cancel-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const reason = new FormData(e.target).get('reason');
+    if (!reason) { $('#cancel-msg').textContent = 'Choose a reason first. It helps us make Lumio better.'; return; }
+    act($('#cancel-go'), 'page:billing-cancel', { reason, comment: $('#cancel-comment').value }, `Canceled. You keep ${name} until ${day(sub.periodEnd)}, then you’re on Free. Thanks for telling us why.`);
+  });
+}
+
+// Runs a billing action, then shows the new state with a short note.
+async function act(button, channel, arg, done) {
+  button.disabled = true;
+  const label = button.textContent;
+  button.textContent = 'Working…';
+  const res = await page.invoke(channel, arg).catch(() => ({ ok: false, error: 'That didn’t work. Try again.' }));
+  if (!res?.ok) {
+    button.disabled = false;
+    button.textContent = label;
+    billNote = { text: res?.error || 'That didn’t work. Try again.', bad: true };
+    renderBilling();
+    return;
+  }
+  billOpen = null;
+  billNote = { text: done };
+  renderBilling();
+  s.account = await page.invoke('page:account');
+  renderAccount(); // shows the new plan and reloads the subscription
+}
+
+async function subscribe(plan, button) {
+  button.disabled = true;
+  button.textContent = 'Opening…';
+  billNote = null;
+  // Resolves when the payment window closes.
+  const res = await page.invoke('page:billing-subscribe', plan).catch(() => ({ ok: false }));
+  s.account = await page.invoke('page:account');
+  if (res?.ok && s.account.plan !== 'free') billNote = { text: `Welcome to Lumio ${s.account.planName}! Your bigger weekly allowance is ready.` };
+  else if (res && !res.ok && res.error) billNote = { text: res.error, bad: true };
+  bill = null;
+  renderAccount();
 }
 
 // ------------------------------------------------------------ Lumio AI: thinking effort + approvals

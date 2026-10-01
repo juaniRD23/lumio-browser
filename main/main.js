@@ -363,6 +363,74 @@ function openAccountPage(which, from) {
   w.focus();
 }
 
+// ---------------------------------------------------------------- plan and billing (Settings)
+// The Lumio server talks to Stripe; Settings shows the plan, switches it,
+// cancels (with a reason) or resumes it.
+async function billingCall(path, body) {
+  if (!account.token()) return { ok: false, error: 'Sign in to Lumio first.' };
+  const r = await account.api(path, body ? { method: 'POST', body } : {}).catch(() => null);
+  if (!r) return { ok: false, error: 'Couldn’t reach Lumio. Check your internet connection.' };
+  if (r.status === 401) return { ok: false, error: 'Sign in to Lumio again (Settings › Lumio account).' };
+  if (!r.ok) return { ok: false, error: r.data?.error || 'That didn’t work. Try again.' };
+  if (body) await account.refresh().catch(() => {});
+  return { ...r.data, ok: true };
+}
+
+// Subscribing happens in a Lumio window over the browser: Lumio's own
+// /checkout page with Stripe's payment form inside it, never a trip to
+// Stripe's site. Resolves when the window closes (the page closes itself
+// after a successful payment), so Settings can show the new plan.
+let checkoutWin = null;
+async function openCheckout(w, plan) {
+  if (!['plus', 'pro', 'max'].includes(plan)) return { ok: false, error: 'Choose Plus, Pro or Max.' };
+  if (checkoutWin && !checkoutWin.isDestroyed()) { checkoutWin.focus(); return { ok: false, error: 'The payment window is already open.' }; }
+  const token = account.token();
+  if (!token) return { ok: false, error: 'Sign in to Lumio first.' };
+  // The window uses the normal profile, signed in to the website as this account.
+  await normal.session.cookies.set({
+    url: account.base, name: account.cookieName, value: token, path: '/', httpOnly: true, sameSite: 'lax',
+    secure: account.base.startsWith('https:'), expirationDate: Math.floor(Date.now() / 1000) + 30 * 86400,
+  }).catch(() => {});
+  const [pw, ph] = w.win.getContentSize();
+  const win = new BrowserWindow({
+    parent: w.win, modal: true, show: false, width: Math.max(420, Math.min(980, pw - 40)), height: Math.max(520, Math.min(780, ph - 30)),
+    minWidth: 400, minHeight: 480, title: 'Subscribe to Lumio', backgroundColor: '#070708', autoHideMenuBar: true,
+    webPreferences: { session: normal.session, contextIsolation: true, sandbox: true, nodeIntegration: false },
+  });
+  checkoutWin = win;
+  const wc = win.webContents;
+  // Links (terms, receipts) open in a normal tab; the window itself only goes to secure pages.
+  wc.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) w.tabs.create(url); return { action: 'deny' }; });
+  wc.on('will-navigate', (e, url) => { if (!/^https:\/\//.test(url) && !url.startsWith(account.base)) e.preventDefault(); });
+  win.once('ready-to-show', () => win.show());
+  const closed = new Promise((resolve) => win.on('closed', resolve));
+  win.loadURL(account.url(`/checkout?plan=${plan}&app=1`)).catch(() => {});
+  await closed;
+  checkoutWin = null;
+  await account.refresh().catch(() => {});
+  return { ok: true, plan: account.state().plan };
+}
+
+// Updating the card: Stripe's billing portal, in the same kind of window.
+async function openCardWindow(w) {
+  const r = await billingCall('/api/billing/portal', {});
+  if (!r.ok || !r.url) return r.ok ? { ok: false, error: 'Billing isn’t available right now.' } : r;
+  const [pw, ph] = w.win.getContentSize();
+  const win = new BrowserWindow({
+    parent: w.win, modal: true, width: Math.max(420, Math.min(900, pw - 40)), height: Math.max(520, Math.min(760, ph - 30)),
+    title: 'Card and invoices', backgroundColor: '#ffffff', autoHideMenuBar: true,
+    webPreferences: { session: normal.session, contextIsolation: true, sandbox: true, nodeIntegration: false },
+  });
+  win.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) w.tabs.create(url); return { action: 'deny' }; });
+  // Stripe's "Return to Lumio" link ends the visit.
+  win.webContents.on('will-navigate', (e, url) => { if (url.startsWith(account.base)) { e.preventDefault(); win.close(); } });
+  const closed = new Promise((resolve) => win.on('closed', resolve));
+  win.loadURL(r.url).catch(() => {});
+  await closed;
+  await account.refresh().catch(() => {});
+  return { ok: true };
+}
+
 function profileState() { return { ...store.settings.profile }; }
 const firstName = (name) => String(name || '').trim().split(/\s+/)[0].slice(0, 40) || null;
 
@@ -767,6 +835,12 @@ function registerIpc() {
   internalHandle('page:account-cancel', ['settings'], () => { account.cancelSignIn(); return account.state(); });
   internalHandle('page:account-sign-out', ['settings'], async () => { await signOutLumio(); return account.state(); });
   internalHandle('page:account-open', ['settings', 'newtab'], ({ w }, which) => openAccountPage(String(which), w));
+  internalHandle('page:billing', ['settings'], () => billingCall('/api/billing/subscription'));
+  internalHandle('page:billing-change', ['settings'], (_ctx, plan) => billingCall('/api/billing/change', { plan: String(plan || '') }));
+  internalHandle('page:billing-cancel', ['settings'], (_ctx, form) => billingCall('/api/billing/cancel', { reason: String(form?.reason || ''), comment: String(form?.comment || '').slice(0, 1000) }));
+  internalHandle('page:billing-resume', ['settings'], () => billingCall('/api/billing/resume', {}));
+  internalHandle('page:billing-subscribe', ['settings'], ({ w }, plan) => openCheckout(w, String(plan || '')));
+  internalHandle('page:billing-card', ['settings'], ({ w }) => openCardWindow(w));
   internalHandle('page:set-profile', ['settings'], (_ctx, patch) => setProfile(patch || {}));
   internalHandle('page:profile-photo', ['settings'], ({ w }) => pickProfilePhoto(w));
   internalHandle('page:choose-download-dir', ['settings'], async ({ w }) => {

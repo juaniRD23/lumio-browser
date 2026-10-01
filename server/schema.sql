@@ -119,3 +119,14 @@ CREATE TABLE IF NOT EXISTS stripe_events (
   type TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
+
+-- Why people cancel (also sent to Stripe as cancellation feedback); shown on the owner's Spend page.
+CREATE TABLE IF NOT EXISTS cancellations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT NOT NULL,
+  plan TEXT NOT NULL,
+  reason TEXT NOT NULL,                  -- too_expensive | unused | missing_features | low_quality | too_complex | switched_service | customer_service | other
+  comment TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS cancellations_time ON cancellations (created_at);

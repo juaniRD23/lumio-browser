@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Subscribe · Lumio</title>
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#070708">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body class="app pay-page">
+  <header class="app-head" id="head">
+    <a class="brand" href="/" aria-label="Lumio home">
+      <svg class="mark" viewBox="0 0 64 64" width="22" height="22" aria-hidden="true"><path d="M35 12a21 21 0 1 0 17 19" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><circle cx="48" cy="17" r="5" fill="#86b7ff"/></svg>
+      <span>Lumio</span>
+    </a>
+    <nav aria-label="Main"><a href="/chat">Chat</a><a href="/account">Account</a></nav>
+  </header>
+
+  <main class="pay">
+    <section class="pay-summary" id="summary" hidden>
+      <div class="pay-eyebrow">Subscribe</div>
+      <h1>Lumio <em id="plan-name"></em></h1>
+      <div class="pay-price"><b id="price"></b> a month</div>
+      <ul class="pay-perks" id="perks"></ul>
+      <p class="pay-fine">Cancel anytime in Settings. You keep your plan until the end of the month you paid for.</p>
+    </section>
+
+    <section class="pay-form" id="form" hidden>
+      <div class="notice err" id="error" hidden></div>
+      <div class="pay-box" id="checkout"><div class="pay-loading"><span class="spin" aria-hidden="true"></span>Loading the secure payment form…</div></div>
+      <p class="pay-secure"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>Payments are handled securely by Stripe. Lumio never sees your card number.</p>
+    </section>
+
+    <section class="pay-done" id="done" hidden>
+      <div class="pay-check" aria-hidden="true"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></div>
+      <h1 id="done-title">You’re all set</h1>
+      <p id="done-text">Your bigger weekly allowance is ready to use.</p>
+      <a class="btn primary" id="done-btn" href="/account">Done</a>
+    </section>
+
+    <section class="pay-done" id="problem" hidden>
+      <h1>That didn’t go through</h1>
+      <p id="problem-text"></p>
+      <a class="btn" id="problem-btn" href="/account">Back to your account</a>
+    </section>
+  </main>
+
+  <script src="https://js.stripe.com/v3/"></script>
+  <script type="module" src="/checkout.js"></script>
+</body>
+</html>

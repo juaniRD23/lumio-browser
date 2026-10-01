@@ -55,6 +55,16 @@ function render(d) {
     ['Revenue a month', money(d.monthlyRevenue)], ['AI cost this month', money(aiMonth)],
   ].map(([k, v]) => `<div><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('');
 
+  const c = d.cancellations || { last30Days: [], recent: [] };
+  const most = Math.max(1, ...c.last30Days.map((r) => r.n));
+  $('#why').hidden = false;
+  $('#why-list').innerHTML = c.last30Days.length
+    ? `<p class="fine first">Last 30 days</p>${c.last30Days.map((r) => `<div class="meter why-row"><div class="row"><span>${esc(r.label)}</span><span>${r.n}</span></div><div class="bar"><i style="width:${Math.round((r.n / most) * 100)}%"></i></div></div>`).join('')}`
+    : '<p class="fine first">No cancellations in the last 30 days.</p>';
+  $('#why-recent').innerHTML = c.recent.some((r) => r.comment)
+    ? `<p class="fine">What they wrote</p>${c.recent.filter((r) => r.comment).map((r) => `<blockquote class="why-quote">“${esc(r.comment)}”<span>${esc(r.label)} · Lumio ${esc(r.plan[0].toUpperCase() + r.plan.slice(1))} · ${esc(new Date(r.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }))}</span></blockquote>`).join('')}`
+    : '';
+
   const cap = d.freeCap;
   $('#cap').hidden = false;
   $('#cap-label').textContent = `${money(cap.usedToday)} of ${money(cap.cap)} used`;

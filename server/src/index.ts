@@ -8,6 +8,8 @@
 //   GET  /api/usage         the plan and its Lumio AI allowance
 //   GET  /api/billing/plans the plans and prices
 //   POST /api/billing/checkout | /api/billing/portal
+//   GET  /api/billing/subscription, GET /api/billing/checkout-status
+//   POST /api/billing/change | /api/billing/cancel | /api/billing/resume   (manage the plan in Lumio)
 //   POST /api/stripe/webhook
 //   GET  /api/chats, GET|DELETE /api/chats/:id, POST /api/chat, GET /api/chat/models   (web Chat)
 //   POST /api/files, GET /api/files/:id                            (Chat attachments, made images and files)
@@ -24,7 +26,7 @@
 // session as a bearer token. Cookie-authenticated POSTs must come from our own
 // pages (Origin check).
 import { accountJson, currentUser, googleCallback, googleStart, logout, readToken, type User } from './auth.ts';
-import { checkout, portal, webhook } from './billing.ts';
+import { cancelPlan, changePlan, checkout, checkoutStatus, portal, resumePlan, subscription, webhook } from './billing.ts';
 import { capabilities, runTool, step } from './browser.ts';
 import { connectCallback, connectStart, disconnect, listConnections } from './connections.ts';
 import { chatModels, deleteChat, getChat, listChats, send } from './chat.ts';
@@ -109,6 +111,11 @@ function routeFor(path: string, method: string): Route | null {
   if (f && method === 'GET') return (_r, env, _c, user) => download(env, user, f[1]);
   if (path === '/api/billing/checkout' && method === 'POST') return (r, env, _c, user) => checkout(r, env, user);
   if (path === '/api/billing/portal' && method === 'POST') return (r, env, _c, user) => portal(r, env, user);
+  if (path === '/api/billing/subscription' && method === 'GET') return (_r, env, _c, user) => subscription(env, user);
+  if (path === '/api/billing/checkout-status' && method === 'GET') return (r, env, _c, user) => checkoutStatus(r, env, user);
+  if (path === '/api/billing/change' && method === 'POST') return (r, env, _c, user) => changePlan(r, env, user);
+  if (path === '/api/billing/cancel' && method === 'POST') return (r, env, _c, user) => cancelPlan(r, env, user);
+  if (path === '/api/billing/resume' && method === 'POST') return (_r, env, _c, user) => resumePlan(env, user);
   if (path === '/api/chats' && method === 'GET') return (_r, env, _c, user) => listChats(env, user);
   if (path === '/api/chat' && method === 'POST') return send;
   if (path === '/api/chat/models' && method === 'GET') return async (_r, _env, _c, user) => chatModels(user);

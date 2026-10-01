@@ -33,7 +33,7 @@
       <span class="avatar" id="avatar"></span>
       <div><div class="name" id="name"></div><div class="email" id="email"></div></div>
       <div class="actions">
-        <button class="btn small" id="billing" hidden>Manage billing</button>
+        <button class="btn small" id="billing" hidden>Card and invoices</button>
         <button class="btn small danger" id="sign-out">Sign out</button>
       </div>
     </section>
@@ -54,6 +54,17 @@
     <section class="panel" id="plans" aria-label="Plans">
       <h2>Plans</h2>
       <div class="plans" id="plan-cards"></div>
+    </section>
+
+    <section class="panel cancel-panel" id="cancel-panel" aria-label="Cancel your plan" hidden>
+      <h2>Why are you canceling?</h2>
+      <p class="email" style="margin:-6px 0 14px">You keep your plan until the end of the month you paid for, then you’re on Free. Your answer goes straight to the people who build Lumio.</p>
+      <form id="cancel-form">
+        <div class="reasons" id="cancel-reasons"></div>
+        <textarea id="cancel-comment" maxlength="1000" rows="3" placeholder="Anything else you’d like to tell us? (optional)"></textarea>
+        <p class="cancel-msg" id="cancel-msg" aria-live="polite"></p>
+        <div class="cancel-actions"><button type="button" class="btn small" id="cancel-keep">Keep my plan</button><button type="submit" class="btn small danger" id="cancel-go">Cancel subscription</button></div>
+      </form>
     </section>
   </main>
 

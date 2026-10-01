@@ -117,6 +117,12 @@ if (openrouter) { await putSecret('OPENROUTER_API_KEY', openrouter); console.log
 const google = await ask('Google OAuth client secret: ');
 if (google) { await putSecret('GOOGLE_CLIENT_SECRET', google); console.log('  ✓ Google client secret stored'); }
 const stripeKey = await ask('Stripe secret key (sk_test_… to try it first, sk_live_… for real payments): ');
+// The publishable key shows Stripe's payment form inside Lumio's own /checkout page.
+const publishable = await ask('Stripe publishable key (pk_test_… or pk_live_…, the same mode as the secret key): ');
+if (publishable) {
+  if (!/^pk_(test|live)_[A-Za-z0-9]+$/.test(publishable)) console.log('  ✗ That doesn’t look like a publishable key (pk_test_… or pk_live_…). Skipped.');
+  else { await putSecret('STRIPE_PUBLISHABLE_KEY', publishable); console.log('  ✓ Stripe publishable key stored (payment form inside Lumio)'); }
+}
 if (stripeKey) {
   if (!/^(sk|rk)_(test|live)_/.test(stripeKey)) { console.error('That doesn’t look like a Stripe secret key.'); process.exit(1); }
   await stripeSetup(stripeKey);

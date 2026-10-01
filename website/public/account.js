@@ -48,12 +48,19 @@ async function renderConnections() {
   }));
 }
 
-function renderPlans(plans, current, wanted) {
+// Why people cancel (the server sends the same list to Stripe as feedback).
+const REASONS = [
+  ['too_expensive', 'It costs too much'], ['unused', 'I don’t use it enough'], ['missing_features', 'It’s missing something I need'],
+  ['low_quality', 'Lumio AI’s answers or actions weren’t good enough'], ['too_complex', 'It’s hard to use'],
+  ['switched_service', 'I’m switching to another app'], ['customer_service', 'I had a billing or support problem'], ['other', 'Something else'],
+];
+
+function renderPlans(plans, current, wanted, canceling) {
   $('#plan-cards').innerHTML = plans.map((p) => {
     const here = p.id === current;
     const higher = ORDER.indexOf(p.id) > ORDER.indexOf(current);
-    const action = here ? '<button class="btn small" disabled>Your plan</button>'
-      : p.id === 'free' ? (current !== 'free' ? '<button class="btn small" data-portal>Cancel in billing</button>' : '')
+    const action = here ? (canceling ? `<button class="btn small accent" data-resume>Keep ${esc(p.name)}</button>` : '<button class="btn small" disabled>Your plan</button>')
+      : p.id === 'free' ? (current !== 'free' && !canceling ? '<button class="btn small" data-cancel>Cancel plan</button>' : '')
         : `<button class="btn small ${higher ? 'accent' : ''}" data-plan="${p.id}">${current === 'free' ? `Get ${esc(p.name)}` : higher ? `Upgrade to ${esc(p.name)}` : `Switch to ${esc(p.name)}`}</button>`;
     return `<article class="plan ${here ? 'current' : ''} ${wanted === p.id && !here ? 'wanted' : ''}">
       <div class="p-name">${esc(p.name)}</div>
@@ -63,12 +70,50 @@ function renderPlans(plans, current, wanted) {
     </article>`;
   }).join('');
   $('#plan-cards').querySelectorAll('[data-plan]').forEach((b) => b.addEventListener('click', async () => {
+    const plan = b.dataset.plan;
+    // Free: Lumio's own payment page. Subscribed: switch in place, after a second click to confirm.
+    if (current === 'free') { location.href = `/checkout?plan=${plan}`; return; }
+    if (!b.dataset.sure) {
+      b.dataset.sure = '1';
+      const up = ORDER.indexOf(plan) > ORDER.indexOf(current);
+      b.textContent = up ? 'Confirm: pay the difference now' : 'Confirm switch';
+      b.title = up ? 'You pay the difference for the rest of this month now, and the bigger allowance starts right away.' : 'Your allowance changes now; the unused part of this month is credited to your next bill.';
+      return;
+    }
     b.disabled = true;
-    b.textContent = 'Opening Stripe…';
-    try { location.href = (await post('/api/billing/checkout', { plan: b.dataset.plan })).url; } catch (err) { showError(err.message); b.disabled = false; renderAll(); }
+    b.textContent = 'Switching…';
+    try {
+      await post('/api/billing/change', { plan });
+      notice(`You’re on Lumio ${plans.find((p) => p.id === plan)?.name || plan} now.`);
+      await renderAll();
+    } catch (err) { showError(err.message); renderAll(); }
   }));
-  $('#plan-cards').querySelectorAll('[data-portal]').forEach((b) => b.addEventListener('click', openPortal));
+  $('#plan-cards').querySelector('[data-cancel]')?.addEventListener('click', () => { $('#cancel-panel').hidden = false; $('#cancel-panel').scrollIntoView({ behavior: 'smooth', block: 'center' }); });
+  $('#plan-cards').querySelector('[data-resume]')?.addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    try { await post('/api/billing/resume'); notice('Your plan continues. Nothing else changes.'); await renderAll(); } catch (err) { showError(err.message); renderAll(); }
+  });
 }
+
+function notice(text) { const n = $('#welcome'); n.hidden = false; n.textContent = text; showError(''); }
+
+// The cancel form: why, then cancel at the end of the paid month.
+$('#cancel-reasons').innerHTML = REASONS.map(([id, label]) => `<label class="reason"><input type="radio" name="reason" value="${id}"><span>${esc(label)}</span></label>`).join('');
+$('#cancel-keep').addEventListener('click', () => { $('#cancel-panel').hidden = true; });
+$('#cancel-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const reason = new FormData(e.target).get('reason');
+  if (!reason) { $('#cancel-msg').textContent = 'Choose a reason first. It helps us make Lumio better.'; return; }
+  const go = $('#cancel-go');
+  go.disabled = true;
+  try {
+    const r = await post('/api/billing/cancel', { reason, comment: $('#cancel-comment').value });
+    $('#cancel-panel').hidden = true;
+    e.target.reset();
+    notice(r.endsAt ? `Canceled. You keep your plan until ${new Date(r.endsAt).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}, then you’re on Free. Thanks for the feedback.` : 'Canceled. Thanks for the feedback.');
+    await renderAll();
+  } catch (err) { $('#cancel-msg').textContent = err.message; } finally { go.disabled = false; }
+});
 
 async function openPortal() {
   try { location.href = (await post('/api/billing/portal')).url; } catch (err) { showError(err.message); }
@@ -89,14 +134,14 @@ async function renderAll() {
   const when = p.renewsAt ? new Date(p.renewsAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '';
   const status = u.plan === 'free' ? null
     : p.status === 'canceling' ? { text: when ? `Ends ${when}` : 'Ends at period end', warn: true }
-      : p.status === 'past_due' ? { text: 'Payment issue: update your card in billing', warn: true }
+      : p.status === 'past_due' ? { text: 'Payment issue: update your card (Card and invoices)', warn: true }
         : when ? { text: `Renews ${when}` } : null;
   $('#plan-status').hidden = !status;
   $('#plan-status').textContent = status?.text || '';
   $('#plan-status').classList.toggle('warn', !!status?.warn);
   $('#billing').hidden = u.plan === 'free';
   const wanted = new URLSearchParams(location.search).get('plan');
-  renderPlans(plansList, u.plan, wanted);
+  renderPlans(plansList, u.plan, wanted, p.status === 'canceling');
   return u;
 }
 

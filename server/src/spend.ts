@@ -12,6 +12,7 @@
 // Lumio's key today, this week and this month, next to what Lumio counted,
 // split by Free and paid plans and by Chat, browser and pictures.
 import type { User } from './auth.ts';
+import { CANCEL_REASONS } from './billing.ts';
 import { GEN_ID } from './openrouter.ts';
 import { PLANS, toMicro } from './usage.ts';
 import { type Env, json } from './util.ts';
@@ -146,6 +147,13 @@ export async function spendReport(env: Env, user: User, now = Date.now()) {
     FROM steps WHERE plan = 'free' AND created_at >= ?1`).bind(now - DAY).first<{ used: number }>();
   const pending = await env.DB.prepare(`SELECT COUNT(*) AS n FROM steps WHERE verified_at IS NULL AND gen_ids IS NOT NULL AND created_at >= ?1`).bind(now - 2 * DAY).first<{ n: number }>();
 
+  // Why people cancel (from the cancel form in Settings and on /account).
+  const { results: why } = await env.DB.prepare('SELECT reason, COUNT(*) AS n FROM cancellations WHERE created_at >= ?1 GROUP BY reason ORDER BY n DESC')
+    .bind(now - 30 * DAY).all<{ reason: string; n: number }>();
+  const { results: recent } = await env.DB.prepare('SELECT reason, comment, plan, created_at FROM cancellations ORDER BY created_at DESC LIMIT 8')
+    .all<{ reason: string; comment: string | null; plan: string; created_at: number }>();
+  const label = (r: string) => CANCEL_REASONS[r] || r;
+
   return json({
     at: now,
     openrouter,
@@ -155,5 +163,9 @@ export async function spendReport(env: Env, user: User, now = Date.now()) {
     monthlyRevenue,
     freeCap: { usedToday: usd(free24?.used ?? 0), cap },
     waitingForCheck: pending?.n ?? 0,
+    cancellations: {
+      last30Days: why.map((r) => ({ reason: r.reason, label: label(r.reason), n: r.n })),
+      recent: recent.map((r) => ({ reason: r.reason, label: label(r.reason), comment: r.comment, plan: r.plan, at: r.created_at })),
+    },
   });
 }
