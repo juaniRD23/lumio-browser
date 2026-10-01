@@ -3,6 +3,9 @@
 // Run: npm run test:e2e   (set LUMIO_SHOTS=/some/dir to save screenshots)
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -85,6 +88,72 @@ after(async () => {
   await L?.close();
   site?.close();
   lumio?.server.close();
+});
+
+// ------------------------------------------------------------ passkeys
+test('passkeys: a site saves one after the person confirms, signs in with it, and the signature verifies', async () => {
+  const { cborDecode } = require('../../main/passkeys.js');
+  const sha = (d) => crypto.createHash('sha256').update(d).digest();
+  const url = `http://localhost:${site.address().port}/passkey.html`;
+  await go(url, 'Passkey Test Site');
+  assert.equal(await L.page(`PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()`), true);
+  assert.equal(await L.page(`String(navigator.credentials.create)`), 'function create() { [native code] }');
+
+  // Create: Lumio asks first.
+  await L.page(`register(); true`);
+  assert.ok(await until(async () => (await overlayKind()) === 'passkey'));
+  const ask = await L.main(() => global.lumio.current.overlay.webContents.executeJavaScript('document.body.innerText'));
+  assert.match(ask, /Save a passkey for localhost\?[\s\S]*Sam Tester[\s\S]*sam@example\.com/);
+  await L.wait(300);
+  await shot('30-passkey-save');
+  await overlayClick('[data-pk="ok"]');
+  assert.ok(await until(() => L.page(`!!(window.state.reg || window.state.regError)`)));
+  const reg = await L.page(`window.state.reg || window.state.regError`);
+  assert.equal(typeof reg, 'object', String(reg));
+  assert.deepEqual([reg.isPKC, reg.isAtt, reg.type, reg.attachment, reg.alg, reg.id === reg.rawId], [true, true, 'public-key', 'platform', -7, true]);
+  assert.deepEqual(reg.ext, { credProps: { rk: true } });
+  assert.equal(reg.json.response.attestationObject, reg.attestationObject);
+  // What the site's server would check.
+  const client = JSON.parse(Buffer.from(reg.clientDataJSON, 'base64url'));
+  assert.deepEqual(client, { type: 'webauthn.create', challenge: reg.challenge, origin: `http://localhost:${site.address().port}`, crossOrigin: false });
+  const [att] = cborDecode(Buffer.from(reg.attestationObject, 'base64url'));
+  const authData = att.get('authData');
+  assert.deepEqual(authData.subarray(0, 32), sha('localhost'));
+  assert.equal(authData[32], 0x45, 'user present and verified');
+  assert.deepEqual((await L.main(() => global.lumio.passwords.passkeys.list())).map((k) => [k.rpId, k.userName]), [['localhost', 'sam@example.com']]);
+
+  // Sign in: pick the account, confirm, and the site gets a valid signature.
+  await L.page(`login(); true`);
+  assert.ok(await until(async () => (await overlayKind()) === 'passkey'));
+  assert.match(await L.main(() => global.lumio.current.overlay.webContents.executeJavaScript('document.body.innerText')), /Sign in to localhost[\s\S]*Sam Tester/);
+  await shot('31-passkey-signin');
+  await overlayClick('[data-pk="ok"]');
+  assert.ok(await until(() => L.page(`!!(window.state.auth || window.state.authError)`)));
+  const auth = await L.page(`window.state.auth || window.state.authError`);
+  assert.equal(typeof auth, 'object', String(auth));
+  assert.equal(auth.isAssert, true);
+  assert.equal(auth.id, reg.id);
+  assert.equal(auth.userHandle, 'user-42');
+  const key = crypto.createPublicKey({ key: Buffer.from(reg.publicKey, 'base64url'), format: 'der', type: 'spki' });
+  const signed = Buffer.concat([Buffer.from(auth.authenticatorData, 'base64url'), sha(Buffer.from(auth.clientDataJSON, 'base64url'))]);
+  assert.equal(crypto.verify('sha256', signed, { key, dsaEncoding: 'der' }, Buffer.from(auth.signature, 'base64url')), true, 'the site can verify the signature');
+  assert.equal(JSON.parse(Buffer.from(auth.clientDataJSON, 'base64url')).challenge, auth.challenge);
+
+  // Cancel: the page gets NotAllowedError; an aborted request closes the prompt.
+  await L.page(`window.state.authError = null; window.state.auth = null; login(); true`);
+  assert.ok(await until(async () => (await overlayKind()) === 'passkey'));
+  await overlayClick('[data-pk="cancel"]');
+  assert.ok(await until(() => L.page(`window.state.authError`)));
+  assert.match(await L.page(`window.state.authError`), /^NotAllowedError/);
+  await L.page(`loginAbort(); true`);
+  assert.ok(await until(async () => (await overlayKind()) === 'passkey'));
+  assert.equal(await until(() => L.page(`window.state.aborted`)), 'AbortError');
+  assert.ok(await until(async () => (await overlayKind()) !== 'passkey'), 'the prompt closed');
+  // The site asks for an account it already has: refused.
+  await L.page(`window.state.regError = null; register(); true`);
+  assert.ok(await until(async () => (await overlayKind()) === 'passkey'));
+  await overlayClick('[data-pk="ok"]');
+  assert.ok(await until(() => L.page(`window.state.regError || (window.state.reg && window.state.reg.id !== ${JSON.stringify(reg.id)})`)));
 });
 
 // ------------------------------------------------------------ account

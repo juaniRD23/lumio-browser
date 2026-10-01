@@ -122,6 +122,32 @@ function renderPwSave({ prompt }) {
   card.dataset.prompt = String(prompt.id);
 }
 
+// "Save a passkey?" / "Sign in with a passkey" when a site asks (Lumio is the authenticator).
+function renderPasskey({ prompt }) {
+  const p = prompt;
+  const who = (a) => esc(a.displayName && a.displayName !== a.userName ? a.displayName : a.userName || 'Account');
+  const sub = (a) => (a.displayName && a.userName && a.displayName !== a.userName ? `<small>${esc(a.userName)}</small>` : '');
+  let body = '';
+  let ok = '';
+  if (p.mode === 'create') {
+    body = `<div class="pk-title">Save a passkey for ${esc(p.rpId)}?</div>
+      <div class="pk-account">${icons.person}<span><b>${who(p)}</b>${sub(p)}</span></div>
+      <p class="pk-note">Lumio keeps it on this computer and asks for ${navigator.platform.startsWith('Mac') ? 'Touch ID' : 'Windows Hello'} when you use it. No password needed next time.</p>`;
+    ok = 'Save passkey';
+  } else if (p.mode === 'get') {
+    body = `<div class="pk-title">Sign in to ${esc(p.rpId)}</div>
+      <div class="pk-list">${p.accounts.map((a, i) => `<label class="pk-acc"><input type="radio" name="pk" value="${esc(a.id)}" ${i === 0 ? 'checked' : ''}>${icons.person}<span><b>${who(a)}</b>${sub(a)}</span></label>`).join('')}</div>
+      <p class="pk-note">With your passkey saved in Lumio.</p>`;
+    ok = 'Continue';
+  } else {
+    body = `<div class="pk-title">No passkey for ${esc(p.rpId)}</div>
+      <p class="pk-note">You don’t have a passkey for this site saved in Lumio. Sign in another way, then the site can offer to create one.</p>`;
+  }
+  card.innerHTML = `<div class="pk-head">${icons.key}<span>Passkey · ${esc(p.host)}</span></div>${body}
+    <div class="pws-actions"><span style="flex:1"></span><button class="acc-btn ghost" data-pk="cancel">${ok ? 'Cancel' : 'OK'}</button>${ok ? `<button class="acc-btn primary" data-pk="ok">${ok}</button>` : ''}</div>`;
+  card.dataset.prompt = String(p.id);
+}
+
 // Tell the browser how tall this dropdown really is.
 function measure() {
   // Measure the natural height (a scroll box never reports less than it has).
@@ -147,6 +173,7 @@ api.on('overlay-data', (payload) => {
   else if (kind === 'account') { renderAccount(payload); reportSize(); }
   else if (kind === 'autofill') { renderAutofill(payload); reportSize(); }
   else if (kind === 'pwsave') { renderPwSave(payload); reportSize(); }
+  else if (kind === 'passkey') { renderPasskey(payload); reportSize(); }
 });
 
 card.addEventListener('change', (e) => {
@@ -155,6 +182,14 @@ card.addEventListener('change', (e) => {
 });
 
 card.addEventListener('mousedown', async (e) => {
+  if (kind === 'passkey') {
+    const decision = e.target.closest('[data-pk]')?.dataset.pk;
+    if (!decision) return; // choosing an account works normally
+    e.preventDefault();
+    const account = card.querySelector('input[name=pk]:checked')?.value || null;
+    api.send('passwords:passkey', { id: Number(card.dataset.prompt), decision, account });
+    return;
+  }
   if (kind === 'autofill') {
     e.preventDefault();
     const fill = e.target.closest('[data-fill]')?.dataset.fill;

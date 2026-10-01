@@ -110,3 +110,18 @@ svg { display: block; }
 .pws-eye { flex: none; width: 34px; height: 34px; border: 0; border-radius: 8px; background: #262628; color: #bbb; display: grid; place-items: center; }
 .pws-eye:hover { background: #303033; color: #fff; }
 .pws-actions { display: flex; align-items: center; gap: 6px; padding: 8px 8px 6px; }
+
+/* passkey prompt */
+.pk-head { display: flex; align-items: center; gap: 7px; padding: 6px 8px 2px; color: #a3a3aa; font-size: 11.5px; }
+.pk-head svg { width: 14px; height: 14px; }
+.pk-title { font: 400 22px/1.15 'Instrument Serif', Georgia, serif; padding: 6px 8px 10px; }
+.pk-account, .pk-acc { display: flex; align-items: center; gap: 10px; margin: 0 4px 4px; padding: 9px 10px; border-radius: 12px; background: #ffffff08; border: 1px solid #ffffff14; }
+.pk-account svg, .pk-acc svg { width: 18px; height: 18px; color: #a3a3aa; flex: none; }
+.pk-account span, .pk-acc span { display: flex; flex-direction: column; min-width: 0; }
+.pk-account b, .pk-acc b { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pk-account small, .pk-acc small { color: #8a8a8a; font-size: 11.5px; }
+.pk-list { display: flex; flex-direction: column; max-height: 220px; overflow-y: auto; }
+.pk-acc { cursor: pointer; }
+.pk-acc input { accent-color: var(--accent); margin: 0; }
+.pk-acc:has(input:checked) { border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
+.pk-note { color: #8a8a8a; font-size: 12px; line-height: 1.5; margin: 6px 8px 4px; }

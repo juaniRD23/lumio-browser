@@ -1,0 +1,46 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Passkey Test Site</title>
+<h1>Passkey test site</h1>
+<script>
+// A tiny relying party: register a passkey, then sign in with it.
+const rand = (n) => crypto.getRandomValues(new Uint8Array(n));
+const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+window.state = { log: [] };
+window.register = async () => {
+  const challenge = rand(32);
+  try {
+    const cred = await navigator.credentials.create({ publicKey: {
+      challenge, rp: { name: 'Passkey Test Site' },
+      user: { id: new TextEncoder().encode('user-42'), name: 'sam@example.com', displayName: 'Sam Tester' },
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+      authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
+      extensions: { credProps: true },
+    } });
+    window.state.reg = {
+      isPKC: cred instanceof PublicKeyCredential, isAtt: cred.response instanceof AuthenticatorAttestationResponse,
+      id: cred.id, rawId: b64(cred.rawId), type: cred.type, attachment: cred.authenticatorAttachment,
+      clientDataJSON: b64(cred.response.clientDataJSON), attestationObject: b64(cred.response.attestationObject),
+      publicKey: b64(cred.response.getPublicKey()), alg: cred.response.getPublicKeyAlgorithm(), transports: cred.response.getTransports(),
+      ext: cred.getClientExtensionResults(), json: cred.toJSON(), challenge: b64(challenge),
+    };
+  } catch (err) { window.state.regError = `${err.name}: ${err.message}`; }
+};
+window.login = async () => {
+  const challenge = rand(32);
+  try {
+    const cred = await navigator.credentials.get({ publicKey: { challenge, rpId: 'localhost', userVerification: 'required' } });
+    window.state.auth = {
+      isAssert: cred.response instanceof AuthenticatorAssertionResponse, id: cred.id,
+      clientDataJSON: b64(cred.response.clientDataJSON), authenticatorData: b64(cred.response.authenticatorData),
+      signature: b64(cred.response.signature), userHandle: new TextDecoder().decode(cred.response.userHandle), challenge: b64(challenge),
+    };
+  } catch (err) { window.state.authError = `${err.name}: ${err.message}`; }
+};
+window.loginAbort = async () => {
+  const ac = new AbortController();
+  const p = navigator.credentials.get({ publicKey: { challenge: rand(32), rpId: 'localhost' }, signal: ac.signal }).catch((err) => err.name);
+  setTimeout(() => ac.abort(), 300);
+  window.state.aborted = await p;
+};
+</script>

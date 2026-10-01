@@ -90,6 +90,7 @@ async function reload() {
   state = await page.invoke('page:passwords');
   renderList();
   renderDetail();
+  renderPasskeys();
 }
 
 $('#list').addEventListener('click', (e) => {
@@ -176,6 +177,25 @@ function renderNever() {
   $('#never').hidden = !never.length;
   $('#never').innerHTML = never.map((site) => `<div class="row"><div class="grow"><div class="title">${esc(site.replace(/^https?:\/\//, ''))}</div></div><button class="btn small" data-site="${esc(site)}">Remove</button></div>`).join('');
 }
+// Passkeys Lumio made for sites (it's the authenticator).
+function renderPasskeys() {
+  const keys = state.passkeys || [];
+  $('#passkeys-title').hidden = !keys.length;
+  $('#passkeys').hidden = !keys.length;
+  const date = (t) => new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  $('#passkeys').innerHTML = keys.map((k) => `<div class="row"><div class="grow"><div class="title">${esc(k.rpId)}</div><div class="desc">${esc(k.userName || k.displayName || 'Account')} · created ${esc(date(k.created))}${k.lastUsed && k.lastUsed !== k.created ? ` · last used ${esc(date(k.lastUsed))}` : ''}</div></div><button class="btn small danger" data-passkey="${esc(k.id)}">Delete</button></div>`).join('');
+}
+$('#passkeys').addEventListener('click', async (e) => {
+  const id = e.target.closest('[data-passkey]')?.dataset.passkey;
+  if (!id) return;
+  const k = (state.passkeys || []).find((x) => x.id === id);
+  if (!confirm(`Delete the passkey for ${k?.rpId || 'this site'}? You’ll need another way to sign in there, and the site may still list it until you remove it in its settings.`)) return;
+  const ok = await page.invoke('page:passkey-delete', id);
+  if (!ok) msg('Couldn’t delete that passkey.', true);
+  state = await page.invoke('page:passwords');
+  renderPasskeys();
+});
+
 $('#never').addEventListener('click', async (e) => {
   const site = e.target.closest('[data-site]')?.dataset.site;
   if (!site) return;
@@ -186,4 +206,5 @@ $('#never').addEventListener('click', async (e) => {
 
 renderList();
 renderDetail();
+renderPasskeys();
 renderNever();

@@ -6,6 +6,9 @@
 //    typed, shows saved accounts when they click a sign-in field, and fills
 //    only what they pick in Lumio's own dropdown. Passwords are never exposed
 //    to the page before that choice.
+//  - Passkeys: navigator.credentials.create()/get() for public keys go to
+//    Lumio (main/password-manager.js), which asks the person, confirms it's
+//    them and answers as the authenticator. The page only gets the result.
 const { contextBridge, ipcRenderer } = require('electron');
 
 if (window.location.protocol === 'lumio:') {
@@ -14,7 +17,104 @@ if (window.location.protocol === 'lumio:') {
   });
 }
 
-if (/^https?:$/.test(window.location.protocol) && window === window.top) passwordHelper();
+if (/^https?:$/.test(window.location.protocol) && window === window.top) {
+  passwordHelper();
+  try {
+    contextBridge.executeInMainWorld({
+      func: installPasskeys,
+      args: [{
+        request: (kind, payload) => ipcRenderer.invoke('pk:request', { ...payload, kind }),
+        cancel: () => ipcRenderer.send('pk:cancel'),
+      }],
+    });
+  } catch { /* the page keeps its own navigator.credentials */ }
+}
+
+// Runs in the page's own world (before its scripts), so it must be
+// self-contained. Only `bridge` reaches back to Lumio, and Lumio decides the
+// origin itself, so a page can only ever ask for its own site's passkeys.
+function installPasskeys(bridge) {
+  const C = window.navigator.credentials;
+  const PKC = window.PublicKeyCredential;
+  if (!C || !PKC) return;
+  const nativeCreate = C.create.bind(C);
+  const nativeGet = C.get.bind(C);
+  const b64 = (v) => {
+    const u = v instanceof ArrayBuffer ? new Uint8Array(v) : new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+    let s = '';
+    for (let i = 0; i < u.length; i++) s += String.fromCharCode(u[i]);
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  };
+  const bin = (s) => {
+    const t = String(s).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(t + '==='.slice((t.length + 3) % 4));
+    const u = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) u[i] = raw.charCodeAt(i);
+    return u.buffer;
+  };
+  const plain = (v) => {
+    if (v instanceof ArrayBuffer || ArrayBuffer.isView(v)) return b64(v);
+    if (Array.isArray(v)) return v.map(plain);
+    if (v && typeof v === 'object') { const o = {}; for (const k of Object.keys(v)) o[k] = plain(v[k]); return o; }
+    return v;
+  };
+  const own = (obj, props) => { for (const k of Object.keys(props)) Object.defineProperty(obj, k, { value: props[k], enumerable: true, configurable: true }); return obj; };
+  function build(kind, c) {
+    const R = kind === 'create' ? window.AuthenticatorAttestationResponse : window.AuthenticatorAssertionResponse;
+    const response = Object.create(R ? R.prototype : Object.prototype);
+    if (kind === 'create') {
+      own(response, {
+        clientDataJSON: bin(c.clientDataJSON), attestationObject: bin(c.attestationObject),
+        getTransports: () => c.transports.slice(), getAuthenticatorData: () => bin(c.authenticatorData),
+        getPublicKey: () => bin(c.publicKey), getPublicKeyAlgorithm: () => c.publicKeyAlgorithm,
+        toJSON: () => ({ clientDataJSON: c.clientDataJSON, attestationObject: c.attestationObject, authenticatorData: c.authenticatorData, publicKey: c.publicKey, publicKeyAlgorithm: c.publicKeyAlgorithm, transports: c.transports.slice() }),
+      });
+    } else {
+      own(response, {
+        clientDataJSON: bin(c.clientDataJSON), authenticatorData: bin(c.authenticatorData), signature: bin(c.signature),
+        userHandle: c.userHandle ? bin(c.userHandle) : null,
+        toJSON: () => ({ clientDataJSON: c.clientDataJSON, authenticatorData: c.authenticatorData, signature: c.signature, ...(c.userHandle ? { userHandle: c.userHandle } : {}) }),
+      });
+    }
+    const ext = kind === 'create' && c.credProps ? { credProps: { rk: true } } : {};
+    return own(Object.create(PKC.prototype), {
+      id: c.id, rawId: bin(c.id), type: 'public-key', response, authenticatorAttachment: 'platform',
+      getClientExtensionResults: () => JSON.parse(JSON.stringify(ext)),
+      toJSON: () => ({ id: c.id, rawId: c.id, type: 'public-key', response: response.toJSON(), authenticatorAttachment: 'platform', clientExtensionResults: JSON.parse(JSON.stringify(ext)) }),
+    });
+  }
+  async function run(kind, options) {
+    const signal = options.signal;
+    const abortError = () => signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
+    if (signal?.aborted) throw abortError();
+    let onAbort;
+    const aborted = new Promise((_, reject) => { onAbort = () => { bridge.cancel(); reject(abortError()); }; signal?.addEventListener('abort', onAbort, { once: true }); });
+    try {
+      const res = await Promise.race([bridge.request(kind, { publicKey: plain(options.publicKey), mediation: options.mediation || null }), aborted]);
+      if (!res || res.error) throw new DOMException(res?.message || 'The operation either timed out or was not allowed.', res?.error || 'NotAllowedError');
+      return build(kind, res.credential);
+    } finally {
+      signal?.removeEventListener('abort', onAbort);
+    }
+  }
+  const native = (name, fn) => {
+    const f = { [name](...args) { return fn.apply(this, args); } }[name];
+    Object.defineProperty(f, 'toString', { value: () => `function ${name}() { [native code] }` });
+    return f;
+  };
+  C.create = native('create', (options) => (options && options.publicKey ? run('create', options) : nativeCreate(options)));
+  C.get = native('get', (options) => (options && options.publicKey ? run('get', options) : nativeGet(options)));
+  PKC.isUserVerifyingPlatformAuthenticatorAvailable = native('isUserVerifyingPlatformAuthenticatorAvailable', async () => true);
+  PKC.isConditionalMediationAvailable = native('isConditionalMediationAvailable', async () => true);
+  if (typeof PKC.getClientCapabilities === 'function') {
+    const caps = PKC.getClientCapabilities.bind(PKC);
+    PKC.getClientCapabilities = native('getClientCapabilities', async () => ({
+      ...(await caps().catch(() => ({}))),
+      conditionalCreate: false, conditionalGet: true, hybridTransport: false,
+      passkeyPlatformAuthenticator: true, userVerifyingPlatformAuthenticator: true,
+    }));
+  }
+}
 
 function passwordHelper() {
   const typed = new WeakSet(); // fields the person typed into, or Lumio filled

@@ -5,12 +5,16 @@
 //  - fill only the page that asked, only after a choice, and only while it's
 //    still on the same site;
 //  - confirm who they are (Touch ID / Mac password, Windows Hello) before
-//    showing, copying or exporting passwords.
+//    showing, copying or exporting passwords;
+//  - passkeys: when a site calls navigator.credentials.create()/get(), ask in
+//    Lumio's own prompt, confirm it's them, then create or use a passkey
+//    (passkeys.js is the authenticator).
 // Page messages come from the isolated tab preload (preload/internal.js).
-const { ipcMain, clipboard, dialog } = require('electron');
+const { ipcMain, clipboard, dialog, webContents } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { PasswordStore, generatePassword, siteKey } = require('./passwords');
+const { PasskeyStore, WebAuthnError, validRpId } = require('./passkeys');
 const { windowsHello } = require('./win/hello');
 
 const AUTH_MS = 3 * 60 * 1000;
@@ -19,6 +23,8 @@ const PROMPT_MS = 10 * 60 * 1000;
 class PasswordManager {
   constructor({ dir, safeStorage, settings, helper, findTab, toast }) {
     this.store = new PasswordStore(dir, safeStorage);
+    this.passkeys = new PasskeyStore(dir, safeStorage);
+    this.pkPending = new Map(); // prompt id -> { resolve, kind, pk, origin, rpId, w, wcId, accounts }
     this.settings = settings; // the app Store (for offer/autofill switches)
     this.helper = helper;
     this.findTab = findTab; // (webContents) -> { w, tab } | null
@@ -45,6 +51,8 @@ class PasswordManager {
     ipcMain.on('pw:captured', (e, data) => this.captured(e, data));
     ipcMain.handle('pw:query', (e, data) => this.query(e, data));
     ipcMain.on('pw:show', (e, rect) => this.show(e, rect));
+    ipcMain.handle('pk:request', (e, req) => this.passkeyRequest(e, req || {}));
+    ipcMain.on('pk:cancel', (e) => this.passkeyCancel(e.sender.id));
     ipcMain.on('pw:hide', (e) => {
       const found = this.findTab(e.sender);
       if (found && found.w.overlayKind === 'autofill') found.w.hideOverlay();
@@ -187,11 +195,131 @@ class PasswordManager {
     return response === 0;
   }
 
+  // ------------------------------------------------------------ passkeys
+  // A site called navigator.credentials.create()/get() (preload/internal.js).
+  // Resolves with { credential } or { error, message } for the page.
+  async passkeyRequest(e, req) {
+    const origin = PasswordManager.origin(e);
+    const found = this.findTab(e.sender);
+    const no = (message, error = 'NotAllowedError') => ({ error, message });
+    if (!origin || !found) return no('Passkeys work on websites in a tab.');
+    if (!this.passkeys.available()) return no('Lumio can’t store passkeys on this computer.');
+    const kind = req.kind === 'create' ? 'create' : 'get';
+    const pk = req.publicKey && typeof req.publicKey === 'object' ? req.publicKey : {};
+    let rpId;
+    let accounts = [];
+    try {
+      if (kind === 'create') {
+        if (pk.authenticatorSelection?.authenticatorAttachment === 'cross-platform') return no('Lumio can’t use security keys yet. Try a passkey saved in Lumio.');
+        rpId = String(pk.rp?.id || new URL(origin).hostname).toLowerCase();
+        if (!validRpId(rpId, origin)) throw new WebAuthnError('SecurityError', 'This site can’t use that passkey domain.');
+      } else {
+        const c = this.passkeys.candidates(pk, origin);
+        rpId = c.rpId;
+        accounts = c.list.map((k) => ({ id: k.id, userName: k.userName, displayName: k.displayName }));
+      }
+    } catch (err) {
+      return no(err.message, err.name || 'NotAllowedError');
+    }
+    // A passkey-autofill request with nothing to offer just waits, like Chrome.
+    if (kind === 'get' && req.mediation === 'conditional' && !accounts.length) return new Promise(() => {});
+    this.passkeyCancel(e.sender.id); // one prompt per tab
+    const { w, tab } = found;
+    const id = this.nextPromptId();
+    return new Promise((resolve) => {
+      const entry = { id, resolve, kind, pk, origin, rpId, w, wcId: e.sender.id, accounts };
+      this.pkPending.set(id, entry);
+      const b = tab.view?.getBounds() || { x: 0, y: 90, width: 800 };
+      const width = 380;
+      w.showOverlay(
+        { x: b.x + b.width - width - 4, y: b.y + 4, width: width + 24, height: 230 + accounts.length * 52 },
+        {
+          kind: 'passkey',
+          prompt: { id, mode: kind === 'create' ? 'create' : accounts.length ? 'get' : 'none', rpId, host: new URL(origin).host, userName: String(pk.user?.name || ''), displayName: String(pk.user?.displayName || ''), accounts },
+          accent: '',
+        },
+      );
+    });
+  }
+
+  // The page gave up (AbortSignal), went away, or a newer request came in.
+  passkeyCancel(wcId) {
+    for (const [id, p] of this.pkPending) {
+      if (p.wcId !== wcId) continue;
+      this.pkPending.delete(id);
+      p.resolve({ error: 'NotAllowedError', message: 'The request was cancelled.' });
+      if (p.w.overlayKind === 'passkey') p.w.hideOverlay();
+    }
+  }
+
+  // The passkey prompt was closed without a choice (another click, tab switch...).
+  passkeyClosed(w) {
+    for (const [id, p] of this.pkPending) {
+      if (p.w !== w) continue;
+      this.pkPending.delete(id);
+      p.resolve({ error: 'NotAllowedError', message: 'The operation either timed out or was not allowed.' });
+    }
+  }
+
+  // The person answered the prompt: confirm it's them, then create or sign.
+  async passkeyDecide(w, { id, decision, account } = {}) {
+    const p = this.pkPending.get(Number(id));
+    if (!p || p.w !== w) return;
+    this.pkPending.delete(p.id);
+    if (w.overlayKind === 'passkey') w.hideOverlay();
+    const deny = (message = 'The operation either timed out or was not allowed.') => p.resolve({ error: 'NotAllowedError', message });
+    if (decision !== 'ok') return deny();
+    if (p.kind === 'get' && !p.accounts.some((a) => a.id === account)) return deny();
+    const check = await this.verifyPerson(w, p.kind === 'create' ? `save a passkey for ${p.rpId}` : `sign in to ${p.rpId} with a passkey`);
+    if (!check.ok) return deny('Lumio couldn’t confirm it’s you.');
+    // Still the same page?
+    const wc = webContents.fromId(p.wcId);
+    let now = null;
+    try { now = wc && !wc.isDestroyed() ? new URL(wc.mainFrame.url).origin : null; } catch { /* gone */ }
+    if (now !== p.origin) return deny('The page changed.');
+    try {
+      const credential = p.kind === 'create'
+        ? this.passkeys.create(p.pk, p.origin, { verified: check.verified })
+        : this.passkeys.assert(p.pk, p.origin, account, { verified: check.verified });
+      p.resolve({ credential });
+      if (p.kind === 'create') this.toast(w, `Passkey saved for ${p.rpId}`);
+    } catch (err) {
+      p.resolve({ error: err.name || 'NotAllowedError', message: err.message });
+    }
+  }
+
+  // User verification for passkeys: every time (no 3-minute unlock).
+  async verifyPerson(w, reason) {
+    const testAuth = process.env.LUMIO_TEST && process.env.LUMIO_TEST_AUTH;
+    if (testAuth) return { ok: testAuth === 'allow', verified: testAuth === 'allow' };
+    if (process.platform === 'darwin' && this.helper?.available()) {
+      const r = await this.helper.request('authenticate', { reason }, 120000).catch(() => null);
+      if (r?.unavailable) return { ok: await this.confirmPasskey(w), verified: false };
+      return { ok: !!r?.authenticated, verified: !!r?.authenticated };
+    }
+    if (process.platform === 'win32') {
+      const r = await windowsHello(reason);
+      if (r === 'unavailable') return { ok: await this.confirmPasskey(w), verified: false };
+      return { ok: r === 'verified', verified: r === 'verified' };
+    }
+    return { ok: await this.confirmPasskey(w), verified: false };
+  }
+
+  async confirmPasskey(w) {
+    const { response } = await dialog.showMessageBox(w.win, {
+      type: 'question', buttons: ['Continue', 'Cancel'], defaultId: 0, cancelId: 1,
+      message: 'Use a passkey without Touch ID?',
+      detail: 'This computer has no Touch ID, Windows Hello or password check that Lumio can use.',
+    });
+    return response === 0;
+  }
+
   // ------------------------------------------------------------ manager page
   pageState() {
     return {
       available: this.store.available(),
       entries: this.store.list(),
+      passkeys: this.passkeys.list(),
       never: this.store.never(),
       offer: this.settings.settings.offerPasswords !== false,
       autofill: this.settings.settings.autofillPasswords !== false,

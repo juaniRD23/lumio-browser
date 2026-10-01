@@ -130,6 +130,7 @@ const services = {
   },
   onSessionChanged: () => saveSession(),
   onViewCreated: (w, tab) => { if (!w.incognito && tab.view) extensions?.addTab(tab.view.webContents, w.win); },
+  onPasskeyPromptClosed: (w) => passwords?.passkeyClosed(w),
   onTabActivated: (w, tab) => { if (!w.incognito && tab.view) extensions?.selectTab(tab.view.webContents); },
   savePage: (w, tab) => savePage(w, tab),
   contextMenuExtras: (w, tab, params) => (w.incognito || !tab.view ? [] : extensions?.contextMenuItems(tab.view.webContents, params) || []),
@@ -592,6 +593,7 @@ function registerIpc() {
   // ---- passwords (dropdown under sign-in fields, save prompt) ----
   on('passwords:fill', (w, choice) => passwords.fill(w, choice || {}));
   on('passwords:decide', (w, d) => { w.hideOverlay(); passwords.decide(w, d || {}); });
+  on('passwords:passkey', (w, d) => passwords.passkeyDecide(w, d || {}));
   handle('passwords:reveal-pending', (w, id) => passwords.revealPending(w, Number(id)));
   on('passwords:manage', (w) => { w.hideOverlay(); openInternal('lumio://passwords/'); });
   on('extensions:manage', () => openInternal('lumio://extensions/'));
@@ -735,6 +737,7 @@ function registerIpc() {
   internalHandle('page:password-edit', ['passwords'], ({ w }, id, patch) => passwords.edit(w, String(id), patch));
   internalHandle('page:password-add', ['passwords'], (_ctx, entry) => passwords.add(entry));
   internalHandle('page:password-delete', ['passwords'], (_ctx, id) => passwords.store.remove(String(id)));
+  internalHandle('page:passkey-delete', ['passwords'], async ({ w }, id) => ((await passwords.authorize(w, 'delete a passkey')) ? passwords.passkeys.remove(String(id)) : false));
   internalHandle('page:passwords-import', ['passwords'], ({ w }) => passwords.importFile(w));
   internalHandle('page:passwords-export', ['passwords'], ({ w }) => passwords.exportFile(w));
   internalHandle('page:password-never-remove', ['passwords'], (_ctx, site) => passwords.store.removeNever(String(site)));
