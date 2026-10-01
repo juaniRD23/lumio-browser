@@ -224,14 +224,24 @@
         <h2>Import from another browser</h2>
         <div class="card">
           <div class="row">
-            <div class="grow"><div class="title">Bookmarks and history</div><div class="desc" id="import-desc">Copy bookmarks and the last 90 days of history. To bring passwords, export them from the other browser as a CSV file and import it in the Password Manager.</div></div>
+            <div class="grow"><div class="title">Bookmarks, history and passwords</div><div class="desc" id="import-desc">Copy bookmarks, the last 90 days of history and, from Chrome-based browsers on a Mac, saved passwords. From Safari, export your passwords (File › Export › Passwords) and import the file below.</div></div>
             <select id="import-from" class="field"></select>
           </div>
           <div class="row checks">
             <label><input type="checkbox" id="import-bm" checked /> Bookmarks</label>
             <label><input type="checkbox" id="import-hist" checked /> History</label>
+            <label id="import-pw-wrap"><input type="checkbox" id="import-pw" checked /> Passwords</label>
             <span class="grow"></span>
             <button class="btn primary" id="import-go">Import</button>
+          </div>
+          <div class="row" id="import-access" hidden>
+            <div class="grow"><div class="title">Lumio needs Full Disk Access to read Safari</div><div class="desc">Turn on Lumio Browser under Full Disk Access in System Settings, then import again, or use files exported from Safari.</div></div>
+            <button class="btn" id="import-open-access">Open System Settings</button>
+          </div>
+          <div class="row">
+            <div class="grow"><div class="title">From a file</div><div class="desc">Bookmarks exported as HTML, or passwords exported as CSV, from Safari, Chrome, Firefox, 1Password or Bitwarden.</div></div>
+            <button class="btn" data-import-file="bookmarks">Bookmarks…</button>
+            <button class="btn" data-import-file="passwords">Passwords…</button>
           </div>
         </div>
       </section>

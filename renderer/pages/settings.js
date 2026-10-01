@@ -249,24 +249,47 @@ if (!sources.length) {
 } else {
   $('#import-from').innerHTML = sources.map((b) => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
 }
+function importPwOption() {
+  const src = sources.find((b) => b.id === $('#import-from').value);
+  $('#import-pw-wrap').hidden = !src?.passwords;
+}
+$('#import-from').addEventListener('change', importPwOption);
+importPwOption();
+function importSaid(text, ok) {
+  const desc = $('#import-desc');
+  desc.textContent = text;
+  desc.style.color = ok ? 'var(--ok)' : 'var(--danger)';
+}
+const counted = (res) => {
+  const parts = [];
+  if (res.bookmarks) parts.push(`${res.bookmarks} bookmark${res.bookmarks === 1 ? '' : 's'}`);
+  if (res.history) parts.push(`${res.history} history entr${res.history === 1 ? 'y' : 'ies'}`);
+  const pw = res.passwords ? res.passwords.added + res.passwords.updated : 0;
+  if (pw) parts.push(`${pw} password${pw === 1 ? '' : 's'}`);
+  return parts.length ? `Imported ${parts.join(', ')}${res.browser ? ` from ${res.browser}` : ''}.` : 'Nothing new to import.';
+};
 $('#import-go').addEventListener('click', async () => {
   const bookmarks = $('#import-bm').checked;
   const history = $('#import-hist').checked;
-  if (!bookmarks && !history) return;
+  const passwords = !$('#import-pw-wrap').hidden && $('#import-pw').checked;
+  if (!bookmarks && !history && !passwords) return;
   $('#import-go').disabled = true;
   $('#import-go').textContent = 'Importing…';
-  const res = await page.invoke('page:import', $('#import-from').value, { bookmarks, history });
+  $('#import-access').hidden = true;
+  const res = await page.invoke('page:import', $('#import-from').value, { bookmarks, history, passwords });
   $('#import-go').disabled = false;
   $('#import-go').textContent = 'Import';
-  const desc = $('#import-desc');
-  if (res.ok) {
-    desc.textContent = `Imported ${res.bookmarks} bookmark${res.bookmarks === 1 ? '' : 's'} and ${res.history} history entr${res.history === 1 ? 'y' : 'ies'} from ${res.browser}.`;
-    desc.style.color = 'var(--ok)';
-  } else {
-    desc.textContent = res.error;
-    desc.style.color = 'var(--danger)';
-  }
+  if (res.needsAccess) { $('#import-access').hidden = false; importSaid(res.error, false); return; }
+  if (!res.ok) { importSaid(res.error, false); return; }
+  importSaid(counted(res) + (res.passwordError ? ` ${res.passwordError}` : ''), !res.passwordError);
 });
+$('#import-open-access').addEventListener('click', () => page.invoke('page:open-disk-access'));
+document.querySelectorAll('[data-import-file]').forEach((b) => b.addEventListener('click', async () => {
+  const res = await page.invoke('page:import-file', b.dataset.importFile);
+  if (res.canceled) return;
+  if (!res.ok) importSaid(res.error || 'Couldn’t import that file.', false);
+  else importSaid(counted(res), true);
+}));
 
 // ------------------------------------------------------------ sidebar highlight
 const links = [...document.querySelectorAll('.side a')];

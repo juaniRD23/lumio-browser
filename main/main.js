@@ -28,7 +28,7 @@ const { PasswordManager } = require('./password-manager');
 const screenAura = require('./ai/screen-aura');
 const { Updater, LATEST, compareVersions } = require('./updater');
 const { generatePassword } = require('./passwords');
-const importer = require('./importer/chromium');
+const importer = require('./importer');
 
 const IS_DEV = !app.isPackaged;
 
@@ -482,7 +482,7 @@ function internalHandle(channel, hosts, fn) {
   });
 }
 
-const ALL_PAGES = ['newtab', 'error', 'history', 'settings', 'downloads', 'bookmarks', 'extensions', 'passwords'];
+const ALL_PAGES = ['newtab', 'error', 'history', 'settings', 'downloads', 'bookmarks', 'extensions', 'passwords', 'welcome'];
 
 function registerIpc() {
   handle('shell:init', (w) => ({
@@ -744,7 +744,7 @@ function registerIpc() {
     if (typeof origin !== 'string' || typeof permission !== 'string') return;
     normal.permissions.set(origin, permission, value === 'allow' ? true : value === 'block' ? false : undefined);
   });
-  internalHandle('page:make-default', ['settings'], () => makeDefaultBrowser());
+  internalHandle('page:make-default', ['settings', 'welcome'], () => makeDefaultBrowser());
   internalHandle('page:mac-permissions', ['settings'], ({ w }) => w.ai.macPermissions());
   internalHandle('page:mac-permissions-open', ['settings'], ({ w }, which) => w.ai.openMacPermissionSettings(which));
   internalHandle('page:passwords', ['passwords'], () => passwords.pageState());
@@ -758,9 +758,9 @@ function registerIpc() {
   internalHandle('page:passwords-export', ['passwords'], ({ w }) => passwords.exportFile(w));
   internalHandle('page:password-never-remove', ['passwords'], (_ctx, site) => passwords.store.removeNever(String(site)));
   internalHandle('page:password-generate', ['passwords'], () => generatePassword());
-  internalHandle('page:account', ['settings', 'newtab'], () => account.state());
+  internalHandle('page:account', ['settings', 'newtab', 'welcome'], () => account.state());
   internalHandle('page:account-refresh', ['settings'], () => account.refresh());
-  internalHandle('page:account-sign-in', ['settings', 'newtab'], ({ w }) => signIn(w));
+  internalHandle('page:account-sign-in', ['settings', 'newtab', 'welcome'], ({ w }) => signIn(w));
   internalHandle('page:account-cancel', ['settings'], () => { account.cancelSignIn(); return account.state(); });
   internalHandle('page:account-sign-out', ['settings'], async () => { await signOutLumio(); return account.state(); });
   internalHandle('page:account-open', ['settings', 'newtab'], ({ w }, which) => openAccountPage(String(which), w));
@@ -771,10 +771,56 @@ function registerIpc() {
     if (!canceled && filePaths[0]) store.setSetting('downloadDir', filePaths[0]);
     return store.settings.downloadDir || app.getPath('downloads');
   });
-  internalHandle('page:import', ['settings'], (_ctx, id, opts) => {
-    const res = importer.importFrom(String(id), store, opts || {});
+  internalHandle('page:import', ['settings', 'welcome'], async (_ctx, id, opts) => {
+    const o = opts || {};
+    // Tests use a known key instead of the macOS Keychain.
+    const secret = process.env.LUMIO_TEST ? process.env.LUMIO_IMPORT_SECRET : undefined;
+    const res = await importer.importFrom(String(id), { store, passwordStore: passwords.store }, { bookmarks: o.bookmarks !== false, history: o.history !== false, passwords: !!o.passwords, ...(secret ? { secret } : {}) });
     if (res.ok) bookmarksChanged();
     return res;
+  });
+  internalHandle('page:import-sources', ['settings', 'welcome'], () => importer.detect());
+  // An exported file: Safari/Chrome bookmarks (HTML) or passwords (CSV).
+  internalHandle('page:import-file', ['settings', 'welcome'], async ({ w }, kind) => {
+    const bookmarks = kind === 'bookmarks';
+    const { canceled, filePaths } = await dialog.showOpenDialog(w.win, {
+      properties: ['openFile'],
+      filters: bookmarks ? [{ name: 'Bookmarks (HTML)', extensions: ['html', 'htm'] }] : [{ name: 'Passwords (CSV)', extensions: ['csv'] }],
+      message: bookmarks ? 'Choose the bookmarks file you exported (in Safari: File › Export › Bookmarks)' : 'Choose the passwords file you exported (in Safari: File › Export › Passwords)',
+    });
+    if (canceled || !filePaths[0]) return { ok: false, canceled: true };
+    try {
+      const text = fs.readFileSync(filePaths[0], 'utf8');
+      if (bookmarks) {
+        const added = store.importBookmarks(importer.parseBookmarksHtml(text));
+        bookmarksChanged();
+        return { ok: true, bookmarks: added };
+      }
+      return { ok: true, passwords: passwords.store.importCsv(text) };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+  // Safari's files need Full Disk Access: open that page of System Settings.
+  internalHandle('page:open-disk-access', ['settings', 'welcome'], () => shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles'));
+
+  // ---- first-run welcome ----
+  internalHandle('page:welcome-state', ['welcome'], () => ({ platform: process.platform, sources: importer.detect(), account: account.state() }));
+  // Lumio's own Keychain item (saved passwords and sign-ins): touching it now
+  // makes macOS ask while the welcome screen explains what to click.
+  internalHandle('page:keychain-check', ['welcome'], () => {
+    if (!safeStorage.isEncryptionAvailable()) return { ok: false };
+    try {
+      const probe = safeStorage.encryptString('lumio-keychain-check');
+      return { ok: safeStorage.decryptString(probe) === 'lumio-keychain-check' };
+    } catch { return { ok: false }; }
+  });
+  internalHandle('page:welcome-done', ['welcome'], ({ w, tab }) => {
+    store.setSetting('onboarded', true);
+    store.setSetting('panelOpen', true);
+    w.tabs.navigate('lumio://newtab/', tab.id);
+    w.emit('panel-open');
+    return true;
   });
 }
 
@@ -953,7 +999,13 @@ app.whenReady().then(async () => {
   Menu.setApplicationMenu(buildMenu(cmd, menuState()));
 
   const saved = store.settings.startup === 'newtab' ? [] : store.sessionWindows();
-  if (saved.length) saved.forEach((s) => createWindow({ tabs: s.tabs, active: s.active, bounds: s.bounds }));
+  // First launch: the welcome screens (people updating from an older version
+  // already have history, bookmarks or tabs, and skip them).
+  if (store.settings.onboarded !== true && (saved.length || store.history().length || store.bookmarks().length)) store.setSetting('onboarded', true);
+  if (store.settings.onboarded !== true && (!process.env.LUMIO_TEST || process.env.LUMIO_TEST_WELCOME)) {
+    store.setSetting('panelOpen', false);
+    createWindow({ tabs: [{ url: 'lumio://welcome/', title: 'Welcome to Lumio Browser' }], active: 0 });
+  } else if (saved.length) saved.forEach((s) => createWindow({ tabs: s.tabs, active: s.active, bounds: s.bounds }));
   else createWindow();
   // Windows passes links to open on the command line.
   if (process.platform !== 'darwin' && !process.env.LUMIO_TEST) pendingUrls.push(...process.argv.slice(1).filter((a) => /^https?:\/\//i.test(a)));

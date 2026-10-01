@@ -63,6 +63,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   $('#ai-toggle').addEventListener('click', () => setOpen(!panelOpen));
   $('#panel-close').addEventListener('click', () => setOpen(false));
   api.on('panel-toggle', () => setOpen(!panelOpen));
+  api.on('panel-open', () => { if (!panelOpen) setOpen(true); });
   api.on('ai-focus', () => { if (!panelOpen) setOpen(true); prompt.focus(); });
 
   // resize

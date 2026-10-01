@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Welcome to Lumio Browser</title>
+  <link rel="stylesheet" href="pages.css" />
+  <link rel="stylesheet" href="welcome.css" />
+</head>
+<body>
+  <main class="wl">
+    <div class="dots" id="dots" aria-hidden="true"></div>
+
+    <!-- 1. Welcome -->
+    <section class="step" data-step="hello">
+      <div class="mark" id="mark"></div>
+      <h1>Welcome to <em>Lumio</em> Browser</h1>
+      <p class="lead">A fast browser with an AI that reads pages and does the work for you.</p>
+      <div class="chips">
+        <span>Lumio AI in every tab</span><span>Passwords &amp; passkeys</span><span>Chrome extensions</span>
+      </div>
+      <div class="actions"><button class="btn primary big" data-next>Get started</button></div>
+    </section>
+
+    <!-- 2. Keychain (Mac) -->
+    <section class="step" data-step="keychain" hidden>
+      <h1>Keep your passwords <em>safe</em></h1>
+      <p class="lead">Lumio locks your saved passwords, passkeys and sign-ins with a key in your Mac’s Keychain. When you continue, macOS asks for permission once.</p>
+      <div class="mock" aria-hidden="true">
+        <div class="mock-lock"><svg viewBox="0 0 40 46" width="54" height="62"><rect x="4" y="18" width="32" height="26" rx="4" fill="#d6a23b"/><rect x="4" y="18" width="32" height="13" rx="4" fill="#e8b84e"/><path d="M11 18v-6a9 9 0 0 1 18 0v6" fill="none" stroke="#bfc3c9" stroke-width="5"/></svg></div>
+        <div class="mock-body">
+          <b>Lumio Browser wants to use your confidential information stored in “Lumio Browser Safe Storage” in your keychain.</b>
+          <span>To allow this, enter the “login” keychain password.</span>
+          <div class="mock-pw"><label>Password:</label><div>●●●●●●</div></div>
+          <div class="mock-btns"><span class="always">Always Allow</span><span class="spacer"></span><span>Deny</span><span class="allow">Allow</span></div>
+        </div>
+        <div class="mock-tip">Click this one</div>
+      </div>
+      <ol class="how">
+        <li>Type the password you use to unlock your Mac.</li>
+        <li>Click <b>Always Allow</b>, not Allow, so macOS doesn’t keep asking.</li>
+      </ol>
+      <p class="note" id="kc-msg"></p>
+      <div class="actions">
+        <button class="btn" data-back>Back</button>
+        <button class="btn ghost" id="kc-skip" hidden>Skip for now</button>
+        <button class="btn primary big" id="kc-go">Continue</button>
+      </div>
+      <p class="fine">macOS may ask again after Lumio updates itself. Just click Always Allow again.</p>
+    </section>
+
+    <!-- 3. Import -->
+    <section class="step" data-step="import" hidden>
+      <h1>Bring your <em>stuff</em> over</h1>
+      <p class="lead">Copy your bookmarks, history and passwords from the browser you use now.</p>
+      <div class="sources" id="sources"></div>
+      <div class="opts" id="opts"></div>
+      <div class="banner" id="access" hidden>
+        <b>Lumio needs permission to read Safari.</b>
+        <span>macOS protects Safari’s bookmarks and history. In System Settings, turn on <b>Lumio Browser</b> under Full Disk Access, then try again. Or use files exported from Safari below.</span>
+        <div class="row-btns"><button class="btn small" id="open-access">Open System Settings</button><button class="btn small" id="retry">Try again</button></div>
+      </div>
+      <p class="note" id="imp-note"></p>
+      <div class="result" id="result" hidden></div>
+      <div class="files">
+        <span>Or import a file:</span>
+        <button class="btn small" data-file="bookmarks">Bookmarks (HTML)</button>
+        <button class="btn small" data-file="passwords">Passwords (CSV)</button>
+      </div>
+      <p class="fine" id="safari-tip">From Safari: choose <b>File › Export › Bookmarks</b> and <b>File › Export › Passwords</b>, then pick the files here.</p>
+      <div class="actions">
+        <button class="btn" data-back>Back</button>
+        <button class="btn ghost" data-next id="imp-skip">Skip</button>
+        <button class="btn primary big" id="imp-go">Import</button>
+      </div>
+    </section>
+
+    <!-- 4. Done -->
+    <section class="step" data-step="done" hidden>
+      <h1>You’re all <em>set</em></h1>
+      <p class="lead">Two more things you might like:</p>
+      <div class="cards">
+        <div class="card-row">
+          <div><b>Make Lumio your default browser</b><span>Links from other apps open here.</span></div>
+          <button class="btn small" id="default">Make default</button>
+        </div>
+        <div class="card-row">
+          <div><b>Sign in to Lumio AI</b><span>Free to start. Chat, pictures, documents, and an AI that uses websites for you.</span></div>
+          <button class="btn small accent" id="sign-in">Sign in</button>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn" data-back>Back</button>
+        <button class="btn primary big" id="finish">Start browsing</button>
+      </div>
+    </section>
+  </main>
+  <script type="module" src="welcome.js"></script>
+</body>
+</html>

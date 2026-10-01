@@ -172,7 +172,7 @@ function renderUpdateCard({ update: u }) {
     <div class="up-title">Lumio Browser ${esc(u.latest)} is here</div>
     <div class="up-sub">You have ${esc(u.current)}</div>
     ${u.notes ? `<div class="up-notes">${notesHtml(u.notes)}</div>` : ''}
-    <div class="up-foot">Lumio restarts and reopens your tabs. It takes a few seconds.</div>
+    <div class="up-foot">Lumio restarts and reopens your tabs. It takes a few seconds.${navigator.platform.startsWith('Mac') ? ' If macOS then asks for your Mac password, type it and click <b>Always Allow</b>.' : ''}</div>
     <div class="pws-actions">
       ${u.notesUrl ? '<button class="acc-btn ghost" data-up="notes">Details</button>' : ''}
       <span style="flex:1"></span>

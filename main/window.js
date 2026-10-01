@@ -142,6 +142,7 @@ class BrowserWin {
   close() { if (!this.win.isDestroyed()) this.win.close(); }
 
   focusOmnibox() {
+    if (this.win.isDestroyed()) return; // closed before a delayed focus ran
     this.win.webContents.focus();
     this.emit('focus-omnibox');
   }

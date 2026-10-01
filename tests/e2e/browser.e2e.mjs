@@ -370,14 +370,14 @@ test('imports bookmarks and history from Chrome', async () => {
   await until(() => L.page(`document.getElementById('import-from').value === 'chrome'`));
   await L.page(`document.getElementById('import-go').click(); true`);
   const msg = await until(() => L.page(`/Imported/.test(document.getElementById('import-desc').textContent) && document.getElementById('import-desc').textContent`));
-  assert.match(msg, /Imported 2 bookmarks and 2 history entries from Google Chrome/);
+  assert.match(msg, /Imported 2 bookmarks, 2 history entries from Google Chrome/);
   const marks = await L.main(() => global.lumio.store.bookmarks().map((b) => b.title));
   assert.ok(marks.includes('Imported One') && marks.includes('Imported Two'));
   const hist = await L.main(() => global.lumio.store.history().filter((h) => h.url.includes('chrome-history.example')).length);
   assert.equal(hist, 2);
   // Importing again doesn't duplicate anything.
   await L.page(`document.getElementById('import-go').click(); true`);
-  assert.ok(await until(() => L.page(`/Imported 0 bookmarks and 0 history/.test(document.getElementById('import-desc').textContent)`)));
+  assert.ok(await until(() => L.page(`/Nothing new to import/.test(document.getElementById('import-desc').textContent)`)));
 });
 
 test('PDFs open in the built-in viewer instead of downloading', async () => {

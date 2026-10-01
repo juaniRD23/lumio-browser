@@ -168,7 +168,7 @@ class PasswordStore {
   }
 
   importCsv(text) {
-    const rows = parseCsv(String(text).replace(/^﻿/, ''));
+    const rows = parseCsv(String(text).replace(/^\uFEFF/, ''));
     if (!rows.length) return { added: 0, updated: 0, skipped: 0 };
     const head = rows[0].map((h) => h.trim().toLowerCase());
     const col = (names) => head.findIndex((h) => names.includes(h));
@@ -177,17 +177,22 @@ class PasswordStore {
     const iPass = col(['password', 'login_password']);
     const iNote = col(['note', 'notes']);
     if (iUrl < 0 || iPass < 0) throw new Error('That file doesn’t look like a password export (it needs url and password columns).');
+    return this.importEntries(rows.slice(1).map((r) => ({
+      url: (r[iUrl] || '').trim(), username: iUser >= 0 ? r[iUser] || '' : '', password: r[iPass] || '', note: iNote >= 0 && r[iNote] ? r[iNote] : undefined,
+    })));
+  }
+
+  // Passwords from another browser or a file: new ones are added, changed
+  // ones updated, and ones already saved (or not for a website) skipped.
+  importEntries(list) {
     let added = 0;
     let updated = 0;
     let skipped = 0;
-    for (const r of rows.slice(1)) {
-      const url = (r[iUrl] || '').trim();
-      const password = r[iPass] || '';
+    for (const { url, username = '', password, note } of list) {
       if (!siteKey(url) || !password) { skipped++; continue; }
-      const username = iUser >= 0 ? r[iUser] || '' : '';
       const c = this.classify(url, username, password);
       if (c.action === 'none') { skipped++; continue; }
-      this.save({ origin: url, username, password, note: iNote >= 0 && r[iNote] ? r[iNote] : undefined });
+      this.save({ origin: url, username, password, note });
       if (c.action === 'update') updated++; else added++;
     }
     this.file.save(true);
