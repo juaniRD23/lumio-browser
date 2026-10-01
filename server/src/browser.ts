@@ -3,7 +3,7 @@
 // picks tools by name. Retries of the same step replay its saved result.
 import {
   BROWSER_AGENT_VERSION, BROWSER_REASONING, browserAgentTools, browserInputEstimate,
-  browserSystemPrompt, parseToolArgs, ToolArgumentsError, validateBrowserStep, validateBrowserToolCall, type AgentMessage, type NativeToolCall,
+  browserContextNote, browserSystemPrompt, parseToolArgs, withContextNote, ToolArgumentsError, validateBrowserStep, validateBrowserToolCall, type AgentMessage, type NativeToolCall,
 } from './agent.ts';
 import type { User } from './auth.ts';
 import { appForTool, connectedApps, runConnectionTool, toolsFor } from './connections.ts';
@@ -68,7 +68,8 @@ export async function step(request: Request, env: Env, ctx: ExecutionContext, us
     max_tokens: maxOutput,
     reasoning: { effort: s.reasoning, exclude: true },
   });
-  let messages: unknown[] = [{ role: 'system', content: browserSystemPrompt(s, maxOutput) }, ...s.messages];
+  // The unchanging start first (cached by the provider), what changes last.
+  let messages: unknown[] = [{ role: 'system', content: browserSystemPrompt(s) }, ...withContextNote(s.messages, browserContextNote(s, maxOutput))];
   let gen = call(messages);
 
   // Fail fast (with a plain error response) if the provider refuses outright,

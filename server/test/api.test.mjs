@@ -466,23 +466,50 @@ const page = (k, size = 24_000) => `Page ${k}: iPhone 18 Pro — Apple\n` + 'Sto
 test('browser: long tasks keep going; older page readings are shortened instead of "start a new chat"', async () => {
   const { token } = await signIn();
   const sent = (id) => calls.or.at(-1).body.messages.find((m) => m.tool_call_id === id)?.content;
-  // Six full readings of a big page and two screenshots: this used to be refused (413).
+  // Seven full readings of a big page and two screenshots: this used to be refused (413).
   const messages = [{ role: 'user', content: 'Buy the iPhone 18 Pro Max with 2TB' }];
-  for (let k = 0; k < 6; k++) messages.push(...readTurn(k, page(k)));
+  for (let k = 0; k < 7; k++) messages.push(...readTurn(k, page(k)));
   messages.push(...shotTurn(0), ...shotTurn(1));
   const res = await call('/v1/agent', { token, method: 'POST', body: step({ messages }) });
   assert.equal(res.status, 200);
   await events(res);
   await settled();
-  for (const k of [0, 1, 2]) {
+  // Shortened 4 at a time (the newest 3 to 6 stay whole), so earlier messages stay the same for the cache.
+  for (const k of [0, 1, 2, 3]) {
     assert.ok(sent(`read_${k}`).length < 2000, `reading ${k} shortened`);
     assert.match(sent(`read_${k}`), /^Page \d: iPhone 18 Pro[\s\S]*Older page reading, shortened[\s\S]*call read_page/);
   }
-  for (const k of [3, 4, 5]) assert.equal(sent(`read_${k}`), page(k), `reading ${k} whole`);
+  for (const k of [4, 5, 6]) assert.equal(sent(`read_${k}`), page(k), `reading ${k} whole`);
+  // One more reading: nothing earlier changes.
+  const before = calls.or.at(-1).body.messages;
+  const more = [...messages, ...readTurn(7, page(7))];
+  await events(await call('/v1/agent', { token, method: 'POST', body: step({ stepId: 's2', messages: more }) }));
+  await settled();
+  const after = calls.or.at(-1).body.messages;
+  assert.deepEqual(after.slice(0, before.length - 1), before.slice(0, -1), 'same start, so the provider cache keeps working');
+  assert.match(JSON.stringify(after.at(-1).content), /Page 7[\s\S]*\[Lumio Browser, not the user\] Now:/, 'the note is on the newest result');
   assert.equal(calls.or.at(-1).body.messages.filter((m) => Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url')).length, 2, 'both screenshots kept');
   // It's billed and held at a realistic size, not the old bytes-as-tokens count.
   const held = sql.prepare("SELECT held_microusd FROM steps WHERE kind = 'browser'").get().held_microusd;
   assert.ok(held < 20000, `hold ${held}`);
+});
+
+test('browser: every step starts the same (cached by the provider); the time and the tab go last', async () => {
+  const { token } = await signIn();
+  const at = (title, url) => ({ ...context, activeTab: { id: 3, title, url } });
+  await events(await call('/v1/agent', { token, method: 'POST', body: step({ context: at('iPhone 18 Pro', 'https://www.apple.com/shop/buy-iphone/iphone-18-pro') }) }));
+  await settled();
+  const first = calls.or.at(-1).body.messages;
+  // Apple changes the address on every choice; the start of the request must not.
+  await events(await call('/v1/agent', { token, method: 'POST', body: step({ stepId: 's2', context: at('iPhone 18 Pro Max', 'https://www.apple.com/shop/buy-iphone/iphone-18-pro/6.9-inch-display-2tb') }) }));
+  await settled();
+  const second = calls.or.at(-1).body.messages;
+  assert.equal(first[0].role, 'system');
+  assert.equal(second[0].content, first[0].content, 'same instructions on every step');
+  assert.doesNotMatch(first[0].content, /apple\.com|Now:|output tokens/);
+  // The note rides on the newest message instead of being a turn of its own.
+  assert.equal(second.length, 2);
+  assert.match(second.at(-1).content, /^Summarize this page\n\n\[Lumio Browser, not the user\] Now: .+\(America\/New_York\)\. The user is looking at tab 3: "iPhone 18 Pro Max" — https:\/\/www\.apple\.com\/shop\/buy-iphone\/iphone-18-pro\/6\.9-inch-display-2tb\. 1 tab\(s\) open\.$/);
 });
 
 test('browser: over the model budget, older results shrink first and the newest stay whole', async () => {
@@ -501,7 +528,7 @@ test('browser: over the model budget, older results shrink first and the newest 
   const body = calls.or.at(-1).body.messages;
   const out = (k) => body.find((m) => m.tool_call_id === `tabs_${k}`).content;
   assert.match(out(0), /Older result, shortened to save space/);
-  assert.equal(out(11), big(11), 'the latest result is whole');
+  assert.ok(out(11).startsWith(big(11) + '\n\n[Lumio Browser, not the user] Now:'), 'the latest result is whole (plus the time and tab note)');
   assert.equal(body[1].content, 'Compare my last 12 orders', 'the request is whole');
   const bytes = Buffer.byteLength(JSON.stringify(body));
   assert.ok(bytes / 3 < 160_000, `fits the budget (${bytes} bytes)`);

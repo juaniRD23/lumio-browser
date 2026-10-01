@@ -17,12 +17,14 @@ const PER_MINUTE = 20;
 const ROUNDS = 4; // model calls per message (each tool use is another round)
 const HISTORY_IMAGES = 16; // pictures from earlier messages the model still sees
 
+// The date but not the time, so the instructions stay the same all day and
+// the model provider can reuse its cached copy of the conversation's start.
 function systemPrompt(timeZone: string, connections = '') {
   let date;
-  try { date = new Date().toLocaleString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone }); } catch { date = new Date().toUTCString(); }
+  try { date = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone }); } catch { date = new Date().toUTCString().slice(0, 16); }
   return `You are Lumio, a friendly and capable AI assistant on lumio-usa.online.
 
-Now: ${date} (${timeZone}).
+Today is ${date} (${timeZone}).
 
 - Answer clearly and concisely. Use Markdown lightly (short lists, **bold** for key facts, code blocks for code).
 - Reply in the user's language.
