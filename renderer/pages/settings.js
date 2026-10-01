@@ -5,12 +5,6 @@ const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 const AVATAR_COLORS = ['#86b7ff', '#b58cff', '#7ee2a8', '#ffb86b', '#ff8fc7', '#ff7a7a', '#ffd479', '#e4e4e7'];
 const THEMES = { blue: '#86b7ff', purple: '#b58cff', green: '#7ee2a8', orange: '#ffb86b', pink: '#ff8fc7', mono: '#e4e4e7' };
-const PLANS = [
-  { id: 'free', name: 'Free', price: '$0' },
-  { id: 'plus', name: 'Plus', price: '$20/mo' },
-  { id: 'pro', name: 'Pro', price: '$100/mo' },
-  { id: 'max', name: 'Max', price: '$200/mo' },
-];
 
 let s = await page.invoke('page:settings');
 $('#version').textContent = 'v' + s.version;
@@ -83,7 +77,6 @@ function renderAccount() {
   $('#account-error').hidden = !a.error;
   $('#account-error .desc').textContent = a.error || '';
   renderPlan();
-  renderAiStatus();
   clearTimeout(pollTimer);
   if (a.connecting) pollTimer = setTimeout(async () => { s.account = await page.invoke('page:account'); renderAccount(); }, 1500);
 }
@@ -131,34 +124,29 @@ function when(t) {
   const sameDay = d.toDateString() === new Date().toDateString();
   return sameDay ? d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
+// The plan, and how much of this week's limit is left.
 function renderPlan() {
   const a = s.account;
-  const current = a.plan === 'go' ? 'plus' : a.plan;
-  const options = `<div class="plans">${PLANS.map((p) => `<div class="plan-opt ${p.id === current ? 'current' : ''}"><b>${p.name}</b><span>${p.price}</span></div>`).join('')}</div>`;
   if (!a.signedIn) {
-    $('#plan-card').innerHTML = `<div class="plan-top"><div class="grow"><div class="plan-name">Lumio plans</div><div class="desc">Sign in to see your plan and usage. Plus, Pro and Max can run the AI in this browser.</div></div><button class="btn" id="plan-sign-in">Sign in</button></div>${options}`;
+    $('#plan-card').innerHTML = `<div class="plan-top"><div class="grow"><div class="plan-name">Lumio</div><div class="desc">Sign in to see your plan and how much of your weekly limit is left.</div></div><button class="btn" id="plan-sign-in">Sign in</button></div>`;
     $('#plan-sign-in').onclick = () => $('#sign-in').click();
     return;
   }
-  const windows = a.usage?.windows || [];
-  const meters = windows.map((w) => {
-    const left = w.limit ? Math.max(0, Math.round((w.remaining / w.limit) * 100)) : 0;
-    return `<div class="row"><div class="grow"><div class="title">${esc(w.label)}</div><div class="meter"><i style="width:${left}%"></i></div><div class="desc">${left}% left${w.used > 0 && w.fullAt ? ` · fully refilled by ${esc(when(w.fullAt))}` : ''} · no 5-hour limits</div></div></div>`;
-  }).join('');
+  const w = (a.usage?.windows || []).find((x) => x.id === 'weekly') || a.usage;
+  const left = w?.limit ? Math.max(0, Math.min(100, Math.round((w.remaining / w.limit) * 100))) : null;
+  const usage = left == null ? '' : `
+    <div class="usage">
+      <div class="usage-top"><span class="title">Weekly limit</span><span class="usage-left"><b>${left}%</b> left</span></div>
+      <div class="meter"><i style="width:${left}%"></i></div>
+      <div class="desc">${w.used > 0 && w.fullAt ? `Fully refilled by ${esc(when(w.fullAt))}` : 'All of this week’s usage is available'} · No 5-hour limits</div>
+    </div>`;
   $('#plan-card').innerHTML = `<div class="plan-top"><div class="grow"><div class="desc">Your plan</div><div class="plan-name">Lumio ${esc(a.planName || 'Free')}</div></div>
       ${a.plan !== 'max' ? '<button class="btn primary" data-open="upgrade">Upgrade</button>' : ''}
-      <button class="btn" data-open="billing">Manage billing</button></div>
-    ${meters}${options}`;
+      <button class="btn" data-open="billing">Manage billing</button></div>${usage}`;
   $('#plan-card').querySelectorAll('[data-open]').forEach((b) => { b.onclick = () => page.invoke('page:account-open', b.dataset.open); });
 }
 
-// ------------------------------------------------------------ Lumio AI: plan + reasoning + approvals
-function renderAiStatus() {
-  const a = s.account;
-  const model = s.ai?.modelName ? `${s.ai.modelName}, a fast, low-cost model that can read pages and see screenshots,` : 'a fast, low-cost model that can read pages and see screenshots';
-  if (!a.signedIn) $('#ai-status').textContent = `Lumio AI uses ${model} and runs on your Lumio account. Sign in to start: every plan includes some use each week, Free too.`;
-  else $('#ai-status').textContent = `Lumio AI uses ${model} on your Lumio ${a.planName || 'Free'} plan.${a.plan === 'max' ? '' : ' Upgrade for more use each week.'}`;
-}
+// ------------------------------------------------------------ Lumio AI: thinking effort + approvals
 document.querySelectorAll('input[name=reasoning]').forEach((r) => {
   r.checked = r.value === s.ai.reasoning;
   r.addEventListener('change', () => page.invoke('page:set-setting', 'reasoning', r.value));

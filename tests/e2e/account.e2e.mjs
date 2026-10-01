@@ -191,7 +191,10 @@ test('account button signs in on the Lumio website and shows the plan', async ()
 test('settings show the plan, and Upgrade opens Lumio billing', async () => {
   await go('lumio://settings/#plan', 'Settings');
   await until(() => L.page(`document.querySelector('.plan-name')?.textContent === 'Lumio Plus'`));
-  assert.match(await L.page(`document.getElementById('plan-card').innerText`), /Weekly usage[\s\S]*62% left · fully refilled by/);
+  const plan = await L.page(`document.getElementById('plan-card').innerText`);
+  assert.match(plan, /Lumio Plus[\s\S]*Weekly limit[\s\S]*62%\s*left[\s\S]*Fully refilled by[\s\S]*No 5-hour limits/);
+  assert.doesNotMatch(plan, /\$100\/mo|\$200\/mo/, 'no plan list');
+  assert.equal(await L.page(`!!document.getElementById('ai-status')`), false, 'no "Runs on your Lumio plan" note');
   await shot('21-settings-plan');
   const before = await L.main(() => global.lumio.tabs.tabs.length);
   await L.page(`document.querySelector('[data-open=upgrade]').click(); true`);

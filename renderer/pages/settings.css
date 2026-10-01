@@ -48,3 +48,11 @@ select.field { appearance: none; padding-right: 30px; background: var(--field) u
 .plan-opt b { display: block; font-size: 14px; font-weight: 600; }
 .plan-opt span { color: var(--dim); font-size: 12.5px; }
 .plan-top .grow { flex: 1; min-width: 0; }
+
+/* weekly limit under the plan */
+.usage { padding: 4px 20px 18px; }
+.usage-top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+.usage-left { color: var(--dim); font-size: 13px; }
+.usage-left b { color: var(--text); font: 400 26px/1 var(--serif); margin-right: 2px; }
+.usage .meter { margin: 0 0 8px; }
+.content section h2 + h3 { margin-top: 0; }
