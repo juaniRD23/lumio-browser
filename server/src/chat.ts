@@ -238,7 +238,7 @@ async function runTool(env: Env, user: User, chatId: string, call: NativeToolCal
     } catch (err) {
       if (err instanceof LimitError) {
         await out.send({ type: 'notice', code: 'usage_limit', message: err.message });
-        return 'Couldn’t make the picture: the user’s Lumio allowance is used up for now. Tell them briefly; they can upgrade or wait for it to refill.';
+        return `Couldn’t make the picture: ${err.message} Tell the user briefly.`;
       }
       if (err instanceof AgentError) return `Couldn’t make the picture: ${err.message}`;
       throw err;

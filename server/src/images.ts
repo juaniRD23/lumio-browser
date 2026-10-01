@@ -4,7 +4,7 @@
 // (Gemini 2.5 Flash Image $0.039, GPT-5 Image Mini $0.042 and ~40 s).
 import type { Plan } from './agent.ts';
 import { ProviderError } from './openrouter.ts';
-import { hold, settle } from './usage.ts';
+import { hold, LimitError, limits, settle } from './usage.ts';
 import { AgentError, type Env, fail, json, randomHex, sha256 } from './util.ts';
 
 export const IMAGE_MODEL = {
@@ -27,6 +27,7 @@ function fromDataUrl(url: string) {
 // Makes one image and bills it. Throws LimitError when the allowance can't cover it.
 export async function makeImage(env: Env, user: { id: string; plan: Plan }, prompt: string, aspect: Aspect = 'square'): Promise<Made> {
   if (!env.OPENROUTER_API_KEY) throw new AgentError('Lumio AI isn’t connected to its model right now.', 503, 'model_not_connected');
+  if (limits(user.plan).weekly < Math.ceil(IMAGE_MODEL.hold * 1_000_000)) throw new LimitError('Making pictures needs Lumio Plus or higher. Upgrade to make pictures.');
   const key = await sha256(`image|${user.id}|${randomHex(8)}`);
   await hold(env, { key, owner: user.id, plan: user.plan, requestHash: key, kind: 'image', held: Math.ceil(IMAGE_MODEL.hold * 1_000_000) });
   let cost = 0;

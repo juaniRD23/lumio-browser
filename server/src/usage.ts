@@ -22,12 +22,16 @@ export function weeklyBudget(monthlyPrice: number) {
   return Math.floor((forModels / p.weeksPerMonth) * 100) / 100;
 }
 
+// Free and Plus use the formula above (Free is small enough to pay for itself
+// at a few percent conversion). Pro and Max are set by hand above it, on
+// purpose: at 100% use Pro keeps ~4% and Max runs slightly negative, but
+// almost nobody uses all of it every week.
 export const PLANS: Record<Plan, { name: string; weekly: number; price: number }> = {
-  free: { name: 'Free', weekly: 0.05, price: 0 }, // paid for out of the profit
+  free: { name: 'Free', weekly: 0.02, price: 0 },
   go: { name: 'Go', weekly: weeklyBudget(9), price: 9 }, // legacy; not sold
   plus: { name: 'Plus', weekly: weeklyBudget(20), price: 20 },
-  pro: { name: 'Pro', weekly: weeklyBudget(100), price: 100 },
-  max: { name: 'Max', weekly: weeklyBudget(200), price: 200 },
+  pro: { name: 'Pro', weekly: 20, price: 100 },
+  max: { name: 'Max', weekly: 43, price: 200 },
 };
 export const planName = (p: Plan) => PLANS[p]?.name || 'Free';
 

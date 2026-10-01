@@ -4,10 +4,10 @@ import { appLogo } from '/applook.js';
 const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const DESCS = {
-  free: 'Try Lumio AI in Chat and the browser. A few tasks each week.',
-  plus: '70× Free, plus Claude Sonnet, GPT-6.1 Sol, Gemini and Grok in Chat.',
-  pro: '350× Free, and every model, including Claude Opus and GPT-6 Astra.',
-  max: '700× Free, and every model.',
+  free: 'Try Lumio AI in Chat and the browser, a little every week.',
+  plus: 'Thousands of messages and browser tasks a week, about 100 pictures, and Claude Sonnet, GPT-6.1 Sol, Gemini and Grok in Chat.',
+  pro: 'About 6× Plus, and every model, including Claude Opus and GPT-6 Astra.',
+  max: 'About 12× Plus, and every model.',
 };
 const ORDER = ['free', 'plus', 'pro', 'max'];
 

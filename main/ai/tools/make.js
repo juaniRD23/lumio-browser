@@ -65,7 +65,7 @@ const tools = [
       if (!prompt) throw new Error('Describe the picture.');
       let data;
       try { data = await postJson(ctx, '/v1/images', { prompt, aspect: args.aspect }); } catch (err) {
-        if (err.code === 'usage_limit') return { text: 'Couldn’t make the picture: the user’s Lumio allowance is used up for now. Tell them briefly; they can upgrade or wait for it to refill.' };
+        if (err.code === 'usage_limit') return { text: `Couldn’t make the picture: ${err.message} Tell the user briefly.` };
         throw err;
       }
       const m = /^data:image\/(png|jpeg|webp);base64,(.+)$/.exec(String(data.image || ''));
