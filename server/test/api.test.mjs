@@ -437,7 +437,12 @@ test('plan budgets: Plus leaves 15% profit after fees; Pro and Max are set highe
   assert.equal(weeklyBudget(20), 3.48);
   assert.equal(weeklyBudget(100), 17.67);
   assert.equal(weeklyBudget(200), 35.42);
-  assert.deepEqual([PLANS.free.weekly, PLANS.plus.weekly, PLANS.pro.weekly, PLANS.max.weekly], [0.02, 3.48, 20, 43]);
+  assert.deepEqual([PLANS.free.weekly, PLANS.plus.weekly, PLANS.pro.weekly, PLANS.max.weekly], [0.02, 3.48, 20, 40]);
+  // No paid plan loses money even at 100% use.
+  for (const id of ['plus', 'pro', 'max']) {
+    const p = PLANS[id];
+    assert.ok(p.price - p.weekly * (365.25 / 12 / 7) * 1.055 - (p.price * 0.036 + 0.3) > 0, `${id} is profitable at full use`);
+  }
   for (const id of ['plus']) {
     const p = PLANS[id];
     const monthlyAi = p.weekly * (365.25 / 12 / 7) * 1.055;
@@ -446,7 +451,7 @@ test('plan budgets: Plus leaves 15% profit after fees; Pro and Max are set highe
     assert.ok(profit >= p.price * 0.15 && profit < p.price * 0.151, `${id}: ${profit}`);
   }
   const plans = (await (await call('/api/billing/plans')).json()).plans;
-  assert.deepEqual(plans.map((p) => p.weeklyUsd), [0.02, 3.48, 20, 43]);
+  assert.deepEqual(plans.map((p) => p.weeklyUsd), [0.02, 3.48, 20, 40]);
 });
 
 test('Chat: attach pictures and documents; the model sees them; only the owner can read them', async () => {

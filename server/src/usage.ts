@@ -24,14 +24,14 @@ export function weeklyBudget(monthlyPrice: number) {
 
 // Free and Plus use the formula above (Free is small enough to pay for itself
 // at a few percent conversion). Pro and Max are set by hand above it, on
-// purpose: at 100% use Pro keeps ~4% and Max runs slightly negative, but
-// almost nobody uses all of it every week.
+// purpose, but never at a loss: at 100% use Pro keeps ~4% ($4.36) and Max
+// ~4.5% ($9.02); at typical use both keep far more.
 export const PLANS: Record<Plan, { name: string; weekly: number; price: number }> = {
   free: { name: 'Free', weekly: 0.02, price: 0 },
   go: { name: 'Go', weekly: weeklyBudget(9), price: 9 }, // legacy; not sold
   plus: { name: 'Plus', weekly: weeklyBudget(20), price: 20 },
   pro: { name: 'Pro', weekly: 20, price: 100 },
-  max: { name: 'Max', weekly: 43, price: 200 },
+  max: { name: 'Max', weekly: 40, price: 200 },
 };
 export const planName = (p: Plan) => PLANS[p]?.name || 'Free';
 
