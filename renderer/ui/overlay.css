@@ -125,3 +125,17 @@ svg { display: block; }
 .pk-acc input { accent-color: var(--accent); margin: 0; }
 .pk-acc:has(input:checked) { border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
 .pk-note { color: #8a8a8a; font-size: 12px; line-height: 1.5; margin: 6px 8px 4px; }
+
+/* What's new in an update */
+.up-top { padding: 6px 8px 0; }
+.up-badge { display: inline-flex; height: 22px; align-items: center; padding: 0 9px; border-radius: 999px; font-size: 11px; font-weight: 600; background: #ffb4a826; color: #ffb4a8; }
+.up-badge.soft { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.up-title { font: 400 24px/1.12 'Instrument Serif', Georgia, serif; padding: 8px 8px 2px; }
+.up-sub { color: #8a8a8a; font-size: 12px; padding: 0 8px 8px; }
+.up-notes { margin: 2px 4px 6px; padding: 10px 12px; border-radius: 12px; background: #ffffff08; border: 1px solid #ffffff14; max-height: 220px; overflow-y: auto; font-size: 12.5px; line-height: 1.5; color: #d8d8dc; }
+.up-notes ul { margin: 0; padding-left: 18px; }
+.up-notes li { margin: 2px 0; }
+.up-notes p { margin: 0 0 6px; }
+.up-notes .up-h { font-weight: 600; margin: 6px 0 4px; }
+.up-notes code { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; background: #ffffff12; padding: 0 4px; border-radius: 4px; }
+.up-foot { color: #8a8a8a; font-size: 11.5px; padding: 2px 8px 2px; }

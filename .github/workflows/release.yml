@@ -1,0 +1,71 @@
+# Release a Lumio Browser update from GitHub, no Mac needed:
+#   Actions → "Release Lumio Browser" → Run workflow.
+# It builds both Mac DMGs and the Windows ZIP on a Mac runner, publishes the
+# GitHub release, and every installed Lumio Browser offers the update (with
+# your "What's new") within the hour.
+name: Release Lumio Browser
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version, like 0.6.0 (leave empty for the next patch version)"
+        required: false
+        default: ""
+      notes:
+        description: "What's new: separate items with  |  (for example: Passkeys | Faster tabs)"
+        required: true
+      critical:
+        description: "Urgent: show the update card on every launch until people update"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Choose the version
+        id: version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: node scripts/ship.mjs --prepare "$VERSION"
+
+      - name: Build (Mac Apple Silicon, Mac Intel, Windows)
+        run: npm run release
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTES: ${{ inputs.notes }}
+          CRITICAL: ${{ inputs.critical }}
+        run: node scripts/ship.mjs --publish
+
+      - name: Summary
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          echo "### Lumio Browser $VERSION is out" >> "$GITHUB_STEP_SUMMARY"
+          echo "Installed copies will offer it within the hour: https://github.com/${{ github.repository }}/releases/tag/v$VERSION" >> "$GITHUB_STEP_SUMMARY"

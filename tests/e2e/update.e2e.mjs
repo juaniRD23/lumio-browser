@@ -69,7 +69,7 @@ before(async () => {
     if (q.url === '/latest') {
       const base = `http://127.0.0.1:${server.address().port}`;
       r.writeHead(200, { 'content-type': 'application/json' });
-      r.end(JSON.stringify({ tag_name: 'v9.9.9', draft: false, prerelease: false, html_url: base + '/notes', assets: [{ name, size: bytes.length, digest, browser_download_url: base + '/' + name }] }));
+      r.end(JSON.stringify({ tag_name: 'v9.9.9', draft: false, prerelease: false, html_url: base + '/notes', body: "## What's new\n\n- **Passkeys** in every tab\n- Faster tabs\n\n<!-- lumio:critical -->\n\n## Install\n\n- Mac: dmg", assets: [{ name, size: bytes.length, digest, browser_download_url: base + '/' + name }] }));
       return;
     }
     if (q.url === '/' + name) { r.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': bytes.length }); r.end(bytes); return; }
@@ -96,12 +96,27 @@ test('a newer release shows the Update button next to the profile picture', { sk
   if (process.env.LUMIO_SHOTS) { await new Promise((r) => setTimeout(r, 800)); fs.mkdirSync(process.env.LUMIO_SHOTS, { recursive: true }); await L.shot(path.join(process.env.LUMIO_SHOTS, '32-update-button.png')); }
 });
 
-test('Update downloads, verifies and installs the new version', { skip: !mac }, async () => {
+test("a new version shows its What's new card by itself, once (urgent: every launch)", { skip: !mac }, async () => {
+  assert.ok(await until(async () => (await L.main(() => global.lumio.current.overlayKind)) === 'update', 10_000), 'card opened');
+  const card = await L.main(() => global.lumio.current.overlay.webContents.executeJavaScript('document.body.innerText'));
+  assert.match(card, /Important update[\s\S]*Lumio Browser 9\.9\.9 is here[\s\S]*Passkeys in every tab[\s\S]*Faster tabs[\s\S]*Update now/);
+  assert.doesNotMatch(card, /Install|dmg/, 'no install section');
+  const state = await L.main(() => global.lumio.updater.state);
+  assert.equal(state.critical, true);
+  if (process.env.LUMIO_SHOTS) { await new Promise((r) => setTimeout(r, 500)); await L.shot(path.join(process.env.LUMIO_SHOTS, '33-update-card.png')); }
+  // Later closes it; the Update button opens it again.
+  await L.main(() => global.lumio.current.overlay.webContents.executeJavaScript(`document.querySelector('[data-up="later"]').dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); true`));
+  assert.ok(await until(async () => (await L.main(() => global.lumio.current.overlayKind)) !== 'update'));
+});
+
+test('Update now (from the card) downloads, verifies and installs the new version', { skip: !mac }, async () => {
   await L.shell(`document.getElementById('update-btn').click(); true`);
+  assert.ok(await until(async () => (await L.main(() => global.lumio.current.overlayKind)) === 'update'));
+  await L.main(() => global.lumio.current.overlay.webContents.executeJavaScript(`document.querySelector('[data-up="now"]').dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); true`));
   assert.ok(await until(() => L.main(() => global.lumio.updater?.state.status === 'installing'), 30_000), 'installing');
   assert.equal(await L.shell(`document.querySelector('#update-btn .label').textContent`), 'Restarting…');
   const plist = path.join(target, 'Contents', 'Info.plist');
-  assert.ok(await until(async () => fs.existsSync(plist) && fs.readFileSync(plist, 'utf8').includes('9.9.9'), 15_000), 'new version swapped in');
+  assert.ok(await until(async () => fs.existsSync(plist) && fs.readFileSync(plist, 'utf8').includes('9.9.9'), 40_000), 'new version swapped in');
   assert.equal(fs.existsSync(path.join(target, 'Contents', 'old-marker')), false, 'old copy removed');
   assert.deepEqual(fs.readdirSync(path.dirname(target)), ['Lumio Browser.app'], 'no leftovers next to the app');
   execFileSync('codesign', ['--verify', '--deep', '--strict', target]);

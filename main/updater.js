@@ -34,6 +34,16 @@ function compareVersions(a, b) {
   return x.pre < y.pre ? -1 : 1;
 }
 
+// The "What's new" text of a release (Markdown from GitHub), without the
+// install section, and whether it's marked urgent (<!-- lumio:critical -->,
+// added by the release workflow when "critical" is ticked).
+function releaseNotes(body) {
+  const text = String(body || '');
+  const critical = /<!--\s*lumio:critical\s*-->/i.test(text);
+  const notes = text.replace(/<!--[\s\S]*?-->/g, '').split(/\n##\s+Install\b/i)[0].replace(/^##\s+What['’]s new\s*\n/i, '').trim().slice(0, 4000);
+  return { notes, critical };
+}
+
 // The installer that fits this computer (fixed names, see build/package.mjs).
 function assetName(platform = process.platform, arch = process.arch) {
   if (platform === 'darwin') return arch === 'arm64' ? 'Lumio-Browser-mac-apple-silicon.dmg' : 'Lumio-Browser-mac-intel.dmg';
@@ -59,7 +69,7 @@ class Updater {
     this.release = null; // { version, url, size, digest, notesUrl, name }
     this.file = null; // the downloaded, verified installer
     this.busy = null;
-    this.state = { status: 'idle', current: currentVersion, latest: null, progress: 0, error: null, notesUrl: null };
+    this.state = { status: 'idle', current: currentVersion, latest: null, progress: 0, error: null, notesUrl: null, notes: '', critical: false };
   }
 
   set(patch) {
@@ -79,9 +89,10 @@ class Updater {
       const version = String(rel.tag_name || '').replace(/^v/i, '');
       const name = assetName(this.platform, this.arch);
       const asset = (rel.assets || []).find((a) => a.name === name);
+      const { notes, critical } = releaseNotes(rel.body);
       if (!version || rel.draft || rel.prerelease || compareVersions(version, this.currentVersion) <= 0 || !asset) {
         this.release = null;
-        return this.set({ status: 'current', latest: version || null, error: null, notesUrl: rel.html_url || null });
+        return this.set({ status: 'current', latest: version || null, error: null, notesUrl: rel.html_url || null, notes: '', critical: false });
       }
       if (this.release?.version !== version) { this.release = null; this.file = null; }
       this.release = {
@@ -89,7 +100,7 @@ class Updater {
         digest: /^sha256:[a-f0-9]{64}$/i.test(asset.digest || '') ? asset.digest.slice(7).toLowerCase() : null,
         notesUrl: rel.html_url || null,
       };
-      return this.set({ status: this.file ? 'ready' : 'available', latest: version, error: null, notesUrl: this.release.notesUrl });
+      return this.set({ status: this.file ? 'ready' : 'available', latest: version, error: null, notesUrl: this.release.notesUrl, notes, critical });
     } catch (err) {
       return this.set({ status: this.release ? 'available' : 'idle', error: manual ? `Couldn't check for updates: ${err.message}` : null });
     }
@@ -227,4 +238,4 @@ class Updater {
   }
 }
 
-module.exports = { Updater, compareVersions, assetName, LATEST };
+module.exports = { releaseNotes, Updater, compareVersions, assetName, LATEST };

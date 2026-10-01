@@ -26,7 +26,7 @@ const { ExtensionManager } = require('./extensions');
 const { LumioAccount } = require('./account');
 const { PasswordManager } = require('./password-manager');
 const screenAura = require('./ai/screen-aura');
-const { Updater, LATEST } = require('./updater');
+const { Updater, LATEST, compareVersions } = require('./updater');
 const { generatePassword } = require('./passwords');
 const importer = require('./importer/chromium');
 
@@ -416,11 +416,13 @@ async function clearData({ range = 0, what = [] } = {}) {
 
 // ---------------------------------------------------------------- updates
 // The Update button: download and check the installer, then ask before restarting.
-async function startUpdate(w) {
+// confirmed: the person already chose "Update now" in the What's new card, so
+// only ask again if Lumio AI is in the middle of a task.
+async function startUpdate(w, { confirmed = false } = {}) {
   if (!updater || ['downloading', 'installing'].includes(updater.state.status)) return updater?.state || null;
   try { await updater.download(); } catch { return updater.state; }
-  if (!process.env.LUMIO_TEST) {
-    const working = alive().some((x) => x.ai.isRunning());
+  const working = alive().some((x) => x.ai.isRunning());
+  if (!process.env.LUMIO_TEST && (!confirmed || working)) {
     const { response } = await dialog.showMessageBox(w.win, {
       type: 'info',
       message: `Lumio Browser ${updater.state.latest} is ready to install`,
@@ -434,6 +436,18 @@ async function startUpdate(w) {
   }
   await updater.install().catch(() => {});
   return updater.state;
+}
+
+// A new version shows its What's new card once (urgent ones every launch
+// until installed), in the window the person is using.
+const announced = new Set();
+function announceUpdate(state) {
+  if (state.status !== 'available' || !state.latest || announced.has(state.latest)) return;
+  if (!state.critical && store.settings.updateAnnounced === state.latest) return;
+  announced.add(state.latest);
+  if (!state.critical) store.setSetting('updateAnnounced', state.latest);
+  const w = lastFocused && !lastFocused.win.isDestroyed() && !lastFocused.incognito ? lastFocused : alive().find((x) => !x.incognito);
+  setTimeout(() => w?.emit('update-announce', state), 1200);
 }
 
 // ---------------------------------------------------------------- IPC
@@ -601,6 +615,8 @@ function registerIpc() {
   // ---- updates ----
   handle('update:state', () => updater?.state || null);
   on('update:install', (w) => { startUpdate(w); });
+  on('update:now', (w) => { w.hideOverlay(); startUpdate(w, { confirmed: true }); });
+  on('update:later', (w) => { w.hideOverlay(); });
 
   // ---- AI panel ----
   handle('ai:state', (w) => w.ai.state());
@@ -888,7 +904,7 @@ app.whenReady().then(async () => {
     currentVersion: app.getVersion(),
     fetchImpl: (url, opts) => net.fetch(url, opts),
     workDir: path.join(app.getPath('temp'), 'Lumio Browser Update'),
-    onChange: (state) => alive().forEach((w) => w.emit('update', state)),
+    onChange: (state) => { alive().forEach((w) => w.emit('update', state)); announceUpdate(state); },
     quit: process.env.LUMIO_UPDATE_TARGET && process.env.LUMIO_TEST ? () => {} : () => app.quit(),
     openPath: (file) => shell.openPath(file),
     api: testUpdates ? process.env.LUMIO_UPDATE_API : LATEST,
@@ -896,8 +912,14 @@ app.whenReady().then(async () => {
   });
   if (app.isPackaged || testUpdates) {
     setTimeout(() => updater.check(), testUpdates ? 300 : 8000);
-    setInterval(() => updater.check(), 6 * 60 * 60 * 1000).unref?.();
+    setInterval(() => updater.check(), 60 * 60 * 1000).unref?.(); // every hour (GitHub allows 60/hour)
   }
+  // Just updated? Say so once, with what's new.
+  const lastVersion = store.settings.lastVersion;
+  if (lastVersion && compareVersions(app.getVersion(), lastVersion) > 0) {
+    setTimeout(() => { const w = lastFocused && !lastFocused.win.isDestroyed() ? lastFocused : alive()[0]; w?.emit('toast', { text: `Updated to Lumio Browser ${app.getVersion()}` }); }, 2500);
+  }
+  if (lastVersion !== app.getVersion()) store.setSetting('lastVersion', app.getVersion());
   normal.permissions = new Permissions(ses, { store, emitFor, persist: true });
 
   extensions = new ExtensionManager({

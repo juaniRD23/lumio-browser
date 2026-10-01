@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-const { Updater, compareVersions, assetName } = require('../main/updater.js');
+const { Updater, compareVersions, assetName, releaseNotes } = require('../main/updater.js');
 
 const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 const INSTALLER = Buffer.from('pretend this is a DMG '.repeat(4000));
@@ -116,4 +116,11 @@ test("install: if the app's folder isn't writable, the installer is opened for t
   } finally {
     fs.chmodSync(path.dirname(target), 0o755);
   }
+});
+
+test("release notes: What's new without the install section; the urgent marker", () => {
+  const body = "## What's new\n\n- Passkeys\n- Faster tabs\n\n<!-- lumio:critical -->\n\n## Install\n\n- **Mac:** dmg";
+  assert.deepEqual(releaseNotes(body), { notes: '- Passkeys\n- Faster tabs', critical: true });
+  assert.deepEqual(releaseNotes('- Just a fix'), { notes: '- Just a fix', critical: false });
+  assert.deepEqual(releaseNotes(null), { notes: '', critical: false });
 });

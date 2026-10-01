@@ -19,7 +19,8 @@
     "test:e2e": "node --test --test-concurrency=1 tests/e2e/*.e2e.mjs",
     "build:app": "sh native/build.sh && node scripts/build-preload.mjs && node build/package.mjs",
     "install:app": "sh native/build.sh && node scripts/build-preload.mjs && node build/package.mjs --install",
-    "release": "node scripts/build-preload.mjs && node build/package.mjs --release"
+    "release": "node scripts/build-preload.mjs && node build/package.mjs --release",
+    "ship": "node scripts/ship.mjs"
   },
   "dependencies": {
     "dompurify": "^3.2.6",

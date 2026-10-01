@@ -10,7 +10,7 @@ const EVENTS = new Set([
   'tabs', 'downloads', 'permission', 'permission-cancel', 'find-result', 'find-open', 'find-close', 'find-step',
   'focus-omnibox', 'panel-toggle', 'ai-focus', 'ai-prefill', 'ai-event', 'ai-state', 'overlay-data',
   'overlay-picked', 'toast', 'zoom', 'fullscreen', 'agent-state', 'bookmarks', 'site-info', 'extensions-changed',
-  'account', 'profile', 'passwords-prompt', 'passwords-changed', 'aura', 'update', 'ai-build-doc',
+  'account', 'profile', 'passwords-prompt', 'passwords-changed', 'aura', 'update', 'update-announce', 'ai-build-doc',
 ]);
 
 contextBridge.exposeInMainWorld('lumio', {

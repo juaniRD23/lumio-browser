@@ -148,6 +148,40 @@ function renderPasskey({ prompt }) {
   card.dataset.prompt = String(p.id);
 }
 
+// What's new in an update, from the release notes (a little Markdown).
+function notesHtml(md) {
+  const inline = (t) => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
+  const out = [];
+  let list = false;
+  for (const raw of String(md || '').split('\n')) {
+    const line = raw.trim();
+    const item = /^[-*]\s+(.*)$/.exec(line);
+    if (item) { if (!list) { out.push('<ul>'); list = true; } out.push(`<li>${inline(item[1])}</li>`); continue; }
+    if (list) { out.push('</ul>'); list = false; }
+    if (!line) continue;
+    const h = /^#{1,4}\s+(.*)$/.exec(line);
+    out.push(h ? `<div class="up-h">${inline(h[1])}</div>` : `<p>${inline(line)}</p>`);
+  }
+  if (list) out.push('</ul>');
+  return out.join('');
+}
+function renderUpdateCard({ update: u }) {
+  const ready = u.status === 'ready';
+  card.innerHTML = `
+    <div class="up-top">${u.critical ? '<span class="up-badge">Important update</span>' : '<span class="up-badge soft">Update</span>'}</div>
+    <div class="up-title">Lumio Browser ${esc(u.latest)} is here</div>
+    <div class="up-sub">You have ${esc(u.current)}</div>
+    ${u.notes ? `<div class="up-notes">${notesHtml(u.notes)}</div>` : ''}
+    <div class="up-foot">Lumio restarts and reopens your tabs. It takes a few seconds.</div>
+    <div class="pws-actions">
+      ${u.notesUrl ? '<button class="acc-btn ghost" data-up="notes">Details</button>' : ''}
+      <span style="flex:1"></span>
+      <button class="acc-btn ghost" data-up="later">Later</button>
+      <button class="acc-btn primary" data-up="now">${ready ? 'Restart now' : 'Update now'}</button>
+    </div>`;
+  card.dataset.notesUrl = u.notesUrl || '';
+}
+
 // Tell the browser how tall this dropdown really is.
 function measure() {
   // Measure the natural height (a scroll box never reports less than it has).
@@ -174,6 +208,7 @@ api.on('overlay-data', (payload) => {
   else if (kind === 'autofill') { renderAutofill(payload); reportSize(); }
   else if (kind === 'pwsave') { renderPwSave(payload); reportSize(); }
   else if (kind === 'passkey') { renderPasskey(payload); reportSize(); }
+  else if (kind === 'update') { renderUpdateCard(payload); reportSize(); }
 });
 
 card.addEventListener('change', (e) => {
@@ -182,6 +217,16 @@ card.addEventListener('change', (e) => {
 });
 
 card.addEventListener('mousedown', async (e) => {
+  if (kind === 'update') {
+    const act = e.target.closest('[data-up]')?.dataset.up;
+    if (!act) return;
+    e.preventDefault();
+    if (act === 'now') api.send('update:now');
+    else if (act === 'later') api.send('update:later');
+    else if (act === 'notes' && card.dataset.notesUrl) { api.send('open-url', card.dataset.notesUrl); api.send('update:later'); }
+    api.send('overlay:pick', { kind });
+    return;
+  }
   if (kind === 'passkey') {
     const decision = e.target.closest('[data-pk]')?.dataset.pk;
     if (!decision) return; // choosing an account works normally

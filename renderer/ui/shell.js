@@ -288,7 +288,7 @@ function pick(item) {
 
 api.on('overlay-picked', (msg) => {
   if (msg.kind === 'suggest' && suggestions[msg.index]) pick(suggestions[msg.index]);
-  if (['downloads', 'siteinfo', 'account', 'autofill'].includes(msg.kind)) { overlayKind = null; accountBtn.classList.remove('open'); }
+  if (['downloads', 'siteinfo', 'account', 'autofill', 'update'].includes(msg.kind)) { overlayKind = null; accountBtn.classList.remove('open'); }
   if (msg.kind === 'pwsave') { overlayKind = null; const t = activeTab(); if (t) pwPrompts.delete(t.id); renderPwKey(); }
 });
 
@@ -498,7 +498,9 @@ api.on('profile', (p) => { state.profile = p || {}; renderAccount(); });
 // ------------------------------------------------------------------ updates
 // A blue Update button next to the avatar while a newer release is out.
 const updateBtn = $('#update-btn');
+let updateState = null;
 function renderUpdate(u) {
+  updateState = u;
   const show = !!u && ['available', 'downloading', 'ready', 'installing'].includes(u.status);
   updateBtn.hidden = !show;
   if (!show) return;
@@ -512,11 +514,28 @@ function renderUpdate(u) {
   updateBtn.title = u.error || `Lumio Browser ${u.latest} is available (you have ${u.current})`;
   updateBtn.setAttribute('aria-label', `Update Lumio Browser to ${u.latest}`);
 }
+// The What's new card under the Update button (also opened once when a new
+// version comes out).
+function showUpdateCard(u = updateState) {
+  if (!u || !u.latest || !['available', 'ready'].includes(u.status)) return;
+  const r = updateBtn.hidden ? $('#account-btn').getBoundingClientRect() : updateBtn.getBoundingClientRect();
+  const width = 360;
+  overlayKind = 'update';
+  api.send('overlay:show', {
+    rect: { x: r.right - width - 12 + 8, y: r.bottom + 8, width: width + 24, height: 320 },
+    payload: { kind: 'update', update: u, accent: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() },
+  });
+}
+updateBtn.addEventListener('mousedown', (e) => e.preventDefault());
 updateBtn.addEventListener('click', () => {
   if (updateBtn.classList.contains('busy')) return;
-  api.send('update:install');
+  if (overlayKind === 'update') { hideOverlay(); return; }
+  if (updateState?.status === 'ready') { api.send('update:install'); return; }
+  showUpdateCard();
 });
+window.addEventListener('mousedown', (e) => { if (overlayKind === 'update' && !e.target.closest('#update-btn')) hideOverlay(); });
 api.on('update', renderUpdate);
+api.on('update-announce', (u) => { if (!overlayKind) { renderUpdate(u); showUpdateCard(u); } });
 
 // ------------------------------------------------------------------ extensions
 $('#ext-btn').addEventListener('click', () => api.send('extensions:manage'));
