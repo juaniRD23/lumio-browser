@@ -6,7 +6,9 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { scriptedTurn, turnEvents } from './mock-scripts.mjs';
 
-// The tools the real server owns (lib/browser-agent.ts).
+// The model the server says it runs (the browser must use whatever is listed).
+const MODEL = { id: 'mock/agent-1', name: 'Mock Agent', maker: 'Lumio', minimumPlan: 'free', available: true };
+// The tools the real server owns (server/src/agent.ts).
 const TOOLS = ['read_page', 'click', 'type', 'select_option', 'press_key', 'scroll', 'navigate', 'go_back', 'screenshot_tab', 'click_at',
   'list_tabs', 'open_tab', 'switch_tab', 'close_tab', 'wait', 'computer_screenshot', 'computer_click', 'computer_move', 'computer_drag',
   'computer_scroll', 'computer_type', 'computer_key', 'open_app', 'list_apps', 'run_shell', 'update_plan', 'run_applescript'];
@@ -77,10 +79,10 @@ export async function startMockLumio({ plan = 'plus' } = {}) {
       if (url.pathname === '/v1/agent' && req.method === 'GET') {
         const u = bearer(req);
         if (!u) return json(res, 401, { enabled: false });
-        // Like the real endpoint: one model on every plan, the server's tools, reasoning levels.
+        // Like the real endpoint: the model it runs, the server's tools, reasoning levels.
         return json(res, 200, {
           version: 1, enabled: true, plan: state.plan,
-          models: [{ id: 'openai/gpt-6-luna', name: 'GPT-6 Luna', minimumPlan: 'free', available: true }],
+          model: MODEL, models: [MODEL],
           tools: TOOLS, reasoning: { levels: ['low', 'medium', 'high'], default: 'medium' }, usage: allowance(),
         });
       }
@@ -90,7 +92,7 @@ export async function startMockLumio({ plan = 'plus' } = {}) {
         const body = JSON.parse(await readBody(req));
         // The same shape checks as the real endpoint's validation.
         const bad = body.version !== 1 || !body.taskId || !body.runId || !body.stepId || !body.context
-          || body.model !== 'openai/gpt-6-luna' || !['low', 'medium', 'high'].includes(body.reasoning ?? 'medium')
+          || body.model !== MODEL.id || !['low', 'medium', 'high'].includes(body.reasoning ?? 'medium')
           || !Array.isArray(body.tools) || body.tools.some((t) => typeof t !== 'string' || !TOOLS.includes(t))
           || body.messages.some((m) => m.role === 'system') || body.messages[0]?.role !== 'user';
         if (bad) return json(res, 400, { error: 'Invalid browser step.', code: 'invalid_request' });

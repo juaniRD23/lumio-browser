@@ -1,8 +1,10 @@
 import './keys.js';
 const page = window.lumioPage;
 const $ = (s) => document.querySelector(s);
-const MARK = '<svg viewBox="0 0 64 64" width="40" height="40"><path d="M35 12a21 21 0 1 0 17 19" fill="none" stroke="#eee" stroke-width="7" stroke-linecap="round"/><circle cx="48" cy="17" r="5" fill="#eee"/></svg>';
+const MARK = '<svg viewBox="0 0 64 64" width="40" height="40"><path d="M35 12a21 21 0 1 0 17 19" fill="none" stroke="#ededee" stroke-width="7" stroke-linecap="round"/><circle cx="48" cy="17" r="5" fill="#86b7ff"/></svg>';
 $('#mark').innerHTML = MARK;
+const hour = new Date().getHours();
+$('.brand .word').textContent = hour < 5 ? 'Up late?' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
 $('#ask').insertAdjacentHTML('afterbegin', MARK.replace('width="40" height="40"', 'width="14" height="14"'));
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

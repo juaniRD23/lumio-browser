@@ -1,7 +1,8 @@
 // Lumio Browser's AI: one inexpensive model that supports tools and can see
 // screenshots, run on the person's Lumio plan (every plan, Free included, has
-// a weekly allowance). People choose how hard it thinks.
-const MODEL = { id: 'openai/gpt-6-luna', name: 'GPT-6 Luna', short: 'Luna', maker: 'OpenAI' };
+// a weekly allowance). People choose how hard it thinks. The server names the
+// model (GET /v1/agent); this is only the fallback until it answers.
+const MODEL = { id: 'inclusionai/ling-3.0-flash-vl', name: 'Ling 3.0 Flash', maker: 'inclusionAI' };
 
 const REASONING = [
   { id: 'low', name: 'Low', desc: 'Fastest, and uses the least of your plan' },

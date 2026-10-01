@@ -1,22 +1,22 @@
-@font-face { font-family: 'Inter Variable'; src: url('/assets/inter.woff2') format('woff2'); font-weight: 100 900; }
+@import url('/assets/fonts/fonts.css');
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
 :root { --accent: #86b7ff; }
 body {
   padding: 2px 12px 22px;
-  font: 13px/1.4 'Inter Variable', -apple-system, sans-serif; color: #eee;
+  font: 13px/1.4 'Geist', -apple-system, sans-serif; color: #eee;
   -webkit-font-smoothing: antialiased; user-select: none; cursor: default;
 }
 #card {
   height: 100%; overflow-y: auto; padding: 6px;
-  background: #19191b; border: 1px solid #ffffff1f; border-radius: 12px;
+  background: #161619; border: 1px solid #ffffff24; border-radius: 16px;
   /* Small enough to fit inside the view's transparent margin, so it's never clipped. */
   box-shadow: 0 6px 16px -4px #000a, 0 1px 3px #0006;
   animation: in .16s cubic-bezier(.22,1,.36,1);
 }
 @keyframes in { from { opacity: 0; transform: translateY(-4px); } }
-.row { display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 10px; border-radius: 8px; }
-.row.sel, .row:hover { background: #262628; }
+.row { display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 10px; border-radius: 10px; }
+.row.sel, .row:hover { background: #ffffff0d; }
 .row .ic { width: 18px; display: grid; place-items: center; color: #8a8a8a; flex: none; }
 .row .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
 .row .u { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #7c7c80; flex: 1 1 0; min-width: 0; }
@@ -66,10 +66,10 @@ svg { display: block; }
 .avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .avatar svg { width: 55%; height: 55%; }
 .avatar.incog { background: #2a2338; color: #d6c2ff; }
-.acc-name { font-weight: 650; font-size: 15px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.acc-sub { color: #8a8a8a; font-size: 12.5px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.acc-name { font: 400 26px/1.1 'Instrument Serif', Georgia, serif; letter-spacing: -.01em; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.acc-sub { color: #a3a3aa; font-size: 12.5px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .acc-plan { margin-top: 6px; font-size: 11.5px; font-weight: 600; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); padding: 3px 10px; border-radius: 999px; }
-.acc-box { margin: 2px 6px 8px; padding: 12px; border-radius: 10px; background: #ffffff08; text-align: center; }
+.acc-box { margin: 2px 6px 8px; padding: 14px; border-radius: 14px; background: #0e0e11; border: 1px solid #ffffff14; text-align: center; }
 .acc-box-t { font-weight: 600; margin-bottom: 2px; }
 .acc-box-s { color: #9a9a9a; font-size: 12px; margin-bottom: 10px; }
 .acc-code { font-size: 24px; font-weight: 650; letter-spacing: 5px; margin: 2px 0 10px; font-variant-numeric: tabular-nums; }

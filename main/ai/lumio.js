@@ -1,4 +1,4 @@
-// Runs the AI panel on the person's Lumio plan through lumio-usa.online's
+// Runs the AI panel on the person's Lumio plan through the Lumio server's
 // /v1/agent (server/ in this repo), authenticated with the Lumio session. Each model
 // call is one "step" (task = chat, run = one send, step = counter). The server
 // owns the model, system prompt and tool definitions; we send the
@@ -26,7 +26,6 @@ function friendly(status, data) {
   if (status === 401 || code === 'sign_in_required') return 'Sign in to Lumio again (account button, top right).';
   if (code === 'browser_plan_required' || code === 'model_plan_required') return data?.error || 'Lumio AI isn’t available on your plan.';
   if (code === 'usage_limit' || status === 429) return data?.error || 'You’ve used your Lumio allowance for now. Upgrade for more, or try again when it resets.';
-  if (status === 428) return 'Accept Lumio’s Terms & Conditions on lumio-usa.online, then try again.';
   if (status === 413) return 'This chat got too long. Start a new chat.';
   return data?.error || `Lumio couldn’t answer (HTTP ${status}).`;
 }

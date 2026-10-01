@@ -16,14 +16,14 @@ select.field { appearance: none; padding-right: 30px; background: var(--field) u
 /* layout: sticky sidebar + sections */
 .layout { display: grid; grid-template-columns: 220px minmax(0, 720px); gap: 36px; justify-content: center; padding: 40px 28px 120px; }
 .side { position: sticky; top: 32px; align-self: start; display: flex; flex-direction: column; gap: 2px; }
-.side-title { font-size: 24px; font-weight: 650; letter-spacing: -.6px; margin: 0 0 14px 12px; }
-.side a { color: var(--dim); padding: 7px 12px; border-radius: 9px; font-size: 13.5px; text-decoration: none !important; }
+.side-title { font: 400 38px/1.05 var(--serif); letter-spacing: -.02em; margin: 0 0 16px 12px; }
+.side a { color: var(--dim); padding: 8px 12px; border-radius: 10px; font-size: 13.5px; text-decoration: none !important; }
 .side a:hover { color: var(--text); background: #ffffff08; }
 .side a.on { color: var(--text); background: #ffffff10; font-weight: 550; }
 .content section { scroll-margin-top: 24px; padding-top: 6px; }
-.content h2 { font-size: 18px; font-weight: 650; letter-spacing: -.3px; text-transform: none; color: var(--text); margin: 30px 0 12px; }
+.content h2 { font: 400 30px/1.1 var(--serif); letter-spacing: -.01em; text-transform: none; color: var(--text); margin: 36px 0 14px; }
 .content section:first-child h2 { margin-top: 0; }
-.content h3 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; color: var(--label); margin: 22px 0 8px; }
+.content h3 { font: 500 11px var(--mono); text-transform: uppercase; letter-spacing: .12em; color: var(--label); margin: 24px 0 8px; }
 @media (max-width: 820px) { .layout { grid-template-columns: 1fr; } .side { display: none; } }
 
 .account-row .avatar-lg { width: 44px; height: 44px; }
@@ -39,12 +39,12 @@ select.field { appearance: none; padding-right: 30px; background: var(--field) u
 
 /* plan */
 .plan-top { display: flex; align-items: center; gap: 14px; padding: 16px; }
-.plan-name { font-size: 20px; font-weight: 650; letter-spacing: -.4px; }
-.meter { margin-top: 8px; height: 6px; border-radius: 6px; background: #ffffff12; overflow: hidden; }
-.meter i { display: block; height: 100%; background: var(--accent); border-radius: 6px; }
+.plan-name { font: 400 30px/1.05 var(--serif); letter-spacing: -.01em; }
+.meter { margin-top: 8px; height: 8px; border-radius: 999px; background: #ffffff10; overflow: hidden; }
+.meter i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), #c0d8ff); border-radius: inherit; }
 .plans { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 0 16px 16px; }
-.plan-opt { padding: 12px; border-radius: 12px; background: var(--card2); border: 1px solid var(--line); }
-.plan-opt.current { border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
-.plan-opt b { display: block; font-size: 14px; }
+.plan-opt { padding: 14px; border-radius: 16px; background: var(--card2); border: 1px solid var(--line); }
+.plan-opt.current { border-color: #86b7ff66; background: radial-gradient(260px 140px at 50% 0%, #86b7ff14, transparent 70%), var(--card2); }
+.plan-opt b { display: block; font-size: 14px; font-weight: 600; }
 .plan-opt span { color: var(--dim); font-size: 12.5px; }
 .plan-top .grow { flex: 1; min-width: 0; }

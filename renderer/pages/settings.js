@@ -155,8 +155,9 @@ function renderPlan() {
 // ------------------------------------------------------------ Lumio AI: plan + reasoning + approvals
 function renderAiStatus() {
   const a = s.account;
-  if (!a.signedIn) $('#ai-status').textContent = 'Lumio AI uses GPT-6 Luna and runs on your Lumio account. Sign in to start: every plan includes some use each week, Free too.';
-  else $('#ai-status').textContent = `Lumio AI uses GPT-6 Luna on your Lumio ${a.planName || 'Free'} plan.${a.plan === 'max' ? '' : ' Upgrade for more use each week.'}`;
+  const model = s.ai?.modelName ? `${s.ai.modelName}, a fast, low-cost model that can read pages and see screenshots,` : 'a fast, low-cost model that can read pages and see screenshots';
+  if (!a.signedIn) $('#ai-status').textContent = `Lumio AI uses ${model} and runs on your Lumio account. Sign in to start: every plan includes some use each week, Free too.`;
+  else $('#ai-status').textContent = `Lumio AI uses ${model} on your Lumio ${a.planName || 'Free'} plan.${a.plan === 'max' ? '' : ' Upgrade for more use each week.'}`;
 }
 document.querySelectorAll('input[name=reasoning]').forEach((r) => {
   r.checked = r.value === s.ai.reasoning;

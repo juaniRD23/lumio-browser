@@ -855,7 +855,7 @@ app.whenReady().then(async () => {
 
   account = new LumioAccount({
     store,
-    onChange: (state) => { alive().forEach((w) => { w.emit('account', state); w.ai.capsCache = null; }); services.broadcastAIState(); },
+    onChange: (state) => { alive().forEach((w) => { w.emit('account', state); w.ai.refreshCapabilities(); }); services.broadcastAIState(); },
   });
   account.refresh();
   watchLumioCookie();

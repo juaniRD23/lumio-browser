@@ -76,7 +76,7 @@ function renderAccount({ account = {}, profile = {}, incognito }) {
   const plan = account.signedIn && account.planName ? `<span class="acc-plan">Lumio ${esc(account.planName)}</span>` : '';
   let status = '';
   if (account.connecting) {
-    status = `<div class="acc-box"><div class="acc-box-t">Finish signing in on lumio-usa.online</div><div class="acc-box-s">Log in on the Lumio tab that opened. Lumio Browser signs in with you.</div><button class="acc-btn ghost" data-acc="cancel">Cancel</button></div>`;
+    status = `<div class="acc-box"><div class="acc-box-t">Finish signing in on the Lumio tab</div><div class="acc-box-s">Log in on the Lumio tab that opened. Lumio Browser signs in with you.</div><button class="acc-btn ghost" data-acc="cancel">Cancel</button></div>`;
   } else if (!account.signedIn) {
     status = `<div class="acc-box"><div class="acc-box-s">Sign in to use Lumio AI in this browser. It’s free to start.</div><button class="acc-btn primary" data-acc="sign-in">Sign in to Lumio</button></div>`;
   }

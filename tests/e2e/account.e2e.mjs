@@ -255,7 +255,7 @@ test('signed in on Plus, the AI runs on the Lumio plan', async () => {
   await ask('hello');
   assert.match(await L.shell(`[...document.querySelectorAll('.msg.ai')].at(-1)?.innerText || ''`), /mock model/);
   const req = lumio.state.agentRequests.at(-1);
-  assert.equal(req.model, 'openai/gpt-6-luna');
+  assert.equal(req.model, 'mock/agent-1');
   assert.equal(req.reasoning, 'medium');
   assert.ok(req.tools.includes('read_page') && !req.tools.some((t) => t.startsWith('mac_')));
   assert.equal(req.context.platform, 'mac');

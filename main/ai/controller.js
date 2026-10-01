@@ -15,7 +15,9 @@ const mac = require('./tools/mac');
 const plan = require('./tools/plan');
 const screenAura = require('./screen-aura');
 
-const HELPER_TOOLS = new Set(['computer_screenshot', 'computer_click', 'computer_move', 'computer_drag', 'computer_scroll', 'computer_type', 'computer_key', 'list_apps']);
+// Without the helper there's no computer control at all (the server only
+// accepts these when the step's context says the computer is available).
+const HELPER_TOOLS = new Set(['computer_screenshot', 'computer_click', 'computer_move', 'computer_drag', 'computer_scroll', 'computer_type', 'computer_key', 'open_app', 'list_apps', 'run_shell', 'run_applescript']);
 // Tools that look at or drive the computer itself: while one runs, the screen glows.
 const CONTROLS_COMPUTER = new Set(['computer_screenshot', 'computer_click', 'computer_move', 'computer_drag', 'computer_scroll', 'computer_type', 'computer_key', 'open_app', 'run_applescript']);
 const CAPS_TTL = 10 * 60 * 1000;
@@ -32,7 +34,7 @@ class AIController {
     this.helper = helper;
     this.onSettingsChanged = onSettingsChanged; // lets every window refresh its panel
     this.run = null;
-    this.capsCache = null; // { at, tools } from the Lumio server
+    this.capsCache = null; // { at, tools, model } from the Lumio server
     this.refs = new Map();
     if (!findReasoning(store.settings.reasoning)) store.setSetting('reasoning', DEFAULT_REASONING);
   }
@@ -52,16 +54,20 @@ class AIController {
 
   reasoning() { return findReasoning(this.store.settings.reasoning) || findReasoning(DEFAULT_REASONING); }
 
+  // The server picks the model (so it can change without an update).
+  model() { return this.capsCache?.model || MODEL; }
+
   state() {
     const a = this.account?.state() || {};
     const r = this.reasoning();
+    const m = this.model();
     return {
       // The AI runs on the person's Lumio plan; every plan has an allowance.
       ready: !!a.signedIn,
       lumio: { signedIn: !!a.signedIn, paid: !!a.paid, plan: a.plan || null, planName: a.planName || null, connecting: !!a.connecting, usage: a.usage || null },
-      model: MODEL.id,
-      modelName: MODEL.name,
-      modelMaker: MODEL.maker,
+      model: m.id,
+      modelName: m.name,
+      modelMaker: m.maker,
       reasoning: r.id,
       reasoningName: r.name,
       reasoningLevels: REASONING,
@@ -118,14 +124,32 @@ class AIController {
       && (process.platform === 'darwin' || t.name !== 'run_applescript'));
   }
 
+  async capabilities() {
+    if (!this.capsCache || Date.now() - this.capsCache.at > CAPS_TTL) {
+      const caps = await lumioCapabilities(this.account).catch(() => null);
+      const m = caps?.model;
+      const before = this.model().id;
+      this.capsCache = {
+        at: Date.now(),
+        tools: Array.isArray(caps?.tools) ? new Set(caps.tools) : null,
+        model: m && typeof m.id === 'string' && typeof m.name === 'string' ? { id: m.id, name: m.name, maker: String(m.maker || '') } : null,
+      };
+      if (this.model().id !== before) this.emitState();
+    }
+    return this.capsCache;
+  }
+
+  // The plan (or account) changed: ask the server again.
+  refreshCapabilities() {
+    if (this.capsCache) this.capsCache.at = 0;
+    if (this.account?.state().signedIn) this.capabilities().catch(() => {});
+  }
+
   // The server owns the tool definitions and rejects names it doesn't know,
   // so only offer the tools it lists. A server too old to list them gets
   // everything except the newer update_plan.
   async lumioTools() {
-    if (!this.capsCache || Date.now() - this.capsCache.at > CAPS_TTL) {
-      const caps = await lumioCapabilities(this.account).catch(() => null);
-      this.capsCache = { at: Date.now(), tools: Array.isArray(caps?.tools) ? new Set(caps.tools) : null };
-    }
+    await this.capabilities();
     const allowed = this.capsCache.tools;
     return this.tools().filter((t) => (allowed ? allowed.has(t.name) : t.name !== 'update_plan'));
   }
@@ -202,10 +226,11 @@ class AIController {
     let stepNo = 0;
 
     try {
+      const tools = await this.lumioTools();
       await runAgent({
-        model: MODEL.id,
+        model: this.model().id,
         messages: chat.messages,
-        tools: await this.lumioTools(),
+        tools,
         systemPrompt: () => {
           const tab = this.tabs.active;
           return buildSystemPrompt({

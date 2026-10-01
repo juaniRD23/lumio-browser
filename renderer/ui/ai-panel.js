@@ -108,7 +108,8 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     const level = LEVEL[ai.reasoning] || 2;
     $('#reasoning-bars').innerHTML = levelBars(level);
     $('#reasoning-name').textContent = ai.reasoningName || 'Medium';
-    $('#reasoning-btn').title = `Reasoning: ${ai.reasoningName || 'Medium'} (${ai.modelName})`;
+    $('#reasoning-btn').title = `Thinking effort: ${ai.reasoningName || 'Medium'} (${ai.modelName})`;
+    if (!$('#reasoning-menu').hidden && !$('#effort-slider').classList.contains('dragging')) renderModels();
     document.querySelectorAll('#mode button').forEach((b) => b.classList.toggle('on', b.dataset.mode === ai.mode));
     const running = ai.running && ai.runChatId === chatId;
     sendBtn.classList.toggle('stop', running);
@@ -243,10 +244,10 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
       // Lumio AI runs on the person's Lumio plan. Free includes a little.
       const l = ai.lumio || {};
       el.innerHTML = `
-        <div class="hero-mark">${markSvg(26)}</div>
+        <div class="hero-mark">${markSvg(34, true)}</div>
         <h2>Sign in to use Lumio AI</h2>
         ${l.connecting
-    ? '<p>Log in on the lumio-usa.online tab that opened. Lumio Browser signs in with you.</p>'
+    ? '<p>Continue with Google on the Lumio tab that opened. Lumio Browser signs in with you.</p>'
     : `<p>Lumio AI runs on your Lumio account. It’s free to start, and Plus, Pro or Max give you much more.</p>
         <button class="btn primary" id="lumio-sign-in">Sign in to Lumio</button>`}`;
       messages.append(el);
@@ -254,8 +255,8 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
       return;
     }
     el.innerHTML = `
-      <div class="hero-mark">${markSvg(26)}</div>
-      <h2>What can I do for you?</h2>
+      <div class="hero-mark">${markSvg(34, true)}</div>
+      <h2>What can I help with?</h2>
       <p>Ask anything, or tell me what to do. I can read and use web pages${ai.macAvailable ? ' and control your Mac' : ''}, and I'll ask before I act.</p>
       ${ai.ephemeral ? '<p class="incog-note">You’re incognito: chats here aren’t saved.</p>' : ''}
       <div class="suggestions">${SUGGESTIONS.map((s, i) => `<button class="suggestion" data-i="${i}"><b>${esc(s.title)}</b>${esc(s.text)}</button>`).join('')}</div>`;
@@ -539,12 +540,14 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     if (/^https?:\/\//i.test(href)) api.send('open-url', href);
   });
 
-  // ------------------------------------------------------------ reasoning menu
-  // One model; people choose how hard it thinks. The menu also shows how much
-  // of their Lumio plan is left, with a way to get more.
+  // ------------------------------------------------------------ thinking effort
+  // One model; people choose how hard it thinks, on a slider that snaps to
+  // each level. The popover also shows how much of their plan is left.
   const modelMenu = $('#reasoning-menu');
   const modelBtn = $('#reasoning-btn');
-  const modelList = $('#reasoning-list');
+  const slider = $('#effort-slider');
+  const levels = () => (ai.reasoningLevels?.length ? ai.reasoningLevels : [{ id: 'low', name: 'Low', desc: '' }, { id: 'medium', name: 'Medium', desc: '' }, { id: 'high', name: 'High', desc: '' }]);
+  const levelIndex = () => Math.max(0, levels().findIndex((r) => r.id === ai.reasoning));
 
   function allowance() {
     const l = ai.lumio || {};
@@ -555,16 +558,34 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     const more = l.plan !== 'max' ? '<button class="link" id="reasoning-upgrade" type="button">Get more</button>' : '';
     return `<span>${plan}${left}</span>${more}`;
   }
+  // i: the level to show; p: where the knob sits (0-1), while dragging.
+  function renderEffort(i = levelIndex(), p) {
+    const L = levels();
+    const r = L[i] || L[0];
+    slider.style.setProperty('--p', p ?? (L.length > 1 ? i / (L.length - 1) : 0));
+    slider.setAttribute('aria-valuemax', String(L.length - 1));
+    slider.setAttribute('aria-valuenow', String(i));
+    slider.setAttribute('aria-valuetext', r.name);
+    $('#effort-model').textContent = ai.modelName || '';
+    $('#effort-label').textContent = r.name;
+    $('#effort-desc').textContent = r.desc || '';
+    $('#effort-ticks').innerHTML = L.map((x, n) => `<button type="button" data-i="${n}" class="${n === i ? 'on' : ''}">${esc(x.name)}</button>`).join('');
+  }
   function renderModels() {
-    const levels = ai.reasoningLevels || [];
-    modelList.innerHTML = levels.map((r) => `
-      <button class="list-item model-row ${r.id === ai.reasoning ? 'current' : ''}" role="option" aria-selected="${r.id === ai.reasoning}" data-id="${esc(r.id)}">
-        <span class="logo bars">${levelBars(LEVEL[r.id] || 2, 16)}</span>
-        <span class="li-main"><span class="li-title">${esc(r.name)}</span><span class="li-sub">${esc(r.desc)}</span></span>
-        <span class="check">${r.id === ai.reasoning ? icons.check : ''}</span>
-      </button>`).join('');
+    renderEffort();
     $('#reasoning-foot').innerHTML = allowance();
     $('#reasoning-upgrade')?.addEventListener('click', () => { closeModels(); api.send('account:open', 'upgrade'); });
+  }
+  async function setEffort(i) {
+    const L = levels();
+    const r = L[Math.max(0, Math.min(L.length - 1, i))];
+    if (r && r.id !== ai.reasoning) {
+      ai.reasoning = r.id; // show it right away; the main process confirms
+      renderEffort();
+      ai = await api.invoke('ai:set-reasoning', r.id);
+      renderState();
+    }
+    renderEffort();
   }
   function closeModels() {
     modelMenu.hidden = true;
@@ -575,23 +596,42 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     modelMenu.hidden = false;
     modelBtn.setAttribute('aria-expanded', 'true');
     renderModels();
-    (modelList.querySelector('.current') || modelList.querySelector('button'))?.focus();
+    slider.focus();
   }
   modelBtn.addEventListener('click', () => (modelMenu.hidden ? openModels() : closeModels()));
   modelMenu.addEventListener('keydown', (e) => {
-    const rows = [...modelList.querySelectorAll('button')];
-    const i = rows.indexOf(document.activeElement);
     if (e.key === 'Escape') { e.stopPropagation(); closeModels(); modelBtn.focus(); }
-    if (e.key === 'ArrowDown') { e.preventDefault(); rows[(i + 1) % rows.length]?.focus(); }
-    if (e.key === 'ArrowUp') { e.preventDefault(); rows[(i - 1 + rows.length) % rows.length]?.focus(); }
   });
-  modelList.addEventListener('click', async (e) => {
-    const id = e.target.closest('[data-id]')?.dataset.id;
-    if (!id) return;
-    ai = await api.invoke('ai:set-reasoning', id);
-    closeModels();
-    renderState();
-    prompt.focus();
+  slider.addEventListener('keydown', (e) => {
+    const step = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1 }[e.key];
+    if (step) { e.preventDefault(); setEffort(levelIndex() + step); }
+    else if (e.key === 'Home') { e.preventDefault(); setEffort(0); }
+    else if (e.key === 'End') { e.preventDefault(); setEffort(levels().length - 1); }
+    else if (e.key === 'Enter') { e.preventDefault(); closeModels(); prompt.focus(); }
+  });
+  slider.addEventListener('pointerdown', (e) => {
+    slider.setPointerCapture(e.pointerId);
+    slider.classList.add('dragging');
+    let i = levelIndex();
+    const at = (ev) => {
+      const r = slider.getBoundingClientRect();
+      const p = Math.max(0, Math.min(1, (ev.clientX - r.left - 15) / (r.width - 30)));
+      i = Math.round(p * (levels().length - 1));
+      renderEffort(i, p);
+    };
+    at(e);
+    const up = () => {
+      slider.classList.remove('dragging');
+      slider.removeEventListener('pointermove', at);
+      setEffort(i);
+    };
+    slider.addEventListener('pointermove', at);
+    slider.addEventListener('pointerup', up, { once: true });
+    slider.addEventListener('pointercancel', up, { once: true });
+  });
+  $('#effort-ticks').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-i]');
+    if (b) setEffort(Number(b.dataset.i));
   });
 
   // ------------------------------------------------------------ chats menu

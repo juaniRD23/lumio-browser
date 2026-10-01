@@ -146,22 +146,40 @@ test('signed out, the panel asks to sign in; on the Free plan the AI is ready', 
   assert.ok(await until(() => L.shell(`!!document.querySelector('.suggestion')`)));
 });
 
-test('one model; the reasoning picker under the chat box sets how hard it thinks', async () => {
+test('one model; the thinking-effort slider under the chat box sets how hard it thinks', async () => {
   assert.equal(await L.shell(`!!document.querySelector('#composer .composer-row #reasoning-btn')`), true);
   assert.equal(await L.shell(`document.getElementById('reasoning-name').textContent`), 'Medium');
   assert.equal(await L.shell(`document.querySelectorAll('#reasoning-bars rect').length`), 3);
   await L.shell(`document.getElementById('reasoning-btn').click(); true`);
-  assert.deepEqual(await L.shell(`[...document.querySelectorAll('#reasoning-list [data-id]')].map((b) => b.dataset.id)`), ['low', 'medium', 'high']);
-  assert.equal(await L.shell(`document.querySelector('#reasoning-list .current').dataset.id`), 'medium');
+  assert.deepEqual(await L.shell(`[...document.querySelectorAll('#effort-ticks button')].map((b) => b.textContent)`), ['Low', 'Medium', 'High']);
+  assert.equal(await L.shell(`document.getElementById('effort-slider').getAttribute('aria-valuenow')`), '1');
+  assert.equal(await L.shell(`document.getElementById('effort-label').textContent`), 'Medium');
+  // The server names the model (the browser doesn't hard-code it).
+  assert.equal(await L.shell(`document.getElementById('effort-model').textContent`), 'Mock Agent');
   // It opens upward, above the chat box, and shows what's left of the plan.
   assert.equal(await L.shell(`document.getElementById('reasoning-menu').getBoundingClientRect().bottom <= document.getElementById('composer').getBoundingClientRect().top`), true);
   assert.match(await L.shell(`document.getElementById('reasoning-foot').textContent`), /Lumio Free · \d+% left\s*Get more/);
   await L.wait(400);
-  await shot('05-reasoning-menu');
-  await L.shell(`document.querySelector('[data-id="high"]').click(); true`);
+  await shot('05-effort-slider');
+  // A real click at the right end of the track moves the knob to High.
+  const r = await L.shell(`(() => { const b = document.getElementById('effort-slider').getBoundingClientRect(); return { x: Math.round(b.right - 6), y: Math.round(b.top + b.height / 2) }; })()`);
+  await L.main(async (_e, p) => {
+    const wc = global.lumio.win.webContents;
+    wc.sendInputEvent({ type: 'mouseDown', x: p.x, y: p.y, button: 'left', clickCount: 1 });
+    wc.sendInputEvent({ type: 'mouseUp', x: p.x, y: p.y, button: 'left', clickCount: 1 });
+  }, r);
   await until(async () => (await L.shell(`document.getElementById('reasoning-name').textContent`)) === 'High');
-  assert.equal(await L.shell(`document.getElementById('reasoning-menu').hidden`), true);
   assert.equal(await L.main(() => global.lumio.store.settings.reasoning), 'high');
+  assert.equal(await L.shell(`document.getElementById('effort-slider').getAttribute('aria-valuenow')`), '2');
+  // Arrow keys step through the levels; the tick labels pick one directly.
+  await L.shell(`document.getElementById('effort-slider').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); true`);
+  await until(async () => (await L.main(() => global.lumio.store.settings.reasoning)) === 'medium');
+  await L.shell(`document.querySelector('#effort-ticks [data-i="2"]').click(); true`);
+  await until(async () => (await L.main(() => global.lumio.store.settings.reasoning)) === 'high');
+  // Escape closes it.
+  await L.shell(`document.getElementById('effort-slider').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); true`);
+  assert.equal(await L.shell(`document.getElementById('reasoning-menu').hidden`), true);
+  assert.equal(await L.shell(`document.getElementById('reasoning-name').textContent`), 'High');
   // Anything else is refused.
   await L.main(() => global.lumio.ai.setReasoning('extreme'));
   assert.equal(await L.main(() => global.lumio.store.settings.reasoning), 'high');
@@ -173,7 +191,7 @@ test('chat streams markdown and includes the page when asked', async () => {
   assert.match(await lastReply(), /Keepers ran them/);
   const req = lumio.state.agentRequests.at(-1);
   assert.ok(req.messages.some((m) => Array.isArray(m.content) && m.content.some((p) => /<current_page/.test(p.text || ''))));
-  assert.equal(req.model, 'openai/gpt-6-luna');
+  assert.equal(req.model, 'mock/agent-1', 'the model the server listed');
   assert.equal(req.reasoning, 'high', 'the chosen reasoning level');
   assert.ok(req.tools.includes('read_page'));
   await L.main(() => global.lumio.ai.setReasoning('medium'));

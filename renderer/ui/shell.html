@@ -79,15 +79,19 @@
         <ol id="plan-list"></ol>
       </section>
       <div id="composer">
-        <div id="reasoning-menu" class="popover" role="listbox" aria-label="Reasoning" hidden>
-          <div class="list-label">Reasoning</div>
-          <div id="reasoning-list"></div>
+        <div id="reasoning-menu" class="popover effort-pop" role="dialog" aria-label="Thinking effort" hidden>
+          <div class="effort-head"><span class="effort-model" id="effort-model"></span><b id="effort-label">Medium</b><span id="effort-desc"></span></div>
+          <div class="slider" id="effort-slider" role="slider" tabindex="0" aria-label="Thinking effort" aria-valuemin="0" aria-valuemax="2" aria-valuenow="1">
+            <div class="s-track"><div class="s-fill"></div></div>
+            <div class="s-knob"></div>
+          </div>
+          <div class="ticks" id="effort-ticks"></div>
           <div id="reasoning-foot" class="menu-foot"></div>
         </div>
         <div id="context-chip" class="chip" hidden title="Lumio will read this page with your message"><i></i><span></span><button aria-label="Don't include this page">×</button></div>
         <textarea id="prompt" rows="1" placeholder="Ask Lumio, or tell it what to do…" spellcheck="true"></textarea>
         <div class="composer-row">
-          <button id="reasoning-btn" class="model-btn" title="Reasoning" aria-haspopup="listbox" aria-expanded="false"><span id="reasoning-bars"></span><span id="reasoning-name">Medium</span><i class="chev"></i></button>
+          <button id="reasoning-btn" class="model-btn" title="Thinking effort" aria-haspopup="dialog" aria-expanded="false"><span id="reasoning-bars"></span><span id="reasoning-name">Medium</span><i class="chev"></i></button>
           <div id="mode" class="segmented" role="radiogroup" aria-label="Approval mode">
             <button data-mode="ask" title="Ask before every action">Ask</button>
             <button data-mode="auto" title="Browse on its own; ask before Mac actions and commands">Auto</button>
