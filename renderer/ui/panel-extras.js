@@ -202,6 +202,9 @@ export function initExtras({ api, getAi, onChange, notice }) {
 
   return {
     renderRing,
+    closePlus: () => plus.close(),
+    // Reads one file the way an attachment is read (for "Summarize this PDF").
+    read: (file) => read(file).then((r) => r.items),
     busy: () => attachments.some((a) => a.status === 'busy'),
     ready: () => attachments.filter((a) => a.status === 'ready').length > 0,
     // Takes what's ready for sending (and clears it from the tray).

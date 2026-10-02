@@ -294,4 +294,59 @@ function aura(opts) {
   return new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true))));
 }
 
-module.exports = { snapshot, locate, focusCheck, selectContents, selectOption, scrollInfo, cursor, aura };
+// The open YouTube video's details and transcript, for "Summarize this
+// video". Runs in Lumio's isolated world, so it re-reads the watch page's HTML
+// (same origin, always the current video even after YouTube's in-page
+// navigation) instead of the page's own JavaScript objects. Without a transcript
+// it returns just the title and description.
+async function youtube(opts) {
+  const max = opts.max || 60000;
+  const pull = (html, name) => {
+    const at = html.indexOf(name);
+    if (at < 0) return null;
+    const start = html.indexOf('{', at);
+    let depth = 0, inStr = false, esc = false;
+    for (let i = start; i < html.length; i++) {
+      const c = html[i];
+      if (inStr) { if (esc) esc = false; else if (c === '\\') esc = true; else if (c === '"') inStr = false; continue; }
+      if (c === '"') inStr = true;
+      else if (c === '{') depth++;
+      else if (c === '}' && --depth === 0) { try { return JSON.parse(html.slice(start, i + 1)); } catch { return null; } }
+    }
+    return null;
+  };
+  const id = new URL(location.href).searchParams.get('v') || (location.pathname.match(/^\/(?:shorts|live)\/([\w-]{6,})/) || [])[1];
+  if (!id) return { error: 'No video is open.' };
+  const html = await (await fetch(`/watch?v=${id}`, { credentials: 'include' })).text();
+  const player = pull(html, 'ytInitialPlayerResponse = ') || {};
+  const d = player.videoDetails || {};
+  const out = { id, title: d.title || document.title, channel: d.author || '', seconds: Number(d.lengthSeconds) || 0, description: String(d.shortDescription || '').slice(0, 4000), transcript: "" };
+
+  // YouTube only serves captions to its own player (with a token the page
+  // makes), so Lumio opens the page's "Show transcript" panel and reads it,
+  // then closes the panel again if it wasn't open.
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const segs = () => [...document.querySelectorAll('ytd-transcript-segment-renderer, transcript-segment-view-model')];
+  const panel = () => document.querySelector('ytd-engagement-panel-section-list-renderer[target-id*="transcript"]');
+  const wasOpen = panel()?.getAttribute('visibility') === 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED';
+  if (!segs().length) {
+    const button = () => document.querySelector('ytd-video-description-transcript-section-renderer button, button[aria-label="Show transcript"]');
+    if (!button()) { document.querySelector('ytd-text-inline-expander #expand, #description-inline-expander #expand, tp-yt-paper-button#expand')?.click(); await wait(400); }
+    button()?.click();
+    for (let i = 0; i < 40 && !segs().length; i++) await wait(200);
+    await wait(300);
+  }
+  const lines = segs().map((el) => {
+    const time = (el.querySelector('.segment-timestamp, .ytwTranscriptSegmentViewModelTimestamp')?.textContent || '').trim();
+    const t = (el.querySelector('.segment-text, .ytAttributedStringHost, [role="text"]')?.textContent || '').replace(/\s+/g, ' ').trim();
+    return t ? (time ? `[${time}] ${t}` : t) : '';
+  }).filter(Boolean);
+  if (lines.length && !wasOpen) panel()?.querySelector('#visibility-button button, button[aria-label="Close transcript"]')?.click();
+
+  let text = lines.join('\n');
+  if (text.length > max) text = text.slice(0, max) + '\n[… transcript shortened]';
+  out.transcript = text;
+  return out;
+}
+
+module.exports = { youtube, snapshot, locate, focusCheck, selectContents, selectOption, scrollInfo, cursor, aura };

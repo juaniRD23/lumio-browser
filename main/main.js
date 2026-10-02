@@ -753,6 +753,7 @@ function registerIpc() {
   handle('ai:connections', (w) => w.ai.connections());
   handle('ai:set-app', (w, name, on) => w.ai.setApp(String(name || ''), !!on));
   handle('ai:extract', (w, file) => w.ai.extractOffice(file || {}));
+  handle('ai:tab-pdf', (w, tabId) => require('./ai/tools/browser').tabPdf(w.tabs, Number.isSafeInteger(tabId) ? tabId : null));
   on('ai:doc-built', (w, result) => w.ai.docBuilt(result || {}));
   on('ai:connect', (w, id) => { if (/^[a-z_]{2,40}$/.test(String(id))) w.tabs.create(`${account.base}/api/connect/${id}/start?next=/account`); });
   on('ai:open-file', (w, p) => { if (w.ai.ownsFile(p)) shell.openPath(p); });

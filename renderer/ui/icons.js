@@ -31,6 +31,7 @@ export const icons = {
   x: s('<path d="M7 7l10 10M17 7L7 17"/>', 'width="14" height="14"'),
   copy: s('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>', 'width="14" height="14"'),
   trash: s('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>', 'width="14" height="14"'),
+  play: s('<rect x="3" y="5.5" width="18" height="13" rx="3.5"/><path d="M10.5 9.5v5l4-2.5z" fill="currentColor"/>'),
   page: s('<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>', 'width="13" height="13"'),
   cursor: s('<path d="M5 3l14 7-6 1.5L10.5 18z"/>', 'width="14" height="14"'),
   keyboard: s('<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/>', 'width="14" height="14"'),

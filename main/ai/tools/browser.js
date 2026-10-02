@@ -154,6 +154,12 @@ const tools = [
         snap.lines.join('\n') || '(none)',
       ];
       if (snap.text) parts.push('', 'Page text:', snap.text);
+      // A YouTube video's transcript, once per video per task (it's long).
+      if (a.include_text !== false && YOUTUBE_VIDEO.test(snap.url) && !(ctx.videosRead ??= new Set()).has(snap.url)) {
+        ctx.videosRead.add(snap.url);
+        const v = await inPage(wc, scripts.youtube, { max: 30000 }).catch(() => null);
+        if (v?.transcript) parts.push('', 'Video transcript (from YouTube):', v.transcript);
+      }
       if (snap.frames) parts.push('', `(${snap.frames} embedded frame(s) not included; use screenshot_tab to see them.)`);
       return { text: parts.join('\n'), summary: `${snap.lines.length} elements` };
     },
@@ -452,18 +458,85 @@ async function clearCursors(tabs) {
 }
 
 // Text of the active page, for "Include this page" context.
-async function pageContext(tabs) {
-  const tab = tabs.active;
+const YOUTUBE_VIDEO = /^https:\/\/(www\.|m\.)?youtube\.com\/(watch\?|shorts\/|live\/)/;
+
+function videoText(v) {
+  const len = v.seconds ? ` · ${Math.floor(v.seconds / 60)}:${String(v.seconds % 60).padStart(2, '0')} long` : '';
+  return [
+    `YouTube video: ${v.title}${v.channel ? ` · by ${v.channel}` : ''}${len}`,
+    v.description ? `Description:\n${v.description}` : '',
+    v.transcript ? `Transcript:\n${v.transcript}` : '(This video has no transcript, so only the title and description are available.)',
+  ].filter(Boolean).join('\n\n');
+}
+
+// What "Include this page" sends: the page's readable text, or for a YouTube
+// video its details and transcript.
+async function pageContext(tabs, tab = tabs.active, { maxText = 12000 } = {}) {
   if (!tab?.view) return null;
   const wc = tab.view.webContents;
   const url = wc.getURL();
   if (!/^https?:/.test(url)) return null;
+  if (YOUTUBE_VIDEO.test(url)) {
+    try {
+      const v = await inPage(wc, scripts.youtube, { max: Math.max(maxText, 60000) });
+      if (v && !v.error) return { tabId: tab.id, title: v.title, url, text: videoText(v), favicon: tab.favicon, video: true, transcript: !!v.transcript };
+    } catch {}
+  }
   try {
-    const snap = await inPage(wc, scripts.snapshot, { max: 0, maxText: 12000 });
+    const snap = await inPage(wc, scripts.snapshot, { max: 0, maxText });
     return { tabId: tab.id, title: snap.title, url: snap.url, text: snap.text, favicon: tab.favicon };
   } catch {
     return { tabId: tab.id, title: wc.getTitle(), url, text: '', favicon: tab.favicon };
   }
 }
 
-module.exports = { tools, clearCursors, pageContext, pressKey, inPage, settle };
+// "Ask about my tabs": every open web tab's text, each tab getting an equal
+// share of the budget. Sleeping tabs (Memory Saver) are listed by title only.
+const ALL_TABS_BUDGET = 90000;
+const ALL_TABS_MAX = 30;
+async function allTabsContext(tabs) {
+  const web = tabs.tabs.filter((t) => /^(https?:|file:.*\.pdf$)/i.test(tabs.displayUrl(t) || ''));
+  const list = web.slice(0, ALL_TABS_MAX);
+  const per = Math.max(2500, Math.floor(ALL_TABS_BUDGET / Math.max(1, list.length)));
+  const read = await Promise.all(list.map(async (t) => {
+    const base = { tabId: t.id, title: t.title || '', url: tabs.displayUrl(t), favicon: t.favicon };
+    if (!t.view || t.discarded) return { ...base, text: '', note: 'asleep (Memory Saver), not read' };
+    if (t.pdf) return { ...base, text: '', note: 'a PDF; open it and ask Lumio to summarize it' };
+    let timer;
+    const page = await Promise.race([pageContext(tabs, t, { maxText: per }), new Promise((r) => { timer = setTimeout(r, 6000, null); })]).catch(() => null);
+    clearTimeout(timer);
+    return page ? { ...base, title: page.title || base.title, text: (page.text || '').slice(0, per) } : { ...base, text: '', note: 'couldn’t be read' };
+  }));
+  return { tabs: read, skipped: web.length - list.length };
+}
+
+// The PDF open in a tab, fetched with that tab's cookies so signed-in
+// documents work too. The panel reads it with pdf.js.
+const MAX_PDF = 30 * 1024 * 1024;
+async function tabPdf(tabs, tabId) {
+  const tab = tabId == null ? tabs.active : tabs.tabs.find((t) => t.id === tabId);
+  if (!tab?.view || !tab.pdf) return { error: 'That tab isn’t showing a PDF.' };
+  const wc = tab.view.webContents;
+  const url = wc.getURL();
+  const name = decodeURIComponent((new URL(url).pathname.split('/').pop() || 'document.pdf')).replace(/[\u0000-\u001f]/g, ' ').slice(0, 120) || 'document.pdf';
+  try {
+    let data;
+    if (url.startsWith('file:')) {
+      const file = require('url').fileURLToPath(url);
+      const st = await require('fs').promises.stat(file);
+      if (st.size > MAX_PDF) return { error: 'That PDF is over 30 MB.' };
+      data = await require('fs').promises.readFile(file);
+    } else if (/^https?:/.test(url)) {
+      const res = await wc.session.fetch(url);
+      if (!res.ok) return { error: `Couldn’t download the PDF (${res.status}).` };
+      if (Number(res.headers.get('content-length')) > MAX_PDF) return { error: 'That PDF is over 30 MB.' };
+      data = Buffer.from(await res.arrayBuffer());
+      if (data.length > MAX_PDF) return { error: 'That PDF is over 30 MB.' };
+    } else return { error: 'That tab isn’t showing a PDF.' };
+    return { name: /\.pdf$/i.test(name) ? name : `${name}.pdf`, data: new Uint8Array(data), tabId: tab.id, title: tab.title, url, favicon: tab.favicon };
+  } catch (err) {
+    return { error: `Couldn’t read the PDF: ${err.message}` };
+  }
+}
+
+module.exports = { tools, clearCursors, pageContext, allTabsContext, tabPdf, YOUTUBE_VIDEO, pressKey, inPage, settle };

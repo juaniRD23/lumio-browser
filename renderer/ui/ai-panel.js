@@ -34,6 +34,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   let chatId = null;
   let panelOpen = true;
   let includePage = true;
+  let includeTabs = false; // "Ask about my tabs": the next message reads every open tab
   const includedUrl = new Map(); // chatId -> last page URL sent as context
   let live = null; // { textEl, textBuf, thinkingEl, steps: Map }
   let plan = null; // the current chat's checklist from update_plan
@@ -203,6 +204,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     const before = key(ai);
     ai = s;
     renderState();
+    renderSuggest();
     // Signing in or out changes the empty panel's card.
     if (messages.querySelector('.empty') && before !== key(ai)) renderEmpty();
   });
@@ -214,8 +216,18 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
 
   // ------------------------------------------------------------ context chip
   function renderChip() {
+    renderSuggest();
     const t = getActiveTab();
-    const web = t && /^https?:/.test(t.url || '');
+    if (includeTabs) {
+      chip.hidden = false;
+      chip.classList.remove('off');
+      chip.querySelector('i').innerHTML = icons.tabs;
+      chip.querySelector('span').textContent = 'All open tabs';
+      chip.querySelector('button').textContent = '×';
+      chip.title = 'Lumio will read all your open tabs with your message. Click × to just use this page.';
+      return;
+    }
+    const web = t && /^(https?:|file:.*\.pdf)/i.test(t.url || '');
     chip.hidden = !web;
     if (!web) return;
     chip.classList.toggle('off', !includePage);
@@ -224,7 +236,69 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     chip.querySelector('button').textContent = includePage ? '×' : '+';
     chip.title = includePage ? 'Lumio will read this page with your message. Click × to leave it out.' : 'Click + to include this page.';
   }
-  chip.addEventListener('click', () => { includePage = !includePage; renderChip(); });
+  chip.addEventListener('click', () => {
+    if (includeTabs) includeTabs = false;
+    else includePage = !includePage;
+    renderChip();
+  });
+  $('#add-tabs').addEventListener('click', () => {
+    extras.closePlus();
+    includeTabs = true;
+    renderChip();
+    if (!prompt.value.trim()) { prompt.value = 'Which of my tabs '; autosize(); }
+    prompt.focus();
+    prompt.setSelectionRange(prompt.value.length, prompt.value.length);
+  });
+
+  // ------------------------------------------------------------ summarize suggestion
+  // On a YouTube video or a PDF, one tap summarizes it (once per chat and page).
+  const VIDEO = /^https:\/\/(www\.|m\.)?youtube\.com\/(watch\?|shorts\/|live\/)/;
+  const summarized = new Set(); // `${chatId}|${url}`
+  const suggestBtn = $('#page-suggest');
+  function suggestKind(t) {
+    if (!t) return null;
+    if (t.pdf) return 'pdf';
+    if (VIDEO.test(t.url || '')) return 'video';
+    return null;
+  }
+  function renderSuggest() {
+    const t = getActiveTab();
+    const kind = suggestKind(t);
+    const show = kind && ai.ready && !summarized.has(`${chatId}|${t.url}`);
+    suggestBtn.hidden = !show;
+    if (!show) return;
+    suggestBtn.dataset.kind = kind;
+    suggestBtn.innerHTML = `${kind === 'video' ? icons.play : icons.page}<span>Summarize this ${kind === 'video' ? 'video' : 'PDF'}</span>`;
+  }
+  suggestBtn.addEventListener('click', async () => {
+    const t = getActiveTab();
+    const kind = suggestKind(t);
+    if (!kind) return;
+    if (ai.running) { notice('Lumio is still working. Press Stop first.'); return; }
+    summarized.add(`${chatId}|${t.url}`);
+    renderSuggest();
+    let res = null;
+    if (kind === 'video') res = await submit('Summarize this video: a one-line takeaway first, then the key points with their timestamps.', true);
+    else {
+      const items = await readTabPdf(t);
+      if (items) res = await submit('Summarize this PDF: a one-line takeaway first, then the key points.', false, items);
+    }
+    if (res?.chatId) summarized.add(`${res.chatId}|${t.url}`);
+    renderSuggest();
+  });
+
+  // The PDF open in a tab, read like an attached file.
+  async function readTabPdf(t) {
+    const wait = notice('Reading the PDF…', 'info');
+    try {
+      const got = await api.invoke('ai:tab-pdf', t.id);
+      if (got.error) { notice(got.error); return null; }
+      return await extras.read(new File([got.data], got.name, { type: 'application/pdf' }));
+    } catch (err) {
+      notice(`Couldn’t read the PDF: ${err.message}`);
+      return null;
+    } finally { wait.remove(); }
+  }
 
   // ------------------------------------------------------------ composer
   function autosize() {
@@ -244,23 +318,36 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     else submit();
   });
 
-  async function submit(textOverride, forcePage) {
+  async function submit(textOverride, forcePage, extraFiles = null) {
     const text = (textOverride ?? prompt.value).trim();
     const useFiles = textOverride == null;
     if (!text && !(useFiles && extras.ready())) return;
     if (!ai.ready) { renderEmpty(); $('#key-input')?.focus(); return; }
     if (ai.running) { notice('Lumio is still working. Press Stop first.'); return; }
     if (useFiles && extras.busy()) { notice('Still reading your files. Send again in a moment.'); return; }
-    const attachments = useFiles ? extras.take() : [];
+    const attachments = useFiles ? extras.take() : (extraFiles || []);
     if (attachments === null) return;
     const t = getActiveTab();
     const url = t?.url || '';
-    const web = /^https?:/.test(url);
-    const wantPage = web && (forcePage || (includePage && includedUrl.get(chatId) !== url));
+    const web = /^https?:/.test(url) || !!t?.pdf;
+    const tabs = includeTabs;
+    let wantPage = !tabs && web && (forcePage || (includePage && includedUrl.get(chatId) !== url));
     if (textOverride == null) { prompt.value = ''; autosize(); }
-    const res = await api.invoke('ai:send', { chatId, text, includePage: wantPage, attachments });
+    // A PDF's text comes from the file itself (the page only shows the viewer).
+    if (wantPage && t.pdf) {
+      wantPage = false;
+      const items = await readTabPdf(t);
+      if (items) {
+        if (attachments.length + items.length > 10) { notice('That’s too many files with this PDF. Attach up to 10.'); return; }
+        attachments.push(...items);
+        includedUrl.set(chatId, url);
+      }
+    }
+    const res = await api.invoke('ai:send', { chatId, text, includePage: wantPage, includeTabs: tabs, attachments });
     if (!res.ok) { notice(res.error); return; }
-    if (wantPage) includedUrl.set(res.chatId, url);
+    if (tabs) { includeTabs = false; renderChip(); }
+    if (wantPage || (t?.pdf && includedUrl.get(chatId) === url)) includedUrl.set(res.chatId, url);
+    return res;
   }
 
   // ------------------------------------------------------------ rendering
@@ -729,6 +816,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     live = ai.running && ai.runChatId === id ? { textEl: null, textBuf: '', thinkingEl: null, steps: new Map() } : null;
     renderChat(chat.display);
     showPlan(chat.plan || null);
+    renderSuggest();
     if (live) {
       messages.querySelectorAll('.step.running').forEach((el) => live.steps.set(el.dataset.id, el));
       const last = messages.lastElementChild;
@@ -743,6 +831,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     messages.innerHTML = '';
     renderEmpty();
     renderState();
+    renderSuggest();
     prompt.focus();
   }
   $('#newchat-btn').addEventListener('click', () => { chatMenu.hidden = true; newChat(); });

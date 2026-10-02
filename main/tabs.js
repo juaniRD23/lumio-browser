@@ -144,6 +144,14 @@ class TabManager {
 
     wc.on('did-start-loading', () => update({ loading: true, crashed: false }));
     wc.on('did-stop-loading', () => update({ loading: false, ...M().navState(wc) }));
+    // PDFs open in Chromium's viewer: the panel offers "Summarize this PDF"
+    // and reads the file itself (page text tools see only the viewer).
+    wc.on('did-finish-load', () => {
+      if (!/^(https?|file):/.test(wc.getURL())) { if (tab.pdf) update({ pdf: false }); return; }
+      wc.executeJavaScriptInIsolatedWorld(1001, [{ code: 'document.contentType' }])
+        .then((type) => { if (!wc.isDestroyed() && !!tab.pdf !== (type === 'application/pdf')) update({ pdf: type === 'application/pdf' }); })
+        .catch(() => {});
+    });
     wc.on('page-title-updated', (_e, title) => {
       update({ title });
       remember((s) => s.updateTitle(wc.getURL(), title));
@@ -457,6 +465,7 @@ class TabManager {
         audible: t.audible,
         muted: t.muted,
         sleeping: !!t.discarded,
+        pdf: !!t.pdf,
         crashed: t.crashed,
         pinned: t.pinned,
         bookmarked: this.store.isBookmarked(this.displayUrl(t)),

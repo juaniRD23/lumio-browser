@@ -94,11 +94,16 @@
             <span class="mi"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 11-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg></span>
             <span class="mt"><b>Add photos &amp; files</b><small>Pictures, PDFs, Word, PowerPoint, Excel, text · up to 10</small></span>
           </button>
+          <button type="button" class="menu-row" id="add-tabs" role="menuitem">
+            <span class="mi"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="14" height="13" rx="2"/><path d="M7 4h12a2 2 0 0 1 2 2v10"/></svg></span>
+            <span class="mt"><b>Ask about my tabs</b><small>Lumio reads every open tab with your message</small></span>
+          </button>
           <div class="list-label conn-label">Connections</div>
           <div id="apps" class="apps"></div>
         </div>
         <div id="usage-pop" class="popover usage-pop" role="dialog" aria-label="Usage" hidden></div>
         <div id="tray" class="tray" hidden></div>
+        <button id="page-suggest" class="page-suggest" type="button" hidden></button>
         <div id="context-chip" class="chip" hidden title="Lumio will read this page with your message"><i></i><span></span><button aria-label="Don't include this page">×</button></div>
         <textarea id="prompt" rows="1" placeholder="Ask Lumio, or tell it what to do…" spellcheck="true"></textarea>
         <div class="composer-row">
