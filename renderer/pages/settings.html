@@ -17,6 +17,7 @@
       <a href="#autofill">Passwords and autofill</a>
       <a href="#privacy">Privacy and security</a>
       <a href="#appearance">Appearance</a>
+      <a href="#performance">Performance</a>
       <a href="#search">Search engine</a>
       <a href="#downloads">Downloads</a>
       <a href="#startup">On startup</a>
@@ -169,6 +170,23 @@
           <div class="row">
             <div class="grow"><div class="title">Theme color</div><div class="desc">Change it under Customize profile.</div></div>
             <a class="btn" href="#profile" style="display:inline-flex;align-items:center">Customize</a>
+          </div>
+        </div>
+      </section>
+
+      <!-- Performance -->
+      <section id="performance">
+        <h2>Performance</h2>
+        <div class="card">
+          <label class="row" style="cursor:pointer">
+            <div class="grow"><div class="title">Memory Saver</div><div class="desc">Tabs you haven’t looked at for a while go to sleep and give back their memory. They come back where you left them when you open them. Tabs playing sound never sleep.</div></div>
+            <span class="switch"><input type="checkbox" id="mem-saver"><i></i></span>
+          </label>
+          <div class="row" id="mem-after-row">
+            <div class="grow"><div class="title">Sleep tabs after</div></div>
+            <select id="mem-after" class="field">
+              <option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option><option value="120">2 hours</option><option value="240">4 hours</option>
+            </select>
           </div>
         </div>
       </section>

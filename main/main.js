@@ -1,6 +1,6 @@
 // Lumio Browser — main process entry.
 const {
-  app, BrowserWindow, ipcMain, session, protocol, Menu, safeStorage, nativeImage, dialog, net, shell,
+  app, BrowserWindow, ipcMain, session, protocol, Menu, safeStorage, nativeImage, dialog, net, shell, desktopCapturer, webContents,
 } = require('electron');
 const fs = require('fs');
 const path = require('path');
@@ -80,6 +80,7 @@ function incognitoProfile() {
   const profile = { incognito: true, session: ses, chats: new ChatStore(null) };
   profile.downloads = new Downloads(ses, { settings: store, emit: (c, p) => alive().filter((w) => w.profile === profile).forEach((w) => w.emit(c, p)) });
   profile.permissions = new Permissions(ses, { store, emitFor, persist: false });
+  setupScreenShare(ses);
   incog = profile;
   return profile;
 }
@@ -131,6 +132,7 @@ const services = {
   onSessionChanged: () => saveSession(),
   onViewCreated: (w, tab) => { if (!w.incognito && tab.view) extensions?.addTab(tab.view.webContents, w.win); },
   onPasskeyPromptClosed: (w) => passwords?.passkeyClosed(w),
+  onScreenSharePickerClosed: (w) => shareCancel(w),
   onTabActivated: (w, tab) => { if (!w.incognito && tab.view) extensions?.selectTab(tab.view.webContents); },
   savePage: (w, tab) => savePage(w, tab),
   contextMenuExtras: (w, tab, params) => (w.incognito || !tab.view ? [] : extensions?.contextMenuItems(tab.view.webContents, params) || []),
@@ -431,6 +433,56 @@ async function openCardWindow(w) {
   return { ok: true };
 }
 
+// ---------------------------------------------------------------- screen sharing
+// getDisplayMedia (Google Meet, Zoom, Discord on the web). macOS 15+ shows its
+// own picker (no Screen Recording permission needed); elsewhere Lumio shows
+// the screens and windows to choose from, over the tab that asked.
+const sharePending = new Map(); // id -> { callback, w, audio }
+let nextShareId = 1;
+function setupScreenShare(ses) {
+  ses.setDisplayMediaRequestHandler(async (request, callback) => {
+    const wc = request.frame ? webContents.fromFrame(request.frame) : null;
+    const w = wc && alive().find((x) => x.tabs.byWebContents(wc));
+    const tab = w?.tabs.byWebContents(wc);
+    if (!w || !tab) return callback({});
+    let sources = [];
+    try { sources = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 320, height: 200 } }); } catch { /* no permission */ }
+    sources = sources.filter((s) => !/^Lumio Browser/.test(s.name) || s.id.startsWith('screen:'));
+    if (!sources.length) {
+      w.emit('toast', { text: process.platform === 'darwin' ? 'To share your screen, turn on Lumio Browser in System Settings › Privacy & Security › Screen Recording.' : 'Nothing to share right now.' });
+      return callback({});
+    }
+    shareCancel(w);
+    const id = nextShareId++;
+    sharePending.set(id, { callback, w, audio: !!request.audioRequested, sources });
+    let host = '';
+    try { host = new URL(request.securityOrigin || wc.getURL()).host; } catch { /* keep empty */ }
+    const b = tab.view?.getBounds() || { x: 0, y: 90, width: 900, height: 600 };
+    const width = Math.min(560, b.width - 24);
+    w.showOverlay(
+      { x: b.x + Math.round((b.width - width) / 2), y: b.y + 12, width, height: Math.min(520, b.height - 24) },
+      {
+        kind: 'screenshare',
+        share: {
+          id, host,
+          sources: sources.map((s) => ({ id: s.id, name: s.name, screen: s.id.startsWith('screen:'), thumb: s.thumbnail.isEmpty() ? '' : s.thumbnail.toDataURL() })),
+        },
+      },
+    );
+  }, { useSystemPicker: true });
+}
+function shareAnswer(id, sourceId) {
+  const p = sharePending.get(id);
+  if (!p) return;
+  sharePending.delete(id);
+  const source = sourceId && p.sources.find((s) => s.id === sourceId);
+  // System audio can only be shared on Windows (loopback).
+  p.callback(source ? { video: source, ...(p.audio && process.platform === 'win32' ? { audio: 'loopback' } : {}) } : {});
+}
+function shareCancel(w) {
+  for (const [id, p] of sharePending) if (p.w === w) shareAnswer(id, null);
+}
+
 function profileState() { return { ...store.settings.profile }; }
 const firstName = (name) => String(name || '').trim().split(/\s+/)[0].slice(0, 40) || null;
 
@@ -612,6 +664,10 @@ function registerIpc() {
     w.overlay.setBounds({ ...b, height: Math.max(60, Math.min(Math.round(height), max)) });
   });
   on('overlay:pick', (w, item) => {
+    if (item?.kind === 'screenshare') {
+      const p = sharePending.get(Number(item.id));
+      if (p?.w === w) shareAnswer(Number(item.id), typeof item.source === 'string' ? item.source : null);
+    }
     w.hideOverlay();
     w.emit('overlay-picked', item);
   });
@@ -784,6 +840,8 @@ function registerIpc() {
     startup: store.settings.startup,
     downloadDir: store.settings.downloadDir || app.getPath('downloads'),
     askDownload: !!store.settings.askDownload,
+    memorySaver: store.settings.memorySaver !== false,
+    memorySaverMinutes: store.settings.memorySaverMinutes || 60,
     offerPasswords: store.settings.offerPasswords !== false,
     autofillPasswords: store.settings.autofillPasswords !== false,
     platform: process.platform,
@@ -809,6 +867,8 @@ function registerIpc() {
     if (key === 'askDownload') store.setSetting('askDownload', !!value);
     if (key === 'offerPasswords') store.setSetting('offerPasswords', !!value);
     if (key === 'autofillPasswords') store.setSetting('autofillPasswords', !!value);
+    if (key === 'memorySaver') store.setSetting('memorySaver', !!value);
+    if (key === 'memorySaverMinutes' && [15, 30, 60, 120, 240].includes(Number(value))) store.setSetting('memorySaverMinutes', Number(value));
     services.broadcastAIState();
   });
   internalHandle('page:set-site-permission', ['settings'], (_ctx, origin, permission, value) => {
@@ -1009,6 +1069,12 @@ app.whenReady().then(async () => {
   account.refresh();
   watchLumioCookie();
   setInterval(() => { if (account.token()) account.refresh(); }, 10 * 60 * 1000).unref?.();
+  // Memory Saver: once a minute, tabs nobody has looked at for a while go to sleep.
+  setInterval(() => {
+    if (!store.settings.memorySaver) return;
+    const minutes = Math.max(5, Number(store.settings.memorySaverMinutes) || 60);
+    for (const w of alive()) if (!w.ai?.isRunning()) w.tabs.sleepIdle(minutes);
+  }, 60 * 1000).unref?.();
 
   passwords = new PasswordManager({
     dir: app.getPath('userData'),
@@ -1044,6 +1110,7 @@ app.whenReady().then(async () => {
   }
   if (lastVersion !== app.getVersion()) store.setSetting('lastVersion', app.getVersion());
   normal.permissions = new Permissions(ses, { store, emitFor, persist: true });
+  setupScreenShare(ses);
 
   extensions = new ExtensionManager({
     session: ses,

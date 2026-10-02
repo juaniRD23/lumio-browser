@@ -365,6 +365,13 @@ $('#engine').value = s.searchEngine;
 $('#engine').addEventListener('change', (e) => page.invoke('page:set-setting', 'searchEngine', e.target.value));
 
 $('#dl-dir').textContent = s.downloadDir;
+// Memory Saver
+$('#mem-saver').checked = s.memorySaver !== false;
+$('#mem-after').value = String(s.memorySaverMinutes || 60);
+$('#mem-after-row').classList.toggle('dim', !$('#mem-saver').checked);
+$('#mem-saver').addEventListener('change', (e) => { page.invoke('page:set-setting', 'memorySaver', e.target.checked); $('#mem-after-row').classList.toggle('dim', !e.target.checked); });
+$('#mem-after').addEventListener('change', (e) => page.invoke('page:set-setting', 'memorySaverMinutes', Number(e.target.value)));
+
 $('#dl-ask').checked = s.askDownload;
 $('#dl-ask').addEventListener('change', (e) => page.invoke('page:set-setting', 'askDownload', e.target.checked));
 $('#dl-change').addEventListener('click', async () => { $('#dl-dir').textContent = await page.invoke('page:choose-download-dir'); });

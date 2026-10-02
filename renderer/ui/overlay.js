@@ -148,6 +148,21 @@ function renderPasskey({ prompt }) {
   card.dataset.prompt = String(p.id);
 }
 
+// A site asked to share your screen: pick a whole screen or one window.
+function renderScreenShare({ share: s }) {
+  const tile = (x) => `<button class="ss-tile" data-src="${esc(x.id)}" title="${esc(x.name)}">
+      <span class="ss-thumb">${x.thumb ? `<img src="${esc(x.thumb)}" alt="">` : ''}</span>
+      <span class="ss-name">${esc(x.screen ? (x.name || 'Entire screen') : x.name)}</span></button>`;
+  const screens = s.sources.filter((x) => x.screen);
+  const windows = s.sources.filter((x) => !x.screen);
+  card.innerHTML = `<div class="pk-head">${icons.eye || ''}<span>${esc(s.host)} wants to see your screen</span></div>
+    <div class="pk-title">Choose what to share</div>
+    ${screens.length ? `<div class="ss-label">Entire screen</div><div class="ss-grid">${screens.map(tile).join('')}</div>` : ''}
+    ${windows.length ? `<div class="ss-label">Window</div><div class="ss-grid">${windows.map(tile).join('')}</div>` : ''}
+    <div class="pws-actions"><span style="flex:1"></span><button class="acc-btn ghost" data-ss="cancel">Cancel</button><button class="acc-btn primary" data-ss="share" disabled>Share</button></div>`;
+  card.dataset.prompt = String(s.id);
+}
+
 // What's new in an update, from the release notes (a little Markdown).
 function notesHtml(md) {
   const inline = (t) => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
@@ -209,6 +224,7 @@ api.on('overlay-data', (payload) => {
   else if (kind === 'pwsave') { renderPwSave(payload); reportSize(); }
   else if (kind === 'passkey') { renderPasskey(payload); reportSize(); }
   else if (kind === 'update') { renderUpdateCard(payload); reportSize(); }
+  else if (kind === 'screenshare') renderScreenShare(payload);
 });
 
 card.addEventListener('change', (e) => {
@@ -217,6 +233,23 @@ card.addEventListener('change', (e) => {
 });
 
 card.addEventListener('mousedown', async (e) => {
+  if (kind === 'screenshare') {
+    const tile = e.target.closest('[data-src]');
+    if (tile) {
+      card.querySelectorAll('.ss-tile.on').forEach((t) => t.classList.remove('on'));
+      tile.classList.add('on');
+      card.querySelector('[data-ss=share]').disabled = false;
+      if (e.detail >= 2) api.send('overlay:pick', { kind, id: Number(card.dataset.prompt), source: tile.dataset.src }); // double-click shares
+      return;
+    }
+    const act = e.target.closest('[data-ss]')?.dataset.ss;
+    if (!act) return;
+    e.preventDefault();
+    const chosen = card.querySelector('.ss-tile.on')?.dataset.src || null;
+    if (act === 'share' && !chosen) return;
+    api.send('overlay:pick', { kind, id: Number(card.dataset.prompt), source: act === 'share' ? chosen : null });
+    return;
+  }
   if (kind === 'update') {
     const act = e.target.closest('[data-up]')?.dataset.up;
     if (!act) return;

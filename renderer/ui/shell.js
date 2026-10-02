@@ -70,8 +70,9 @@ function createTabEl(id) {
 function updateTabEl(el, t) {
   el.classList.toggle('active', t.id === state.activeId);
   el.classList.toggle('pinned', !!t.pinned);
+  el.classList.toggle('sleeping', !!t.sleeping);
   el.setAttribute('aria-selected', String(t.id === state.activeId));
-  el.title = t.title + (t.url ? '\n' + t.url : '');
+  el.title = t.title + (t.url ? '\n' + t.url : '') + (t.sleeping ? '\nSleeping to save memory (Memory Saver)' : '');
   const fav = faviconHtml(t);
   if (el._fav !== fav) { el.querySelector('.fav').innerHTML = fav; el._fav = fav; }
   const img = el.querySelector('.fav img');

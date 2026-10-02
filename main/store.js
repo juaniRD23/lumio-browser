@@ -48,6 +48,8 @@ const DEFAULT_SETTINGS = {
   askDownload: false, // ask where to save each file
   offerPasswords: true,
   autofillPasswords: true,
+  memorySaver: true, // tabs you haven't looked at for a while give back their memory
+  memorySaverMinutes: 60,
 };
 
 const HISTORY_DAYS = 90;

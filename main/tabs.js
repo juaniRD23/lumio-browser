@@ -3,7 +3,7 @@
 // from the last session are created lazily (their page loads the first time
 // they're activated). A tab can move to another window (detach + adopt), so
 // its event handlers always look up the manager that currently owns it.
-const { WebContentsView, Menu, clipboard, shell } = require('electron');
+const { WebContentsView, Menu, clipboard, shell, app } = require('electron');
 const path = require('path');
 const { parseInput, displayUrl } = require('./omnibox');
 const { SEARCH_ENGINES } = require('./store');
@@ -51,6 +51,7 @@ class TabManager {
       crashed: false,
       pinned: !!pinned,
       pendingUrl: lazy ? url : null,
+      lastActive: Date.now(),
     };
     if (!lazy) this.ensureView(tab);
     this.insert(tab, index);
@@ -90,8 +91,49 @@ class TabManager {
     this.hooks.onViewCreated?.(tab, this);
     const url = tab.pendingUrl || tab.url;
     tab.pendingUrl = null;
-    view.webContents.loadURL(url).catch(() => {});
+    // A tab Memory Saver put to sleep comes back with its back/forward history.
+    const saved = tab.savedHistory;
+    tab.savedHistory = null;
+    tab.discarded = false;
+    if (saved?.entries?.length) {
+      view.webContents.navigationHistory.restore(saved).catch(() => view.webContents.loadURL(url).catch(() => {}));
+    } else {
+      view.webContents.loadURL(url).catch(() => {});
+    }
     return view;
+  }
+
+  // Memory Saver: closes the page of a tab you haven't looked at for a while,
+  // keeping its address, title, icon and history; it reloads when you return.
+  // Never the tab you're on, one playing sound, loading, being captured
+  // (screen share, camera) or with devtools open.
+  discard(id) {
+    const tab = this.get(id);
+    if (!tab?.view || tab.id === this.activeId || tab.audible) return false;
+    const wc = tab.view.webContents;
+    if (wc.isDestroyed() || wc.isLoading() || wc.isCurrentlyAudible() || wc.isBeingCaptured() || wc.isDevToolsOpened()) return false;
+    const url = wc.getURL();
+    if (!url || url.startsWith('lumio://')) return false; // internal pages are cheap
+    const h = wc.navigationHistory;
+    tab.savedHistory = { entries: h.getAllEntries(), index: h.getActiveIndex() };
+    tab.pendingUrl = url;
+    tab.url = url;
+    tab.discarded = true;
+    tab.loading = false;
+    this.win.contentView.removeChildView(tab.view);
+    tab.view = null;
+    wc.close();
+    this.changed();
+    return true;
+  }
+
+  // Tabs not looked at for `minutes` (and not pinned to anything playing).
+  sleepIdle(minutes, now = Date.now()) {
+    let n = 0;
+    for (const t of this.tabs) {
+      if (t.view && t.id !== this.activeId && now - (t.lastActive || now) >= minutes * 60_000 && this.discard(t.id)) n++;
+    }
+    return n;
   }
 
   wire(tab) {
@@ -248,6 +290,9 @@ class TabManager {
   activate(id) {
     const tab = this.get(id);
     if (!tab) return;
+    const prev = this.active;
+    if (prev) prev.lastActive = Date.now();
+    tab.lastActive = Date.now();
     this.activeId = id;
     this.ensureView(tab);
     for (const t of this.tabs) if (t.view) { t.view.setVisible(t.id === id); t.view.lumioCovered = false; }
@@ -334,6 +379,20 @@ class TabManager {
     this.changed();
   }
 
+  // Quick Lumio AI actions for highlighted text (right-click › Lumio).
+  selectionActions(selection) {
+    const quoted = selection.slice(0, 8000).split('\n').map((l) => `> ${l}`).join('\n');
+    const ask = (instruction, includePage = false) => this.hooks.askAI(`${instruction}\n\n${quoted}`, { includePage });
+    let lang = 'English';
+    try { lang = new Intl.DisplayNames(['en'], { type: 'language' }).of(app.getLocale().split('-')[0]) || 'English'; } catch { /* keep English */ }
+    return [
+      { label: 'Explain', click: () => ask('Explain this simply, using the page for context:', true) },
+      { label: 'Summarize', click: () => ask('Summarize this in a few short bullet points:') },
+      { label: `Translate to ${lang}`, click: () => ask(`Translate this into ${lang}. If it's already in ${lang}, translate it into English.`) },
+      { label: 'Fix grammar and spelling', click: () => ask('Fix the grammar and spelling of this text. Reply with just the corrected text:') },
+    ];
+  }
+
   // ---------- layout ----------
   setSlot(rect) {
     this.slot = {
@@ -397,6 +456,7 @@ class TabManager {
         canGoForward: t.canGoForward,
         audible: t.audible,
         muted: t.muted,
+        sleeping: !!t.discarded,
         crashed: t.crashed,
         pinned: t.pinned,
         bookmarked: this.store.isBookmarked(this.displayUrl(t)),
@@ -482,6 +542,7 @@ class TabManager {
         { role: 'paste', enabled: params.editFlags.canPaste },
         { role: 'pasteAndMatchStyle', enabled: params.editFlags.canPaste },
         { role: 'selectAll' },
+        ...(selection ? [{ type: 'separator' }, { label: 'Lumio', submenu: this.selectionActions(selection) }] : []),
       );
       sep();
     } else if (selection) {
@@ -490,6 +551,7 @@ class TabManager {
         { role: 'copy' },
         { label: `Search ${engine.name} for “${short}”`, click: () => this.create(parseInput(selection, engine.url).url, { index }) },
         { label: `Ask Lumio About “${short}”`, click: () => this.hooks.askAI(`About this text from the page:\n\n> ${selection}\n\n`, { includePage: true, draft: true }) },
+        { label: 'Lumio', submenu: this.selectionActions(selection) },
       );
       sep();
     }

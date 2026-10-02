@@ -161,6 +161,7 @@ class BrowserWin {
     const kind = this.overlayKind;
     this.overlayKind = null;
     if (kind === 'passkey') this.app.onPasskeyPromptClosed?.(this);
+    if (kind === 'screenshare') this.app.onScreenSharePickerClosed?.(this);
     if (!this.win.isDestroyed() && this.win.contentView.children.includes(this.overlay)) {
       this.win.contentView.removeChildView(this.overlay);
     }

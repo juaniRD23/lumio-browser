@@ -100,3 +100,4 @@ select.field { appearance: none; padding-right: 30px; background: var(--field) u
 .btn.danger-fill { background: #ff7a7a; color: #1a0a0a; border-color: transparent; font-weight: 600; }
 .btn.danger-fill:hover { background: #ff9590; }
 @media (max-width: 720px) { .bill-plans, .reasons { grid-template-columns: 1fr; } }
+.row.dim { opacity: .45; pointer-events: none; }
