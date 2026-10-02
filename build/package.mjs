@@ -173,7 +173,19 @@ function dmg(app, arch) {
   fs.symlinkSync('/Applications', path.join(stage, 'Applications'));
   // No version in the name, so /releases/latest/download/<name> links stay valid.
   const file = path.join(release, `Lumio-Browser-mac-${arch === 'x64' ? 'intel' : 'apple-silicon'}.dmg`);
-  execFileSync('hdiutil', ['create', '-volname', 'Lumio Browser', '-srcfolder', stage, '-ov', '-format', 'UDZO', file], { stdio: 'ignore' });
+  // hdiutil sometimes fails with "Resource busy" while macOS (Spotlight,
+  // XProtect) is still scanning the new files, mostly on CI: try a few times.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      execFileSync('hdiutil', ['create', '-volname', 'Lumio Browser', '-srcfolder', stage, '-ov', '-format', 'UDZO', file], { stdio: ['ignore', 'ignore', 'pipe'] });
+      break;
+    } catch (err) {
+      const why = String(err.stderr || err.message).trim();
+      if (attempt >= 5) throw new Error(`hdiutil couldn't make ${path.basename(file)}: ${why}`);
+      console.log(`hdiutil failed (${why}); trying again in ${attempt * 5} s`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, attempt * 5000);
+    }
+  }
   fs.rmSync(stage, { recursive: true, force: true });
   // Developer ID builds: the disk image is signed and notarized too.
   if (SIGN_ID) execFileSync('codesign', ['--force', '--sign', SIGN_ID, '--timestamp', ...(process.env.MACOS_SIGN_KEYCHAIN ? ['--keychain', process.env.MACOS_SIGN_KEYCHAIN] : []), file], { stdio: 'inherit' });
