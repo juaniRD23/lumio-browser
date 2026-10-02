@@ -246,7 +246,7 @@ test('recently closed tabs show on the history page and reopen', async () => {
   await shot('13-recently-closed');
   await L.page(`document.querySelector('.closed-item [data-reopen]').click(); true`);
   assert.ok(await until(async () => (await title()).includes('closed-one')), 'reopened tab loaded');
-  assert.equal(await L.main(() => global.lumio.tabs.wc().isLoading()), false);
+  assert.ok(await until(async () => !(await L.main(() => global.lumio.tabs.wc().isLoading()))), 'and finished loading');
 });
 
 test('downloads finish, show on the downloads page and are remembered', async () => {

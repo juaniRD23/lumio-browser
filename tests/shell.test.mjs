@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { resolveFile } = require('../main/protocol.js');
@@ -39,24 +40,33 @@ before(async () => {
 });
 after(async () => { await browser?.close(); server?.close(); });
 
-test('the window and AI panel start without errors, and the composer works', { skip: !CHROME && 'Google Chrome not installed' }, async () => {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+// Opens the window UI with a stand-in main process. `answers` adds or replaces
+// what ai:… calls return; every call is recorded in window.__calls.
+async function openShell(b, answers = {}) {
+  const page = await b.newPage({ viewport: { width: 1280, height: 800 } });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errors.push(m.text()); });
-  await page.addInitScript(({ init, ai }) => {
+  await page.addInitScript(({ init, ai, extra }) => {
     const handlers = {};
     window.__sent = [];
+    window.__calls = [];
     window.__emit = (channel, payload) => (handlers[channel] || []).forEach((fn) => fn(payload));
     const answers = { 'shell:init': init, 'ai:state': ai, 'ai:chats': [], 'ai:connections': { apps: [] }, 'ai:set-mode': (m) => ({ ...ai, mode: m }) };
+    for (const [k, v] of Object.entries(extra)) answers[k] = v.fn ? new Function('...args', v.fn) : v.value;
     window.lumio = {
-      invoke: async (channel, ...args) => { const a = answers[channel]; return typeof a === 'function' ? a(...args) : a ?? null; },
+      invoke: async (channel, ...args) => { window.__calls.push([channel, args[0]]); const a = answers[channel]; return typeof a === 'function' ? a(...args) : a ?? null; },
       send: (channel, payload) => window.__sent.push([channel, payload]),
       on: (channel, fn) => { (handlers[channel] ||= []).push(fn); return () => {}; },
     };
-  }, { init: INIT, ai: AI });
+  }, { init: INIT, ai: AI, extra: answers });
   await page.goto(`${base}/`);
   await page.waitForFunction(() => document.getElementById('mode-name')?.textContent === 'Ask', null, { timeout: 10_000 }).catch(() => {});
+  return { page, errors };
+}
+
+test('the window and AI panel start without errors, and the composer works', { skip: !CHROME && 'Google Chrome not installed' }, async () => {
+  const { page, errors } = await openShell(browser);
   assert.deepEqual(errors, [], 'no errors while starting');
 
   // Approvals: one button; its menu switches the mode.
@@ -82,4 +92,65 @@ test('the window and AI panel start without errors, and the composer works', { s
   await page.click('#add-tabs');
   assert.equal(await page.textContent('#context-chip span'), 'All open tabs');
   assert.deepEqual(errors, [], 'no errors while using it');
+});
+
+// A WAV file: quiet, a second and a half of "speech" (a wavering tone), quiet.
+function speechWav(file) {
+  const rate = 16000;
+  const sec = (s) => Math.round(s * rate);
+  const samples = new Float32Array(sec(1) + sec(1.5) + sec(3));
+  for (let i = 0; i < sec(1.5); i++) samples[sec(1) + i] = 0.35 * Math.sin(i * 2 * Math.PI * 180 / rate) * (0.6 + 0.4 * Math.sin(i / 900));
+  const buf = Buffer.alloc(44 + samples.length * 2);
+  buf.write('RIFF', 0); buf.writeUInt32LE(36 + samples.length * 2, 4); buf.write('WAVE', 8); buf.write('fmt ', 12);
+  buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22); buf.writeUInt32LE(rate, 24); buf.writeUInt32LE(rate * 2, 28);
+  buf.writeUInt16LE(2, 32); buf.writeUInt16LE(16, 34); buf.write('data', 36); buf.writeUInt32LE(samples.length * 2, 40);
+  samples.forEach((v, i) => buf.writeInt16LE(Math.round(v * 32767), 44 + i * 2));
+  fs.writeFileSync(file, buf);
+}
+
+test('voice mode: what you say is sent, and the answer is spoken sentence by sentence', { skip: !CHROME && 'Google Chrome not installed' }, async () => {
+  const wav = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'lumio-voice-')), 'speech.wav');
+  speechWav(wav);
+  const { chromium } = require('playwright-core');
+  const b = await chromium.launch({
+    executablePath: CHROME, headless: true,
+    args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${wav}%noloop`, '--autoplay-policy=no-user-gesture-required'],
+  });
+  try {
+    const { page, errors } = await openShell(b, {
+      'ai:voice-transcribe': { value: { text: 'What is this video about?' } },
+      'ai:send': { value: { ok: true, chatId: 'c1' } },
+      'ai:voice-speak': { value: { error: 'no audio in tests' } },
+    });
+    await page.click('#voice-btn');
+    assert.equal(await page.isVisible('#voice-bar'), true, 'the voice dock replaces the chat box');
+    assert.equal(await page.isVisible('#prompt'), false);
+    // The microphone hears the phrase, it's turned into text and sent as a voice message.
+    const ok = await page.waitForFunction(() => window.__calls.some(([c]) => c === 'ai:send'), null, { timeout: 15_000 }).then(() => true, () => false);
+    if (!ok) {
+      const why = await page.evaluate(() => ({ calls: window.__calls.map(([c]) => c), notices: [...document.querySelectorAll('.notice')].map((n) => n.textContent), status: document.querySelector('.vb-status').textContent, level: getComputedStyle(document.getElementById('voice-bar')).getPropertyValue('--level'), voice: document.body.dataset.voice }));
+      assert.fail(`nothing was sent: ${JSON.stringify(why)} ${JSON.stringify(errors)}`);
+    }
+    const [heard, sent] = await page.evaluate(() => [window.__calls.find(([c]) => c === 'ai:voice-transcribe')[1], window.__calls.find(([c]) => c === 'ai:send')[1]]);
+    assert.equal(heard.mime, 'audio/wav');
+    assert.ok(heard.seconds > 1 && heard.seconds < 3, `phrase of ${heard.seconds} s`);
+    assert.deepEqual([sent.text, sent.voice], ['What is this video about?', true]);
+    // The reply streams in; each finished sentence is read aloud right away.
+    await page.evaluate(() => {
+      const e = (ev) => window.__emit('ai-event', { chatId: 'c1', ...ev });
+      e({ type: 'user', text: 'What is this video about?' });
+      e({ type: 'start' });
+      e({ type: 'text', delta: 'It shows how bikes ' });
+      e({ type: 'text', delta: 'work. The gears' });
+    });
+    await page.waitForFunction(() => window.__calls.some(([c, a]) => c === 'ai:voice-speak' && a.text === 'It shows how bikes work.'));
+    assert.equal(await page.evaluate(() => window.__calls.filter(([c]) => c === 'ai:voice-speak').length), 1, 'the unfinished sentence waits');
+    await page.evaluate(() => window.__emit('ai-event', { chatId: 'c1', type: 'end' }));
+    await page.click('#voice-bar .vb-end');
+    assert.equal(await page.isVisible('#voice-bar'), false);
+    assert.equal(await page.isVisible('#prompt'), true);
+    assert.deepEqual(errors.filter((e) => !/no audio in tests/.test(e)), []);
+  } finally {
+    await b.close();
+  }
 });

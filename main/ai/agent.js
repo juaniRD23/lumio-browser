@@ -106,9 +106,16 @@ async function runToolCall(call, env) {
 
 async function runAgent({
   model, messages, tools, systemPrompt, chat, approve, getMode, emit, signal, ctx,
-  maxSteps = MAX_STEPS, grants = new Set(),
+  maxSteps = MAX_STEPS, grants = new Set(), takeQueued = null,
 }) {
   const byName = new Map(tools.map((t) => [t.name, t]));
+  // Messages the person sent (typed or said) while Lumio was working join the
+  // conversation before the next step, so it can change course.
+  const absorb = () => {
+    const queued = takeQueued?.() || [];
+    for (const content of queued) messages.push({ role: 'user', content });
+    return queued.length;
+  };
   const schemas = toolSchemas(tools);
   const env = { byName, ctx, approve, getMode, emit, signal, grants };
 
@@ -132,6 +139,7 @@ async function runAgent({
     if (result.content) emit({ type: 'text_end' });
 
     if (!calls.length) {
+      if (absorb()) continue; // they said something while it answered: answer that too
       emit({ type: 'done', reason: result.finishReason === 'length' ? 'length' : 'complete' });
       return { steps: step + 1 };
     }
@@ -151,6 +159,7 @@ async function runAgent({
         ],
       });
     }
+    absorb();
   }
   emit({ type: 'done', reason: 'max_steps' });
   return { steps: maxSteps };

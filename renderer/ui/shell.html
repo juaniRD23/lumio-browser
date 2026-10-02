@@ -109,8 +109,12 @@
         </div>
         <div id="usage-pop" class="popover usage-pop" role="dialog" aria-label="Usage" hidden></div>
         <div id="voice-bar" class="voice-bar" hidden>
-          <button type="button" class="vb-orb" aria-label="Done talking, or interrupt"><i></i></button>
-          <span class="vb-text">Voice mode</span>
+          <button type="button" class="vb-orb" title="Skip what Lumio is saying, or finish talking" aria-label="Skip, or finish talking"><i></i></button>
+          <div class="vb-main">
+            <div class="vb-status" aria-live="polite">Listening…</div>
+            <div class="vb-cap"></div>
+          </div>
+          <button type="button" class="vb-mute round-btn" title="Mute the microphone" aria-label="Mute the microphone" aria-pressed="false"></button>
           <button type="button" class="vb-end">End</button>
         </div>
         <div id="tray" class="tray" hidden></div>

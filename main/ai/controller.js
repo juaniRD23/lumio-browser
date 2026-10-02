@@ -56,6 +56,12 @@ function contextNote(tabs) {
   return `[Lumio Browser, not the user] Now: ${now} (${tz}). ${where}`;
 }
 
+// Added to messages said in voice mode: everything Lumio writes is read aloud
+// as it streams, so it should talk, not format.
+const VOICE_NOTE = 'The user is talking to you by voice: their words were transcribed (expect small mistakes), and everything you write is read aloud as you write it. Write like you talk: short, plain sentences, with no Markdown, lists, tables, links or emoji. Before each group of actions, say one short sentence about what you are about to do. Keep the final answer to two or three sentences unless they ask for more.';
+// Said or typed while Lumio works: these stop the task instead of joining it.
+const STOP_WORDS = /^(?:ok(?:ay)?[,.]?\s+)?(?:stop|cancel|never ?mind|forget it|wait,? stop|stop (?:it|that|now))[.!]*$/i;
+
 class AIController {
   constructor({ store, chats, tabs, emit, helper, account = null, indicator = null, schedules = null, notify = null, onSettingsChanged = () => {} }) {
     this.store = store;
@@ -252,7 +258,7 @@ class AIController {
     return this.tools().filter((t) => (allowed ? allowed.has(t.name) : t.name !== 'update_plan' && !schedule.NAMES.has(t.name)));
   }
 
-  async send({ chatId, text, includePage, includeTabs, attachments } = {}) {
+  async send({ chatId, text, includePage, includeTabs, attachments, voice = false } = {}) {
     if (this.run) return { ok: false, error: 'Lumio is still working on the last request. Stop it first.' };
     if (!this.account?.state().signedIn) return { ok: false, error: 'Sign in to Lumio first (account button, top right). It’s free.' };
     const files = cleanAttachments(attachments);
@@ -305,17 +311,40 @@ class AIController {
     }
     // The time and the tab are written into the message once, so every later
     // step sends exactly the same text (the model provider's cache needs it).
-    const said = `${clean || '(See the attached files.)'}\n\n${contextNote(this.tabs)}`;
+    const said = `${clean || '(See the attached files.)'}\n\n${contextNote(this.tabs)}${voice ? ` ${VOICE_NOTE}` : ''}`;
     const content = parts.length ? [...parts, { type: 'text', text: said }] : said;
     chat.messages.push({ role: 'user', content });
     const shown = files.list.map((f) => ({ kind: f.kind, name: f.name, ...(f.thumb ? { thumb: f.thumb } : {}), ...(f.pages ? { pages: f.pages } : {}) }));
-    chat.display.push({ kind: 'user', text: clean, ctx: ctxInfo, ...(shown.length ? { files: shown } : {}) });
+    chat.display.push({ kind: 'user', text: clean, ctx: ctxInfo, ...(shown.length ? { files: shown } : {}), ...(voice ? { voice: true } : {}) });
     chat.plan = null; // a new request starts without a checklist until the AI makes one
     chat.updatedAt = Date.now();
     this.saveChats();
-    this.emit('ai-event', { chatId: chat.id, type: 'user', text: clean, ctx: ctxInfo, title: chat.title, ...(shown.length ? { files: shown } : {}) });
+    this.emit('ai-event', { chatId: chat.id, type: 'user', text: clean, ctx: ctxInfo, title: chat.title, ...(shown.length ? { files: shown } : {}), ...(voice ? { voice: true } : {}) });
     this.start(chat);
     return { ok: true, chatId: chat.id };
+  }
+
+  // A message typed or said while Lumio works on this chat: it joins the task
+  // before the next step ("actually, use Best Buy"), or stops it ("stop").
+  steer({ chatId, text, voice = false } = {}) {
+    const run = this.run;
+    const clean = String(text || '').trim().slice(0, 4000);
+    if (!clean) return { ok: false, error: 'Empty message.' };
+    if (!run || run.chatId !== chatId) return { ok: false, notRunning: true };
+    const chat = this.chatStore.get(chatId);
+    if (STOP_WORDS.test(clean)) {
+      if (chat) { chat.display.push({ kind: 'user', text: clean, ...(voice ? { voice: true } : {}) }); this.emit('ai-event', { chatId, type: 'user', text: clean, mid: true, ...(voice ? { voice: true } : {}) }); }
+      this.stop();
+      return { ok: true, stopped: true };
+    }
+    run.queue.push(`${clean}\n\n[Lumio Browser, not the user] The user ${voice ? 'said' : 'sent'} this while you were working. Take it into account: change course if they want something different, answer if they asked something, or stop and say so if they want you to stop.${voice ? ` ${VOICE_NOTE}` : ''}`);
+    run.text = null; // Lumio's next words start a new reply after this message
+    if (chat) {
+      chat.display.push({ kind: 'user', text: clean, ...(voice ? { voice: true } : {}) });
+      chat.updatedAt = Date.now();
+    }
+    this.emit('ai-event', { chatId, type: 'user', text: clean, mid: true, ...(voice ? { voice: true } : {}) });
+    return { ok: true, chatId };
   }
 
   // Voice mode (the panel records and plays; the Lumio server does the rest).
@@ -371,7 +400,7 @@ class AIController {
 
   async start(chat, { scheduled = null, watch = null } = {}) {
     const abort = new AbortController();
-    const run = { chatId: chat.id, abort, pending: new Map(), grants: new Set(), text: null, steps: new Map(), scheduled };
+    const run = { chatId: chat.id, abort, pending: new Map(), grants: new Set(), text: null, steps: new Map(), scheduled, queue: [] };
     this.run = run;
     this.chatStore.running.add(chat.id);
     this.emitState();
@@ -421,6 +450,7 @@ class AIController {
         signal: abort.signal,
         ctx,
         grants: run.grants,
+        takeQueued: () => run.queue.splice(0),
       });
     } catch (err) {
       if (err.name === 'AbortError' || abort.signal.aborted) record({ type: 'stopped' });

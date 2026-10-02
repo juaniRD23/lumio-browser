@@ -48,7 +48,15 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   // Dictation and hands-free voice mode.
   $('#mic-btn').innerHTML = icons.mic;
   $('#voice-btn').innerHTML = icons.wave;
-  const voice = initVoice({ api, prompt, autosize: () => autosize(), submit: (text) => submit(text), notice: (t) => notice(t), isReady: () => !!ai.ready, onChange: () => renderState() });
+  const voice = initVoice({
+    api, prompt, autosize: () => autosize(), notice: (t) => notice(t),
+    submit: (text, opts) => submit(text, undefined, null, opts),
+    isReady: () => !!ai.ready,
+    isBusy: () => !!(ai.running && ai.runChatId === chatId),
+    getChatId: () => chatId,
+    onChange: () => renderState(),
+  });
+  $('#voice-bar .vb-mute').innerHTML = icons.mic;
 
   // ------------------------------------------------------------ chrome
   $('#panel-mark').innerHTML = markSvg(18);
@@ -159,12 +167,14 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     if (!$('#reasoning-menu').hidden && !$('#effort-slider').classList.contains('dragging')) renderModels();
     renderMode();
     const running = ai.running && ai.runChatId === chatId;
-    sendBtn.classList.toggle('stop', running);
-    sendBtn.innerHTML = running ? icons.square : icons.send;
-    sendBtn.title = running ? 'Stop (Esc)' : 'Send (↵)';
+    const steering = running && !!prompt.value.trim(); // typing while it works: Send adds to the task
+    sendBtn.classList.toggle('stop', running && !steering);
+    sendBtn.innerHTML = running && !steering ? icons.square : icons.send;
+    sendBtn.title = steering ? 'Add to the task (↵)' : running ? 'Stop (Esc)' : 'Send (↵)';
+    prompt.placeholder = running ? 'Add to the task, or tell Lumio to stop…' : 'Ask Lumio, or tell it what to do…';
     sendBtn.disabled = !running && ((!prompt.value.trim() && !extras.ready()) || extras.busy() || !ai.ready);
     // An empty box offers voice mode where Send is (and Send comes back as you type).
-    const talk = document.body.dataset.voice || (!running && ai.ready && !prompt.value.trim() && !extras.ready() && !extras.busy());
+    const talk = document.body.classList.contains('voice-on') || (!running && ai.ready && !prompt.value.trim() && !extras.ready() && !extras.busy());
     sendBtn.hidden = !!talk;
     $('#voice-btn').hidden = !talk;
     extras.renderRing();
@@ -368,16 +378,25 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     if (e.key === 'Escape' && ai.running) { e.preventDefault(); api.send('ai:stop'); }
   });
   sendBtn.addEventListener('click', () => {
-    if (ai.running && ai.runChatId === chatId) api.send('ai:stop');
+    if (ai.running && ai.runChatId === chatId && !prompt.value.trim()) api.send('ai:stop');
     else submit();
   });
 
-  async function submit(textOverride, forcePage, extraFiles = null) {
+  async function submit(textOverride, forcePage, extraFiles = null, { voice = false } = {}) {
     const text = (textOverride ?? prompt.value).trim();
     const useFiles = textOverride == null;
     if (!text && !(useFiles && extras.ready())) return;
     if (!ai.ready) { renderEmpty(); $('#key-input')?.focus(); return; }
-    if (ai.running) { notice('Lumio is still working. Press Stop first.'); return; }
+    // While Lumio works on this chat, a message joins the task ("actually,
+    // use Best Buy"; "stop" stops it).
+    if (ai.running && ai.runChatId === chatId && text) {
+      if (useFiles && extras.ready()) { notice('Add files after Lumio finishes, or press Stop first.'); return; }
+      if (useFiles) { prompt.value = ''; autosize(); }
+      const res = await api.invoke('ai:steer', { chatId, text, voice });
+      if (!res.ok && !res.notRunning) { notice(res.error); return res; }
+      if (res.ok) return res;
+    }
+    if (ai.running) { notice('Lumio is still working on another chat. Press Stop first.'); return; }
     if (useFiles && extras.busy()) { notice('Still reading your files. Send again in a moment.'); return; }
     const attachments = useFiles ? extras.take() : (extraFiles || []);
     if (attachments === null) return;
@@ -397,7 +416,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
         includedUrl.set(chatId, url);
       }
     }
-    const res = await api.invoke('ai:send', { chatId, text, includePage: wantPage, includeTabs: tabs, attachments });
+    const res = await api.invoke('ai:send', { chatId, text, includePage: wantPage, includeTabs: tabs, attachments, voice });
     if (!res.ok) { notice(res.error); return; }
     if (tabs) { includeTabs = false; renderChip(); }
     if (wantPage || (t?.pdf && includedUrl.get(chatId) === url)) includedUrl.set(res.chatId, url);
@@ -621,8 +640,18 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
       if ((!chatId && !(ev.background && prompt.value.trim())) || chatId === ev.chatId) {
         if (!chatId) messages.innerHTML = '';
         chatId = ev.chatId;
-        showPlan(null); // each request starts fresh; the AI posts a new checklist if it needs one
+        if (ev.mid) {
+          // Said while Lumio works: its next words start a new reply below this.
+          if (live) {
+            if (frame) { cancelAnimationFrame(frame); flushText(); } // finish drawing the reply so far
+            thinking(false);
+            live.textEl?.classList.remove('streaming');
+            live.textEl = null;
+            live.textBuf = '';
+          }
+        } else showPlan(null); // each request starts fresh; the AI posts a new checklist if it needs one
         messages.append(userEl(ev.text, ev.ctx, ev.files));
+        if (ev.mid && live) thinking(true);
         scrollDown(true);
       }
       return;

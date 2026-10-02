@@ -782,6 +782,7 @@ function registerIpc() {
   handle('ai:set-reasoning', (w, id) => w.ai.setReasoning(id));
   handle('ai:set-mode', (w, mode) => w.ai.setMode(mode));
   handle('ai:send', (w, payload) => w.ai.send(payload));
+  handle('ai:steer', (w, payload) => w.ai.steer(payload || {}));
   handle('ai:chats', (w) => w.ai.listChats());
   handle('ai:chat', (w, id) => w.ai.getChat(id));
   handle('ai:delete-chat', (w, id) => w.ai.deleteChat(id));

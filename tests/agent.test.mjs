@@ -140,3 +140,26 @@ test('prepareMessages keeps plain messages untouched', () => {
   const out = prepareMessages('sys', [{ role: 'user', content: 'hi' }]);
   assert.deepEqual(out, [{ role: 'system', content: 'sys' }, { role: 'user', content: 'hi' }]);
 });
+
+test('messages sent while Lumio works join before its next step, even after its answer', async () => {
+  const queue = [];
+  const { opts, messages, chat } = setup({
+    mode: 'auto',
+    turns: [
+      { calls: [{ id: 'a', name: 'read_page', arguments: '{}' }] },
+      { text: 'Here are the Amazon prices.' },
+      { text: 'Okay, Best Buy instead: $379.' },
+    ],
+    tools: [{ name: 'read_page', risk: 'read', icon: 'app', description: 'r', parameters: { type: 'object', properties: {} }, label: () => 'Reading', run: () => { queue.push('actually use Best Buy'); return 'page'; } }],
+  });
+  let lateSent = false;
+  opts.takeQueued = () => {
+    // Something said while the final answer streams is answered too.
+    if (!queue.length && chat.seen.length === 2 && !lateSent) { lateSent = true; return ['and the cheapest one?']; }
+    return queue.splice(0);
+  };
+  await runAgent(opts);
+  const roles = messages.map((m) => `${m.role}${typeof m.content === 'string' && m.role === 'user' ? `:${m.content}` : ''}`);
+  assert.deepEqual(roles, ['user:go', 'assistant', 'tool', 'user:actually use Best Buy', 'assistant', 'user:and the cheapest one?', 'assistant']);
+  assert.equal(chat.seen.length, 3);
+});

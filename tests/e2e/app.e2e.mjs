@@ -11,6 +11,7 @@ import { launch, root } from '../../scripts/launch.mjs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 import { startMockLumio } from '../mock-lumio.mjs';
+import { turnEvents } from '../mock-scripts.mjs';
 
 const FIX = path.join(root, 'tests', 'fixtures');
 const SHOTS = process.env.LUMIO_SHOTS;
@@ -304,6 +305,39 @@ test('Stop ends a run and keeps the chat usable', async () => {
   assert.match(await lastReply(), /mock/);
 });
 
+test('typing while Lumio works adds to the task, and "stop" stops it', async () => {
+  const type = (text) => L.shell(`(() => { const p = document.getElementById('prompt'); p.value = ${JSON.stringify(text)}; p.dispatchEvent(new Event('input')); return document.getElementById('send').title })()`);
+  // A task that keeps waiting until it's told something.
+  lumio.state.agentScript = (body) => {
+    const last = body.messages.at(-1);
+    if (last.role === 'user' && typeof last.content === 'string' && /while you were working/.test(last.content)) return turnEvents({ text: 'Okay, switching to Best Buy.' });
+    return turnEvents({ calls: [{ name: 'wait', args: { seconds: 2 } }] });
+  };
+  try {
+    await ask('compare headphone prices on Amazon');
+    assert.equal(await type(''), 'Stop (Esc)', 'an empty box keeps Stop');
+    assert.equal(await type('actually use Best Buy'), 'Add to the task (↵)');
+    await L.shell(`document.getElementById('send').click(); true`);
+    assert.ok(await until(() => L.shell(`[...document.querySelectorAll('.msg.user')].at(-1).innerText.includes('actually use Best Buy')`)));
+    assert.equal(await L.main(() => global.lumio.ai.isRunning()), true, 'the task keeps going');
+    await idle();
+    assert.match(await lastReply(), /switching to Best Buy/);
+    const msgs = lumio.state.agentRequests.at(-1).messages;
+    assert.match(msgs.at(-1).content, /^actually use Best Buy\n\n\[Lumio Browser, not the user\] The user sent this while you were working/);
+    assert.equal(msgs.at(-2).role, 'tool', 'it joined right after the step it was sent during');
+
+    // "stop" ends the task instead of joining it.
+    lumio.state.agentScript = () => turnEvents({ calls: [{ name: 'wait', args: { seconds: 5 } }] });
+    await ask('another long task');
+    await type('stop');
+    await L.shell(`document.getElementById('send').click(); true`);
+    assert.ok(await until(async () => !(await L.main(() => global.lumio.ai.isRunning())), 4000), 'stopped');
+    assert.match(await L.shell(`[...document.querySelectorAll('.notice')].at(-1).textContent`), /Stopped/);
+  } finally {
+    lumio.state.agentScript = null;
+  }
+});
+
 test('multi-step tasks show a Task progress checklist', async () => {
   await L.main(() => global.lumio.ai.setMode('auto'));
   await ask('plan a trip to Lisbon');
@@ -476,8 +510,16 @@ test('ask about my tabs: the + menu sends every open tab with the message', asyn
   assert.equal(await L.shell(`document.getElementById('plus-menu').hidden`), true);
   await shot('47-all-tabs');
   const before = lumio.state.agentRequests.length;
-  await ask('which tab talks about keepers?');
-  await idle();
+  // A fixed answer: the scripted model matches words anywhere in the message,
+  // and every open tab is in this one (the pizza form among them).
+  lumio.state.agentScript = () => turnEvents({ text: 'The lighthouse article talks about keepers.' });
+  try {
+    await ask('which tab talks about keepers?');
+    await idle();
+  } finally {
+    lumio.state.agentScript = null;
+  }
+  assert.match(await lastReply(), /lighthouse article/);
   const req = lumio.state.agentRequests.slice(before)[0];
   const sent = req.messages.at(-1).content.map((p) => p.text || '').join('\n');
   assert.match(sent, /<open_tabs count="\d+"/);
