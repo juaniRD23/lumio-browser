@@ -30,7 +30,7 @@
   },
   "devDependencies": {
     "@electron/packager": "^20.0.2",
-    "electron": "43.0.0",
+    "electron": "43.7.7",
     "esbuild": "^0.28.2",
     "playwright-core": "^1.55.0"
   },
