@@ -51,6 +51,17 @@ function assetName(platform = process.platform, arch = process.arch) {
   return null;
 }
 
+// The Apple team that signed an app ("TeamIdentifier=…"), or null when it's
+// signed ad hoc or not at all. codesign prints it on stderr.
+function teamId(app) {
+  return new Promise((resolve) => {
+    execFile('codesign', ['-dv', '--verbose=2', app], { timeout: 60_000 }, (_err, _out, errOut) => {
+      const m = /^TeamIdentifier=([A-Z0-9]{10})$/m.exec(String(errOut || ''));
+      resolve(m ? m[1] : null);
+    });
+  });
+}
+
 function run(file, args, opts = {}) {
   return new Promise((resolve, reject) => {
     execFile(file, args, { timeout: 180_000, maxBuffer: 8 * 1024 * 1024, ...opts }, (err, stdout, stderr) => {
@@ -205,6 +216,10 @@ class Updater {
     if (id !== BUNDLE_ID) throw new Error('the installer is not Lumio Browser');
     if (version !== this.release.version) throw new Error(`the installer is version ${version}, not ${this.release.version}`);
     await run('codesign', ['--verify', '--deep', '--strict', fresh]);
+    // Once this copy is signed with a Developer ID, an update must be signed by
+    // the same team (older ad-hoc copies accept the first signed update).
+    const mine = await teamId(target);
+    if (mine && (await teamId(fresh)) !== mine) throw new Error('the installer is not signed by Lumio');
     // After Lumio quits: move the old copy aside, put the new one in place
     // (putting the old one back if that fails), then open it.
     const script = [

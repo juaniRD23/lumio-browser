@@ -1,10 +1,16 @@
-// Packages Lumio Browser with @electron/packager. Builds have no developer
-// certificate: the Mac app is signed ad hoc, and the Windows app is unsigned.
+// Packages Lumio Browser with @electron/packager.
+// Mac signing: release builds on GitHub are signed with a Developer ID (the
+// workflow imports the certificate and sets MACOS_SIGN_IDENTITY) with the
+// hardened runtime, then notarized by Apple and stapled when the App Store
+// Connect key is set (APPLE_API_KEY_PATH, APPLE_API_KEY_ID, APPLE_API_ISSUER).
+// Without them (local builds) the Mac app is signed ad hoc. The Windows app
+// is unsigned.
 //   node build/package.mjs             → this Mac's .app in dist/
 //   node build/package.mjs --install   → also copy it into /Applications
 //   node build/package.mjs --release   → dist/release/: Mac DMGs (Apple silicon
 //                                        and Intel) and a Windows x64 ZIP
 import { packager } from '@electron/packager';
+import { signAsync } from '@electron/osx-sign';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -14,6 +20,12 @@ const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
 const dist = path.join(root, 'dist');
 const release = path.join(dist, 'release');
 const arg = (name) => process.argv.includes(name);
+
+const SIGN_ID = process.env.MACOS_SIGN_IDENTITY || '';
+const NOTARY = process.env.APPLE_API_KEY_PATH && process.env.APPLE_API_KEY_ID && process.env.APPLE_API_ISSUER
+  ? ['--key', process.env.APPLE_API_KEY_PATH, '--key-id', process.env.APPLE_API_KEY_ID, '--issuer', process.env.APPLE_API_ISSUER]
+  : null;
+const HELPER_ID = 'online.lumio-usa.browser.helper';
 
 const common = {
   dir: root,
@@ -73,11 +85,67 @@ function adhocSign(app) {
   return app;
 }
 
+// Developer ID: every binary with the hardened runtime and a secure
+// timestamp. The app gets build/entitlements.mac.plist; Electron's helper
+// apps keep @electron/osx-sign's Chromium defaults; Lumio's Swift helper
+// needs none and keeps its own identifier (macOS ties Accessibility and
+// Screen Recording permission to it).
+async function developerIdSign(app) {
+  const keychain = process.env.MACOS_SIGN_KEYCHAIN ? ['--keychain', process.env.MACOS_SIGN_KEYCHAIN] : [];
+  // Lumio's helper sits in Resources, which signing tools don't always walk.
+  const helper = path.join(app, 'Contents', 'Resources', 'lumio-helper');
+  if (fs.existsSync(helper)) {
+    execFileSync('codesign', ['--force', '--options', 'runtime', '--timestamp', '--sign', SIGN_ID, ...keychain, '--identifier', HELPER_ID, helper], { stdio: 'inherit' });
+  }
+  await signAsync({
+    app,
+    identity: SIGN_ID,
+    platform: 'darwin',
+    keychain: process.env.MACOS_SIGN_KEYCHAIN || undefined,
+    preAutoEntitlements: false,
+    optionsForFile: (file) => {
+      if (path.resolve(file) === path.resolve(app)) return { hardenedRuntime: true, entitlements: path.join(root, 'build', 'entitlements.mac.plist') };
+      if (path.basename(file) === 'lumio-helper') return { hardenedRuntime: true, entitlements: [], additionalArguments: ['--identifier', HELPER_ID] };
+      return { hardenedRuntime: true };
+    },
+  });
+  execFileSync('codesign', ['--verify', '--deep', '--strict', '--verbose=2', app], { stdio: 'inherit' });
+  return app;
+}
+
+// Sends a .zip or .dmg to Apple's notary service and waits for the verdict.
+function notarize(file) {
+  console.log(`Notarizing ${path.basename(file)}…`);
+  const out = execFileSync('xcrun', ['notarytool', 'submit', file, ...NOTARY, '--wait', '--timeout', '45m', '--output-format', 'json'], { encoding: 'utf8' });
+  const res = JSON.parse(out.slice(out.indexOf('{')));
+  if (res.status !== 'Accepted') {
+    let log = '';
+    try { log = execFileSync('xcrun', ['notarytool', 'log', res.id, ...NOTARY], { encoding: 'utf8' }); } catch { /* no log yet */ }
+    throw new Error(`Apple didn't notarize ${path.basename(file)} (${res.status}).\n${log}`);
+  }
+  console.log(`  ✓ notarized (${res.id})`);
+}
+
+// Signed and notarized, with the ticket stapled to the app itself so it opens
+// without warnings even offline.
+async function signApp(app) {
+  if (!SIGN_ID) return adhocSign(app);
+  await developerIdSign(app);
+  if (NOTARY) {
+    const zipFile = `${app}.zip`;
+    execFileSync('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', app, zipFile]);
+    try { notarize(zipFile); } finally { fs.rmSync(zipFile, { force: true }); }
+    execFileSync('xcrun', ['stapler', 'staple', app], { stdio: 'inherit' });
+    execFileSync('spctl', ['--assess', '--type', 'execute', '--verbose=2', app], { stdio: 'inherit' });
+  }
+  return app;
+}
+
 async function buildMac(arch) {
   const chip = arch === 'x64' ? 'x86_64' : 'arm64';
   execFileSync('sh', [path.join(root, 'native', 'build.sh')], { env: { ...process.env, ARCH: chip }, stdio: 'inherit' });
   const [out] = await packager(macOptions(arch, path.join(root, 'native', 'bin', chip, 'lumio-helper')));
-  return adhocSign(path.join(out, 'Lumio Browser.app'));
+  return signApp(path.join(out, 'Lumio Browser.app'));
 }
 
 // Windows: the PowerShell helper ships next to the app's resources.
@@ -107,6 +175,13 @@ function dmg(app, arch) {
   const file = path.join(release, `Lumio-Browser-mac-${arch === 'x64' ? 'intel' : 'apple-silicon'}.dmg`);
   execFileSync('hdiutil', ['create', '-volname', 'Lumio Browser', '-srcfolder', stage, '-ov', '-format', 'UDZO', file], { stdio: 'ignore' });
   fs.rmSync(stage, { recursive: true, force: true });
+  // Developer ID builds: the disk image is signed and notarized too.
+  if (SIGN_ID) execFileSync('codesign', ['--force', '--sign', SIGN_ID, '--timestamp', ...(process.env.MACOS_SIGN_KEYCHAIN ? ['--keychain', process.env.MACOS_SIGN_KEYCHAIN] : []), file], { stdio: 'inherit' });
+  if (SIGN_ID && NOTARY) {
+    notarize(file);
+    execFileSync('xcrun', ['stapler', 'staple', file], { stdio: 'inherit' });
+    execFileSync('spctl', ['--assess', '--type', 'open', '--context', 'context:primary-signature', '--verbose=2', file], { stdio: 'inherit' });
+  }
   return file;
 }
 
@@ -127,7 +202,7 @@ if (arg('--release')) {
   const helper = path.join(root, 'native', 'bin', 'lumio-helper');
   if (!fs.existsSync(helper)) throw new Error('Build the Mac helper first: npm run native');
   const [out] = await packager(macOptions(process.arch, helper));
-  const app = adhocSign(path.join(out, 'Lumio Browser.app'));
+  const app = await signApp(path.join(out, 'Lumio Browser.app'));
   console.log('Built', app);
   if (arg('--install')) {
     const running = (() => {

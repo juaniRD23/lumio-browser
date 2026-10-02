@@ -3,6 +3,10 @@
 # It builds both Mac DMGs and the Windows ZIP on a Mac runner, publishes the
 # GitHub release, and every installed Lumio Browser offers the update (with
 # your "What's new") within the hour.
+# Mac builds are signed with the Developer ID in MACOS_CERT_P12 (+ password)
+# and notarized by Apple with the App Store Connect key (APPLE_API_KEY,
+# APPLE_API_KEY_ID, APPLE_API_ISSUER). Without those secrets they are signed
+# ad hoc. "Test build" signs and notarizes without publishing anything.
 name: Release Lumio Browser
 
 on:
@@ -19,6 +23,10 @@ on:
         description: "Urgent: show the update card on every launch until people update"
         type: boolean
         default: false
+      dry_run:
+        description: "Test build: sign and notarize, attach the files to this run, publish nothing"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -30,7 +38,10 @@ concurrency:
 jobs:
   release:
     runs-on: macos-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
+    env:
+      HAS_CERT: ${{ secrets.MACOS_CERT_P12 != '' }}
+      HAS_NOTARY: ${{ secrets.APPLE_API_KEY != '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,22 +59,73 @@ jobs:
         run: npm test
 
       - name: Choose the version
+        if: ${{ !inputs.dry_run }}
         id: version
         env:
           VERSION: ${{ inputs.version }}
         run: node scripts/ship.mjs --prepare "$VERSION"
 
+      - name: Load the Developer ID certificate
+        if: env.HAS_CERT == 'true'
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          # A throwaway keychain that only this job uses; deleted at the end.
+          kc="$RUNNER_TEMP/lumio-signing.keychain-db"
+          kcpw="$(uuidgen)"
+          printf '%s' "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$kcpw" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$kcpw" "$kc"
+          security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "$MACOS_CERT_PASSWORD" -f pkcs12 -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$kcpw" "$kc" > /dev/null
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          id="$(security find-identity -v -p codesigning "$kc" | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -n 1)"
+          if [ -z "$id" ]; then echo "::error::No Developer ID Application certificate in MACOS_CERT_P12"; exit 1; fi
+          echo "Signing as: $id"
+          echo "MACOS_SIGN_IDENTITY=$id" >> "$GITHUB_ENV"
+          echo "MACOS_SIGN_KEYCHAIN=$kc" >> "$GITHUB_ENV"
+
+      - name: Load the notarization key
+        if: env.HAS_CERT == 'true' && env.HAS_NOTARY == 'true'
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          printf '%s\n' "$APPLE_API_KEY" > "$RUNNER_TEMP/AuthKey.p8"
+          echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
+
       - name: Build (Mac Apple Silicon, Mac Intel, Windows)
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: npm run release
 
+      - name: Attach the test build
+        if: ${{ inputs.dry_run }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: lumio-test-build-${{ github.run_number }}
+          path: dist/release/
+          retention-days: 7
+
       - name: Publish the release
+        if: ${{ !inputs.dry_run }}
         env:
           GH_TOKEN: ${{ github.token }}
           NOTES: ${{ inputs.notes }}
           CRITICAL: ${{ inputs.critical }}
         run: node scripts/ship.mjs --publish
 
+      - name: Forget the signing keys
+        if: always()
+        run: |
+          [ -n "$MACOS_SIGN_KEYCHAIN" ] && security delete-keychain "$MACOS_SIGN_KEYCHAIN" || true
+          rm -f "$RUNNER_TEMP/AuthKey.p8" "$RUNNER_TEMP/cert.p12"
+
       - name: Summary
+        if: ${{ !inputs.dry_run }}
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |

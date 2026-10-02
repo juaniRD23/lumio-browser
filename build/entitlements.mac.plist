@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Lumio Browser's hardened-runtime entitlements (Developer ID builds; see
+  build/package.mjs). Used for the app and Electron's helper apps.
+  - allow-jit / allow-unsigned-executable-memory: V8 (JavaScript) needs them.
+  - audio-input / camera / location: websites you allow can use the mic,
+    camera and location; under the hardened runtime macOS refuses them
+    without these, even after the person says yes.
+  - automation.apple-events: Lumio AI's run_applescript tool (osascript).
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+  <key>com.apple.security.device.camera</key>
+  <true/>
+  <key>com.apple.security.personal-information.location</key>
+  <true/>
+  <key>com.apple.security.automation.apple-events</key>
+  <true/>
+</dict>
+</plist>
