@@ -133,6 +133,7 @@ class BrowserWin {
 
   emit(channel, payload) {
     if (!this.win.isDestroyed()) this.win.webContents.send(channel, payload);
+    this.app.onEmit?.(this, channel, payload); // the phone companion follows Lumio's work
   }
 
   focus() {

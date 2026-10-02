@@ -82,6 +82,7 @@ class SyncEngine {
       lastSync: this.lastSync,
       deviceId: this.deviceId,
       deviceName: this.deviceName,
+      siteUrl: this.account.base,
       pairCode: this.pairing?.code || null,
       requests: this.requests.map(({ id, name, kind, code, createdAt }) => ({ id, name, kind, code, createdAt })),
       otherTabs: Object.values(this.remoteTabs).filter((t) => t && t.windows),

@@ -629,6 +629,8 @@ function renderSync(st) {
     : st.status === 'error' ? `Couldn’t sync: ${st.error || 'try again later.'}`
     : 'Turning on…';
   $('#sync-needs').hidden = !(st.on && st.status === 'needs-key');
+  $('#sync-phone').hidden = !(st.on && st.status === 'ready' && st.siteUrl);
+  if (st.siteUrl) $('#phone-url').textContent = `${st.siteUrl.replace(/^https?:\/\//, '')}/companion`;
   $('#sync-name').textContent = `“${st.deviceName}”`;
   $('#sync-code').textContent = st.pairCode ? st.pairCode.replace(/(\d{3})/, '$1 ') : '…';
   $('#sync-types').hidden = !st.on;
@@ -702,3 +704,7 @@ $('#sync-delete').addEventListener('click', async () => {
 refreshSync().then(loadSyncDevices);
 setInterval(() => { if (!document.hidden) refreshSync(); }, 3000);
 setInterval(() => { if (!document.hidden) loadSyncDevices(); }, 30000);
+
+$('#phone-copy').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(`${syncState.siteUrl}/companion`); $('#phone-copy').textContent = 'Copied'; setTimeout(() => { $('#phone-copy').textContent = 'Copy link'; }, 1600); } catch {}
+});

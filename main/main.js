@@ -33,6 +33,7 @@ const { Schedules, describe: describeSchedule } = require('./schedules');
 const { Workflows } = require('./workflows');
 const { SyncEngine } = require('./sync/engine');
 const syncAdapters = require('./sync/adapters');
+const { CompanionBridge } = require('./sync/companion');
 
 const IS_DEV = !app.isPackaged;
 
@@ -55,6 +56,7 @@ let passwords = null;
 let schedules = null; // scheduled tasks (main/schedules.js)
 let workflows = null; // saved workflows (main/workflows.js)
 let sync = null; // Lumio Sync (main/sync)
+let companion = null; // the phone companion's link to this computer
 let quitting = false;
 const windows = new Set();
 let lastFocused = null;
@@ -113,7 +115,8 @@ const services = {
   get account() { return account; },
   get schedules() { return schedules; },
   get workflows() { return workflows; },
-  notify: (w, title, body, chatId) => notifyChat(w, title, body, chatId),
+  notify: (w, title, body, chatId) => { notifyChat(w, title, body, chatId); companion?.notice({ title, body, chatId }); },
+  onEmit: (w, channel, payload) => companion?.onEmit(w, channel, payload),
   createWindow: (opts) => createWindow(opts),
   onFocus: (w) => { lastFocused = w; },
   onClose: (w) => {
@@ -1226,6 +1229,13 @@ app.whenReady().then(async () => {
   // Bookmarks from another device: redraw the bar.
   store.bookmarksFile.onSave(() => { if (sync.busy) bookmarksChanged(); });
   sync.start();
+  companion = new CompanionBridge({
+    sync,
+    windows: () => alive().filter((w) => !w.incognito),
+    pickWindow: () => (lastFocused && !lastFocused.incognito && windows.has(lastFocused) ? lastFocused : alive().find((w) => !w.incognito) || createWindow({ focus: false })),
+    openChat: (w, id) => w.openChat(id, { full: false }),
+  });
+  companion.start();
   passwords.register();
   screenAura.register();
 

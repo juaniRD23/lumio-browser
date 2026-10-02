@@ -1,0 +1,15 @@
+{
+  "name": "Lumio",
+  "short_name": "Lumio",
+  "description": "Lumio on your phone: your chats, and Lumio on your computer while you're away.",
+  "start_url": "/companion",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#070708",
+  "theme_color": "#070708",
+  "icons": [
+    { "src": "/companion-icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/companion-icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/companion-icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -138,4 +138,13 @@ if (!existing.includes('"CONNECTIONS_KEY"')) {
   await putSecret('CONNECTIONS_KEY', crypto.randomBytes(32).toString('base64'));
   console.log('  ✓ Connections encryption key created');
 }
+// Phone notifications (Web Push) need a VAPID key pair. Made once, here;
+// never shown. (Replacing it means phones turn notifications on again.)
+if (!existing.includes('"VAPID_PRIVATE_KEY"')) {
+  const pair = await crypto.webcrypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+  const pub = Buffer.from(await crypto.webcrypto.subtle.exportKey('raw', pair.publicKey)).toString('base64url');
+  await putSecret('VAPID_PRIVATE_KEY', JSON.stringify(await crypto.webcrypto.subtle.exportKey('jwk', pair.privateKey)));
+  await putSecret('VAPID_PUBLIC_KEY', pub);
+  console.log('  ✓ Phone notification keys created');
+}
 console.log('\nDone.');
