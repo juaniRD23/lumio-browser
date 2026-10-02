@@ -11,6 +11,7 @@ const EVENTS = new Set([
   'focus-omnibox', 'panel-toggle', 'panel-open', 'ai-focus', 'ai-prefill', 'ai-event', 'ai-state', 'overlay-data',
   'overlay-picked', 'toast', 'zoom', 'fullscreen', 'agent-state', 'bookmarks', 'site-info', 'extensions-changed',
   'account', 'profile', 'passwords-prompt', 'passwords-changed', 'aura', 'update', 'update-announce', 'ai-build-doc', 'ai-open-chat',
+  'ai-workflow', 'workflows-changed', 'sync-state', 'sync-pair-request',
 ]);
 
 contextBridge.exposeInMainWorld('lumio', {

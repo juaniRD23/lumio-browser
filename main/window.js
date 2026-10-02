@@ -105,6 +105,7 @@ class BrowserWin {
       account: app.account,
       indicator: this.indicator,
       schedules: incognito ? null : app.schedules,
+      workflows: incognito ? null : app.workflows,
       notify: (title, body, chatId) => app.notify(this, title, body, chatId),
       onSettingsChanged: () => app.broadcastAIState(),
     });

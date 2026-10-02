@@ -4,6 +4,7 @@ import { marked } from '/vendor/marked.js';
 import DOMPurify from '/vendor/purify.js';
 import { icons, markSvg, levelBars } from './icons.js';
 import { initVoice } from './voice.js';
+import { initWorkflows } from './panel-workflows.js';
 import { initExtras, filesEl, madeEl } from './panel-extras.js';
 
 const LEVEL = { low: 1, medium: 2, high: 3 }; // reasoning level -> bars
@@ -57,6 +58,24 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     onChange: () => renderState(),
   });
   $('#voice-bar .vb-mute').innerHTML = icons.mic;
+  // Saved workflows: / in the chat box, the blanks card, Save as workflow.
+  const wf = initWorkflows({
+    api, prompt, autosize: () => autosize(), notice: (t) => notice(t),
+    isEnabled: () => !!ai.workflows,
+    run: (id, values) => runWorkflow(id, values),
+    onSave: () => submit('Save what you just did as a workflow I can run again. Make the steps general, with {blanks} for anything that changes each time.'),
+  });
+  // Runs a saved workflow in a new chat.
+  async function runWorkflow(id, values) {
+    if (!ai.ready) { renderEmpty(); return false; }
+    if (ai.running) { notice('Lumio is still working. Press Stop first, then run the workflow.'); return false; }
+    newChat();
+    const res = await api.invoke('ai:send', { chatId: null, workflow: { id, values } });
+    if (!res.ok) { notice(res.error); return false; }
+    return true;
+  }
+  api.on('ai-workflow', ({ id }) => { setOpen(true); wf.open(id); });
+  let lastAsk = null; // the latest message's context, to know a workflow run
 
   // ------------------------------------------------------------ chrome
   $('#panel-mark').innerHTML = markSvg(18);
@@ -370,10 +389,12 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     prompt.style.height = Math.min(180, prompt.scrollHeight) + 'px';
     renderState();
   }
-  prompt.addEventListener('input', autosize);
+  prompt.addEventListener('input', () => { autosize(); wf.onInput(); });
+  prompt.addEventListener('blur', () => setTimeout(() => wf.closeMenu(), 150));
   prompt.addEventListener('focus', () => $('#composer').classList.add('focused'));
   prompt.addEventListener('blur', () => $('#composer').classList.remove('focused'));
   prompt.addEventListener('keydown', (e) => {
+    if (wf.onKeydown(e)) return;
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); }
     if (e.key === 'Escape' && ai.running) { e.preventDefault(); api.send('ai:stop'); }
   });
@@ -477,7 +498,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     if (ctx?.title) {
       const c = document.createElement('div');
       c.className = 'ctx';
-      c.innerHTML = `${ctx.scheduled ? icons.clock : ctx.tabs ? icons.tabs : ctx.video ? icons.play : icons.page}<span></span>`;
+      c.innerHTML = `${ctx.workflow ? icons.workflow : ctx.scheduled ? icons.clock : ctx.tabs ? icons.tabs : ctx.video ? icons.play : icons.page}<span></span>`;
       c.querySelector('span').textContent = ctx.title;
       el.append(c);
     }
@@ -671,6 +692,10 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
 
   api.on('ai-event', (ev) => {
     voice.onEvent(ev);
+    if (ev.chatId === chatId || !chatId) {
+      if (ev.type === 'user' && !ev.mid) lastAsk = ev.ctx || null;
+      if ((ev.type === 'error' || ev.type === 'stopped') && live) live.failed = true;
+    }
     if (ev.type === 'user') {
       // A scheduled task shows up in an empty panel, unless you're typing there.
       if ((!chatId && !(ev.background && prompt.value.trim())) || chatId === ev.chatId) {
@@ -788,6 +813,13 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
         thinking(false);
         messages.querySelectorAll('.step.running').forEach((el) => setStepStatus(el, 'error', 'Stopped'));
         messages.querySelectorAll('.approval:not(.done)').forEach((el) => el.classList.add('done'));
+        // A task with several steps that finished well: offer to save it.
+        if (live && !live.failed && live.steps.size >= 2 && !lastAsk?.workflow && !lastAsk?.scheduled) {
+          const steps = [...live.steps.keys()];
+          if (!steps.some((id) => messages.querySelector(`.step[data-id="${CSS.escape(id)}"] .s-label`)?.textContent.startsWith('Saving workflow'))) {
+            wf.offerSave([...messages.querySelectorAll('.msg.ai')].at(-1) || messages.lastElementChild);
+          }
+        }
         live = null;
         planEl.classList.remove('live');
         // A finished checklist folds away; it's still one click away.

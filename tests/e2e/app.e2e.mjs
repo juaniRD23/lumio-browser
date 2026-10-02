@@ -388,6 +388,41 @@ test('on High effort, Lumio sends helper AIs to work in background tabs, each wi
   }
 });
 
+test('workflows: Lumio saves one, / runs it with its blank filled in, and Settings lists it', async () => {
+  const mode = await L.main(() => global.lumio.store.settings.approvalMode);
+  await L.main(() => global.lumio.ai.setMode('auto'));
+  try {
+    await ask('save this as a workflow');
+    await idle();
+    assert.match(await lastReply(), /Saved the workflow “Page summary”/);
+    const [w] = await L.main(() => global.lumio.workflows.list());
+    assert.deepEqual(w.inputs, [{ name: 'page', label: 'Which page' }]);
+
+    // Type / to pick it; the card asks for the blank.
+    await L.shell(`(() => { const p = document.getElementById('prompt'); p.focus(); p.value = '/page'; p.dispatchEvent(new Event('input')); return true })()`);
+    assert.ok(await until(() => L.shell(`!document.getElementById('wf-menu').hidden && document.querySelectorAll('#wf-menu .menu-row').length === 1`)));
+    await L.shell(`document.querySelector('#wf-menu .menu-row').click(); true`);
+    assert.ok(await until(() => L.shell(`!document.getElementById('wf-card').hidden`)));
+    await L.shell(`(() => { const i = document.querySelector('#wf-card input'); i.value = 'apnews.com'; document.querySelector('#wf-card .wf-run').click(); return true })()`);
+    await until(() => L.main(() => global.lumio.ai.isRunning()), 3000);
+    await idle();
+    assert.match(await lastReply(), /summary of the page you picked/);
+    const sent = lumio.state.agentRequests.at(-1).messages[0].content;
+    assert.match(sent, /^Run my workflow “Page summary” \(Which page: apnews\.com\)/);
+    assert.match(sent, /<workflow title="Page summary">\nOpen apnews\.com and summarize it in three bullet points\.\n<\/workflow>/);
+    assert.equal((await L.main(() => global.lumio.workflows.list()))[0].runs, 1);
+
+    await L.main((_e, u) => global.lumio.tabs.navigate(u), 'lumio://settings/#workflows');
+    assert.ok(await until(() => L.page(`document.getElementById('wf-list')?.innerText.includes('Page summary')`)));
+    assert.match(await L.page(`document.getElementById('wf-list').innerText`), /Asks for Which page · Run 1 time/);
+    await shot('50-workflows');
+    await L.page(`window.confirm = () => true; document.querySelector('#wf-list [data-act="delete"]').click(); true`);
+    assert.ok(await until(() => L.main(() => global.lumio.workflows.list().length === 0)));
+  } finally {
+    await L.main((_e, m) => global.lumio.ai.setMode(m), mode);
+  }
+});
+
 test('multi-step tasks show a Task progress checklist', async () => {
   await L.main(() => global.lumio.ai.setMode('auto'));
   await ask('plan a trip to Lisbon');

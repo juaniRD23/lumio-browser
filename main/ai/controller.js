@@ -16,6 +16,8 @@ const plan = require('./tools/plan');
 const make = require('./tools/make');
 const schedule = require('./tools/schedule');
 const helpersTool = require('./tools/helpers');
+const workflowTool = require('./tools/workflow');
+const { fill: fillWorkflow } = require('../workflows');
 const screenAura = require('./screen-aura');
 
 // Without the helper there's no computer control at all (the server only
@@ -64,8 +66,9 @@ const VOICE_NOTE = 'The user is talking to you by voice: their words were transc
 const STOP_WORDS = /^(?:ok(?:ay)?[,.]?\s+)?(?:stop|cancel|never ?mind|forget it|wait,? stop|stop (?:it|that|now))[.!]*$/i;
 
 class AIController {
-  constructor({ store, chats, tabs, emit, helper, account = null, indicator = null, schedules = null, notify = null, onSettingsChanged = () => {} }) {
+  constructor({ store, chats, tabs, emit, helper, account = null, indicator = null, schedules = null, workflows = null, notify = null, onSettingsChanged = () => {} }) {
     this.store = store;
+    this.workflows = workflows; // Workflows: saved tasks (main/workflows.js)
     this.schedules = schedules; // Schedules: tasks Lumio runs on its own (main/schedules.js)
     this.notify = notify; // (title, body, chatId) => shows a notification that opens the chat
     this.indicator = indicator; // PageIndicator: page glow + Stop bar while working in the browser
@@ -120,6 +123,7 @@ class AIController {
       runChatId: this.run?.chatId || null,
       macAvailable: this.helper.available(),
       ephemeral: this.chatStore.ephemeral,
+      workflows: !!this.workflows,
     };
   }
 
@@ -165,7 +169,7 @@ class AIController {
     const helperOk = this.helper.available();
     const off = new Set(this.store.settings.appsOff || []);
     const remote = make.remoteTools(this.capsCache?.remote || []).filter((t) => !off.has(t.app));
-    return [...browser.tools, ...mac.tools, ...plan.tools, ...make.tools, ...(this.schedules ? schedule.tools : []), ...(this.reasoning().id === 'high' ? helpersTool.tools : []), ...remote].filter((t) => (helperOk || !HELPER_TOOLS.has(t.name))
+    return [...browser.tools, ...mac.tools, ...plan.tools, ...make.tools, ...(this.schedules ? schedule.tools : []), ...(this.workflows ? workflowTool.tools : []), ...(this.reasoning().id === 'high' ? helpersTool.tools : []), ...remote].filter((t) => (helperOk || !HELPER_TOOLS.has(t.name))
       && (process.platform === 'darwin' || t.name !== 'run_applescript'));
   }
 
@@ -256,12 +260,26 @@ class AIController {
   async lumioTools() {
     await this.capabilities();
     const allowed = this.capsCache.tools;
-    return this.tools().filter((t) => (allowed ? allowed.has(t.name) : t.name !== 'update_plan' && t.name !== 'send_helpers' && !schedule.NAMES.has(t.name)));
+    return this.tools().filter((t) => (allowed ? allowed.has(t.name) : t.name !== 'update_plan' && t.name !== 'send_helpers' && !schedule.NAMES.has(t.name) && !workflowTool.NAMES.has(t.name)));
   }
 
-  async send({ chatId, text, includePage, includeTabs, attachments, voice = false } = {}) {
+  async send({ chatId, text, includePage, includeTabs, attachments, voice = false, workflow = null } = {}) {
     if (this.run) return { ok: false, error: 'Lumio is still working on the last request. Stop it first.' };
     if (!this.account?.state().signedIn) return { ok: false, error: 'Sign in to Lumio first (account button, top right). It’s free.' };
+    // A saved workflow: its instructions, with the blanks filled in, are the message.
+    let flow = null;
+    if (workflow) {
+      const w = this.workflows?.get(String(workflow.id || ''));
+      if (!w) return { ok: false, error: 'That workflow doesn’t exist anymore.' };
+      try {
+        flow = { w, steps: fillWorkflow(w, workflow.values || {}) };
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+      const filled = w.inputs.map((i) => `${i.label}: ${String(workflow.values[i.name]).trim()}`).join(' · ');
+      text = `Run my workflow “${w.title}”${filled ? ` (${filled})` : ''}`;
+      includePage = false;
+    }
     const files = cleanAttachments(attachments);
     if (files.error) return { ok: false, error: files.error };
     const clean = String(text || '').trim().slice(0, 20_000);
@@ -312,7 +330,12 @@ class AIController {
     }
     // The time and the tab are written into the message once, so every later
     // step sends exactly the same text (the model provider's cache needs it).
-    const said = `${clean || '(See the attached files.)'}\n\n${contextNote(this.tabs)}${voice ? ` ${VOICE_NOTE}` : ''}`;
+    let said = `${clean || '(See the attached files.)'}\n\n${contextNote(this.tabs)}${voice ? ` ${VOICE_NOTE}` : ''}`;
+    if (flow) {
+      said = `${clean}\n\n<workflow title="${flow.w.title.replace(/"/g, "'")}">\n${flow.w.startUrl ? `Start at ${flow.w.startUrl}\n` : ''}${flow.steps}\n</workflow>\n\n${contextNote(this.tabs)} This is a workflow the user saved earlier: follow its steps. If a page has changed since, adapt and say what was different.${voice ? ` ${VOICE_NOTE}` : ''}`;
+      ctxInfo = { title: `Workflow · ${flow.w.title}`, workflow: true };
+      this.workflows.ran(flow.w.id);
+    }
     const content = parts.length ? [...parts, { type: 'text', text: said }] : said;
     chat.messages.push({ role: 'user', content });
     const shown = files.list.map((f) => ({ kind: f.kind, name: f.name, ...(f.thumb ? { thumb: f.thumb } : {}), ...(f.pages ? { pages: f.pages } : {}) }));
@@ -507,6 +530,7 @@ class AIController {
       setPlan: (items) => record({ type: 'plan', items }),
       account: this.account,
       schedules: this.schedules,
+      workflows: this.workflows,
       made: (file) => record({ type: 'made', file }),
       buildDocument: (spec) => this.buildDocument(spec),
       onPage: (wc) => this.indicator?.touch(wc),

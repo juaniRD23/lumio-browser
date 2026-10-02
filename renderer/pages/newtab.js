@@ -92,6 +92,19 @@ if (data.aiReady && !data.incognito) {
     q.setSelectionRange(q.value.length, q.value.length);
     setAsking(true);
   });
+  // Saved workflows: one click runs one (the panel asks for any blanks).
+  page.invoke('page:workflows').then(({ workflows = [] } = {}) => {
+    if (!workflows.length) return;
+    const wf = workflows.slice(0, 4);
+    const row = document.createElement('div');
+    row.className = 'ideas wf-ideas';
+    row.innerHTML = wf.map((w, i) => `<button type="button" class="idea wf" data-i="${i}" title="Run your workflow “${esc(w.title)}”">${svg('<path d="M4 6.5h9M4 12h6M4 17.5h9"/><path d="M15.5 9.5 21 13l-5.5 3.5z"/>')}<span>${esc(w.title)}</span></button>`).join('');
+    row.addEventListener('click', (e) => {
+      const w = wf[e.target.closest('.wf')?.dataset.i];
+      if (w) page.invoke('page:workflow-run', w.id);
+    });
+    $('#ideas').after(row);
+  }).catch(() => {});
   if (data.chats?.length) {
     $('#recent').hidden = false;
     $('#chats').innerHTML = data.chats.map((c) => `<button type="button" class="chat" data-id="${esc(c.id)}">

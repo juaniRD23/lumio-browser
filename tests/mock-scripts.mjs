@@ -21,6 +21,11 @@ export function scriptedTurn(msgs) {
   const lastTool = [...after].reverse().find((m) => m.role === 'tool');
   const snapshot = [...after].reverse().find((m) => m.role === 'tool' && /^Tab \d+:/.test(m.content))?.content || '';
 
+  if (ask.includes('save this as a workflow')) {
+    if (step === 0) return { calls: [{ name: 'save_workflow', args: { title: 'Page summary', instructions: 'Open {page} and summarize it in three bullet points.', inputs: [{ name: 'page', label: 'Which page' }] } }] };
+    return { text: `Saved. ${(lastTool?.content || '').split('.')[0]}.` };
+  }
+  if (ask.includes('<workflow title="page summary">')) return { text: 'Here is the summary of the page you picked.' };
   if (ask.includes('every morning at 8')) {
     if (step === 0) return { calls: [{ name: 'schedule_task', args: { title: 'Morning news', prompt: 'Say good morning with three headlines', repeat: 'daily', time: '08:00' } }] };
     return { text: `Scheduled. ${(lastTool?.content || '').split('.')[0]}.` };

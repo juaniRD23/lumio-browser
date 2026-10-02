@@ -540,3 +540,71 @@ $('#sched-form').addEventListener('submit', async (e) => {
 syncRepeat();
 loadSchedules();
 setInterval(() => { if (!document.hidden) loadSchedules(); }, 15000);
+
+// ---- Workflows
+const PENCIL = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
+let workflowsCache = [];
+async function loadWorkflows() {
+  try { workflowsCache = (await page.invoke('page:workflows')).workflows || []; } catch { return; }
+  $('#wf-intro').hidden = workflowsCache.length > 0;
+  $('#wf-list').innerHTML = workflowsCache.map((w) => `
+    <div class="row wf-row" data-id="${esc(w.id)}">
+      <div class="grow">
+        <div class="title"><b>${esc(w.title)}</b></div>
+        <div class="desc">${esc(w.description || w.instructions.split('\n')[0].slice(0, 120))}</div>
+        <div class="prompt">${w.inputs.length ? `Asks for ${esc(w.inputs.map((i) => i.label).join(', '))} · ` : ''}${w.runs ? `Run ${w.runs} time${w.runs === 1 ? '' : 's'}` : 'Not run yet'}${w.startUrl ? ` · Starts at ${esc(w.startUrl.replace(/^https?:\/\//, '').slice(0, 40))}` : ''}</div>
+      </div>
+      <div class="acts">
+        <button class="btn" data-act="run">Run</button>
+        <button class="btn ghost" data-act="schedule" title="Run it on a schedule">Schedule</button>
+        <button class="btn ghost icon-btn" data-act="edit" title="Edit" aria-label="Edit ${esc(w.title)}">${PENCIL}</button>
+        <button class="btn ghost icon-btn" data-act="delete" title="Delete" aria-label="Delete ${esc(w.title)}">${TRASH}</button>
+      </div>
+    </div>`).join('');
+}
+function editWorkflow(row, w) {
+  if (row.nextElementSibling?.classList.contains('wf-edit')) { row.nextElementSibling.remove(); return; }
+  const form = document.createElement('form');
+  form.className = 'sched-form wf-edit';
+  form.innerHTML = `<input class="field" name="title" maxlength="60" value="${esc(w.title)}" aria-label="Name">
+    <textarea class="field" name="instructions" rows="6" maxlength="6000" aria-label="Instructions">${esc(w.instructions)}</textarea>
+    <input class="field" name="startUrl" maxlength="2000" placeholder="Start page (optional)" value="${esc(w.startUrl || '')}" aria-label="Start page">
+    <div class="desc" style="color:var(--label)">Put anything that changes each run in curly braces, like {item}: Lumio asks for it when the workflow runs.</div>
+    <div class="sched-actions"><span class="desc err"></span><button type="button" class="btn ghost" data-cancel>Cancel</button><button type="submit" class="btn primary">Save</button></div>`;
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = new FormData(form);
+    const r = await page.invoke('page:workflow-update', w.id, { title: f.get('title'), instructions: f.get('instructions'), startUrl: f.get('startUrl') });
+    if (!r.ok) { form.querySelector('.err').textContent = r.error; return; }
+    form.remove();
+    loadWorkflows();
+  });
+  form.querySelector('[data-cancel]').addEventListener('click', () => form.remove());
+  row.after(form);
+  form.querySelector('textarea').focus();
+}
+$('#wf-list').addEventListener('click', async (e) => {
+  const b = e.target.closest('button[data-act]');
+  const row = e.target.closest('[data-id]');
+  if (!b || !row) return;
+  const w = workflowsCache.find((x) => x.id === row.dataset.id);
+  if (!w) return;
+  if (b.dataset.act === 'run') {
+    const r = await page.invoke('page:workflow-run', w.id);
+    if (!r.ok) alert(r.error);
+  } else if (b.dataset.act === 'edit') editWorkflow(row, w);
+  else if (b.dataset.act === 'delete') {
+    if (!confirm(`Delete the workflow “${w.title}”?`)) return;
+    await page.invoke('page:workflow-remove', w.id);
+    loadWorkflows();
+  } else if (b.dataset.act === 'schedule') {
+    // The scheduled task form, filled in with this workflow.
+    showSchedForm(true);
+    $('#sched-title').value = w.title;
+    $('#sched-prompt').value = `${w.startUrl ? `Start at ${w.startUrl}\n` : ''}${w.instructions}`;
+    $('#scheduled').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (w.inputs.length) $('#sched-err').textContent = `Replace ${w.inputs.map((i) => `{${i.name}}`).join(', ')} with what it should use each time.`;
+  }
+});
+loadWorkflows();
+setInterval(() => { if (!document.hidden) loadWorkflows(); }, 15000);

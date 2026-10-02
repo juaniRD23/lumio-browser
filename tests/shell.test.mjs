@@ -173,3 +173,31 @@ test('voice mode: what you say is sent, and the answer is spoken sentence by sen
     await b.close();
   }
 });
+
+test('workflows: / lists them, the card asks for blanks, and Run sends it', { skip: !CHROME && 'Google Chrome not installed' }, async () => {
+  const { page, errors } = await openShell(browser, {
+    'shell:init': { value: { ...INIT, ai: { ...AI, workflows: true } } },
+    'ai:workflows': { value: [
+      { id: 'w1', title: 'Price check', description: '', instructions: 'Check the price of {item}.', inputs: [{ name: 'item', label: 'Product' }], runs: 0 },
+      { id: 'w2', title: 'Morning news', description: 'Top stories', instructions: 'Read the news.', inputs: [], runs: 2 },
+    ] },
+    'ai:send': { value: { ok: true, chatId: 'c5' } },
+  });
+  await page.fill('#prompt', '/pri');
+  assert.equal(await page.isVisible('#wf-menu'), true);
+  assert.deepEqual(await page.$$eval('#wf-menu .menu-row b', (els) => els.map((e) => e.textContent)), ['Price check']);
+  await page.press('#prompt', 'Enter');
+  assert.equal(await page.inputValue('#prompt'), '', 'the / text is cleared');
+  assert.equal(await page.isVisible('#wf-card'), true);
+  await page.fill('#wf-card input', 'AirPods Pro');
+  await page.press('#wf-card input', 'Enter');
+  await page.waitForFunction(() => window.__calls.some(([c]) => c === 'ai:send'));
+  const sent = await page.evaluate(() => window.__calls.find(([c]) => c === 'ai:send')[1]);
+  assert.deepEqual(sent.workflow, { id: 'w1', values: { item: 'AirPods Pro' } });
+  assert.equal(await page.isVisible('#wf-card'), false);
+  // From the new tab page or Settings, main asks the panel to open one.
+  await page.evaluate(() => window.__emit('ai-workflow', { id: 'w2' }));
+  await page.waitForFunction(() => window.__calls.filter(([c]) => c === 'ai:send').length === 2, null, { timeout: 5000 });
+  assert.deepEqual(await page.evaluate(() => window.__calls.filter(([c]) => c === 'ai:send')[1][1].workflow), { id: 'w2', values: {} }, 'no blanks: it runs right away');
+  assert.deepEqual(errors, []);
+});

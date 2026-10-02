@@ -27,6 +27,8 @@ body { display: grid; place-items: start center; min-height: 100vh; background: 
 .idea svg { color: var(--label); transition: color .15s; }
 .idea:hover { background: #1c1c1f; border-color: var(--line2); color: var(--text); }
 .idea:hover svg { color: var(--accent); }
+.wf-ideas { margin-top: -22px; }
+.idea.wf svg { color: var(--accent); }
 
 /* Recent Lumio chats: open full size */
 .recent { margin: 0 0 26px; animation: rise .5s var(--ease) .16s backwards; }

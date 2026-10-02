@@ -31,6 +31,7 @@ export const icons = {
   x: s('<path d="M7 7l10 10M17 7L7 17"/>', 'width="14" height="14"'),
   copy: s('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>', 'width="14" height="14"'),
   trash: s('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>', 'width="14" height="14"'),
+  workflow: s('<path d="M4 6.5h9M4 12h6M4 17.5h9"/><path d="M15.5 9.5 21 13l-5.5 3.5z"/>', 'width="15" height="15"'),
   helpers: s('<circle cx="12" cy="7" r="3"/><circle cx="5.5" cy="16" r="2.5"/><circle cx="18.5" cy="16" r="2.5"/><path d="M10 9.5 7 13.8M14 9.5l3 4.3M8 16h8"/>', 'width="15" height="15"'),
   shield: s('<path d="M12 3.5l7 3v5c0 4.2-2.9 7.6-7 9-4.1-1.4-7-4.8-7-9v-5z"/><path d="M9 12l2 2 4-4"/>', 'width="15" height="15"'),
   bolt: s('<path d="M13 3L5 13.5h6L10.5 21 19 10.5h-6z"/>', 'width="15" height="15"'),

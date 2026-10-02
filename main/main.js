@@ -30,6 +30,7 @@ const { Updater, LATEST, compareVersions } = require('./updater');
 const { generatePassword } = require('./passwords');
 const importer = require('./importer');
 const { Schedules, describe: describeSchedule } = require('./schedules');
+const { Workflows } = require('./workflows');
 
 const IS_DEV = !app.isPackaged;
 
@@ -50,6 +51,7 @@ let updater = null;
 let account = null;
 let passwords = null;
 let schedules = null; // scheduled tasks (main/schedules.js)
+let workflows = null; // saved workflows (main/workflows.js)
 let quitting = false;
 const windows = new Set();
 let lastFocused = null;
@@ -107,6 +109,7 @@ const services = {
   get helper() { return helper; },
   get account() { return account; },
   get schedules() { return schedules; },
+  get workflows() { return workflows; },
   notify: (w, title, body, chatId) => notifyChat(w, title, body, chatId),
   createWindow: (opts) => createWindow(opts),
   onFocus: (w) => { lastFocused = w; },
@@ -783,6 +786,7 @@ function registerIpc() {
   handle('ai:set-mode', (w, mode) => w.ai.setMode(mode));
   handle('ai:send', (w, payload) => w.ai.send(payload));
   handle('ai:steer', (w, payload) => w.ai.steer(payload || {}));
+  handle('ai:workflows', (w) => (w.incognito ? [] : workflows.list()));
   handle('ai:chats', (w) => w.ai.listChats());
   handle('ai:chat', (w, id) => w.ai.getChat(id));
   handle('ai:delete-chat', (w, id) => w.ai.deleteChat(id));
@@ -895,6 +899,19 @@ function registerIpc() {
     importSources: importer.detect(),
     sitePermissions: Object.entries(normal.permissions.all()).map(([origin, perms]) => ({ origin, perms })),
   }));
+  // Saved workflows (Settings › Workflows, and the new tab page)
+  internalHandle('page:workflows', ['settings', 'newtab'], () => ({ workflows: workflows.list() }));
+  internalHandle('page:workflow-update', ['settings'], (_ctx, id, patch) => { try { return { ok: true, workflow: workflows.update(String(id), patch || {}) }; } catch (err) { return { ok: false, error: err.message }; } });
+  internalHandle('page:workflow-remove', ['settings'], (_ctx, id) => ({ ok: workflows.remove(String(id)) }));
+  // Running one happens in the panel, which asks for any blanks first.
+  internalHandle('page:workflow-run', ['settings', 'newtab'], ({ w }, id) => {
+    if (!workflows.get(String(id))) return { ok: false, error: 'That workflow doesn’t exist anymore.' };
+    store.setSetting('panelOpen', true);
+    w.emit('ai-workflow', { id: String(id) });
+    w.win.webContents.focus();
+    return { ok: true };
+  });
+
   // Scheduled tasks (Settings › Scheduled tasks)
   const scheduleReply = (fn) => { try { return { ok: true, ...fn() }; } catch (err) { return { ok: false, error: err.message }; } };
   internalHandle('page:schedules', ['settings'], () => ({ tasks: schedules.list(), signedIn: !!account.state().signedIn }));
@@ -1136,6 +1153,8 @@ app.whenReady().then(async () => {
   account.refresh();
   watchLumioCookie();
   setInterval(() => { if (account.token()) account.refresh(); }, 10 * 60 * 1000).unref?.();
+  workflows = new Workflows(app.getPath('userData'));
+  workflows.onChange(() => alive().forEach((w) => w.emit('workflows-changed', {})));
   schedules = new Schedules(app.getPath('userData'));
   schedules.onChange(() => alive().forEach((w) => w.emit('schedules-changed', {})));
   setInterval(runDueSchedules, 20 * 1000).unref?.();
@@ -1287,6 +1306,8 @@ global.lumio = {
   get extensions() { return extensions; },
   get account() { return account; },
   get passwords() { return passwords; },
+  get workflows() { return workflows; },
+  get schedules() { return schedules; },
   get profiles() { return { normal, incognito: incog }; },
   get recentlyClosed() { return recentlyClosed; },
   screenAura,

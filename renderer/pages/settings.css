@@ -103,7 +103,13 @@ select.field { appearance: none; padding-right: 30px; background: var(--field) u
 .row.dim { opacity: .45; pointer-events: none; }
 
 /* scheduled tasks */
-.sched-row { align-items: center; }
+.sched-row, .wf-row { align-items: center; }
+.wf-row .grow { min-width: 0; }
+.wf-row .title b { font-weight: 550; }
+.wf-row .prompt { color: var(--label); font-size: 12.5px; margin-top: 3px; }
+.wf-row .acts { display: flex; gap: 6px; align-items: center; flex: none; }
+.wf-row .btn { height: 30px; padding: 0 11px; font-size: 12.5px; }
+.wf-row .icon-btn { width: 30px; padding: 0; display: grid; place-items: center; }
 .sched-row .grow { min-width: 0; }
 .sched-row .title { display: flex; align-items: center; gap: 8px; }
 .sched-row .title b { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
