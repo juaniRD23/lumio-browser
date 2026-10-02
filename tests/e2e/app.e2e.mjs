@@ -363,6 +363,7 @@ test('on High effort, Lumio sends helper AIs to work in background tabs, each wi
   const active = await L.main(() => global.lumio.tabs.activeId);
   await L.main(() => global.lumio.ai.setReasoning('high'));
   const before = lumio.state.agentRequests.length;
+  await L.shell(`document.getElementById('newchat-btn').click(); true`); // the script counts this chat's turns
   try {
     await ask('research this two ways at once');
     // While they work: two new background tabs, each with its helper's colored dot.
