@@ -56,7 +56,7 @@ function makePdf() {
 
 // A fake Chrome profile to import from.
 function makeChromeProfile(dir) {
-  const profile = path.join(dir, 'Google', 'Chrome', 'Default');
+  const profile = path.join(dir, 'Google', 'Chrome', ...(process.platform === 'win32' ? ['User Data'] : []), 'Default');
   fs.mkdirSync(profile, { recursive: true });
   const chromeTime = (ms) => String((ms + 11644473600000) * 1000);
   fs.writeFileSync(path.join(profile, 'Bookmarks'), JSON.stringify({

@@ -247,9 +247,8 @@
           <summary>Installing on a Mac</summary>
           <ol>
             <li>Open the <b>.dmg</b> and drag <b>Lumio Browser</b> into <b>Applications</b>.</li>
-            <li>Open it. macOS says it can’t verify the app, because Lumio Browser isn’t signed with a paid Apple Developer ID yet. Click <b>Done</b>.</li>
-            <li>Open <b>System Settings → Privacy &amp; Security</b>, scroll down and click <b>Open Anyway</b>, then confirm. You only do this once.</li>
-            <li>Optional: to let Lumio use your whole Mac, turn on Lumio Browser under <b>Accessibility</b> and <b>Screen Recording</b> in the same settings.</li>
+            <li>Open it from Applications. macOS checks it (Lumio Browser is signed and notarized by Apple) and asks once to confirm you want to open an app from the internet. Click <b>Open</b>.</li>
+            <li>Optional: to let Lumio use your whole Mac, turn on Lumio Browser under <b>System Settings → Privacy &amp; Security → Accessibility</b> and <b>Screen Recording</b>.</li>
           </ol>
         </details>
         <details>
@@ -287,7 +286,8 @@
         <details><summary>Is it based on Chrome?</summary><p>It’s built on Chromium, the open-source engine inside Chrome, through Electron. Websites work like they do in Chrome, and most Chrome extensions install from the Chrome Web Store.</p></details>
         <details><summary>What can the AI see?</summary><p>Only what you share: the page you include in a message, or pages and screenshots it opens while doing a task you asked for. Chats are saved on your computer (never in incognito). Saved passwords are never available to it.</p></details>
         <details><summary>Can it control my whole computer?</summary><p>If you let it. On a Mac, turn on Accessibility and Screen Recording for Lumio Browser. On Windows it works out of the box. In the default Ask mode, it asks before every action on your computer.</p></details>
-        <details><summary>Why does my computer warn me when I open it?</summary><p>Lumio Browser isn’t signed with a paid Apple or Microsoft certificate yet, so your system can’t vouch for it. The install steps above show the one-time way to open it. The source code is public if you’d like to check it.</p></details>
+        <details><summary>Why does Windows warn me when I open it?</summary><p>On a Mac, Lumio Browser is signed and notarized by Apple, so it opens like any other app. On Windows it isn’t signed with a Microsoft certificate yet, so SmartScreen may ask first: click <b>More info → Run anyway</b>. The source code is public if you’d like to check it.</p></details>
+        <details><summary>Can I use Lumio on my phone?</summary><p>Yes. Turn on <b>Settings › Sync</b> in Lumio Browser, then open <b>lumio.gw607953.workers.dev/companion</b> on your phone and sign in. You’ll see what Lumio is doing on your computer, approve its steps, run your workflows and read your chats. Your synced data is encrypted on your devices.</p></details>
         <details><summary>What’s Lumio Chat?</summary><p>Lumio’s AI in your web browser, at <a href="/chat">lumio-usa.online/chat</a>. Sign in with Google and ask anything; your chats are saved to your account. Pick the model: fast ones on every plan, and bigger ones from Claude, GPT, Gemini and Grok on Plus and up. It shares your plan with Lumio Browser.</p></details>
         <details><summary>How do updates work?</summary><p>Lumio Browser checks for new versions on its own. When one is out, a blue <b>Update</b> button appears next to your profile picture. Click it, and Lumio downloads the update, checks it, installs it and restarts with your tabs.</p></details>
         <details><summary>Does it sync between devices?</summary><p>Not yet. Bookmarks, history and passwords stay on your computer. Your Lumio account and plan work everywhere you sign in.</p></details>

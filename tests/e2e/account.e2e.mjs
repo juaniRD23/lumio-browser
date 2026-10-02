@@ -354,7 +354,7 @@ test('signed in on Plus, the AI runs on the Lumio plan', async () => {
   assert.equal(req.model, 'mock/agent-1');
   assert.equal(req.reasoning, 'medium');
   assert.ok(req.tools.includes('read_page') && !req.tools.some((t) => t.startsWith('mac_')));
-  assert.equal(req.context.platform, 'mac');
+  assert.equal(req.context.platform, process.platform === 'darwin' ? 'mac' : 'windows');
   assert.ok(!req.messages.some((m) => m.role === 'system'), 'the server owns the system prompt');
   await shot('25-lumio-plan-chat');
 });

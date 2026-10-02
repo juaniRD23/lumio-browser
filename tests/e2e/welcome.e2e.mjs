@@ -26,7 +26,7 @@ const visibleStep = () => L.page(`document.querySelector('.step:not([hidden])')?
 
 before(async () => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lumio-welcome-'));
-  const profile = path.join(tmp, 'support', 'Google', 'Chrome', 'Default');
+  const profile = path.join(tmp, 'support', 'Google', 'Chrome', ...(process.platform === 'win32' ? ['User Data'] : []), 'Default');
   fs.mkdirSync(profile, { recursive: true });
   fs.writeFileSync(path.join(profile, 'Bookmarks'), JSON.stringify({ roots: { bookmark_bar: { children: [
     { type: 'url', url: 'https://github.com/', name: 'GitHub' }, { type: 'url', url: 'https://news.ycombinator.com/', name: 'Hacker News' },
@@ -68,7 +68,7 @@ test('the Keychain screen shows the macOS prompt and what to click, then asks ma
   assert.equal(await until(async () => (await visibleStep()) === 'import', 5000), true, 'moves on by itself');
 });
 
-test('import: Chrome bookmarks and passwords (macOS asks to read Chrome’s key)', async () => {
+test('import: Chrome bookmarks and passwords (macOS asks to read Chrome’s key)', { skip: process.platform !== 'darwin' && 'Mac only: on Windows, Chrome passwords come from a CSV export' }, async () => {
   assert.equal(await until(async () => (await visibleStep()) === 'import'), true);
   assert.deepEqual(await L.page(`[...document.querySelectorAll('.src b')].map((b) => b.textContent)`), ['Google Chrome']);
   if (process.platform === 'darwin') assert.match(await L.page(`document.getElementById('imp-note').textContent`), /macOS will ask to let Lumio read Google Chrome’s passwords/);
@@ -88,7 +88,7 @@ test('import: Chrome bookmarks and passwords (macOS asks to read Chrome’s key)
   await L.page(`document.getElementById('imp-go').click(); true`);
 });
 
-test('done: Start browsing opens a new tab and the AI panel, and the welcome won’t show again', async () => {
+test('done: Start browsing opens a new tab and the AI panel, and the welcome won’t show again', { skip: process.platform !== 'darwin' && 'follows the Mac-only import step' }, async () => {
   assert.equal(await until(async () => (await visibleStep()) === 'done'), true);
   assert.match(await L.page(`document.querySelector('[data-step=done]').innerText`), /default browser[\s\S]*Sign in to Lumio AI/);
   await shot('54-done');
