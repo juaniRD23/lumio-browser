@@ -64,7 +64,7 @@ export function initVoice({ api, prompt, autosize, submit, notice, isReady, onCh
   let replyBuf = ''; // the reply being written, after the last tool step
   let waitingFor = null; // chat id we sent to in voice mode
 
-  function setPhase(p) {
+  function setPhase(p, notify = true) {
     phase = p;
     document.body.dataset.voice = mode ? p : '';
     micBtn.classList.toggle('on', !mode && !!rec);
@@ -73,7 +73,7 @@ export function initVoice({ api, prompt, autosize, submit, notice, isReady, onCh
     bar.hidden = !mode;
     const label = { listening: 'Listening…', hearing: 'Listening…', thinking: 'Working on it…', speaking: 'Speaking… tap to interrupt', idle: 'Voice mode' }[p];
     bar.querySelector('.vb-text').textContent = label;
-    onChange();
+    if (notify) onChange();
   }
 
   // ---------------------------------------------------------------- recording
@@ -242,7 +242,7 @@ export function initVoice({ api, prompt, autosize, submit, notice, isReady, onCh
     player = null;
   }
 
-  setPhase('idle');
+  setPhase('idle', false); // the panel is still starting: it draws itself after
 
   return {
     // Every ai-event for the open chat.
