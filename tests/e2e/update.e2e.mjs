@@ -118,6 +118,8 @@ test('Update now (from the card) downloads, verifies and installs the new versio
   const plist = path.join(target, 'Contents', 'Info.plist');
   assert.ok(await until(async () => fs.existsSync(plist) && fs.readFileSync(plist, 'utf8').includes('9.9.9'), 40_000), 'new version swapped in');
   assert.equal(fs.existsSync(path.join(target, 'Contents', 'old-marker')), false, 'old copy removed');
+  // The old copy is deleted right after the swap (rm -rf can take a moment).
+  await until(() => fs.readdirSync(path.dirname(target)).length === 1, 20_000);
   assert.deepEqual(fs.readdirSync(path.dirname(target)), ['Lumio Browser.app'], 'no leftovers next to the app');
   execFileSync('codesign', ['--verify', '--deep', '--strict', target]);
 });
