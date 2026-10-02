@@ -101,7 +101,7 @@ test('download: a tampered or truncated installer is thrown away', async () => {
   await assert.rejects(u.download(), /incomplete/);
 });
 
-test("install: if the app's folder isn't writable, the installer is opened for the person", async () => {
+test("install: if the app's folder isn't writable, the installer is opened for the person", { skip: process.platform !== 'darwin' && 'Mac only (disk images)' }, async () => {
   const opened = [];
   const target = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'lumio-ro-')), 'Lumio Browser.app');
   fs.mkdirSync(target);

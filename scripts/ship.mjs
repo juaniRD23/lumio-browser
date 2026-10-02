@@ -11,11 +11,12 @@
 // DMGs and the Windows ZIP, commit + tag + push, create the GitHub release
 // with the notes (and the urgent marker), then check the files are live.
 // In the workflow the same steps run as --prepare and --publish.
+import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REPO = 'juaniRD23/lumio-browser';
 const ASSETS = ['Lumio-Browser-mac-apple-silicon.dmg', 'Lumio-Browser-mac-intel.dmg', 'Lumio-Browser-windows-x64.zip'];
 const pkgFile = path.join(root, 'package.json');

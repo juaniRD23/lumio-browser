@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import worker from '../server/src/index.ts';
 const require = createRequire(import.meta.url);
 const { Store } = require('../main/store.js');
@@ -23,7 +24,7 @@ const adapters = require('../main/sync/adapters.js');
 const SHOTS = process.env.LUMIO_SHOTS;
 const shot = async (page, name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.waitForTimeout(450); await page.screenshot({ path: path.join(SHOTS, `phone-${name}.png`) }); } };
 const CHROME = ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/usr/bin/google-chrome'].find((p) => fs.existsSync(p));
-const PUBLIC = new URL('../website/public/', import.meta.url).pathname;
+const PUBLIC = fileURLToPath(new URL('../website/public/', import.meta.url));
 const TOKEN = crypto.randomBytes(32).toString('hex');
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
 

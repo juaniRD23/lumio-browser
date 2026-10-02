@@ -2,11 +2,12 @@
 // copies Lumio Chat's file code (making PDFs/Word/PowerPoint, reading
 // attachments) into the panel, so both use the same code.
 // Run by `npm start`, the test launcher and packaging.
+import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const WEB = ['docmaker.js', 'attach.js', 'vendor/marked.js', 'vendor/pdf.min.mjs', 'vendor/pdf.worker.min.mjs', 'vendor/pdfmake.min.js', 'vendor/vfs_fonts.js', 'vendor/docx.iife.js', 'vendor/pptxgen.bundle.js'];
 function copyWeb() {
@@ -32,4 +33,4 @@ export async function buildPreload() {
   });
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) await buildPreload();
+if (fileURLToPath(import.meta.url) === path.resolve(process.argv[1] || '')) await buildPreload();

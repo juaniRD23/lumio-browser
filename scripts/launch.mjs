@@ -1,11 +1,12 @@
 // Shared launcher for dev scripts and e2e tests (playwright-core's Electron driver).
+import { fileURLToPath } from 'node:url';
 import { _electron as electron } from 'playwright-core';
 import { buildPreload } from './build-preload.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-export const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 let built = null;
 

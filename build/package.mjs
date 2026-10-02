@@ -9,13 +9,14 @@
 //   node build/package.mjs --install   → also copy it into /Applications
 //   node build/package.mjs --release   → dist/release/: Mac DMGs (Apple silicon
 //                                        and Intel) and a Windows x64 ZIP
+import { fileURLToPath } from 'node:url';
 import { packager } from '@electron/packager';
 import { sign as osxSign } from '@electron/osx-sign';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const dist = path.join(root, 'dist');
 const release = path.join(dist, 'release');
