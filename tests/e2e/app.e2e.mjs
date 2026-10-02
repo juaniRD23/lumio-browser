@@ -445,6 +445,80 @@ test('out of allowance, the chat offers an upgrade', async () => {
   await L.main(() => global.lumio.cmd.closeTab());
 });
 
+test('ask about my tabs: the + menu sends every open tab with the message', async () => {
+  await L.main((_e, u) => global.lumio.tabs.create(u), siteUrl + '/');
+  await until(() => L.main(() => !global.lumio.tabs.active.loading && /^http/.test(global.lumio.tabs.active.url || '')));
+  await L.shell(`document.getElementById('plus-btn').click(); true`);
+  await L.shell(`document.getElementById('add-tabs').click(); true`);
+  assert.equal(await L.shell(`document.querySelector('#context-chip span').textContent`), 'All open tabs');
+  assert.equal(await L.shell(`document.getElementById('plus-menu').hidden`), true);
+  await shot('47-all-tabs');
+  const before = lumio.state.agentRequests.length;
+  await ask('which tab talks about keepers?');
+  await idle();
+  const req = lumio.state.agentRequests.slice(before)[0];
+  const sent = req.messages.at(-1).content.map((p) => p.text || '').join('\n');
+  assert.match(sent, /<open_tabs count="\d+"/);
+  assert.ok(sent.includes(`url="${siteUrl}/"`), 'the page tab is in it');
+  assert.match(sent, /Keepers/i, 'with its text');
+  assert.doesNotMatch(sent, /<current_page/, 'instead of just the current page');
+  assert.match(await L.shell(`[...document.querySelectorAll('.msg.user .ctx')].at(-1).innerText`), /\d+ open tabs?/);
+  assert.notEqual(await L.shell(`document.querySelector('#context-chip span').textContent`), 'All open tabs', 'one message only');
+});
+
+test('voice: an empty box offers voice mode where Send is, and voice calls reach the server', async () => {
+  const setPrompt = (v) => L.shell(`(() => { const p = document.getElementById('prompt'); p.value = ${JSON.stringify(v)}; p.dispatchEvent(new Event('input')); return true })()`);
+  await setPrompt('');
+  assert.equal(await L.shell(`document.getElementById('send').hidden`), true);
+  assert.equal(await L.shell(`document.getElementById('voice-btn').hidden`), false);
+  assert.equal(await L.shell(`document.getElementById('mic-btn').hidden`), false);
+  await setPrompt('hello');
+  assert.equal(await L.shell(`document.getElementById('send').hidden`), false);
+  assert.equal(await L.shell(`document.getElementById('voice-btn').hidden`), true);
+  await setPrompt('');
+  const heard = await L.main(() => global.lumio.ai.transcribe({ data: new Uint8Array(4000).fill(7), mime: 'audio/webm;codecs=opus', seconds: 3 }));
+  assert.deepEqual(heard, { text: 'What is on this page?' });
+  const spoken = await L.main(async () => { const r = await global.lumio.ai.speak({ text: 'Hello there.' }); return Buffer.from(r.audio).toString(); });
+  assert.equal(spoken, 'ID3mockaudio');
+  const [t, sp] = lumio.state.voice.slice(-2);
+  assert.equal(t.body.format, 'webm');
+  assert.equal(Buffer.from(t.body.audio, 'base64').length, 4000);
+  assert.deepEqual(sp.body, { text: 'Hello there.' });
+});
+
+test('scheduled tasks: Lumio schedules one, Settings lists it, and Run now runs it', async () => {
+  const mode = await L.main(() => global.lumio.store.settings.approvalMode);
+  await L.main(() => global.lumio.ai.setMode('auto'));
+  try {
+    await ask('every morning at 8, give me the news');
+    await idle();
+    assert.match(await lastReply(), /Scheduled “Morning news”/);
+    const [task] = await L.main(() => global.lumio.ai.schedules.list());
+    assert.equal(task.when, 'Every day at 8:00 AM');
+    assert.equal(task.prompt, 'Say good morning with three headlines');
+
+    await L.main((_e, u) => global.lumio.tabs.navigate(u), 'lumio://settings/#scheduled');
+    assert.ok(await until(() => L.page(`document.getElementById('sched-list')?.innerText.includes('Morning news')`)));
+    assert.match(await L.page(`document.getElementById('sched-list').innerText`), /Every day at 8:00 AM · Next:/);
+    await shot('48-scheduled');
+    const runs = lumio.state.agentRequests.length;
+    await L.page(`document.querySelector('[data-act="run"]').click(); true`);
+    assert.ok(await until(() => L.main((_e, id) => global.lumio.ai.schedules.get(id)?.lastStatus === 'done', task.id), 20_000), 'the run finished');
+    const sent = lumio.state.agentRequests[runs].messages.at(-1).content;
+    assert.match(sent, /^Say good morning with three headlines/);
+    assert.match(sent, /This is a scheduled task the user set up earlier/);
+    assert.equal((await L.main((_e, id) => global.lumio.ai.schedules.get(id), task.id)).nextRun, task.nextRun, 'Run now keeps the schedule');
+    assert.ok(await until(() => L.shell(`[...document.querySelectorAll('.msg.user .ctx')].some((c) => /Scheduled · Every day/.test(c.innerText))`)));
+    // Pause, then delete.
+    await L.page(`(() => { const c = document.querySelector('[data-act="pause"]'); c.checked = false; c.dispatchEvent(new Event('change', { bubbles: true })); return true })()`);
+    assert.ok(await until(() => L.main((_e, id) => global.lumio.ai.schedules.get(id)?.paused === true, task.id)));
+    await L.page(`window.confirm = () => true; document.querySelector('[data-act="delete"]').click(); true`);
+    assert.ok(await until(() => L.main(() => global.lumio.ai.schedules.list().length === 0)));
+  } finally {
+    await L.main((_e, m) => global.lumio.ai.setMode(m), mode);
+  }
+});
+
 test('chats are saved without screenshots', async () => {
   const chats = await L.main(() => global.lumio.ai.listChats());
   assert.ok(chats.length >= 3);

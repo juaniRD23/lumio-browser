@@ -120,7 +120,7 @@ export async function spendReport(env: Env, user: User, now = Date.now()) {
       total: sum(() => true),
       free: sum((r) => r.who === 'free'),
       paid: sum((r) => r.who === 'paid'),
-      byKind: { browser: sum((r) => r.kind === 'browser'), chat: sum((r) => r.kind === 'chat'), image: sum((r) => r.kind === 'image') },
+      byKind: { browser: sum((r) => r.kind === 'browser'), chat: sum((r) => r.kind === 'chat'), image: sum((r) => r.kind === 'image'), voice: sum((r) => r.kind === 'voice') },
       calls: results.reduce((a, r) => a + r.calls, 0),
       checked: results.reduce((a, r) => a + r.checked, 0),
     };

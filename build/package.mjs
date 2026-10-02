@@ -65,7 +65,7 @@ function macOptions(arch, helper) {
       LSMinimumSystemVersion: '14.0',
       NSAppleEventsUsageDescription: 'Lumio uses AppleScript when you ask it to work with other apps.',
       NSCameraUsageDescription: 'Websites you allow can use your camera.',
-      NSMicrophoneUsageDescription: 'Websites you allow can use your microphone.',
+      NSMicrophoneUsageDescription: 'Lumio’s voice mode and websites you allow can use your microphone.',
       NSLocationWhenInUseUsageDescription: 'Websites you allow can see your location.',
       CFBundleDocumentTypes: [
         { CFBundleTypeName: 'HTML document', CFBundleTypeRole: 'Viewer', LSItemContentTypes: ['public.html', 'public.xhtml'] },

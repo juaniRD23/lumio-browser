@@ -5,7 +5,7 @@
 // renderer can't forge tool calls or approvals for itself.
 const { shell } = require('electron');
 const crypto = require('crypto');
-const { lumioChat, lumioCapabilities } = require('./lumio');
+const { lumioChat, lumioCapabilities, lumioVoice } = require('./lumio');
 const { runAgent, repairHistory } = require('./agent');
 const { buildSystemPrompt } = require('./prompts');
 const { MODES } = require('./policy');
@@ -316,6 +316,24 @@ class AIController {
     this.emit('ai-event', { chatId: chat.id, type: 'user', text: clean, ctx: ctxInfo, title: chat.title, ...(shown.length ? { files: shown } : {}) });
     this.start(chat);
     return { ok: true, chatId: chat.id };
+  }
+
+  // Voice mode (the panel records and plays; the Lumio server does the rest).
+  async transcribe({ data, mime, seconds } = {}) {
+    if (!(data instanceof Uint8Array) && !(data instanceof ArrayBuffer)) return { error: 'No audio.' };
+    const bytes = Buffer.from(data instanceof ArrayBuffer ? new Uint8Array(data) : data);
+    if (bytes.length < 200) return { text: '' };
+    if (bytes.length > 3 * 1024 * 1024) return { error: 'That was too long. Keep it under two minutes.' };
+    const format = (String(mime || '').match(/^audio\/(webm|ogg|wav|mp4|mpeg)/) || [])[1] || 'webm';
+    const out = await lumioVoice(this.account, 'transcribe', { audio: bytes.toString('base64'), format: format === 'mpeg' ? 'mp3' : format === 'mp4' ? 'm4a' : format, seconds: Math.max(1, Math.min(120, Number(seconds) || 1)) });
+    Promise.resolve(this.account?.refresh?.()).catch(() => {}); // the usage ring
+    return out;
+  }
+
+  async speak({ text, voice } = {}) {
+    const clean = String(text || '').trim().slice(0, 4000);
+    if (!clean) return { error: 'Nothing to read.' };
+    return lumioVoice(this.account, 'speak', { text: clean, ...(voice ? { voice: String(voice) } : {}) });
   }
 
   // Runs a scheduled task in a new chat (main.js calls this when it's due).

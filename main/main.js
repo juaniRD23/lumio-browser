@@ -788,6 +788,8 @@ function registerIpc() {
   handle('ai:connections', (w) => w.ai.connections());
   handle('ai:set-app', (w, name, on) => w.ai.setApp(String(name || ''), !!on));
   handle('ai:extract', (w, file) => w.ai.extractOffice(file || {}));
+  handle('ai:voice-transcribe', (w, payload) => w.ai.transcribe(payload || {}));
+  handle('ai:voice-speak', (w, payload) => w.ai.speak(payload || {}));
   handle('ai:tab-pdf', (w, tabId) => require('./ai/tools/browser').tabPdf(w.tabs, Number.isSafeInteger(tabId) ? tabId : null));
   on('ai:doc-built', (w, result) => w.ai.docBuilt(result || {}));
   on('ai:connect', (w, id) => { if (/^[a-z_]{2,40}$/.test(String(id))) w.tabs.create(`${account.base}/api/connect/${id}/start?next=/account`); });
@@ -1106,6 +1108,16 @@ app.whenReady().then(async () => {
   helper = new MacHelper();
   app.userAgentFallback = chromeUserAgent();
   registerUiProtocol(session.defaultSession);
+  // Lumio's own UI (the window and its popups) may use the microphone for
+  // voice mode in the AI panel, and no other device. Everything else keeps
+  // Electron's defaults.
+  const isShell = (wc) => !!wc && alive().some((w) => w.win.webContents === wc);
+  session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {
+    if (permission !== 'media') return callback(true);
+    const audioOnly = (details.mediaTypes || []).length > 0 && details.mediaTypes.every((t) => t === 'audio');
+    callback(audioOnly && isShell(wc) && String(details.requestingUrl || '').startsWith('lumio://shell/'));
+  });
+  session.defaultSession.setPermissionCheckHandler((wc, permission, origin) => permission !== 'media' || (isShell(wc) && String(origin).startsWith('lumio://shell')));
 
   const ses = session.fromPartition('persist:lumio');
   setupTabSession(ses);

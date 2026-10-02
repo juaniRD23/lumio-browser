@@ -12,14 +12,14 @@ const MODEL = { id: 'mock/agent-1', name: 'Mock Agent', maker: 'Lumio', minimumP
 const TOOLS = ['read_page', 'click', 'type', 'select_option', 'press_key', 'scroll', 'navigate', 'go_back', 'screenshot_tab', 'click_at',
   'list_tabs', 'open_tab', 'switch_tab', 'close_tab', 'wait', 'computer_screenshot', 'computer_click', 'computer_move', 'computer_drag',
   'computer_scroll', 'computer_type', 'computer_key', 'open_app', 'list_apps', 'run_shell', 'update_plan', 'run_applescript',
-  'generate_image', 'create_document'];
+  'generate_image', 'create_document', 'schedule_task', 'list_scheduled_tasks', 'cancel_scheduled_task'];
 // A 2x2 PNG for /v1/images.
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFklEQVR42mNkYPj/n4GBgYHhPwMDAwAt8gP9tA3e2wAAAABJRU5ErkJggg==';
 
 export async function startMockLumio({ plan = 'plus' } = {}) {
   const sessions = new Map(); // token -> { email, name }
   // connected: which apps are connected (the + menu); tools: what /v1/tools/run did.
-  const state = { plan, agentRequests: [], agentScript: null, connected: new Set(), toolRuns: [], images: 0, billing: [], canceling: false };
+  const state = { plan, agentRequests: [], agentScript: null, connected: new Set(), toolRuns: [], images: 0, billing: [], canceling: false, voice: [] };
   const APPS = [['google_drive', 'Google Drive', 'drive'], ['gmail', 'Gmail', 'gmail'], ['outlook', 'Outlook', 'mail'], ['onedrive', 'OneDrive', 'files'], ['word', 'Word', 'files']];
   const remoteTools = () => (state.connected.has('gmail') ? [{ name: 'gmail_search', app: 'Gmail' }, { name: 'gmail_read', app: 'Gmail' }] : []);
   const json = (res, status, data) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(data)); };
@@ -118,6 +118,14 @@ export async function startMockLumio({ plan = 'plus' } = {}) {
         state.images++;
         state.lastImagePrompt = body.prompt;
         return json(res, 200, { image: PNG, mime: 'image/png', model: 'Mock Image' });
+      }
+      // ---- voice mode
+      if (url.pathname.startsWith('/v1/voice/') && req.method === 'POST') {
+        if (!bearer(req)) return json(res, 401, { error: 'Sign in.', code: 'sign_in_required' });
+        const body = JSON.parse(await readBody(req));
+        state.voice.push({ path: url.pathname, body });
+        if (url.pathname === '/v1/voice/transcribe') return json(res, 200, { text: 'What is on this page?' });
+        if (url.pathname === '/v1/voice/speak') { res.writeHead(200, { 'content-type': 'audio/mpeg' }); res.end(Buffer.from('ID3mockaudio')); return; }
       }
       if (url.pathname === '/v1/extract' && req.method === 'POST') {
         if (!bearer(req)) return json(res, 401, { error: 'Sign in.', code: 'sign_in_required' });

@@ -23,7 +23,7 @@ const MS_TOKEN = 'https://ms.test/token';
 const GAPI = 'https://gapi.test';
 const GRAPH = 'https://graph.test/v1.0';
 
-let sql, env, calls, reply, imageReply, apiReply, pending, stripeState, r2, generations, unrecorded, orKey;
+let sql, env, calls, reply, imageReply, listenReply, speakReply, apiReply, pending, stripeState, r2, generations, unrecorded, orKey;
 
 function d1(db) {
   return {
@@ -84,6 +84,8 @@ beforeEach(() => {
   apiReply = () => Response.json({}, { status: 404 });
   reply = () => textReply('Hello from Luna.');
   imageReply = () => Response.json({ id: 'gen-img-test', choices: [{ message: { role: 'assistant', content: '', images: [{ type: 'image_url', image_url: { url: PNG_URL } }] } }], usage: { prompt_tokens: 20, completion_tokens: 1100, cost: 0.0094 } });
+  listenReply = () => Response.json({ id: 'gen-stt-test', text: 'What is on this page?', usage: { seconds: 4.2, cost: 0.000014 } });
+  speakReply = () => new Response(new Uint8Array([0x49, 0x44, 0x33, 1, 2, 3]), { headers: { 'content-type': 'audio/mpeg', 'x-generation-id': 'gen-tts-test' } });
   pending = [];
   stripeState = { subscriptions: {} };
   globalThis.fetch = async (url, opts = {}) => {
@@ -92,6 +94,11 @@ beforeEach(() => {
       const body = JSON.parse(opts.body);
       calls.or.push({ headers: opts.headers, body });
       return body.model === IMAGE_MODEL.id ? imageReply(body) : reply(body);
+    }
+    if (u === `${OR}/audio/transcriptions` || u === `${OR}/audio/speech`) {
+      const body = JSON.parse(opts.body);
+      calls.or.push({ headers: opts.headers, body, path: new URL(u).pathname });
+      return u.endsWith('/speech') ? speakReply(body) : listenReply(body);
     }
     if (u.startsWith(`${OR}/generation?`) || u === `${OR}/key`) {
       calls.orGet.push({ url: u, auth: opts.headers?.authorization });
@@ -725,7 +732,7 @@ test('spend page: only the owner sees OpenRouter’s charges next to what Lumio 
   orKey = { usage: 12.5, usage_daily: 0.000321, usage_weekly: 0.5, usage_monthly: 2.25, limit: 50, limit_remaining: 37.5 };
   const d = await (await call('/api/admin/spend', { token })).json();
   assert.deepEqual(d.openrouter, { today: 0.000321, week: 0.5, month: 2.25, total: 12.5, limit: 50, limitRemaining: 37.5 });
-  assert.deepEqual(d.lumio.today, { total: 0.000321, free: 0.000321, paid: 0, byKind: { browser: 0.000321, chat: 0, image: 0 }, calls: 1, checked: 1 });
+  assert.deepEqual(d.lumio.today, { total: 0.000321, free: 0.000321, paid: 0, byKind: { browser: 0.000321, chat: 0, image: 0, voice: 0 }, calls: 1, checked: 1 });
   assert.deepEqual(d.people, { free: 1 });
   assert.equal(d.monthlyRevenue, 0);
   assert.deepEqual(d.freeCap, { usedToday: 0.000321, cap: 3 });
@@ -845,6 +852,55 @@ test('pictures: out of allowance is a plain refusal; Lumio Browser gets the pict
   const no = await call('/v1/images', { token, method: 'POST', body: { prompt: 'something' } });
   assert.equal((await no.json()).code, 'image_refused');
   assert.equal(sql.prepare("SELECT cost_microusd FROM steps WHERE kind = 'image' AND status = 'failed'").get().cost_microusd, 0);
+});
+
+test('voice: speech to text and reading aloud are charged to the weekly allowance', async () => {
+  const { token } = await signIn();
+  generations['gen-stt-test'] = 0.000014;
+  generations['gen-tts-test'] = 0.00003;
+  const audio = Buffer.from('fake opus audio').toString('base64');
+  const heard = await call('/v1/voice/transcribe', { token, method: 'POST', body: { audio, format: 'webm', seconds: 4.2, language: 'en' } });
+  assert.equal(heard.status, 200);
+  assert.deepEqual(await heard.json(), { text: 'What is on this page?' });
+  const stt = calls.or.find((c) => c.path?.endsWith('/transcriptions')).body;
+  assert.equal(stt.model, 'openai/whisper-large-v3-turbo');
+  assert.deepEqual(stt.input_audio, { data: audio, format: 'webm' });
+  assert.equal(stt.language, 'en');
+
+  const spoken = await call('/v1/voice/speak', { token, method: 'POST', body: { text: 'Here is the summary.', voice: 'af_heart' } });
+  assert.equal(spoken.status, 200);
+  assert.equal(spoken.headers.get('content-type'), 'audio/mpeg');
+  assert.equal((await spoken.arrayBuffer()).byteLength, 6);
+  const tts = calls.or.find((c) => c.path?.endsWith('/speech')).body;
+  assert.equal(tts.model, 'hexgrad/kokoro-82m');
+  assert.equal(tts.response_format, 'mp3');
+  await settled();
+  const rows = sql.prepare("SELECT status, cost_microusd, billed_microusd, gen_ids FROM steps WHERE kind = 'voice' ORDER BY created_at").all();
+  assert.equal(rows.length, 2);
+  assert.ok(rows.every((r) => r.status === 'done'));
+  assert.equal(rows[0].cost_microusd, 14); // OpenRouter's reported cost
+  // Reading aloud is charged at the list price (20 characters: 13 microUSD),
+  // then the live check puts in what OpenRouter's record says.
+  assert.equal(rows[1].cost_microusd, 30);
+  assert.equal(rows[1].billed_microusd, 30);
+  assert.deepEqual(JSON.parse(rows[1].gen_ids), ['gen-tts-test']);
+  // Bad input is refused without calling the model.
+  const before = calls.or.length;
+  assert.equal((await call('/v1/voice/transcribe', { token, method: 'POST', body: { audio: 'not base64!' } })).status, 400);
+  assert.equal((await call('/v1/voice/speak', { token, method: 'POST', body: { text: '' } })).status, 400);
+  assert.equal(calls.or.length, before);
+});
+
+test('voice: a provider failure charges nothing, and an empty allowance refuses', async () => {
+  const { token } = await signIn();
+  speakReply = () => Response.json({ error: { message: 'down' } }, { status: 503 });
+  const r = await call('/v1/voice/speak', { token, method: 'POST', body: { text: 'Hello' } });
+  assert.ok(r.status >= 500);
+  assert.equal(sql.prepare("SELECT cost_microusd FROM steps WHERE kind = 'voice'").get().cost_microusd, 0);
+  sql.prepare("INSERT INTO steps (key, owner, plan, kind, request_hash, status, held_microusd, cost_microusd, created_at) VALUES ('x', ?, 'free', 'chat', 'h', 'done', 0, 100000, ?)").run(userRow().id, Date.now() - 1000);
+  const out = await call('/v1/voice/transcribe', { token, method: 'POST', body: { audio: 'AAAA', seconds: 2 } });
+  assert.equal(out.status, 429);
+  assert.equal((await out.json()).code, 'usage_limit');
 });
 
 // ---------------------------------------------------------------- connections

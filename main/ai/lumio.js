@@ -126,4 +126,27 @@ async function lumioCapabilities(account) {
   return data;
 }
 
-module.exports = { lumioChat, lumioCapabilities, trimForServer };
+// Voice mode: speech to text (POST /v1/voice/transcribe) and reading a reply
+// aloud (POST /v1/voice/speak, MP3 back). Both use the person's weekly allowance.
+async function lumioVoice(account, kind, body) {
+  if (!account?.token()) return { error: 'Sign in to Lumio first (account button, top right).' };
+  let res;
+  try {
+    res = await account.fetch(`${account.aiBase}/v1/voice/${kind}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${account.token()}` },
+      body: JSON.stringify(body),
+      redirect: 'manual',
+      signal: AbortSignal.timeout(60000),
+    });
+  } catch {
+    return { error: 'Couldn’t reach Lumio. Check your connection.' };
+  }
+  if (res.ok && kind === 'speak') return { audio: new Uint8Array(await res.arrayBuffer()) };
+  let data = null;
+  try { data = await res.json(); } catch { /* ignore */ }
+  if (!res.ok) return { error: friendly(res.status, data), code: data?.code || null };
+  return { text: String(data?.text || '') };
+}
+
+module.exports = { lumioChat, lumioCapabilities, lumioVoice, trimForServer };

@@ -74,7 +74,7 @@ function outOfAllowance(plan: Plan) {
 // Holds `held` microUSD of the allowance while a call runs. Atomic across
 // concurrent requests; Free accounts also share a daily cap.
 export async function hold(env: Env, { key, owner, plan, requestHash, kind, held, now = Date.now() }:
-  { key: string; owner: string; plan: Plan; requestHash: string; kind: 'browser' | 'chat' | 'image'; held: number; now?: number }) {
+  { key: string; owner: string; plan: Plan; requestHash: string; kind: 'browser' | 'chat' | 'image' | 'voice'; held: number; now?: number }) {
   if (plan === 'free') {
     const cap = Math.floor(Number(env.FREE_DAILY_CAP_USD || '3') * 1_000_000);
     const today = await env.DB.prepare(`SELECT ${SPENT} AS used FROM steps WHERE plan = 'free' AND created_at >= ?1`).bind(now - 24 * HOUR).first<{ used: number }>();

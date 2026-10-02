@@ -102,6 +102,11 @@
           <div id="apps" class="apps"></div>
         </div>
         <div id="usage-pop" class="popover usage-pop" role="dialog" aria-label="Usage" hidden></div>
+        <div id="voice-bar" class="voice-bar" hidden>
+          <button type="button" class="vb-orb" aria-label="Done talking, or interrupt"><i></i></button>
+          <span class="vb-text">Voice mode</span>
+          <button type="button" class="vb-end">End</button>
+        </div>
         <div id="tray" class="tray" hidden></div>
         <button id="page-suggest" class="page-suggest" type="button" hidden></button>
         <div id="context-chip" class="chip" hidden title="Lumio will read this page with your message"><i></i><span></span><button aria-label="Don't include this page">×</button></div>
@@ -116,6 +121,8 @@
           </div>
           <span class="spacer"></span>
           <button id="usage-btn" class="round-btn ring-btn" title="Usage" aria-label="Usage" aria-haspopup="dialog" aria-expanded="false" hidden></button>
+          <button id="mic-btn" class="round-btn mic-btn" title="Dictate" aria-label="Dictate"></button>
+          <button id="voice-btn" class="round-btn voice-btn" title="Voice mode: talk with Lumio hands-free" aria-label="Voice mode" aria-pressed="false"></button>
           <button id="send" class="send" title="Send (↵)" aria-label="Send"></button>
         </div>
       </div>

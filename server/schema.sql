@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS steps (
   key TEXT PRIMARY KEY,
   owner TEXT NOT NULL,
   plan TEXT NOT NULL,
-  kind TEXT NOT NULL DEFAULT 'browser',  -- browser | chat | image
+  kind TEXT NOT NULL DEFAULT 'browser',  -- browser | chat | image | voice
   request_hash TEXT NOT NULL,
   status TEXT NOT NULL,                  -- running | done | failed
   held_microusd INTEGER NOT NULL,

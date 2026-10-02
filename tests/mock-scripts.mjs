@@ -21,6 +21,10 @@ export function scriptedTurn(msgs) {
   const lastTool = [...after].reverse().find((m) => m.role === 'tool');
   const snapshot = [...after].reverse().find((m) => m.role === 'tool' && /^Tab \d+:/.test(m.content))?.content || '';
 
+  if (ask.includes('every morning at 8')) {
+    if (step === 0) return { calls: [{ name: 'schedule_task', args: { title: 'Morning news', prompt: 'Say good morning with three headlines', repeat: 'daily', time: '08:00' } }] };
+    return { text: `Scheduled. ${(lastTool?.content || '').split('.')[0]}.` };
+  }
   if (ask.includes('pizza')) {
     if (step === 0) return { lead: "I'll fill in the order form.", calls: [{ name: 'read_page' }] };
     if (step === 1) {

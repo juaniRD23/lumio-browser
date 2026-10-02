@@ -3,6 +3,7 @@
 import { marked } from '/vendor/marked.js';
 import DOMPurify from '/vendor/purify.js';
 import { icons, markSvg, levelBars } from './icons.js';
+import { initVoice } from './voice.js';
 import { initExtras, filesEl, madeEl } from './panel-extras.js';
 
 const LEVEL = { low: 1, medium: 2, high: 3 }; // reasoning level -> bars
@@ -41,6 +42,10 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
 
   // + menu (files, connections), attachments tray, usage ring, made files.
   const extras = initExtras({ api, getAi: () => ai, onChange: () => renderState(), notice: (t) => notice(t) });
+  // Dictation and hands-free voice mode.
+  $('#mic-btn').innerHTML = icons.mic;
+  $('#voice-btn').innerHTML = icons.wave;
+  const voice = initVoice({ api, prompt, autosize: () => autosize(), submit: (text) => submit(text), notice: (t) => notice(t), isReady: () => !!ai.ready, onChange: () => renderState() });
 
   // ------------------------------------------------------------ chrome
   $('#panel-mark').innerHTML = markSvg(18);
@@ -155,6 +160,10 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     sendBtn.innerHTML = running ? icons.square : icons.send;
     sendBtn.title = running ? 'Stop (Esc)' : 'Send (↵)';
     sendBtn.disabled = !running && ((!prompt.value.trim() && !extras.ready()) || extras.busy() || !ai.ready);
+    // An empty box offers voice mode where Send is (and Send comes back as you type).
+    const talk = document.body.dataset.voice || (!running && ai.ready && !prompt.value.trim() && !extras.ready() && !extras.busy());
+    sendBtn.hidden = !!talk;
+    $('#voice-btn').hidden = !talk;
     extras.renderRing();
     setRunning(!!ai.running);
     spin(!!ai.running);
@@ -561,6 +570,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   }
 
   api.on('ai-event', (ev) => {
+    voice.onEvent(ev);
     if (ev.type === 'user') {
       // A scheduled task shows up in an empty panel, unless you're typing there.
       if ((!chatId && !(ev.background && prompt.value.trim())) || chatId === ev.chatId) {
@@ -813,6 +823,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   async function loadChat(id) {
     const chat = await api.invoke('ai:chat', id);
     if (!chat) return;
+    if (id !== chatId) voice.stop();
     chatId = id;
     live = ai.running && ai.runChatId === id ? { textEl: null, textBuf: '', thinkingEl: null, steps: new Map() } : null;
     renderChat(chat.display);
@@ -826,6 +837,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     renderState();
   }
   function newChat() {
+    voice.stop();
     chatId = null;
     live = null;
     showPlan(null);
