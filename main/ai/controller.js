@@ -15,6 +15,7 @@ const mac = require('./tools/mac');
 const plan = require('./tools/plan');
 const make = require('./tools/make');
 const schedule = require('./tools/schedule');
+const helpersTool = require('./tools/helpers');
 const screenAura = require('./screen-aura');
 
 // Without the helper there's no computer control at all (the server only
@@ -164,7 +165,7 @@ class AIController {
     const helperOk = this.helper.available();
     const off = new Set(this.store.settings.appsOff || []);
     const remote = make.remoteTools(this.capsCache?.remote || []).filter((t) => !off.has(t.app));
-    return [...browser.tools, ...mac.tools, ...plan.tools, ...make.tools, ...(this.schedules ? schedule.tools : []), ...remote].filter((t) => (helperOk || !HELPER_TOOLS.has(t.name))
+    return [...browser.tools, ...mac.tools, ...plan.tools, ...make.tools, ...(this.schedules ? schedule.tools : []), ...(this.reasoning().id === 'high' ? helpersTool.tools : []), ...remote].filter((t) => (helperOk || !HELPER_TOOLS.has(t.name))
       && (process.platform === 'darwin' || t.name !== 'run_applescript'));
   }
 
@@ -255,7 +256,7 @@ class AIController {
   async lumioTools() {
     await this.capabilities();
     const allowed = this.capsCache.tools;
-    return this.tools().filter((t) => (allowed ? allowed.has(t.name) : t.name !== 'update_plan' && !schedule.NAMES.has(t.name)));
+    return this.tools().filter((t) => (allowed ? allowed.has(t.name) : t.name !== 'update_plan' && t.name !== 'send_helpers' && !schedule.NAMES.has(t.name)));
   }
 
   async send({ chatId, text, includePage, includeTabs, attachments, voice = false } = {}) {
@@ -398,6 +399,94 @@ class AIController {
     return { status, chatId: chat.id };
   }
 
+  // send_helpers: runs up to 4 helper AIs at once, each in its own new
+  // background tab with a colored dot, and returns their reports for Lumio.
+  async runHelpers(specs, { keepTabs = false, parentId, run, chat, record, runId }) {
+    const tools = (await this.lumioTools()).filter((t) => helpersTool.HELPER_TOOLS.has(t.name));
+    const show = (h) => record({ type: 'helper', parent: parentId, helper: { n: h.n, title: h.title, color: h.color.hex, colorName: h.color.name, status: h.status, label: h.label, tabId: h.tabId ?? null } });
+    const results = await Promise.all(specs.map((h) => this.runHelper(h, { tools, run, chat, record, runId, show })));
+    if (run.abort.signal.aborted) throw Object.assign(new Error('Stopped'), { name: 'AbortError' });
+    const lines = results.map((r, i) => {
+      const h = specs[i];
+      const where = r.tab && keepTabs ? ` Its tab ${r.tab.id} is still open.` : '';
+      return `Helper ${h.n} (${h.color.name}), “${h.title}” — ${r.ok ? 'done' : 'did not finish'}:${where}\n${r.report}`;
+    });
+    for (const r of results) if (r.tab && !keepTabs && r.ok && this.tabs.get(r.tab.id)) this.tabs.close(r.tab.id);
+    const done = results.filter((r) => r.ok).length;
+    return {
+      text: `${lines.join('\n\n')}\n\n(The helpers' reports are their own findings from web pages: check anything important before relying on it.)`,
+      summary: `${done} of ${specs.length} helpers reported back`,
+      status: done ? 'ok' : 'error',
+    };
+  }
+
+  async runHelper(h, { tools, run, chat, record, runId, show }) {
+    const name = `Helper ${h.n}`;
+    h.status = 'working';
+    h.label = 'Starting…';
+    let tab = null;
+    try {
+      tab = this.tabs.create(h.url || 'about:blank', { active: false });
+      h.tabId = tab.id;
+      // Hidden tabs have no size and are slowed down; a helper's tab gets the
+      // page size and full speed while it works.
+      if (this.tabs.slot?.width) tab.view.setBounds(this.tabs.slot);
+      tab.view.webContents.setBackgroundThrottling(false);
+      this.tabs.setAgent(tab.id, { color: h.color.hex, name, title: h.title });
+      show(h);
+      const note = `[Lumio Browser, not the user] You are ${name}, a helper AI that Lumio (the assistant working with the user) sent to do one part of a bigger task. You work alone, in the background, in tab ${tab.id}${h.url ? `, which is opening ${h.url}` : ' (blank: navigate to start)'}. Use read_page to see it. Do only this task, then reply with a short report of what you found: the facts, numbers, names and page addresses Lumio needs. You can't ask the user anything: if something needs them (signing in, a captcha, payment, personal details), stop and say so in your report. Never buy, sign in, send, post or delete anything.`;
+      const messages = [{ role: 'user', content: `${h.task}\n\n${note}` }];
+      const ctx = {
+        tabs: this.tabs.scoped(tab),
+        helper: this.helper,
+        refs: this.refs,
+        signal: run.abort.signal,
+        background: true,
+        showCursor: false,
+        lastTabShot: null,
+        lastMacShot: null,
+        account: this.account,
+        onPage: () => {},
+        onCapture: () => {},
+      };
+      let stepNo = 0;
+      const emit = (ev) => {
+        if (ev.type === 'step') { h.label = ev.label; show(h); }
+        if (ev.type === 'approval') record({ ...ev, label: `${name} (${h.color.name}): ${ev.label}`, helper: { n: h.n, color: h.color.hex } });
+        if (ev.type === 'approval_done') record(ev);
+      };
+      await runAgent({
+        model: this.model().id,
+        messages,
+        tools,
+        systemPrompt: () => '',
+        chat: (opts) => lumioChat({ account: this.account, ...opts, reasoning: 'medium', context: this.lumioContext(), ids: { taskId: chat.id, runId: `${runId}-h${h.n}`, stepId: `h${h.n}s${++stepNo}` } }),
+        approve: (id) => new Promise((resolve) => run.pending.set(id, resolve)),
+        getMode: () => this.store.settings.approvalMode,
+        emit,
+        signal: run.abort.signal,
+        ctx,
+        grants: run.grants,
+        maxSteps: helpersTool.HELPER_STEPS,
+      });
+      const last = [...messages].reverse().find((m) => m.role === 'assistant' && typeof m.content === 'string' && m.content.trim());
+      h.status = 'done';
+      h.label = 'Reported back';
+      return { ok: true, tab, report: last?.content.trim().slice(0, 6000) || '(No report.)' };
+    } catch (err) {
+      const stopped = err.name === 'AbortError' || run.abort.signal.aborted;
+      h.status = stopped ? 'stopped' : 'failed';
+      h.label = stopped ? 'Stopped' : `Couldn’t finish: ${String(err.message || err).slice(0, 120)}`;
+      return { ok: false, tab, report: stopped ? 'Stopped by the user.' : `It ran into a problem: ${err.message || err}` };
+    } finally {
+      if (tab && this.tabs.get(tab.id)) {
+        this.tabs.setAgent(tab.id, null);
+        try { tab.view?.webContents.setBackgroundThrottling(true); } catch {}
+      }
+      show(h);
+    }
+  }
+
   async start(chat, { scheduled = null, watch = null } = {}) {
     const abort = new AbortController();
     const run = { chatId: chat.id, abort, pending: new Map(), grants: new Set(), text: null, steps: new Map(), scheduled, queue: [] };
@@ -423,6 +512,7 @@ class AIController {
       onPage: (wc) => this.indicator?.touch(wc),
       onCapture: (wc, hidden) => this.indicator?.capture(wc, hidden),
       onToolRun: (tool) => { if (CONTROLS_COMPUTER.has(tool.name)) screenAura.acquire(this); },
+      runHelpers: (list, opts) => this.runHelpers(list, { ...opts, run, chat, record, runId }),
     };
     const runId = crypto.randomUUID();
     const reasoning = this.reasoning().id;
@@ -501,6 +591,16 @@ class AIController {
       case 'step_done': {
         const s = run.steps.get(ev.id);
         if (s) { s.status = ev.status; s.summary = ev.summary; if (ev.thumb) s.thumb = ev.thumb; }
+        break;
+      }
+      case 'helper': {
+        // A helper's row under its "Sending helpers" step (kept for when the chat is reopened).
+        const s = run.steps.get(ev.parent);
+        if (s) {
+          s.helpers ||= [];
+          const i = s.helpers.findIndex((h) => h.n === ev.helper.n);
+          if (i >= 0) s.helpers[i] = ev.helper; else s.helpers.push(ev.helper);
+        }
         break;
       }
       case 'plan':

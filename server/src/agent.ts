@@ -52,6 +52,7 @@ const bool=(description?:string):Schema=>({type:'boolean',...(description?{descr
 const oneOf=(values:readonly string[]):Schema=>({type:'string',enum:values});
 const TAB=int(1,1_000_000,'Tab id (defaults to the active tab)');
 const PLAN_STEPS:Schema={type:'array',minItems:1,maxItems:12,items:{type:'object',properties:{title:str(100,1,'A short step, like "Compare prices"'),status:oneOf(['pending','in_progress','done'])},required:['title','status'],additionalProperties:false}};
+const HELPER_LIST:Schema={type:'array',minItems:1,maxItems:4,items:{type:'object',properties:{title:str(60,1,'A few words, like "Best Buy price"'),task:str(2000,1,'The complete task for this helper'),url:str(2000,0,'Where to start (optional)')},required:['title','task'],additionalProperties:false}};
 const tool=(name:string,description:string,properties:Record<string,Schema>,required:string[]=[])=>({type:'function' as const,function:{name,description,parameters:{type:'object' as const,properties,required,additionalProperties:false as const}}});
 
 // Making pictures and files (Chat runs these on the server; Lumio Browser
@@ -93,6 +94,7 @@ export const browserAgentTools=[
  tool('schedule_task','Schedule a task for Lumio to do later on its own, once or repeating (hourly, daily, weekdays, weekly), in the user\'s local time. Only when the user asks for something to happen later or regularly. Write the prompt as a complete instruction for your future self, since the chat history won\'t be there.',{title:str(80,1,'Short name, like "Morning news"'),prompt:str(4000,1,'What to do when it runs, as a complete instruction'),repeat:oneOf(['once','hourly','daily','weekdays','weekly']),time:str(10,1,'Local time, like "08:00" or "18:30" (for hourly, the minutes count)'),weekday:oneOf(['sunday','monday','tuesday','wednesday','thursday','friday','saturday']),date:str(10,0,'For once: YYYY-MM-DD (default: the next time that clock time comes)')},['title','prompt','repeat','time']),
  tool('list_scheduled_tasks','List the user\'s scheduled tasks with their ids, times and what they do.',{}),
  tool('cancel_scheduled_task','Delete one of the user\'s scheduled tasks by id (from list_scheduled_tasks).',{id:str(64,1)},['id']),
+ tool('send_helpers','Send up to 4 helper AIs to work at the same time, each in its own new background tab, then get their reports back. Only for hard, long tasks with parts that can be done separately, like comparing one product across several stores or checking several sources. Each helper sees only the task you give it (not this chat), so make each one complete, and give a starting URL when you know one. Helpers can read, search, click, type and scroll in their own tab; they cannot sign in, buy, send anything or use the computer.',{helpers:HELPER_LIST,keep_tabs:bool('Leave the helpers’ tabs open afterwards (default: close them)')},['helpers']),
  tool('run_applescript','Run AppleScript on the Mac to control apps. Always asks the user first unless approvals are bypassed.',{script:str(8000,1),explanation:str(300,1,'One short sentence for the user: what this does and why')},['script','explanation']),
 ];
 const computerTools=new Set(['computer_screenshot','computer_click','computer_move','computer_drag','computer_scroll','computer_type','computer_key','open_app','list_apps','run_shell','run_applescript']);
@@ -245,7 +247,9 @@ export function validateBrowserStep(value:unknown,extra:ToolDef[]=[]):BrowserSte
  if(images>MAX_STEP_IMAGES)throw new AgentError(`Send at most ${MAX_STEP_IMAGES} pictures per step.`,400,'image_not_supported');
  if(value.reasoning!==undefined&&!BROWSER_REASONING.includes(value.reasoning as BrowserReasoning))throw new AgentError('Invalid reasoning level.');
  const reasoning=(value.reasoning??'medium') as BrowserReasoning;
- const step:BrowserStep={version:1,taskId:value.taskId,runId:value.runId,stepId:value.stepId,model:value.model,messages,tools,workflow:'build',context,reasoning};
+ // Helper AIs are for hard tasks: only offered on High thinking effort.
+ const offered=reasoning==='high'?tools:tools.filter(name=>name!=='send_helpers');
+ const step:BrowserStep={version:1,taskId:value.taskId,runId:value.runId,stepId:value.stepId,model:value.model,messages,tools:offered,workflow:'build',context,reasoning};
  // Long tasks are made to fit the model's window instead of being refused.
  step.messages=fitBrowserMessages(messages,browserFixedTokens(step,extra));
  return step;

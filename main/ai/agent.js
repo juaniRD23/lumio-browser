@@ -92,6 +92,7 @@ async function runToolCall(call, env) {
 
   safe(() => ctx?.onToolRun?.(tool, args, label)); // e.g. the screen glow when it controls the computer
   try {
+    if (ctx) ctx.callId = call.id; // which step is running (send_helpers groups its helpers under it)
     const out = await tool.run(args, ctx);
     const res = typeof out === 'string' ? { text: out } : out || { text: 'Done.' };
     if (res.text && res.text.length > MAX_TOOL_TEXT) res.text = res.text.slice(0, MAX_TOOL_TEXT) + '\n…[truncated]';

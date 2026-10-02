@@ -521,7 +521,43 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     el.innerHTML = `<span class="s-icon">${icons[s.icon] || icons.app}</span><span class="s-label"></span><span class="s-state"></span>`;
     el.querySelector('.s-label').textContent = s.label;
     setStepStatus(el, s.status || 'running', s.summary);
+    if (s.helpers?.length) {
+      const frag = document.createDocumentFragment();
+      frag.append(el);
+      for (const h of s.helpers) setHelperRow(el, h, frag);
+      return frag;
+    }
     return el;
+  }
+
+  // Helper AIs (send_helpers): one row each under the step, in the helper's
+  // color (the same as the dot on its tab). Click a row to watch its tab.
+  function setHelperRow(stepEl, h, into = null) {
+    let list = into ? into.querySelector?.(`.helpers[data-parent="${CSS.escape(stepEl.dataset.id)}"]`) : stepEl.nextElementSibling;
+    if (!list?.classList?.contains('helpers')) {
+      list = document.createElement('div');
+      list.className = 'helpers';
+      list.dataset.parent = stepEl.dataset.id;
+      if (into) into.append(list); else stepEl.after(list);
+    }
+    let row = list.querySelector(`[data-n="${h.n}"]`);
+    if (!row) {
+      row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'helper';
+      row.dataset.n = h.n;
+      row.innerHTML = '<i class="h-dot"></i><span class="h-main"><b></b><small></small></span><span class="h-state"></span>';
+      row.addEventListener('click', () => { if (row.dataset.tab) api.send('tab:activate', Number(row.dataset.tab)); });
+      list.append(row);
+    }
+    row.style.setProperty('--c', h.color);
+    row.classList.toggle('working', h.status === 'working');
+    row.classList.toggle('failed', h.status === 'failed' || h.status === 'stopped');
+    if (h.tabId) row.dataset.tab = h.tabId;
+    row.title = `Helper ${h.n} (${h.colorName || ''})${h.status === 'working' ? ': click to watch its tab' : ''}`;
+    row.querySelector('b').textContent = h.title;
+    row.querySelector('small').textContent = h.label || '';
+    row.querySelector('.h-state').innerHTML = h.status === 'working' ? '<span class="spinner"></span>' : h.status === 'done' ? icons.check : icons.x;
   }
 
   function setStepStatus(el, status, summary) {
@@ -707,6 +743,11 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
         // The step chip above already shows the outcome; drop the card.
         const el = messages.querySelector(`.approval[data-id="${CSS.escape(ev.id)}"]`);
         if (el) el.animate([{ opacity: 1 }, { opacity: 0, transform: 'translateY(-4px)' }], { duration: 160 }).onfinish = () => el.remove();
+        break;
+      }
+      case 'helper': {
+        const el = live?.steps.get(ev.parent) || messages.querySelector(`.step[data-id="${CSS.escape(ev.parent || '')}"]`);
+        if (el) { setHelperRow(el, ev.helper); scrollDown(); }
         break;
       }
       case 'step_done': {

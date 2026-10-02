@@ -57,7 +57,7 @@ function createTabEl(id) {
   const el = document.createElement('div');
   el.className = 'tab';
   el.setAttribute('role', 'tab');
-  el.innerHTML = '<span class="fav"></span><span class="title"></span><button class="audio" hidden></button><button class="x" aria-label="Close tab"></button>';
+  el.innerHTML = '<span class="fav"></span><i class="agent-dot" hidden></i><span class="title"></span><button class="audio" hidden></button><button class="x" aria-label="Close tab"></button>';
   el.querySelector('.x').innerHTML = icons.close;
   el.querySelector('.x').addEventListener('click', (e) => { e.stopPropagation(); api.send('tab:close', id); });
   el.querySelector('.audio').addEventListener('click', (e) => { e.stopPropagation(); api.send('tab:mute', id); });
@@ -72,7 +72,13 @@ function updateTabEl(el, t) {
   el.classList.toggle('pinned', !!t.pinned);
   el.classList.toggle('sleeping', !!t.sleeping);
   el.setAttribute('aria-selected', String(t.id === state.activeId));
-  el.title = t.title + (t.url ? '\n' + t.url : '') + (t.sleeping ? '\nSleeping to save memory (Memory Saver)' : '');
+  el.title = t.title + (t.url ? '\n' + t.url : '') + (t.sleeping ? '\nSleeping to save memory (Memory Saver)' : '')
+    + (t.agent ? `\n${t.agent.name} is working here: ${t.agent.title}` : '');
+  // A helper AI is working in this tab: its color, the same as its row in the chat.
+  const dot = el.querySelector('.agent-dot');
+  dot.hidden = !t.agent;
+  if (t.agent) dot.style.setProperty('--c', t.agent.color);
+  el.classList.toggle('helped', !!t.agent);
   const fav = faviconHtml(t);
   if (el._fav !== fav) { el.querySelector('.fav').innerHTML = fav; el._fav = fav; }
   const img = el.querySelector('.fav img');

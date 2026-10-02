@@ -349,4 +349,61 @@ async function youtube(opts) {
   return out;
 }
 
-module.exports = { youtube, snapshot, locate, focusCheck, selectContents, selectOption, scrollInfo, cursor, aura };
+// Helper AIs work in background tabs, which have no visible page to send
+// real mouse and keyboard input to, so they act through the page instead.
+// (Lumio's own tab keeps using real input.)
+function domClick(opts) {
+  const el = document.querySelector(`[data-lumio-ref="${opts.ref}"]`);
+  if (!el) return { error: `No element [${opts.ref}] on the page. Call read_page again to get fresh refs.` };
+  el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+  const r = el.getBoundingClientRect();
+  const at = { bubbles: true, cancelable: true, composed: true, view: window, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, button: 0 };
+  for (const type of ['pointerdown', 'mousedown']) el.dispatchEvent(new (type.startsWith('pointer') ? PointerEvent : MouseEvent)(type, { ...at, pointerType: 'mouse', isPrimary: true }));
+  if (typeof el.focus === 'function') el.focus({ preventScroll: true });
+  for (const type of ['pointerup', 'mouseup']) el.dispatchEvent(new (type.startsWith('pointer') ? PointerEvent : MouseEvent)(type, { ...at, pointerType: 'mouse', isPrimary: true }));
+  el.click();
+  if (opts.double) el.dispatchEvent(new MouseEvent('dblclick', at));
+  return { ok: true };
+}
+
+// Types into a field through the page (React and similar frameworks see it as
+// typing). Password, payment and ID fields are refused before this runs.
+function domType(opts) {
+  const el = document.querySelector(`[data-lumio-ref="${opts.ref}"]`);
+  if (!el) return { error: `No element [${opts.ref}] on the page. Call read_page again to get fresh refs.` };
+  const target = el.tagName === 'LABEL' && el.control ? el.control : el;
+  target.scrollIntoView({ block: 'center', behavior: 'instant' });
+  if (typeof target.focus === 'function') target.focus({ preventScroll: true });
+  const text = String(opts.text);
+  if (target.isContentEditable) {
+    if (opts.clear !== false) document.execCommand('selectAll', false);
+    document.execCommand('insertText', false, text);
+  } else if ('value' in target) {
+    const proto = target.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const set = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+    const next = opts.clear === false ? `${target.value}${text}` : text;
+    if (set) set.call(target, next); else target.value = next;
+    target.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: text }));
+    target.dispatchEvent(new Event('change', { bubbles: true }));
+  } else return { error: `Element [${opts.ref}] isn't a text field.` };
+  if (opts.submit) {
+    const key = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
+    const go = target.dispatchEvent(new KeyboardEvent('keydown', key));
+    target.dispatchEvent(new KeyboardEvent('keyup', key));
+    if (go && target.form) {
+      if (typeof target.form.requestSubmit === 'function') target.form.requestSubmit(); else target.form.submit();
+    }
+  }
+  return { ok: true };
+}
+
+// Scrolls the page (or the element with that ref) through the page.
+function domScroll(opts) {
+  const el = opts.ref ? document.querySelector(`[data-lumio-ref="${opts.ref}"]`) : null;
+  const box = el || document.scrollingElement || document.documentElement;
+  const dy = Math.round((opts.down ? 1 : -1) * window.innerHeight * opts.amount);
+  box.scrollBy({ top: dy, behavior: 'instant' });
+  return { scrollY: Math.round(window.scrollY), scrollHeight: document.documentElement.scrollHeight };
+}
+
+module.exports = { domClick, domType, domScroll, youtube, snapshot, locate, focusCheck, selectContents, selectOption, scrollInfo, cursor, aura };

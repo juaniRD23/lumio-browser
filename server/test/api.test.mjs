@@ -854,6 +854,19 @@ test('pictures: out of allowance is a plain refusal; Lumio Browser gets the pict
   assert.equal(sql.prepare("SELECT cost_microusd FROM steps WHERE kind = 'image' AND status = 'failed'").get().cost_microusd, 0);
 });
 
+test('helper AIs are offered to the model only on High thinking effort', async () => {
+  const { token } = await signIn();
+  assert.ok((await (await call('/v1/agent', { token })).json()).tools.includes('send_helpers'));
+  const tools = ['read_page', 'click', 'send_helpers'];
+  await events(await call('/v1/agent', { token, method: 'POST', body: step({ stepId: 'h1', tools, reasoning: 'medium' }) }));
+  await events(await call('/v1/agent', { token, method: 'POST', body: step({ stepId: 'h2', tools, reasoning: 'high' }) }));
+  await settled();
+  const offered = calls.or.map((c) => c.body.tools.map((t) => t.function.name));
+  assert.deepEqual(offered, [['read_page', 'click'], ['read_page', 'click', 'send_helpers']]);
+  const def = calls.or[1].body.tools.find((t) => t.function.name === 'send_helpers').function.parameters;
+  assert.equal(def.properties.helpers.maxItems, 4);
+});
+
 test('voice: speech to text and reading aloud are charged to the weekly allowance', async () => {
   const { token } = await signIn();
   generations['gen-stt-test'] = 0.000014;

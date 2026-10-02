@@ -91,6 +91,25 @@ test('the window and AI panel start without errors, and the composer works', { s
   await page.click('#plus-btn');
   await page.click('#add-tabs');
   assert.equal(await page.textContent('#context-chip span'), 'All open tabs');
+  // Helper AIs: a colored dot on each helper's tab, and a row per helper in the chat.
+  await page.evaluate(() => {
+    window.__emit('tabs', { activeId: 1, tabs: [
+      { id: 1, title: 'YouTube', url: 'https://www.youtube.com/watch?v=abc' },
+      { id: 7, title: 'Best Buy', url: 'https://www.bestbuy.com/', agent: { color: '#b58cff', name: 'Helper 2', title: 'Best Buy price' } },
+    ] });
+    window.__emit('ai-event', { chatId: 'c9', type: 'user', text: 'compare prices' });
+    window.__emit('ai-event', { chatId: 'c9', type: 'start' });
+    window.__emit('ai-event', { chatId: 'c9', type: 'step', id: 'call_h', name: 'send_helpers', label: 'Sending 2 helpers', icon: 'helpers', risk: 'read' });
+    window.__emit('ai-event', { chatId: 'c9', type: 'helper', parent: 'call_h', helper: { n: 2, title: 'Best Buy price', color: '#b58cff', colorName: 'Purple', status: 'working', label: 'Reading bestbuy.com', tabId: 7 } });
+  });
+  const dot = await page.$$eval('.tab .agent-dot', (els) => els.map((e) => ({ hidden: e.hidden, color: e.style.getPropertyValue('--c') })));
+  assert.deepEqual(dot, [{ hidden: true, color: '' }, { hidden: false, color: '#b58cff' }]);
+  assert.match(await page.textContent('.helpers .helper'), /Best Buy price.*Reading bestbuy\.com/);
+  await page.click('.helpers .helper');
+  assert.deepEqual(await page.evaluate(() => window.__sent.filter(([c]) => c === 'tab:activate').at(-1)), ['tab:activate', 7], 'a row opens its tab');
+  await page.evaluate(() => window.__emit('ai-event', { chatId: 'c9', type: 'helper', parent: 'call_h', helper: { n: 2, title: 'Best Buy price', color: '#b58cff', status: 'done', label: 'Reported back', tabId: 7 } }));
+  assert.equal(await page.$$eval('.helpers .helper', (els) => els.length), 1, 'updates in place');
+  assert.match(await page.textContent('.helpers .helper'), /Reported back/);
   assert.deepEqual(errors, [], 'no errors while using it');
 });
 

@@ -338,6 +338,55 @@ test('typing while Lumio works adds to the task, and "stop" stops it', async () 
   }
 });
 
+test('on High effort, Lumio sends helper AIs to work in background tabs, each with its colored dot', async () => {
+  const textOf = (m) => (typeof m.content === 'string' ? m.content : (m.content || []).map((p) => p.text || '').join('\n'));
+  lumio.state.agentScript = (body) => {
+    const asked = textOf(body.messages[0]);
+    const turns = body.messages.filter((m) => m.role === 'assistant').length;
+    const helper = /You are Helper (\d)/.exec(asked);
+    if (helper) {
+      if (turns === 0) return turnEvents({ calls: [{ name: 'wait', args: { seconds: 2 } }] });
+      if (turns === 1) return turnEvents({ calls: [{ name: 'read_page' }] });
+      const title = /^Tab \d+: "([^"]*)"/m.exec(body.messages.at(-1).content)?.[1];
+      return turnEvents({ text: `Helper ${helper[1]} read “${title}”.` });
+    }
+    if (turns === 0) {
+      return turnEvents({ calls: [{ name: 'send_helpers', args: { helpers: [
+        { title: 'First source', task: 'Read the article and report its title.', url: `${siteUrl}/` },
+        { title: 'Second source', task: 'Read the article and report its title too.', url: `${siteUrl}/` },
+      ] } }] });
+    }
+    const reports = textOf(body.messages.at(-1));
+    return turnEvents({ text: /Helper 1 read “.+”[\s\S]*Helper 2 read “.+”/.test(reports) ? 'Both helpers reported back.' : 'A report is missing.' });
+  };
+  const tabsBefore = await L.main(() => global.lumio.tabs.tabs.length);
+  const active = await L.main(() => global.lumio.tabs.activeId);
+  await L.main(() => global.lumio.ai.setReasoning('high'));
+  const before = lumio.state.agentRequests.length;
+  try {
+    await ask('research this two ways at once');
+    // While they work: two new background tabs, each with its helper's colored dot.
+    assert.ok(await until(() => L.main(() => global.lumio.tabs.tabs.filter((t) => t.agent).length === 2)), 'two helpers working');
+    assert.deepEqual(await L.main(() => global.lumio.tabs.tabs.filter((t) => t.agent).map((t) => t.agent.color)), ['#86b7ff', '#b58cff']);
+    assert.equal(await L.main(() => global.lumio.tabs.activeId), active, 'your tab stays in front');
+    assert.ok(await until(() => L.shell(`document.querySelectorAll('.tab .agent-dot:not([hidden])').length === 2`)));
+    assert.ok(await until(() => L.shell(`document.querySelectorAll('.helpers .helper.working').length === 2`)));
+    await shot('49-helpers');
+    await idle();
+    assert.match(await lastReply(), /Both helpers reported back/);
+    assert.equal(await L.main(() => global.lumio.tabs.tabs.length), tabsBefore, 'their tabs closed when done');
+    assert.equal(await L.shell(`document.querySelectorAll('.helpers .helper:not(.working):not(.failed)').length`), 2);
+    const reqs = lumio.state.agentRequests.slice(before);
+    const main = reqs.filter((r) => !/You are Helper/.test(textOf(r.messages[0])));
+    const helpers = reqs.filter((r) => /You are Helper/.test(textOf(r.messages[0])));
+    assert.ok(main[0].tools.includes('send_helpers') && main[0].reasoning === 'high');
+    assert.ok(helpers.length >= 6 && helpers.every((r) => r.reasoning === 'medium' && !r.tools.includes('send_helpers') && !r.tools.includes('run_shell')));
+  } finally {
+    lumio.state.agentScript = null;
+    await L.main(() => global.lumio.ai.setReasoning('medium'));
+  }
+});
+
 test('multi-step tasks show a Task progress checklist', async () => {
   await L.main(() => global.lumio.ai.setMode('auto'));
   await ask('plan a trip to Lisbon');

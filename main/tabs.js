@@ -357,6 +357,45 @@ class TabManager {
     return parsed.url;
   }
 
+  // What a helper AI sees of the tabs: only its own, which counts as the
+  // active one. It works in the background: activating does nothing and
+  // navigating doesn't take keyboard focus, so the person's view never jumps.
+  scoped(tab) {
+    const m = this;
+    const alive = () => m.tabs.includes(tab);
+    const nope = () => { throw new Error('Helpers work only in their own tab.'); };
+    return {
+      get active() { return alive() ? tab : null; },
+      get activeId() { return tab.id; },
+      get tabs() { return alive() ? [tab] : []; },
+      get: (id) => (id === tab.id && alive() ? tab : null),
+      activate: () => {},
+      ensureView: (t) => m.ensureView(t),
+      displayUrl: (t) => m.displayUrl(t),
+      searchTemplate: () => m.searchTemplate(),
+      wc: () => tab.view?.webContents,
+      navigate(input) {
+        const parsed = parseInput(input, m.searchTemplate());
+        if (!parsed || !alive()) return null;
+        m.ensureView(tab);
+        tab.url = parsed.url;
+        tab.view.webContents.loadURL(parsed.url).catch(() => {});
+        m.changed();
+        return parsed.url;
+      },
+      create: nope,
+      close: nope,
+    };
+  }
+
+  // A helper AI is working in this tab: a colored dot on it (null removes it).
+  setAgent(id, agent) {
+    const tab = this.get(id);
+    if (!tab) return;
+    tab.agent = agent;
+    this.changed();
+  }
+
   wc(id = this.activeId) {
     const tab = this.get(id);
     return tab && tab.view ? tab.view.webContents : null;
@@ -466,6 +505,7 @@ class TabManager {
         muted: t.muted,
         sleeping: !!t.discarded,
         pdf: !!t.pdf,
+        agent: t.agent || null,
         crashed: t.crashed,
         pinned: t.pinned,
         bookmarked: this.store.isBookmarked(this.displayUrl(t)),

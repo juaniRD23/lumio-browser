@@ -178,6 +178,12 @@ const tools = [
     detail: (a, ctx) => `Click ${refName(ctx, a.tab_id, a.ref)} on ${activeHost(ctx, a.tab_id)}`,
     async run(a, ctx) {
       const { wc } = tabFor(ctx, a.tab_id, { activate: true });
+      if (ctx.background) { // a helper's hidden tab: click through the page
+        const res = await inPage(wc, scripts.domClick, { ref: a.ref, double: !!a.double });
+        if (res.error) throw new Error(res.error);
+        await settle(wc);
+        return { text: `Clicked [${a.ref}]. ${pageLine(wc)}` };
+      }
       const info = await inPage(wc, scripts.locate, { ref: a.ref });
       if (info.error) throw new Error(info.error);
       const z = wc.getZoomFactor();
@@ -215,6 +221,12 @@ const tools = [
         return { text: 'Refused: this looks like a password, payment, or ID field. Ask the user to fill it in themselves.', summary: 'Sensitive field, left for you', status: 'blocked' };
       }
       if (info.isSelect) throw new Error('That element is a dropdown; use select_option.');
+      if (ctx.background) { // a helper's hidden tab: type through the page
+        const res = await inPage(wc, scripts.domType, { ref: a.ref, text: String(a.text), clear: a.clear !== false, submit: !!a.submit });
+        if (res.error) throw new Error(res.error);
+        if (a.submit) await settle(wc); else await wait(150);
+        return { text: `Typed into [${a.ref}]${a.submit ? ' and pressed Enter' : ''}. ${pageLine(wc)}` };
+      }
       const z = wc.getZoomFactor();
       await moveCursor(ctx, wc, info.x, info.y, false);
       await mouseClick(wc, Math.round(info.x * z), Math.round(info.y * z));
@@ -278,6 +290,11 @@ const tools = [
     label: (a) => `Scroll ${a.direction}`,
     async run(a, ctx) {
       const { tab, wc } = tabFor(ctx, a.tab_id, { activate: true });
+      if (ctx.background) { // a helper's hidden tab: scroll through the page
+        const res = await inPage(wc, scripts.domScroll, { ref: a.ref, down: a.direction !== 'up', amount: Math.min(5, Math.max(0.1, a.amount || 0.8)) });
+        await wait(300);
+        return `Scrolled ${a.direction}. Now at ${res.scrollY} of ${res.scrollHeight}px.`;
+      }
       const bounds = tab.view.getBounds();
       let x = Math.round(bounds.width / 2);
       let y = Math.round(bounds.height / 2);

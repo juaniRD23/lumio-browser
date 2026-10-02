@@ -14,7 +14,7 @@ import { allowance, costOf, planName, reserve, settle } from './usage.ts';
 import { AgentError, type Env, fail, json, sha256 } from './util.ts';
 
 const MAX_BODY = 24_000_000; // up to 12 pictures and long attached documents
-const STEPS_PER_MINUTE = 40;
+const STEPS_PER_MINUTE = 90; // Lumio plus up to 4 helper AIs working at once
 
 export async function capabilities(env: Env, user: User) {
   const connected = toolsFor(await connectedApps(env, user.id));
