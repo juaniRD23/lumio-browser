@@ -23,6 +23,9 @@ class ChatStore {
 
   get ephemeral() { return !this.file; }
 
+  // What's saved (and synced) for a chat: no pictures.
+  forDisk(chat) { return stripForDisk(chat); }
+
   list() {
     return [...this.chats]
       .sort((a, b) => b.updatedAt - a.updatedAt)

@@ -31,6 +31,8 @@ const { generatePassword } = require('./passwords');
 const importer = require('./importer');
 const { Schedules, describe: describeSchedule } = require('./schedules');
 const { Workflows } = require('./workflows');
+const { SyncEngine } = require('./sync/engine');
+const syncAdapters = require('./sync/adapters');
 
 const IS_DEV = !app.isPackaged;
 
@@ -52,6 +54,7 @@ let account = null;
 let passwords = null;
 let schedules = null; // scheduled tasks (main/schedules.js)
 let workflows = null; // saved workflows (main/workflows.js)
+let sync = null; // Lumio Sync (main/sync)
 let quitting = false;
 const windows = new Set();
 let lastFocused = null;
@@ -825,6 +828,7 @@ function registerIpc() {
   internalHandle('page:history', ['history'], () => store.history().slice().reverse());
   internalHandle('page:history-delete', ['history'], (_ctx, what) => store.deleteHistory(what || {}));
   internalHandle('page:history-clear', ['history', 'settings'], () => store.clearHistory());
+  internalHandle('page:other-tabs', ['history'], () => Object.values(sync?.remoteTabs || {}).filter((d) => d?.windows?.length).sort((a, b) => (b.at || 0) - (a.at || 0)));
   internalHandle('page:recently-closed', ['history'], () => recentlyClosed.map((e, index) => ({
     index,
     kind: e.kind,
@@ -899,6 +903,18 @@ function registerIpc() {
     importSources: importer.detect(),
     sitePermissions: Object.entries(normal.permissions.all()).map(([origin, perms]) => ({ origin, perms })),
   }));
+  // Lumio Sync (Settings › Sync)
+  const syncReply = async (fn) => { try { return { ok: true, ...(await fn()) }; } catch (err) { return { ok: false, error: err.message }; } };
+  internalHandle('page:sync', ['settings'], () => sync.state());
+  internalHandle('page:sync-devices', ['settings'], () => syncReply(async () => (sync.keys ? sync.api('/api/sync') : { devices: [] })));
+  internalHandle('page:sync-set', ['settings'], (_ctx, prefs) => { sync.setPrefs(prefs || {}); return sync.state(); });
+  internalHandle('page:sync-now', ['settings'], () => syncReply(async () => { await sync.tick(); return sync.state(); }));
+  internalHandle('page:sync-answer', ['settings'], (_ctx, id, approve) => syncReply(() => sync.answer(String(id), !!approve)));
+  internalHandle('page:sync-recovery', ['settings'], () => ({ key: sync.recoveryKey() }));
+  internalHandle('page:sync-use-recovery', ['settings'], (_ctx, text) => syncReply(() => sync.useRecoveryKey(String(text || ''))));
+  internalHandle('page:sync-remove-device', ['settings'], (_ctx, id) => syncReply(() => sync.api(`/api/sync/devices/${encodeURIComponent(String(id))}`, { method: 'DELETE' })));
+  internalHandle('page:sync-delete-all', ['settings'], () => syncReply(() => sync.deleteEverything()));
+
   // Saved workflows (Settings › Workflows, and the new tab page)
   internalHandle('page:workflows', ['settings', 'newtab'], () => ({ workflows: workflows.list() }));
   internalHandle('page:workflow-update', ['settings'], (_ctx, id, patch) => { try { return { ok: true, workflow: workflows.update(String(id), patch || {}) }; } catch (err) { return { ok: false, error: err.message }; } });
@@ -1148,7 +1164,7 @@ app.whenReady().then(async () => {
 
   account = new LumioAccount({
     store,
-    onChange: (state) => { alive().forEach((w) => { w.emit('account', state); w.ai.refreshCapabilities(); }); services.broadcastAIState(); },
+    onChange: (state) => { alive().forEach((w) => { w.emit('account', state); w.ai.refreshCapabilities(); }); services.broadcastAIState(); sync?.soon(500); },
   });
   account.refresh();
   watchLumioCookie();
@@ -1174,6 +1190,42 @@ app.whenReady().then(async () => {
     findTab: tabOfWc,
     toast: (w, text) => w.emit('toast', { text }),
   });
+
+  // Lumio Sync: bookmarks, passwords, history, chats, workflows, settings and
+  // open tabs on every device signed in to this Lumio account (encrypted here).
+  sync = new SyncEngine({
+    dir: app.getPath('userData'),
+    store,
+    account,
+    onState: (state) => alive().forEach((w) => w.emit('sync-state', state)),
+    onPairRequest: (r) => {
+      if (!Notification.isSupported()) return;
+      const n = new Notification({ title: `“${r.name}” wants to sync with Lumio`, body: `Check that it shows ${r.code.replace(/(\d{3})/, '$1 ')}, then approve it in Settings › Sync.` });
+      n.on('click', () => { const w = ensureWin(); w.focus(); w.tabs.create('lumio://settings/#sync'); });
+      n.show();
+    },
+  });
+  sync.addAdapters([
+    syncAdapters.bookmarks(store),
+    syncAdapters.history(store),
+    syncAdapters.passwords(passwords.store),
+    syncAdapters.chats(normal.chats),
+    syncAdapters.workflows(workflows),
+    syncAdapters.settings(store, { onApplied: () => { services.broadcastAIState(); menuChanged(); } }),
+    syncAdapters.tabs({
+      deviceId: sync.deviceId,
+      deviceName: sync.deviceName,
+      platform: process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'windows' : 'linux',
+      windows: () => alive().filter((w) => !w.incognito).map((w) => ({ tabs: w.tabs.sessionTabs() })),
+      remote: sync.remoteTabs,
+    }),
+  ]);
+  const syncSoon = () => sync.soon();
+  for (const f of [store.bookmarksFile, store.historyFile, store.settingsFile, store.chatsFile, store.sessionFile, passwords.store.file]) f.onSave(syncSoon);
+  workflows.onChange(syncSoon);
+  // Bookmarks from another device: redraw the bar.
+  store.bookmarksFile.onSave(() => { if (sync.busy) bookmarksChanged(); });
+  sync.start();
   passwords.register();
   screenAura.register();
 
@@ -1308,6 +1360,7 @@ global.lumio = {
   get passwords() { return passwords; },
   get workflows() { return workflows; },
   get schedules() { return schedules; },
+  get sync() { return sync; },
   get profiles() { return { normal, incognito: incog }; },
   get recentlyClosed() { return recentlyClosed; },
   screenAura,

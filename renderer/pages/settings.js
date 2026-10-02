@@ -608,3 +608,97 @@ $('#wf-list').addEventListener('click', async (e) => {
 });
 loadWorkflows();
 setInterval(() => { if (!document.hidden) loadWorkflows(); }, 15000);
+
+// ---- Sync
+const SYNC_TYPES = [['bookmarks', 'Bookmarks'], ['passwords', 'Passwords'], ['history', 'History'], ['tabs', 'Open tabs'], ['chats', 'Lumio chats'], ['workflows', 'Workflows'], ['settings', 'Settings']];
+const sinceText = (t) => {
+  if (!t) return '';
+  const s = (Date.now() - t) / 1000;
+  return s < 90 ? 'just now' : s < 3600 ? `${Math.round(s / 60)} minutes ago` : s < 86400 ? `${Math.round(s / 3600)} hours ago` : new Date(t).toLocaleDateString();
+};
+const PHONE_IC = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg>';
+const LAPTOP_IC = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg>';
+let syncState = null;
+function renderSync(st) {
+  syncState = st;
+  $('#sync-on').checked = st.on;
+  $('#sync-status').textContent = !st.on ? 'Off. Your bookmarks, passwords and chats stay on this computer.'
+    : st.status === 'signed-out' ? 'Sign in to Lumio to sync.'
+    : st.status === 'needs-key' ? 'Waiting for you to approve this computer.'
+    : st.status === 'ready' ? `On · encrypted on your devices${st.lastSync ? ` · synced ${sinceText(st.lastSync)}` : ''}`
+    : st.status === 'error' ? `Couldn’t sync: ${st.error || 'try again later.'}`
+    : 'Turning on…';
+  $('#sync-needs').hidden = !(st.on && st.status === 'needs-key');
+  $('#sync-name').textContent = `“${st.deviceName}”`;
+  $('#sync-code').textContent = st.pairCode ? st.pairCode.replace(/(\d{3})/, '$1 ') : '…';
+  $('#sync-types').hidden = !st.on;
+  $('#sync-types').innerHTML = SYNC_TYPES.map(([k, label]) => `<label><input type="checkbox" data-type="${k}" ${st.types[k] ? 'checked' : ''}> ${label}</label>`).join('');
+  $('#sync-requests').innerHTML = (st.requests || []).map((r) => `
+    <div class="row sync-request" data-id="${esc(r.id)}">
+      <div class="grow"><div class="title">“${esc(r.name)}” wants to sync</div>
+        <div class="desc">Only approve it if it shows the code <b class="code-inline">${esc(r.code.replace(/(\d{3})/, '$1 '))}</b>. It will be able to see your bookmarks, passwords, history and chats.</div></div>
+      <button class="btn" data-answer="deny">Deny</button><button class="btn primary" data-answer="approve">Approve</button>
+    </div>`).join('');
+}
+async function loadSyncDevices() {
+  const r = await page.invoke('page:sync-devices').catch(() => null);
+  const list = r?.ok ? r.devices || [] : [];
+  const me = syncState?.deviceId;
+  $('#sync-devices').innerHTML = list.length ? list.map((d) => `
+    <div class="row" data-device="${esc(d.id)}">
+      <span class="dev-ic">${d.kind === 'phone' ? PHONE_IC : LAPTOP_IC}</span>
+      <div class="grow"><div class="title">${esc(d.name)}${d.id === me ? ' <span class="pill">This computer</span>' : ''}</div>
+        <div class="desc">${Date.now() - d.lastSeen < 120000 ? 'Active now' : `Last synced ${sinceText(d.lastSeen)}`}</div></div>
+      ${d.id === me ? '' : '<button class="btn ghost" data-remove>Remove</button>'}
+    </div>`).join('')
+    : `<div class="row"><div class="desc">${syncState?.status === 'ready' ? 'Only this computer so far. Sign in to Lumio on another computer, or on your phone at the Lumio website, to sync it.' : 'Your devices show here once sync is on.'}</div></div>`;
+}
+async function refreshSync() {
+  renderSync(await page.invoke('page:sync'));
+}
+$('#sync-on').addEventListener('change', async (e) => { renderSync(await page.invoke('page:sync-set', { on: e.target.checked })); setTimeout(refreshSync, 1500); });
+$('#sync-types').addEventListener('change', async (e) => {
+  const k = e.target.dataset.type;
+  if (k) renderSync(await page.invoke('page:sync-set', { types: { [k]: e.target.checked } }));
+});
+$('#sync-requests').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-answer]');
+  const id = e.target.closest('[data-id]')?.dataset.id;
+  if (!b || !id) return;
+  b.disabled = true;
+  const r = await page.invoke('page:sync-answer', id, b.dataset.answer === 'approve');
+  if (!r.ok) alert(r.error);
+  refreshSync();
+  setTimeout(loadSyncDevices, 4000);
+});
+$('#sync-recovery-go').addEventListener('click', async () => {
+  $('#sync-recovery-err').textContent = '';
+  const r = await page.invoke('page:sync-use-recovery', $('#sync-recovery-input').value);
+  if (!r.ok) { $('#sync-recovery-err').textContent = r.error; return; }
+  $('#sync-recovery-input').value = '';
+  refreshSync();
+});
+$('#sync-recovery-show').addEventListener('click', async () => {
+  const box = $('#sync-recovery');
+  if (!box.hidden) { box.hidden = true; $('#sync-recovery-show').textContent = 'Show'; return; }
+  const { key } = await page.invoke('page:sync-recovery');
+  box.textContent = key || 'Turn sync on first.';
+  box.hidden = false;
+  $('#sync-recovery-show').textContent = 'Hide';
+});
+$('#sync-devices').addEventListener('click', async (e) => {
+  const id = e.target.closest('[data-remove]') && e.target.closest('[data-device]')?.dataset.device;
+  if (!id || !confirm('Remove this device from sync? It stops getting your synced data until it’s approved again.')) return;
+  await page.invoke('page:sync-remove-device', id);
+  loadSyncDevices();
+});
+$('#sync-delete').addEventListener('click', async () => {
+  if (!confirm('Delete everything synced from Lumio’s servers and turn sync off? What’s on each device stays there.')) return;
+  const r = await page.invoke('page:sync-delete-all');
+  if (!r.ok) alert(r.error);
+  refreshSync();
+  loadSyncDevices();
+});
+refreshSync().then(loadSyncDevices);
+setInterval(() => { if (!document.hidden) refreshSync(); }, 3000);
+setInterval(() => { if (!document.hidden) loadSyncDevices(); }, 30000);

@@ -160,11 +160,25 @@ $('#closed').addEventListener('click', async (e) => {
   renderClosed();
 });
 
+// ---- tabs open on your other devices (Lumio Sync) ----
+async function renderDevices() {
+  const list = await page.invoke('page:other-tabs').catch(() => []);
+  if (!list.length) { $('#devices').innerHTML = '<div class="empty">Tabs open on your other computers show up here when Sync is on (Settings › Sync).</div>'; return; }
+  $('#devices').innerHTML = list.map((d) => `<h3 class="dev-head">${esc(d.name)}<small>${esc(ago(d.at))}</small></h3>${d.windows.flatMap((w) => w.tabs).map((t) => `
+    <div class="closed-item"><span class="ico"><span class="dot"></span></span><div class="meta"><div class="t">${esc(t.title || t.url)}</div><div class="s">${esc(host(t.url))}</div></div><button class="btn" data-open="${esc(t.url)}">Open</button></div>`).join('')}`).join('');
+}
+$('#devices').addEventListener('click', (e) => {
+  const url = e.target.closest('[data-open]')?.dataset.open;
+  if (url) page.invoke('page:open', url, 'tab');
+});
+
 function switchView(v) {
   view = v;
   document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.view === v));
   $('#list').hidden = v !== 'history';
   $('#closed').hidden = v !== 'closed';
+  $('#devices').hidden = v !== 'devices';
+  if (v === 'devices') { renderDevices(); return; }
   $('#filter').hidden = v !== 'history' || !site;
   $('#selbar').hidden = v !== 'history' || !selected.size;
   if (v === 'closed') renderClosed(); else render();

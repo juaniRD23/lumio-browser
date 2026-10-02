@@ -33,9 +33,22 @@ function d1(db) {
         bind(...args) { values = args.map((v) => (v === undefined ? null : v)); return stmt; },
         async first() { return db.prepare(query).get(...values) ?? null; },
         async all() { return { results: db.prepare(query).all(...values) }; },
-        async run() { db.prepare(query).run(...values); return { success: true }; },
+        async run() { const r = db.prepare(query).run(...values); return { success: true, meta: { changes: Number(r.changes), last_row_id: Number(r.lastInsertRowid) } }; },
       };
       return stmt;
+    },
+    // Like D1: the statements run together in one transaction.
+    async batch(stmts) {
+      db.exec('BEGIN');
+      try {
+        const out = [];
+        for (const s of stmts) out.push(await s.run());
+        db.exec('COMMIT');
+        return out;
+      } catch (err) {
+        db.exec('ROLLBACK');
+        throw err;
+      }
     },
   };
 }
@@ -76,7 +89,7 @@ beforeEach(() => {
     MICROSOFT_CLIENT_ID: 'ms-client', MICROSOFT_CLIENT_SECRET: 'ms-secret', MICROSOFT_AUTH_URL: MS_AUTH, MICROSOFT_TOKEN_URL: MS_TOKEN,
     GOOGLE_API: GAPI, GRAPH_API: GRAPH, CONNECTIONS_KEY: Buffer.from(crypto.randomBytes(32)).toString('base64'),
   };
-  calls = { or: [], orGet: [], google: [], stripe: [], api: [], revoked: [] };
+  calls = { or: [], orGet: [], google: [], stripe: [], api: [], revoked: [], push: [] };
   generations = { 'gen-img-test': 0.0094 }; // what OpenRouter's records say each generation cost
   unrecorded = new Set(); // generations OpenRouter hasn't recorded yet
   liveCheck.delays = [0, 0, 0];
@@ -118,6 +131,7 @@ beforeEach(() => {
       return Response.json({ id_token: jwt({ iss: 'https://accounts.google.com', aud: CLIENT_ID, email_verified: true, exp: Math.floor(Date.now() / 1000) + 3600, ...who }) });
     }
     if (u.startsWith(GAPI) || u.startsWith(GRAPH)) { calls.api.push({ url: u, auth: opts.headers?.authorization }); return apiReply(u, opts); }
+    if (u.startsWith('https://web.push.apple.com/')) { calls.push.push({ url: u, headers: opts.headers }); return new Response('', { status: 201 }); }
     if (u.startsWith('https://oauth2.googleapis.com/revoke')) { calls.revoked.push(u); return new Response('', { status: 200 }); }
     if (u.startsWith(STRIPE)) {
       const path = new URL(u).pathname;
@@ -914,6 +928,108 @@ test('voice: a provider failure charges nothing, and an empty allowance refuses'
   const out = await call('/v1/voice/transcribe', { token, method: 'POST', body: { audio: 'AAAA', seconds: 2 } });
   assert.equal(out.status, 429);
   assert.equal((await out.json()).code, 'usage_limit');
+});
+
+// ---------------------------------------------------------------- sync and the phone companion
+const DEV_A = 'mac-aaaaaaaa-1111';
+const DEV_B = 'mac-bbbbbbbb-2222';
+const PHONE = 'phone-cccccccc-3333';
+const sealed = (n) => Buffer.from(`ciphertext-${n}`).toString('base64');
+
+test('sync: the first device sets the key; records go up and come down; a device gets only others’ changes', async () => {
+  const { token } = await signIn();
+  const sync = (path, opts = {}) => call(path, { token, ...opts });
+  assert.deepEqual((await (await sync('/api/sync')).json()).keyCheck, null);
+  assert.equal((await sync('/api/sync/push', { method: 'POST', body: { device: DEV_A, items: [{ id: 'aaaaaaaaaaaa', collection: 'bookmarks', data: sealed(1) }] } })).status, 409, 'set up first');
+  const check = 'a'.repeat(32);
+  assert.equal((await sync('/api/sync/init', { method: 'POST', body: { keyCheck: check } })).status, 200);
+  assert.equal((await sync('/api/sync/init', { method: 'POST', body: { keyCheck: 'b'.repeat(32) } })).status, 409, 'another key is refused');
+  for (const [dev, name] of [[DEV_A, 'MacBook'], [DEV_B, 'iMac']]) assert.equal((await sync('/api/sync/devices', { method: 'POST', body: { id: dev, name, kind: 'computer', platform: 'mac' } })).status, 200);
+
+  const push = await (await sync('/api/sync/push', { method: 'POST', body: { device: DEV_A, items: [
+    { id: 'bookmark-id-001', collection: 'bookmarks', data: sealed(1), updatedAt: 1 },
+    { id: 'password-id-001', collection: 'passwords', data: sealed(2) },
+  ] } })).json();
+  assert.equal(push.cursor, 2);
+  const mine = await (await sync(`/api/sync/changes?since=0&device=${DEV_A}`)).json();
+  assert.deepEqual([mine.items.length, mine.cursor], [0, 2], 'its own changes only move the cursor');
+  const theirs = await (await sync(`/api/sync/changes?since=0&device=${DEV_B}`)).json();
+  assert.deepEqual(theirs.items.map((i) => [i.id, i.collection, i.data, i.deleted]), [['bookmark-id-001', 'bookmarks', sealed(1), false], ['password-id-001', 'passwords', sealed(2), false]]);
+  // B deletes the bookmark: A learns about it as a tombstone after its cursor.
+  await sync('/api/sync/push', { method: 'POST', body: { device: DEV_B, items: [{ id: 'bookmark-id-001', collection: 'bookmarks', deleted: true }] } });
+  const later = await (await sync(`/api/sync/changes?since=2&device=${DEV_A}`)).json();
+  assert.deepEqual(later.items.map((i) => [i.id, i.deleted, i.data]), [['bookmark-id-001', true, null]]);
+  // The phone asks for just some collections.
+  const phone = await (await sync(`/api/sync/changes?since=0&device=${PHONE}&collections=passwords`)).json();
+  assert.deepEqual(phone.items.map((i) => i.collection), ['passwords']);
+  // Bad records are refused.
+  assert.equal((await sync('/api/sync/push', { method: 'POST', body: { device: DEV_A, items: [{ id: 'x', collection: 'bookmarks', data: sealed(3) }] } })).status, 400);
+  assert.equal((await sync('/api/sync/push', { method: 'POST', body: { device: DEV_A, items: [{ id: 'cookie-id-0001', collection: 'cookies', data: sealed(3) }] } })).status, 400);
+  assert.equal((await sync('/api/sync/push', { method: 'POST', body: { device: DEV_A, items: [{ id: 'big-record-01', collection: 'chats', data: 'A'.repeat(600_004) }] } })).status, 413);
+  const status = await (await sync('/api/sync')).json();
+  assert.equal(status.keyCheck, check);
+  assert.deepEqual(status.devices.map((d) => d.name).sort(), ['MacBook', 'iMac']);
+  assert.equal(status.usage.items, 1);
+  // Turning sync off for the account deletes everything.
+  await sync('/api/sync', { method: 'DELETE' });
+  assert.deepEqual(await (await sync('/api/sync')).json(), { keyCheck: null, since: null, devices: [], usage: { items: 0, bytes: 0, limit: 60 * 1024 * 1024 } });
+});
+
+test('sync: a new device asks, another approves with the wrapped key, and it is collected once', async () => {
+  const { token } = await signIn();
+  const sync = (path, opts = {}) => call(path, { token, ...opts });
+  const pub = Buffer.alloc(65, 4).toString('base64');
+  const { id } = await (await sync('/api/sync/pair', { method: 'POST', body: { device: PHONE, name: 'iPhone', kind: 'phone', pubkey: pub } })).json();
+  assert.match(id, /^p_[a-f0-9]{24}$/);
+  assert.deepEqual((await (await sync(`/api/sync/pair/${id}`)).json()).status, 'pending');
+  const pending = await (await sync(`/api/sync/pair?device=${DEV_A}`)).json();
+  assert.deepEqual(pending.requests.map((r) => [r.name, r.kind, r.pubkey]), [['iPhone', 'phone', pub]]);
+  assert.equal((await (await sync(`/api/sync/pair?device=${PHONE}`)).json()).requests.length, 0, 'not shown to itself');
+  const wrapped = Buffer.alloc(60, 7).toString('base64');
+  const approverPub = Buffer.alloc(65, 9).toString('base64');
+  assert.equal((await sync(`/api/sync/pair/${id}`, { method: 'POST', body: { approve: true, approverPub, wrapped } })).status, 200);
+  assert.deepEqual(await (await sync(`/api/sync/pair/${id}`)).json(), { status: 'approved', approverPub, wrapped });
+  assert.deepEqual(await (await sync(`/api/sync/pair/${id}`)).json(), { status: 'done' }, 'the key is handed over once');
+  assert.equal((await sync(`/api/sync/pair/${id}`, { method: 'POST', body: { approve: true, approverPub, wrapped } })).status, 410);
+});
+
+test('companion: the phone sends commands to a computer, sees its status, and notices wake the phone', async () => {
+  const { token } = await signIn();
+  const sync = (path, opts = {}) => call(path, { token, ...opts });
+  // VAPID keys for Web Push.
+  const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+  const pubRaw = new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey));
+  env.VAPID_PUBLIC_KEY = Buffer.from(pubRaw).toString('base64url');
+  env.VAPID_PRIVATE_KEY = JSON.stringify(await crypto.subtle.exportKey('jwk', pair.privateKey));
+  assert.equal((await (await sync('/api/companion/vapid')).json()).publicKey, env.VAPID_PUBLIC_KEY);
+  await sync('/api/sync/devices', { method: 'POST', body: { id: DEV_A, name: 'MacBook', kind: 'computer' } });
+  await sync('/api/sync/devices', { method: 'POST', body: { id: PHONE, name: 'iPhone', kind: 'phone' } });
+  assert.equal((await sync('/api/companion/push', { method: 'POST', body: { device: PHONE, endpoint: 'https://evil.example/push' } })).status, 400);
+  assert.equal((await sync('/api/companion/push', { method: 'POST', body: { device: PHONE, endpoint: 'https://web.push.apple.com/QGx' } })).status, 200);
+
+  // Phone -> computer.
+  await sync('/api/companion/messages', { method: 'POST', body: { kind: 'command', device: PHONE, target: DEV_A, data: sealed('do-this') } });
+  await sync('/api/companion/messages', { method: 'POST', body: { kind: 'command', device: PHONE, target: DEV_B, data: sealed('not-for-a') } });
+  const got = await (await sync(`/api/companion/messages?kind=command&device=${DEV_A}&since=0`)).json();
+  assert.deepEqual(got.messages.map((m) => m.data), [sealed('do-this')]);
+  assert.equal(got.watching, true, 'the phone was seen just now');
+  assert.equal((await (await sync(`/api/companion/messages?kind=command&device=${DEV_A}&since=${got.cursor}`)).json()).messages.length, 0);
+  // Computer status -> phone.
+  assert.equal((await sync('/api/companion/status', { method: 'PUT', body: { device: DEV_A, data: sealed('working') } })).status, 200);
+  const st = await (await sync('/api/companion/status')).json();
+  assert.deepEqual(st.computers.map((c) => [c.name, c.status, c.online]), [['MacBook', sealed('working'), true]]);
+  // Computer notice -> phone, with a payload-free VAPID push.
+  await sync('/api/companion/messages', { method: 'POST', body: { kind: 'notice', device: DEV_A, data: sealed('done') } });
+  await settled();
+  assert.equal(calls.push.length, 1);
+  const auth = calls.push[0].headers.Authorization;
+  const [, jwt, k] = /^vapid t=([^,]+), k=(.+)$/.exec(auth);
+  assert.equal(k, env.VAPID_PUBLIC_KEY);
+  const [h, c, sig] = jwt.split('.');
+  assert.equal(JSON.parse(Buffer.from(c, 'base64url')).aud, 'https://web.push.apple.com');
+  assert.ok(await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, pair.publicKey, Buffer.from(sig, 'base64url'), new TextEncoder().encode(`${h}.${c}`)), 'a valid ES256 signature');
+  const notices = await (await sync(`/api/companion/messages?kind=notice&device=${PHONE}&since=0`)).json();
+  assert.deepEqual(notices.messages.map((m) => m.data), [sealed('done')]);
 });
 
 // ---------------------------------------------------------------- connections

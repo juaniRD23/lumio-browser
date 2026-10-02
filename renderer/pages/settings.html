@@ -12,6 +12,7 @@
       <div class="side-title">Settings</div>
       <a href="#you">You and Lumio</a>
       <a href="#profile">Customize profile</a>
+      <a href="#sync">Sync</a>
       <a href="#plan">Plan and usage</a>
       <a href="#ai">Lumio AI</a>
       <a href="#workflows">Workflows</a>
@@ -82,6 +83,41 @@
       </section>
 
       <!-- Plan -->
+      <!-- Sync -->
+      <section id="sync">
+        <h2>Sync</h2>
+        <div class="card">
+          <label class="row" style="cursor:pointer">
+            <div class="grow"><div class="title">Sync with your other devices</div><div class="desc" id="sync-status">…</div></div>
+            <span class="switch"><input type="checkbox" id="sync-on" aria-label="Sync"><i></i></span>
+          </label>
+          <div id="sync-requests"></div>
+          <div class="row sync-needs" id="sync-needs" hidden>
+            <div class="grow">
+              <div class="title">Approve this computer</div>
+              <div class="desc">On a device that already syncs Lumio, open Settings › Sync and approve <b id="sync-name"></b>. It should show the code <b class="code-inline" id="sync-code"></b>.</div>
+              <div class="sync-recovery-use"><input class="field" id="sync-recovery-input" placeholder="Or type your recovery key" autocomplete="off" spellcheck="false" aria-label="Recovery key"><button class="btn" id="sync-recovery-go">Use</button></div>
+              <div class="desc err" id="sync-recovery-err"></div>
+            </div>
+          </div>
+          <div id="sync-types" class="row checks sync-types"></div>
+        </div>
+        <h3>Your devices</h3>
+        <div class="card" id="sync-devices"><div class="row"><div class="desc">…</div></div></div>
+        <h3>Recovery key</h3>
+        <div class="card">
+          <div class="row">
+            <div class="grow"><div class="title">Your recovery key</div><div class="desc">Your synced data is encrypted on your devices: Lumio can’t read it. Write this key down somewhere safe. With it, you can set up a new device even if your others are lost.</div>
+              <div class="recovery" id="sync-recovery" hidden></div></div>
+            <button class="btn" id="sync-recovery-show">Show</button>
+          </div>
+          <div class="row">
+            <div class="grow"><div class="title">Delete synced data</div><div class="desc">Removes everything synced from Lumio’s servers and turns sync off. What’s on each device stays there.</div></div>
+            <button class="btn danger" id="sync-delete">Delete</button>
+          </div>
+        </div>
+      </section>
+
       <section id="plan">
         <h2>Plan and usage</h2>
         <div class="card" id="plan-card"></div>

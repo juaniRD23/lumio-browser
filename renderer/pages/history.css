@@ -57,3 +57,6 @@ dialog::backdrop { background: #0008; backdrop-filter: blur(2px); }
 .chk span { display: flex; flex-direction: column; }
 .chk small { color: var(--label); font-size: 12px; }
 .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.dev-head { display: flex; align-items: baseline; gap: 10px; margin: 22px 12px 6px; font: 600 13px var(--sans); color: var(--text); }
+.dev-head small { font-weight: 400; color: var(--label); font-size: 12px; }
+#devices .dev-head:first-child { margin-top: 6px; }

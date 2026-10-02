@@ -125,3 +125,14 @@ select.field { appearance: none; padding-right: 30px; background: var(--field) u
 .sched-actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; }
 .sched-actions .err { margin-right: auto; }
 #scheduled .note { color: var(--label); font-size: 12.5px; line-height: 1.5; margin: 10px 4px 0; }
+
+/* sync */
+.code-inline { font: 600 13px var(--mono); letter-spacing: .08em; color: var(--text); }
+.sync-recovery-use { display: flex; gap: 8px; margin-top: 10px; }
+.sync-recovery-use .field { flex: 1; font-family: var(--mono); font-size: 12.5px; }
+.sync-types { flex-wrap: wrap; gap: 14px 20px; }
+.sync-request { background: #86b7ff0d; }
+.recovery { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: #0d0d0f; border: 1px solid var(--line); font: 600 13px/1.6 var(--mono); letter-spacing: .06em; user-select: all; word-break: break-all; }
+.dev-ic { width: 28px; display: grid; place-items: center; color: var(--dim); flex: none; }
+.btn.danger { color: #ffb4b4; border-color: #ff7a7a40; }
+.btn.danger:hover { background: #ff7a7a14; }

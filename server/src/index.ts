@@ -33,6 +33,10 @@ import { chatModels, deleteChat, getChat, listChats, send } from './chat.ts';
 import { download, extract, upload } from './files.ts';
 import { imageForBrowser } from './images.ts';
 import { speak, transcribe } from './voice.ts';
+import {
+  companionList, companionPost, companionStatusGet, companionStatusPut, pairAnswer, pairCheck, pairPending, pairRequest,
+  pushSubscribe, syncChanges, syncCleanup, syncDeleteAll, syncDevice, syncInit, syncPush, syncRemoveDevice, syncStatus, vapidKey,
+} from './sync.ts';
 import { spendReport, verifySpend } from './spend.ts';
 import { PLANS, allowance } from './usage.ts';
 import { AgentError, type Env, fail, json, sameOrigin } from './util.ts';
@@ -90,6 +94,7 @@ export default {
 
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(verifySpend(env).then((r) => { if (r.fixed) console.log('lumio spend: corrected', r.fixed, 'of', r.checked, 'calls'); }));
+    ctx.waitUntil(syncCleanup(env).catch((err) => console.error('lumio sync cleanup', err)));
   },
 };
 
@@ -123,6 +128,26 @@ function routeFor(path: string, method: string): Route | null {
   if (path === '/api/chat' && method === 'POST') return send;
   if (path === '/api/chat/models' && method === 'GET') return async (_r, _env, _c, user) => chatModels(user);
   if (path === '/api/admin/spend' && method === 'GET') return (_r, env, _c, user) => spendReport(env, user);
+  // Sync and the phone companion
+  if (path === '/api/sync' && method === 'GET') return (_r, env, _c, user) => syncStatus(env, user);
+  if (path === '/api/sync' && method === 'DELETE') return (_r, env, _c, user) => syncDeleteAll(env, user);
+  if (path === '/api/sync/init' && method === 'POST') return (r, env, _c, user) => syncInit(r, env, user);
+  if (path === '/api/sync/devices' && method === 'POST') return (r, env, _c, user) => syncDevice(r, env, user);
+  const sd = /^\/api\/sync\/devices\/([A-Za-z0-9-]{8,64})$/.exec(path);
+  if (sd && method === 'DELETE') return (_r, env, _c, user) => syncRemoveDevice(env, user, sd[1]);
+  if (path === '/api/sync/changes' && method === 'GET') return (r, env, _c, user) => syncChanges(r, env, user);
+  if (path === '/api/sync/push' && method === 'POST') return (r, env, _c, user) => syncPush(r, env, user);
+  if (path === '/api/sync/pair' && method === 'POST') return (r, env, _c, user) => pairRequest(r, env, user);
+  if (path === '/api/sync/pair' && method === 'GET') return (r, env, _c, user) => pairPending(r, env, user);
+  const sp = /^\/api\/sync\/pair\/(p_[a-f0-9]{24})$/.exec(path);
+  if (sp && method === 'GET') return (_r, env, _c, user) => pairCheck(env, user, sp[1]);
+  if (sp && method === 'POST') return (r, env, _c, user) => pairAnswer(r, env, user, sp[1]);
+  if (path === '/api/companion/messages' && method === 'POST') return (r, env, c, user) => companionPost(r, env, user, c);
+  if (path === '/api/companion/messages' && method === 'GET') return (r, env, _c, user) => companionList(r, env, user);
+  if (path === '/api/companion/status' && method === 'PUT') return (r, env, _c, user) => companionStatusPut(r, env, user);
+  if (path === '/api/companion/status' && method === 'GET') return (_r, env, _c, user) => companionStatusGet(env, user);
+  if (path === '/api/companion/push' && method === 'POST') return (r, env, _c, user) => pushSubscribe(r, env, user);
+  if (path === '/api/companion/vapid' && method === 'GET') return async (_r, env) => vapidKey(env);
   const m = /^\/api\/chats\/(c_[a-f0-9]{20})$/.exec(path);
   if (m && method === 'GET') return (_r, env, _c, user) => getChat(env, user, m[1]);
   if (m && method === 'DELETE') return (_r, env, _c, user) => deleteChat(env, user, m[1]);

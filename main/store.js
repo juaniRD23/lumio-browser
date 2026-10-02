@@ -17,9 +17,13 @@ class JsonFile {
 
   save(now = false) {
     clearTimeout(this.timer);
+    for (const fn of this.listeners || []) fn();
     if (now) return this.flush();
     this.timer = setTimeout(() => this.flush(), 400);
   }
+
+  // Told about every change (Lumio Sync uploads soon after).
+  onSave(fn) { (this.listeners ||= new Set()).add(fn); return () => this.listeners.delete(fn); }
 
   flush() {
     clearTimeout(this.timer);
@@ -231,6 +235,38 @@ class Store {
     }
     this.bookmarksFile.save(true);
     return added;
+  }
+
+  // ---- Lumio Sync (main/sync): applying other devices' changes ----
+  // history: { key: "time|url", record: { url, title, time } | null }
+  applySyncedHistory(changes) {
+    const list = this.historyFile.data;
+    const keyOf = (h) => `${h.time}|${h.url}`;
+    const drop = new Set(changes.filter((c) => !c.record).map((c) => c.key));
+    const have = new Set(list.map(keyOf));
+    const add = changes.filter((c) => c.record && !have.has(c.key) && /^https?:/.test(c.record.url)).map((c) => ({ url: c.record.url, title: c.record.title || c.record.url, time: Number(c.record.time) || Date.now() }));
+    for (const c of changes) {
+      if (!c.record || !have.has(c.key)) continue;
+      const h = list.find((x) => keyOf(x) === c.key);
+      if (h) h.title = c.record.title || h.title;
+    }
+    this.historyFile.data = [...list.filter((h) => !drop.has(keyOf(h))), ...add].sort((a, b) => a.time - b.time);
+    this.pruneHistory();
+    this.historyFile.save();
+  }
+  // bookmarks: { key: url, record: { url, title, time, pos } | null }
+  applySyncedBookmarks(changes) {
+    let list = this.bookmarksFile.data;
+    const keys = new Set(changes.map((c) => c.key));
+    const old = new Map(list.map((b) => [b.url, b]));
+    list = list.filter((b) => !keys.has(b.url));
+    for (const c of changes.filter((x) => x.record && /^(https?|file):/i.test(x.record.url)).sort((a, b) => a.record.pos - b.record.pos)) {
+      const prev = old.get(c.key);
+      const b = { url: c.record.url, title: c.record.title || c.record.url, time: Number(c.record.time) || Date.now(), ...(prev?.favicon ? { favicon: prev.favicon } : {}) };
+      list.splice(Math.max(0, Math.min(Number(c.record.pos) || 0, list.length)), 0, b);
+    }
+    this.bookmarksFile.data = list;
+    this.bookmarksFile.save();
   }
 
   // ---- downloads (history of finished and running downloads) ----

@@ -13,6 +13,8 @@ export interface Env {
   GOOGLE_TOKEN_URL?: string; // tests
   STRIPE_SECRET_KEY?: string;
   STRIPE_PUBLISHABLE_KEY?: string; // for Stripe's payment form inside Lumio's /checkout page
+  VAPID_PUBLIC_KEY?: string; // Web Push for the phone companion (base64url P-256 public key)
+  VAPID_PRIVATE_KEY?: string; // and its private key, as a JWK (JSON)
   STRIPE_WEBHOOK_SECRET?: string;
   STRIPE_API?: string; // tests
   FREE_DAILY_CAP_USD?: string; // total Free-plan AI spend per day, across everyone
