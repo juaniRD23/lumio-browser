@@ -247,8 +247,9 @@ test('deny stops that action; Auto mode skips browser approvals', async () => {
 
 test('shell commands run after approval', async () => {
   await ask('run a shell test');
-  await until(() => L.shell(`!!document.querySelector('.approval [data-d="once"]')`));
-  await L.shell(`document.querySelector('.approval [data-d="once"]').click(); true`);
+  // The deny test's card fades out with disabled buttons; only click a live one.
+  await until(() => L.shell(`!!document.querySelector('.approval [data-d="once"]:not(:disabled)')`));
+  await L.shell(`document.querySelector('.approval [data-d="once"]:not(:disabled)').click(); true`);
   await idle();
   assert.match(await lastReply(), /lumio-42/);
 });

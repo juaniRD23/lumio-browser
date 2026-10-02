@@ -1,0 +1,170 @@
+# Run Lumio Browser's end-to-end suite (tests/e2e/*.e2e.mjs) on a GitHub Mac:
+#   Actions → "E2E tests (Mac)" → Run workflow.
+# It launches the real app from source through Playwright's Electron driver
+# (scripts/launch.mjs) against local stand-in servers on random ports. It needs
+# no accounts, secrets or Apple Developer ID, and it never contacts the live
+# Lumio server.
+name: E2E tests (Mac)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag or commit to test (leave empty for the branch you run this from)"
+        required: false
+        default: ""
+      skip:
+        description: "Skip tests whose name matches this regex (node --test-skip-pattern). Leave empty to run everything."
+        required: false
+        default: ""
+      debug:
+        description: "Verbose logs (Electron output through Playwright, native helper stderr)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  e2e:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      ARTIFACTS: ${{ github.workspace }}/e2e-artifacts
+      # A safeguard: the tests that need a Lumio server start a mock one and
+      # pass its address to the app themselves (scripts/launch.mjs merges each
+      # test's env over this one). Every other test gets an address that
+      # refuses connections, so CI can never reach the live Worker.
+      LUMIO_ACCOUNT_BASE: http://127.0.0.1:9
+      LUMIO_AI_BASE: http://127.0.0.1:9
+      # Don't set LUMIO_HIDDEN: the suite needs real, visible windows
+      # (screenshots, the panel animation, popups). macOS runners have a GUI session.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Cache the Electron download
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/electron
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install
+        run: npm ci
+
+      - name: Build the native Mac helper
+        # native/bin/ is gitignored. Without the helper, the app hides run_shell
+        # and the computer tools, so the deny, shell and screen-glow tests fail.
+        run: npm run native
+
+      - name: Build the shell preload and copy the panel's web files
+        # scripts/launch.mjs also does this on the first launch, but a failure here is clearer.
+        run: node scripts/build-preload.mjs
+
+      - name: Check build outputs
+        run: |
+          test -x native/bin/lumio-helper
+          test -f preload/dist/shell.js
+          test -f renderer/ui/web/docmaker.js
+          test -f renderer/ui/web/vendor/pdf.worker.min.mjs
+
+      - name: Warm up Electron
+        # On a fresh VM, the first launch is slow while macOS scans the new
+        # binary. Do it here so the scan doesn't use up Playwright's 30 s launch
+        # timeout in the first test file.
+        run: |
+          v=$(ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron -p "process.versions.electron")
+          echo "Electron $v"
+          echo "Electron $v" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Use an unlocked throwaway keychain
+        # Playwright's Electron loader already passes --use-mock-keychain, so
+        # safeStorage shouldn't use the real Keychain. If something still
+        # does, it uses this unlocked keychain. Otherwise it could hit a locked
+        # login keychain and wait on a password dialog that nobody can answer.
+        run: |
+          kc="$RUNNER_TEMP/lumio-e2e.keychain-db"
+          pw=$(uuidgen)
+          security create-keychain -p "$pw" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$pw" "$kc"
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          security default-keychain -d user -s "$kc"
+
+      - name: Machine info
+        run: |
+          sw_vers
+          node --version
+          system_profiler SPDisplaysDataType | grep -E "Resolution|Display Type|Metal" || true
+          echo "Reduce Motion: $(defaults read com.apple.universalaccess reduceMotion 2>/dev/null || echo 'not set (off)')"
+
+      - name: Run the e2e suite
+        timeout-minutes: 30
+        env:
+          LUMIO_SHOTS: ${{ github.workspace }}/e2e-artifacts/shots
+          E2E_SKIP: ${{ inputs.skip }}
+          DEBUG: ${{ inputs.debug && 'pw:browser*' || '' }}
+          LUMIO_DEBUG: ${{ inputs.debug && '1' || '' }}
+        run: |
+          mkdir -p "$ARTIFACTS/shots" "$ARTIFACTS/screen"
+          # Capture the whole screen every 20 s, to catch system dialogs or a stuck window.
+          ( while :; do screencapture -x -t jpg "$ARTIFACTS/screen/$(date +%H%M%S).jpg" 2>/dev/null || true; sleep 20; done ) &
+          snapper=$!
+          trap 'kill $snapper 2>/dev/null || true' EXIT
+          # Same as `npm run test:e2e` (one file at a time), plus a per-test
+          # timeout, a forced exit, a JUnit report and the skip list.
+          set -- --test --test-concurrency=1 --test-timeout=180000 --test-force-exit \
+            --test-reporter=spec --test-reporter-destination=stdout \
+            --test-reporter=junit --test-reporter-destination="$ARTIFACTS/junit.xml"
+          if [ -n "$E2E_SKIP" ]; then
+            echo "Skipping tests matching: $E2E_SKIP"
+            echo "Skipped on purpose: \`$E2E_SKIP\`" >> "$GITHUB_STEP_SUMMARY"
+            set -- "$@" "--test-skip-pattern=$E2E_SKIP"
+          fi
+          node "$@" tests/e2e/*.e2e.mjs 2>&1 | tee "$ARTIFACTS/e2e.log"
+
+      - name: Summary
+        if: always()
+        run: |
+          [ -f "$ARTIFACTS/e2e.log" ] || exit 0
+          {
+            echo "### Lumio e2e on $(sw_vers -productName) $(sw_vers -productVersion)"
+            echo '```'
+            grep -E '^ℹ (tests|suites|pass|fail|cancelled|skipped|todo|duration_ms)' "$ARTIFACTS/e2e.log" || tail -n 15 "$ARTIFACTS/e2e.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Collect crash reports and a last screenshot
+        if: failure() || cancelled()
+        run: |
+          mkdir -p "$ARTIFACTS/crash" "$ARTIFACTS/screen"
+          screencapture -x -t jpg "$ARTIFACTS/screen/zz-final.jpg" 2>/dev/null || true
+          for dir in ~/Library/Logs/DiagnosticReports /Library/Logs/DiagnosticReports; do
+            [ -d "$dir" ] || continue
+            find "$dir" -maxdepth 1 \( -iname '*Electron*' -o -iname '*lumio*' \) -newer package.json \
+              -exec cp {} "$ARTIFACTS/crash/" \; 2>/dev/null || true
+          done
+          ls -R "$ARTIFACTS" | head -n 200
+
+      - name: Upload screenshots and logs
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lumio-e2e-${{ github.run_number }}-${{ github.run_attempt }}
+          path: e2e-artifacts/
+          if-no-files-found: warn
+          retention-days: 14
