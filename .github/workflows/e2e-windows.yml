@@ -1,0 +1,97 @@
+# Run Lumio Browser's unit tests and end-to-end suite on a GitHub Windows
+# machine: Actions → "E2E tests (Windows)" → Run workflow.
+# Same as the Mac workflow (e2e.yml), without the Mac-only steps (the Swift
+# helper, the keychain, screen captures). Some tests are about Mac-only
+# features (Touch ID, the Mac helper) and are expected to fail or skip here.
+name: E2E tests (Windows)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag or commit to test (leave empty for the branch you run this from)"
+        required: false
+        default: ""
+      skip:
+        description: "Skip tests whose name matches this regex (node --test-skip-pattern). Leave empty to run everything."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-windows-${{ inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  e2e:
+    runs-on: windows-latest
+    timeout-minutes: 50
+    env:
+      ARTIFACTS: ${{ github.workspace }}/e2e-artifacts
+      LUMIO_ACCOUNT_BASE: http://127.0.0.1:9
+      LUMIO_AI_BASE: http://127.0.0.1:9
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build the shell preload and copy the panel's web files
+        run: node scripts/build-preload.mjs
+
+      - name: Machine info
+        run: |
+          node --version
+          ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron -p "'Electron ' + process.versions.electron + ' on ' + process.platform + ' ' + process.arch"
+          powershell -NoProfile -Command "(Get-CimInstance Win32_OperatingSystem).Caption"
+
+      - name: Unit tests
+        run: |
+          mkdir -p "$ARTIFACTS"
+          npm test 2>&1 | tee "$ARTIFACTS/unit.log"
+
+      - name: Run the e2e suite
+        if: always()
+        timeout-minutes: 35
+        env:
+          LUMIO_SHOTS: ${{ github.workspace }}/e2e-artifacts/shots
+          E2E_SKIP: ${{ inputs.skip }}
+        run: |
+          mkdir -p "$ARTIFACTS/shots"
+          set -- --test --test-concurrency=1 --test-timeout=180000 --test-force-exit \
+            --test-reporter=spec --test-reporter-destination=stdout \
+            --test-reporter=junit --test-reporter-destination="$ARTIFACTS/junit.xml"
+          if [ -n "$E2E_SKIP" ]; then set -- "$@" "--test-skip-pattern=$E2E_SKIP"; fi
+          node "$@" tests/e2e/*.e2e.mjs 2>&1 | tee "$ARTIFACTS/e2e.log"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Lumio on Windows"
+            echo '```'
+            echo "Unit:"; grep -E '^ℹ (tests|pass|fail)' "$ARTIFACTS/unit.log" || true
+            echo "E2E:"; grep -E '^ℹ (tests|pass|fail)' "$ARTIFACTS/e2e.log" || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save logs and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lumio-e2e-windows
+          path: e2e-artifacts
+          retention-days: 7
