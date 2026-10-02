@@ -19,7 +19,7 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kA
 export async function startMockLumio({ plan = 'plus' } = {}) {
   const sessions = new Map(); // token -> { email, name }
   // connected: which apps are connected (the + menu); tools: what /v1/tools/run did.
-  const state = { plan, agentRequests: [], agentScript: null, connected: new Set(), toolRuns: [], images: 0 };
+  const state = { plan, agentRequests: [], agentScript: null, connected: new Set(), toolRuns: [], images: 0, billing: [], canceling: false };
   const APPS = [['google_drive', 'Google Drive', 'drive'], ['gmail', 'Gmail', 'gmail'], ['outlook', 'Outlook', 'mail'], ['onedrive', 'OneDrive', 'files'], ['word', 'Word', 'files']];
   const remoteTools = () => (state.connected.has('gmail') ? [{ name: 'gmail_search', app: 'Gmail' }, { name: 'gmail_read', app: 'Gmail' }] : []);
   const json = (res, status, data) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(data)); };
@@ -131,6 +131,30 @@ export async function startMockLumio({ plan = 'plus' } = {}) {
         state.toolRuns.push(body);
         if (!remoteTools().some((t) => t.name === body.name)) return json(res, 400, { error: 'That app isn’t connected.', code: 'tool_not_allowed' });
         return json(res, 200, { text: '- id: m1 | Tue | From: Boss <boss@co.com> | Subject: Q3 numbers' });
+      }
+      // ---- the plan and its subscription (Settings › Plan and usage)
+      if (url.pathname.startsWith('/api/billing/')) {
+        if (!who(req)) return json(res, 401, { error: 'Sign in.', code: 'sign_in_required' });
+        const names = { free: 'Free', plus: 'Plus', pro: 'Pro', max: 'Max' };
+        const prices = { plus: 20, pro: 100, max: 200 };
+        const periodEnd = Date.UTC(2026, 9, 31, 12); // October 31 in any US or European time zone
+        if (url.pathname === '/api/billing/subscription') {
+          return json(res, 200, {
+            plan: state.plan, planName: names[state.plan],
+            plans: ['plus', 'pro', 'max'].map((id) => ({ id, name: names[id], price: prices[id] })),
+            reasons: [{ id: 'too_expensive', label: 'It costs too much' }, { id: 'unused', label: 'I don’t use it enough' }, { id: 'other', label: 'Something else' }],
+            subscription: state.plan === 'free' ? null : { status: 'active', canceling: state.canceling, periodEnd, price: prices[state.plan], card: { brand: 'visa', last4: '4242', expMonth: 12, expYear: 2030 } },
+          });
+        }
+        const body = req.method === 'POST' ? JSON.parse((await readBody(req)) || '{}') : {};
+        state.billing.push({ path: url.pathname, body });
+        if (url.pathname === '/api/billing/change') { state.plan = body.plan; state.canceling = false; return json(res, 200, { ok: true, plan: body.plan }); }
+        if (url.pathname === '/api/billing/cancel') {
+          if (!body.reason) return json(res, 400, { error: 'Choose why you’re canceling.', code: 'invalid_reason' });
+          state.canceling = true;
+          return json(res, 200, { ok: true, endsAt: periodEnd });
+        }
+        if (url.pathname === '/api/billing/resume') { state.canceling = false; return json(res, 200, { ok: true, plan: state.plan }); }
       }
       if (url.pathname === '/api/connections') {
         if (!who(req)) return json(res, 401, { error: 'Sign in.', code: 'sign_in_required' });

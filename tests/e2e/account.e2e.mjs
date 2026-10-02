@@ -188,19 +188,43 @@ test('account button signs in on the Lumio website and shows the plan', async ()
   await L.shell(`window.lumio.send('overlay:hide'); true`);
 });
 
-test('settings show the plan, and Upgrade opens Lumio billing', async () => {
+test('settings: the subscription manager shows the plan, switches it in place, and cancels with a reason', async () => {
   await go('lumio://settings/#plan', 'Settings');
   await until(() => L.page(`document.querySelector('.plan-name')?.textContent === 'Lumio Plus'`));
   const plan = await L.page(`document.getElementById('plan-card').innerText`);
   assert.match(plan, /Lumio Plus[\s\S]*Weekly limit[\s\S]*62%\s*left[\s\S]*Fully refilled by[\s\S]*No 5-hour limits/);
-  assert.doesNotMatch(plan, /\$100\/mo|\$200\/mo/, 'no plan list');
   assert.equal(await L.page(`!!document.getElementById('ai-status')`), false, 'no "Runs on your Lumio plan" note');
+  // The subscription: plan, renewal date and card.
+  assert.ok(await until(() => L.page(`!!document.querySelector('.bill-top')`)));
+  assert.match(await L.page(`document.getElementById('billing-card').innerText`), /Lumio Plus · \$20 a month[\s\S]*Renews on October 31[\s\S]*Visa ending 4242[\s\S]*Active/);
   await shot('21-settings-plan');
-  const before = await L.main(() => global.lumio.tabs.tabs.length);
-  await L.page(`document.querySelector('[data-open=upgrade]').click(); true`);
-  await until(async () => (await L.main(() => global.lumio.tabs.tabs.length)) === before + 1);
-  assert.equal(await L.main(() => global.lumio.tabs.active.url), `${lumio.base}/account#plans`);
-  await L.main(() => global.lumio.cmd.closeTab());
+  // Change plan: the first click explains what happens, the second switches. No Stripe page, no new tab.
+  const tabs = await L.main(() => global.lumio.tabs.tabs.length);
+  await L.page(`document.getElementById('bill-change').click(); true`);
+  assert.ok(await until(() => L.page(`!!document.querySelector('[data-switch=pro]')`)));
+  await L.page(`document.querySelector('[data-switch=pro]').click(); true`);
+  assert.match(await L.page(`document.querySelector('[data-switch=pro]').closest('.bill-row').innerText`), /pay the difference/);
+  await L.page(`document.querySelector('[data-switch=pro]').click(); true`);
+  assert.ok(await until(() => L.page(`document.querySelector('.plan-name')?.textContent === 'Lumio Pro'`)));
+  assert.deepEqual(lumio.state.billing.at(-1), { path: '/api/billing/change', body: { plan: 'pro' } });
+  assert.equal(await L.main(() => global.lumio.tabs.tabs.length), tabs);
+  // Cancel: a reason is required, and it reaches the server with the note.
+  assert.ok(await until(() => L.page(`!!document.querySelector('.bill-top') && !!document.getElementById('bill-cancel')`)));
+  await L.page(`document.getElementById('bill-cancel').click(); true`);
+  assert.ok(await until(() => L.page(`!!document.getElementById('cancel-form')`)));
+  await L.page(`document.getElementById('cancel-go').click(); true`);
+  assert.match(await L.page(`document.getElementById('cancel-msg').textContent`), /Choose a reason/);
+  await L.page(`(() => { document.querySelector('input[name=reason][value=too_expensive]').click(); document.getElementById('cancel-comment').value = 'Just over budget'; document.getElementById('cancel-go').click(); return true })()`);
+  assert.ok(await until(() => L.page(`!!document.getElementById('bill-resume')`)));
+  assert.deepEqual(lumio.state.billing.at(-1), { path: '/api/billing/cancel', body: { reason: 'too_expensive', comment: 'Just over budget' } });
+  assert.match(await L.page(`document.getElementById('billing-card').innerText`), /Canceled[\s\S]*Ends on October 31/);
+  // Keep the plan after all.
+  await L.page(`document.getElementById('bill-resume').click(); true`);
+  assert.ok(await until(() => L.page(`!!document.querySelector('#billing-card .pill.ok')`)));
+  assert.equal(lumio.state.billing.at(-1).path, '/api/billing/resume');
+  // Back to Plus for the tests after this one.
+  lumio.state.plan = 'plus';
+  await L.main(() => global.lumio.account.refresh());
 });
 
 test('customizing the profile changes the avatar and theme', async () => {
