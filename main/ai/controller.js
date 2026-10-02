@@ -14,6 +14,7 @@ const browser = require('./tools/browser');
 const mac = require('./tools/mac');
 const plan = require('./tools/plan');
 const make = require('./tools/make');
+const schedule = require('./tools/schedule');
 const screenAura = require('./screen-aura');
 
 // Without the helper there's no computer control at all (the server only
@@ -56,8 +57,10 @@ function contextNote(tabs) {
 }
 
 class AIController {
-  constructor({ store, chats, tabs, emit, helper, account = null, indicator = null, onSettingsChanged = () => {} }) {
+  constructor({ store, chats, tabs, emit, helper, account = null, indicator = null, schedules = null, notify = null, onSettingsChanged = () => {} }) {
     this.store = store;
+    this.schedules = schedules; // Schedules: tasks Lumio runs on its own (main/schedules.js)
+    this.notify = notify; // (title, body, chatId) => shows a notification that opens the chat
     this.indicator = indicator; // PageIndicator: page glow + Stop bar while working in the browser
     this.account = account; // LumioAccount: lets a paid Lumio plan run the AI
     this.chatStore = chats;
@@ -155,7 +158,7 @@ class AIController {
     const helperOk = this.helper.available();
     const off = new Set(this.store.settings.appsOff || []);
     const remote = make.remoteTools(this.capsCache?.remote || []).filter((t) => !off.has(t.app));
-    return [...browser.tools, ...mac.tools, ...plan.tools, ...make.tools, ...remote].filter((t) => (helperOk || !HELPER_TOOLS.has(t.name))
+    return [...browser.tools, ...mac.tools, ...plan.tools, ...make.tools, ...(this.schedules ? schedule.tools : []), ...remote].filter((t) => (helperOk || !HELPER_TOOLS.has(t.name))
       && (process.platform === 'darwin' || t.name !== 'run_applescript'));
   }
 
@@ -246,7 +249,7 @@ class AIController {
   async lumioTools() {
     await this.capabilities();
     const allowed = this.capsCache.tools;
-    return this.tools().filter((t) => (allowed ? allowed.has(t.name) : t.name !== 'update_plan'));
+    return this.tools().filter((t) => (allowed ? allowed.has(t.name) : t.name !== 'update_plan' && !schedule.NAMES.has(t.name)));
   }
 
   async send({ chatId, text, includePage, includeTabs, attachments } = {}) {
@@ -315,15 +318,48 @@ class AIController {
     return { ok: true, chatId: chat.id };
   }
 
-  async start(chat) {
+  // Runs a scheduled task in a new chat (main.js calls this when it's due).
+  // Resolves when the run ends with 'done', 'error' or 'stopped', or 'busy'
+  // when Lumio is already working in this window (main tries again soon).
+  async runScheduled(task) {
+    if (this.run) return { status: 'busy' };
+    if (!this.account?.state().signedIn) return { status: 'error', error: 'Signed out of Lumio' };
+    const chat = {
+      id: crypto.randomUUID(),
+      title: task.title.slice(0, 60),
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      messages: [],
+      display: [],
+      scheduled: task.id,
+    };
+    this.chatStore.add(chat);
+    if (task.manual) { this.store.setSetting('panelOpen', true); this.emit('ai-open-chat', { id: chat.id }); } // "Run now" in Settings shows it
+    const note = `${contextNote(this.tabs)} This is a scheduled task the user set up earlier (“${task.title.replace(/"/g, "'")}”, ${task.when || task.repeat}), running on its own: the user may not be watching. Do it, then reply with a short summary of the result. Ask in chat if you truly need them.`;
+    chat.messages.push({ role: 'user', content: `${task.prompt}\n\n${note}` });
+    chat.display.push({ kind: 'user', text: task.prompt, ctx: { title: `Scheduled · ${task.when || task.title}`, scheduled: true } });
+    this.saveChats();
+    this.emit('ai-event', { chatId: chat.id, type: 'user', text: task.prompt, ctx: { title: `Scheduled · ${task.when || task.title}`, scheduled: true }, title: chat.title, background: true });
+    this.schedules?.started(task.id, chat.id, { manual: !!task.manual });
+    let status = 'done';
+    const watch = (ev) => { if (ev.type === 'error') status = 'error'; else if (ev.type === 'stopped') status = 'stopped'; };
+    await this.start(chat, { scheduled: task, watch });
+    this.schedules?.finished(task.id, status);
+    const reply = [...chat.display].reverse().find((x) => x.kind === 'ai' && x.text?.trim())?.text || '';
+    const body = status === 'done' ? (reply.replace(/[#*_`>[\]()]/g, '').replace(/\s+/g, ' ').trim().slice(0, 180) || 'Done.') : status === 'error' ? 'It ran into a problem. Open the chat to see what happened.' : 'It was stopped.';
+    this.notify?.(task.title, body, chat.id);
+    return { status, chatId: chat.id };
+  }
+
+  async start(chat, { scheduled = null, watch = null } = {}) {
     const abort = new AbortController();
-    const run = { chatId: chat.id, abort, pending: new Map(), grants: new Set(), text: null, steps: new Map() };
+    const run = { chatId: chat.id, abort, pending: new Map(), grants: new Set(), text: null, steps: new Map(), scheduled };
     this.run = run;
     this.chatStore.running.add(chat.id);
     this.emitState();
     this.emit('ai-event', { chatId: chat.id, type: 'start' });
 
-    const record = (ev) => this.record(chat, run, ev);
+    const record = (ev) => { watch?.(ev); this.record(chat, run, ev); };
     const ctx = {
       tabs: this.tabs,
       helper: this.helper,
@@ -334,6 +370,7 @@ class AIController {
       lastMacShot: null,
       setPlan: (items) => record({ type: 'plan', items }),
       account: this.account,
+      schedules: this.schedules,
       made: (file) => record({ type: 'made', file }),
       buildDocument: (spec) => this.buildDocument(spec),
       onPage: (wc) => this.indicator?.touch(wc),
@@ -406,6 +443,7 @@ class AIController {
       }
       case 'approval':
         d.push({ kind: 'approval', id: ev.id, label: ev.label, detail: ev.detail, risk: ev.risk, decision: null });
+        if (run.scheduled) this.notify?.(`“${run.scheduled.title}” needs your OK`, ev.label || 'Lumio is waiting for you to approve a step.', chat.id);
         break;
       case 'approval_done': {
         const a = d.find((x) => x.kind === 'approval' && x.id === ev.id);

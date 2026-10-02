@@ -452,3 +452,91 @@ renderProfile();
 renderSites();
 perms();
 if (location.hash) document.querySelector(location.hash)?.scrollIntoView();
+
+// ---- Scheduled tasks
+const STATUS = { running: 'Running now', done: 'Last run finished', error: 'Last run had a problem', stopped: 'Last run was stopped' };
+const TRASH = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>';
+function nextText(t) {
+  if (t.paused) return 'Paused';
+  if (t.done || !t.nextRun) return 'Done';
+  const d = new Date(t.nextRun);
+  const today = new Date();
+  const tomorrow = new Date(); tomorrow.setDate(today.getDate() + 1);
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (d.toDateString() === today.toDateString()) return `Next: today at ${time}`;
+  if (d.toDateString() === tomorrow.toDateString()) return `Next: tomorrow at ${time}`;
+  return `Next: ${d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })} at ${time}`;
+}
+async function loadSchedules() {
+  let data;
+  try { data = await page.invoke('page:schedules'); } catch { return; }
+  const list = $('#sched-list');
+  list.innerHTML = data.tasks.map((t) => `
+    <div class="row sched-row ${t.paused || t.done ? 'paused' : ''}" data-id="${esc(t.id)}">
+      <div class="grow">
+        <div class="title"><b>${esc(t.title)}</b></div>
+        <div class="desc">${esc(t.when)} · ${esc(nextText(t))}${t.lastStatus ? ` · ${esc(STATUS[t.lastStatus] || '')}` : ''}</div>
+        <div class="prompt" title="${esc(t.prompt)}">${esc(t.prompt)}</div>
+      </div>
+      <div class="acts">
+        ${t.lastChatId ? '<button class="btn ghost" data-act="open">Open chat</button>' : ''}
+        <button class="btn" data-act="run" ${t.lastStatus === 'running' ? 'disabled' : ''}>Run now</button>
+        ${t.done ? '' : `<label class="switch" title="${t.paused ? 'Turn on' : 'Pause'}"><input type="checkbox" data-act="pause" ${t.paused ? '' : 'checked'} aria-label="On"><i></i></label>`}
+        <button class="btn ghost icon-btn" data-act="delete" title="Delete" aria-label="Delete ${esc(t.title)}">${TRASH}</button>
+      </div>
+    </div>`).join('');
+}
+$('#sched-list').addEventListener('click', async (e) => {
+  const b = e.target.closest('button[data-act]');
+  const id = e.target.closest('[data-id]')?.dataset.id;
+  if (!b || !id) return;
+  if (b.dataset.act === 'delete') {
+    const title = e.target.closest('[data-id]').querySelector('b').textContent;
+    if (!confirm(`Delete “${title}”? Lumio won’t run it anymore.`)) return;
+    await page.invoke('page:schedule-remove', id);
+  } else if (b.dataset.act === 'run') {
+    b.disabled = true;
+    const r = await page.invoke('page:schedule-run', id);
+    if (!r.ok) alert(r.error);
+  } else if (b.dataset.act === 'open') await page.invoke('page:schedule-open', id);
+  loadSchedules();
+});
+$('#sched-list').addEventListener('change', async (e) => {
+  if (e.target.dataset.act !== 'pause') return;
+  await page.invoke('page:schedule-update', e.target.closest('[data-id]').dataset.id, { paused: !e.target.checked });
+  loadSchedules();
+});
+function showSchedForm(on) {
+  $('#sched-form').hidden = !on;
+  $('#sched-intro').hidden = on;
+  $('#sched-err').textContent = '';
+  if (on) {
+    const d = new Date(Date.now() + 86400000);
+    $('#sched-date').value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    $('#sched-prompt').focus();
+  }
+}
+function syncRepeat() {
+  const r = $('#sched-repeat').value;
+  $('#sched-weekday').hidden = r !== 'weekly';
+  $('#sched-date').hidden = r !== 'once';
+}
+$('#sched-new').addEventListener('click', () => showSchedForm(true));
+$('#sched-cancel').addEventListener('click', () => { $('#sched-form').reset(); syncRepeat(); showSchedForm(false); });
+$('#sched-repeat').addEventListener('change', syncRepeat);
+$('#sched-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const repeat = $('#sched-repeat').value;
+  const spec = { title: $('#sched-title').value, prompt: $('#sched-prompt').value, repeat, time: $('#sched-time').value };
+  if (repeat === 'weekly') spec.weekday = $('#sched-weekday').value;
+  if (repeat === 'once') spec.date = $('#sched-date').value;
+  const r = await page.invoke('page:schedule-add', spec);
+  if (!r.ok) { $('#sched-err').textContent = r.error; return; }
+  $('#sched-form').reset();
+  syncRepeat();
+  showSchedForm(false);
+  loadSchedules();
+});
+syncRepeat();
+loadSchedules();
+setInterval(() => { if (!document.hidden) loadSchedules(); }, 15000);

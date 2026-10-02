@@ -1,6 +1,6 @@
 // Lumio Browser — main process entry.
 const {
-  app, BrowserWindow, ipcMain, session, protocol, Menu, safeStorage, nativeImage, dialog, net, shell, desktopCapturer, webContents,
+  app, BrowserWindow, ipcMain, session, protocol, Menu, safeStorage, nativeImage, dialog, net, shell, desktopCapturer, webContents, Notification,
 } = require('electron');
 const fs = require('fs');
 const path = require('path');
@@ -29,6 +29,7 @@ const screenAura = require('./ai/screen-aura');
 const { Updater, LATEST, compareVersions } = require('./updater');
 const { generatePassword } = require('./passwords');
 const importer = require('./importer');
+const { Schedules, describe: describeSchedule } = require('./schedules');
 
 const IS_DEV = !app.isPackaged;
 
@@ -48,6 +49,7 @@ let extensions = null;
 let updater = null;
 let account = null;
 let passwords = null;
+let schedules = null; // scheduled tasks (main/schedules.js)
 let quitting = false;
 const windows = new Set();
 let lastFocused = null;
@@ -104,6 +106,8 @@ const services = {
   get store() { return store; },
   get helper() { return helper; },
   get account() { return account; },
+  get schedules() { return schedules; },
+  notify: (w, title, body, chatId) => notifyChat(w, title, body, chatId),
   createWindow: (opts) => createWindow(opts),
   onFocus: (w) => { lastFocused = w; },
   onClose: (w) => {
@@ -146,6 +150,37 @@ function createWindow(opts = {}) {
   lastFocused = w;
   if (opts.focus !== false) w.win.once('ready-to-show', () => w.focus());
   return w;
+}
+
+// A notification about a Lumio chat (scheduled tasks); clicking it opens the
+// chat in that window, or the front window if that one closed.
+function notifyChat(w, title, body, chatId) {
+  if (!Notification.isSupported()) return;
+  const n = new Notification({ title: String(title).slice(0, 80), body: String(body || '').slice(0, 240) });
+  n.on('click', () => {
+    const target = windows.has(w) ? w : alive().find((x) => !x.incognito) || createWindow();
+    target.focus();
+    target.openChat(chatId, { full: false });
+  });
+  n.show();
+}
+
+// Scheduled tasks: every 20 s, run what's due in a normal window that isn't
+// busy (opening one in the background if none is open).
+const runningSchedules = new Set();
+function runDueSchedules() {
+  if (!schedules || quitting || !account?.state().signedIn) return;
+  for (const task of schedules.due()) {
+    if (runningSchedules.has(task.id)) continue;
+    const normalWins = alive().filter((x) => !x.incognito);
+    const w = normalWins.find((x) => x === lastFocused && !x.ai.isRunning()) || normalWins.find((x) => !x.ai.isRunning())
+      || (normalWins.length ? null : createWindow({ focus: false }));
+    if (!w) return; // every window is busy; try again on the next check
+    runningSchedules.add(task.id);
+    w.ai.runScheduled({ ...task, when: describeSchedule(task) })
+      .catch(() => {})
+      .finally(() => runningSchedules.delete(task.id));
+  }
 }
 
 // Save the open normal windows so they come back next launch. When the last
@@ -857,6 +892,24 @@ function registerIpc() {
     importSources: importer.detect(),
     sitePermissions: Object.entries(normal.permissions.all()).map(([origin, perms]) => ({ origin, perms })),
   }));
+  // Scheduled tasks (Settings › Scheduled tasks)
+  const scheduleReply = (fn) => { try { return { ok: true, ...fn() }; } catch (err) { return { ok: false, error: err.message }; } };
+  internalHandle('page:schedules', ['settings'], () => ({ tasks: schedules.list(), signedIn: !!account.state().signedIn }));
+  internalHandle('page:schedule-add', ['settings'], (_ctx, spec) => scheduleReply(() => ({ task: schedules.add(spec || {}) })));
+  internalHandle('page:schedule-update', ['settings'], (_ctx, id, patch) => scheduleReply(() => ({ task: schedules.update(String(id), patch || {}) })));
+  internalHandle('page:schedule-remove', ['settings'], (_ctx, id) => ({ ok: schedules.remove(String(id)) }));
+  internalHandle('page:schedule-run', ['settings'], ({ w }, id) => {
+    const task = schedules.get(String(id));
+    if (!task) return { ok: false, error: 'That scheduled task doesn’t exist anymore.' };
+    if (runningSchedules.has(task.id) || w.ai.isRunning()) return { ok: false, error: 'Lumio is busy right now. Try again when it’s done.' };
+    runningSchedules.add(task.id);
+    w.ai.runScheduled({ ...task, when: describeSchedule(task), manual: true }).catch(() => {}).finally(() => runningSchedules.delete(task.id));
+    return { ok: true };
+  });
+  internalHandle('page:schedule-open', ['settings'], ({ w }, id) => {
+    const chatId = schedules.get(String(id))?.lastChatId;
+    return { ok: !!chatId && w.openChat(chatId, { full: false }) };
+  });
   internalHandle('page:check-updates', ['settings'], () => updater.check({ manual: true }));
   internalHandle('page:update-now', ['settings'], ({ w }) => startUpdate(w));
   internalHandle('page:set-setting', ['settings', 'passwords'], ({ w }, key, value) => {
@@ -1070,6 +1123,10 @@ app.whenReady().then(async () => {
   account.refresh();
   watchLumioCookie();
   setInterval(() => { if (account.token()) account.refresh(); }, 10 * 60 * 1000).unref?.();
+  schedules = new Schedules(app.getPath('userData'));
+  schedules.onChange(() => alive().forEach((w) => w.emit('schedules-changed', {})));
+  setInterval(runDueSchedules, 20 * 1000).unref?.();
+  setTimeout(runDueSchedules, 8000).unref?.(); // catch up after launch, once tabs and sign-in are back
   // Memory Saver: once a minute, tabs nobody has looked at for a while go to sleep.
   setInterval(() => {
     if (!store.settings.memorySaver) return;

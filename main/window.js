@@ -104,6 +104,8 @@ class BrowserWin {
       helper: app.helper,
       account: app.account,
       indicator: this.indicator,
+      schedules: incognito ? null : app.schedules,
+      notify: (title, body, chatId) => app.notify(this, title, body, chatId),
       onSettingsChanged: () => app.broadcastAIState(),
     });
 
@@ -174,11 +176,12 @@ class BrowserWin {
     this.win.webContents.focus();
   }
 
-  // A recent chat picked on the new tab page, opened full size.
-  openChat(id) {
+  // A recent chat picked on the new tab page, opened full size (or in the
+  // side panel, from a notification or Settings).
+  openChat(id, { full = true } = {}) {
     if (!this.profile.chats.get(id)) return false;
     this.app.store.setSetting('panelOpen', true);
-    this.emit('ai-open-chat', { id, full: true });
+    this.emit('ai-open-chat', { id, full });
     this.win.webContents.focus();
     return true;
   }

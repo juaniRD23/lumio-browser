@@ -14,6 +14,7 @@
       <a href="#profile">Customize profile</a>
       <a href="#plan">Plan and usage</a>
       <a href="#ai">Lumio AI</a>
+      <a href="#scheduled">Scheduled tasks</a>
       <a href="#autofill">Passwords and autofill</a>
       <a href="#privacy">Privacy and security</a>
       <a href="#appearance">Appearance</a>
@@ -120,6 +121,42 @@
           </div>
           <div class="row"><div class="desc" id="perm-note">After you turn a permission on, quit and reopen Lumio Browser.</div></div>
         </div>
+      </section>
+
+      <!-- Scheduled tasks -->
+      <section id="scheduled">
+        <h2>Scheduled tasks</h2>
+        <div class="card">
+          <div id="sched-list"></div>
+          <div class="row" id="sched-intro">
+            <div class="grow"><div class="title">New scheduled task</div><div class="desc">Lumio does it on its own at the time you pick, in a new chat, and lets you know when it’s done. You can also just ask Lumio, like “every weekday at 8, summarize the top tech news.”</div></div>
+            <button class="btn" id="sched-new">New task</button>
+          </div>
+          <form id="sched-form" class="sched-form" hidden>
+            <input class="field" id="sched-title" placeholder="Name, like “Morning news”" maxlength="80" autocomplete="off" />
+            <textarea class="field" id="sched-prompt" rows="3" maxlength="4000" placeholder="What should Lumio do? Write it like you would in the chat."></textarea>
+            <div class="sched-when">
+              <select class="field" id="sched-repeat" aria-label="How often">
+                <option value="once">Once</option>
+                <option value="hourly">Every hour</option>
+                <option value="daily" selected>Every day</option>
+                <option value="weekdays">Every weekday</option>
+                <option value="weekly">Every week</option>
+              </select>
+              <select class="field" id="sched-weekday" aria-label="Day" hidden>
+                <option value="monday">Monday</option><option value="tuesday">Tuesday</option><option value="wednesday">Wednesday</option><option value="thursday">Thursday</option><option value="friday">Friday</option><option value="saturday">Saturday</option><option value="sunday">Sunday</option>
+              </select>
+              <input class="field" type="date" id="sched-date" aria-label="Date" hidden />
+              <input class="field" type="time" id="sched-time" value="08:00" aria-label="Time" />
+            </div>
+            <div class="sched-actions">
+              <span class="desc err" id="sched-err"></span>
+              <button type="button" class="btn ghost" id="sched-cancel">Cancel</button>
+              <button type="submit" class="btn primary" id="sched-save">Schedule</button>
+            </div>
+          </form>
+        </div>
+        <p class="note">Scheduled tasks run while Lumio Browser is open (a run missed in the last 6 hours happens when you open it) and use your plan’s weekly allowance. In Ask mode, Lumio still asks before it acts and sends you a notification.</p>
       </section>
 
       <!-- Autofill -->

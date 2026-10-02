@@ -639,7 +639,6 @@ body.panel-closed #composer { transition: border-color var(--fast) var(--ease), 
   animation: suggest-in .25s ease-out;
 }
 .page-suggest:hover { background: #86b7ff26; border-color: #86b7ff66; color: #fff; }
-.page-suggest[hidden] { display: none; }
 .page-suggest svg { width: 15px; height: 15px; flex: none; }
 @keyframes suggest-in { from { opacity: 0; transform: translateY(4px); } }
 .chip.off span { text-decoration: line-through; }

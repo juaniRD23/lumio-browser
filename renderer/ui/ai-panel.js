@@ -404,7 +404,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     if (ctx?.title) {
       const c = document.createElement('div');
       c.className = 'ctx';
-      c.innerHTML = `${icons.page}<span></span>`;
+      c.innerHTML = `${ctx.scheduled ? icons.clock : ctx.tabs ? icons.tabs : ctx.video ? icons.play : icons.page}<span></span>`;
       c.querySelector('span').textContent = ctx.title;
       el.append(c);
     }
@@ -562,7 +562,8 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
 
   api.on('ai-event', (ev) => {
     if (ev.type === 'user') {
-      if (!chatId || chatId === ev.chatId) {
+      // A scheduled task shows up in an empty panel, unless you're typing there.
+      if ((!chatId && !(ev.background && prompt.value.trim())) || chatId === ev.chatId) {
         if (!chatId) messages.innerHTML = '';
         chatId = ev.chatId;
         showPlan(null); // each request starts fresh; the AI posts a new checklist if it needs one
