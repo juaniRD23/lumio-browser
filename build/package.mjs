@@ -10,7 +10,7 @@
 //   node build/package.mjs --release   → dist/release/: Mac DMGs (Apple silicon
 //                                        and Intel) and a Windows x64 ZIP
 import { packager } from '@electron/packager';
-import { signAsync } from '@electron/osx-sign';
+import { sign as osxSign } from '@electron/osx-sign';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -97,7 +97,7 @@ async function developerIdSign(app) {
   if (fs.existsSync(helper)) {
     execFileSync('codesign', ['--force', '--options', 'runtime', '--timestamp', '--sign', SIGN_ID, ...keychain, '--identifier', HELPER_ID, helper], { stdio: 'inherit' });
   }
-  await signAsync({
+  await osxSign({
     app,
     identity: SIGN_ID,
     platform: 'darwin',
