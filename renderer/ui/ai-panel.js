@@ -15,6 +15,9 @@ const SUGGESTIONS = [
   { title: 'Help on my Mac', text: 'What apps are running on my Mac right now?' },
 ];
 
+// Approval modes, for the button under the chat box.
+const MODES = { ask: { name: 'Ask', icon: icons.shield }, auto: { name: 'Auto', icon: icons.bolt }, bypass: { name: 'Bypass', icon: icons.warn } };
+
 const RISK_LABEL = { browser: 'Browser action', mac: 'Controls your Mac', shell: 'Runs on your Mac' };
 
 const $ = (s) => document.querySelector(s);
@@ -154,7 +157,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     $('#reasoning-name').textContent = ai.reasoningName || 'Medium';
     $('#reasoning-btn').title = `Thinking effort: ${ai.reasoningName || 'Medium'} (${ai.modelName})`;
     if (!$('#reasoning-menu').hidden && !$('#effort-slider').classList.contains('dragging')) renderModels();
-    document.querySelectorAll('#mode button').forEach((b) => b.classList.toggle('on', b.dataset.mode === ai.mode));
+    renderMode();
     const running = ai.running && ai.runChatId === chatId;
     sendBtn.classList.toggle('stop', running);
     sendBtn.innerHTML = running ? icons.square : icons.send;
@@ -218,10 +221,52 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     if (messages.querySelector('.empty') && before !== key(ai)) renderEmpty();
   });
 
-  document.querySelectorAll('#mode button').forEach((b) => b.addEventListener('click', async () => {
+  // ------------------------------------------------------------ approvals
+  // One button shows the mode; its menu has Ask, Auto and Bypass.
+  const modeBtn = $('#mode-btn');
+  const modeMenu = $('#mode-menu');
+  modeMenu.querySelectorAll('[data-mode]').forEach((b) => {
+    b.querySelector('.mi').innerHTML = MODES[b.dataset.mode].icon;
+    b.querySelector('.tick').innerHTML = icons.check;
+  });
+  // (Runs from renderState, which can come before the lines below.)
+  function renderMode() {
+    const m = MODES[ai.mode] ? ai.mode : 'ask';
+    const btn = $('#mode-btn');
+    $('#mode-ic').innerHTML = MODES[m].icon;
+    $('#mode-name').textContent = MODES[m].name;
+    btn.classList.toggle('auto', m === 'auto');
+    btn.classList.toggle('bypass', m === 'bypass');
+    btn.title = `Approvals: ${MODES[m].name}`;
+    $('#mode-menu').querySelectorAll('[data-mode]').forEach((b) => {
+      b.classList.toggle('on', b.dataset.mode === m);
+      b.setAttribute('aria-checked', String(b.dataset.mode === m));
+    });
+  }
+  function closeMode() { modeMenu.hidden = true; modeBtn.setAttribute('aria-expanded', 'false'); }
+  function openMode() {
+    document.querySelectorAll('#composer .popover').forEach((p) => { if (p !== modeMenu) p.hidden = true; });
+    document.querySelectorAll('#composer [aria-expanded="true"]').forEach((b) => b.setAttribute('aria-expanded', 'false'));
+    modeMenu.hidden = false;
+    modeBtn.setAttribute('aria-expanded', 'true');
+    (modeMenu.querySelector('.menu-row.on') || modeMenu.querySelector('.menu-row')).focus();
+  }
+  modeBtn.addEventListener('click', () => (modeMenu.hidden ? openMode() : closeMode()));
+  modeMenu.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-mode]');
+    if (!b) return;
+    closeMode();
     ai = await api.invoke('ai:set-mode', b.dataset.mode);
     renderState();
-  }));
+    prompt.focus();
+  });
+  modeMenu.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.stopPropagation(); closeMode(); modeBtn.focus(); return; }
+    const rows = [...modeMenu.querySelectorAll('.menu-row')];
+    const step = { ArrowDown: 1, ArrowUp: -1 }[e.key];
+    if (step) { e.preventDefault(); rows[(rows.indexOf(document.activeElement) + step + rows.length) % rows.length].focus(); }
+  });
+  document.addEventListener('mousedown', (e) => { if (!modeMenu.hidden && !e.target.closest('#mode-menu, #mode-btn')) closeMode(); });
 
   // ------------------------------------------------------------ context chip
   function renderChip() {

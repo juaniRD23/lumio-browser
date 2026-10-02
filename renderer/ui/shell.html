@@ -101,6 +101,12 @@
           <div class="list-label conn-label">Connections</div>
           <div id="apps" class="apps"></div>
         </div>
+        <div id="mode-menu" class="popover plus-menu mode-menu" role="menu" aria-label="Approvals" hidden>
+          <div class="list-label">Approvals</div>
+          <button type="button" class="menu-row" role="menuitemradio" data-mode="ask"><span class="mi"></span><span class="mt"><b>Ask</b><small>Asks before every action. Reading pages never asks.</small></span><i class="tick"></i></button>
+          <button type="button" class="menu-row" role="menuitemradio" data-mode="auto"><span class="mi"></span><span class="mt"><b>Auto</b><small>Browses on its own. Still asks before using your computer or running commands.</small></span><i class="tick"></i></button>
+          <button type="button" class="menu-row bypass" role="menuitemradio" data-mode="bypass"><span class="mi"></span><span class="mt"><b>Bypass</b><small>Never asks, even on your computer. Use with care.</small></span><i class="tick"></i></button>
+        </div>
         <div id="usage-pop" class="popover usage-pop" role="dialog" aria-label="Usage" hidden></div>
         <div id="voice-bar" class="voice-bar" hidden>
           <button type="button" class="vb-orb" aria-label="Done talking, or interrupt"><i></i></button>
@@ -114,11 +120,7 @@
         <div class="composer-row">
           <button id="plus-btn" class="round-btn" title="Add files and connections" aria-label="Add files and connections" aria-haspopup="menu" aria-expanded="false"></button>
           <button id="reasoning-btn" class="model-btn" title="Thinking effort" aria-haspopup="dialog" aria-expanded="false"><span id="reasoning-bars"></span><span id="reasoning-name">Medium</span><i class="chev"></i></button>
-          <div id="mode" class="segmented" role="radiogroup" aria-label="Approval mode">
-            <button data-mode="ask" title="Ask before every action">Ask</button>
-            <button data-mode="auto" title="Browse on its own; ask before Mac actions and commands">Auto</button>
-            <button data-mode="bypass" title="Never ask (use with care)">Bypass</button>
-          </div>
+          <button id="mode-btn" class="model-btn mode-btn" title="Approvals" aria-label="Approvals" aria-haspopup="menu" aria-expanded="false"><span id="mode-ic"></span><span id="mode-name">Ask</span><i class="chev"></i></button>
           <span class="spacer"></span>
           <button id="usage-btn" class="round-btn ring-btn" title="Usage" aria-label="Usage" aria-haspopup="dialog" aria-expanded="false" hidden></button>
           <button id="mic-btn" class="round-btn mic-btn" title="Dictate" aria-label="Dictate"></button>

@@ -643,16 +643,25 @@ body.panel-closed #composer { transition: border-color var(--fast) var(--ease), 
 @keyframes suggest-in { from { opacity: 0; transform: translateY(4px); } }
 .chip.off span { text-decoration: line-through; }
 
-.segmented { display: inline-flex; background: var(--card); border-radius: 999px; padding: 2px; border: 1px solid var(--line); }
-.segmented button { height: 22px; padding: 0 9px; border-radius: 999px; color: var(--label); font-size: 11.5px; font-weight: 500; }
-.segmented button:hover { color: var(--text); }
-.segmented button.on { background: var(--active); color: var(--text); }
-.segmented button.on[data-mode="bypass"] { background: #ff7a7a26; color: #ffb4b4; }
+/* Approvals: one button showing the mode; the menu has all three */
+.mode-btn { max-width: none; gap: 5px; padding: 0 8px 0 7px; margin-left: 0; color: var(--dim); }
+.mode-btn #mode-ic { display: grid; place-items: center; flex: none; }
+.mode-btn #mode-ic svg { width: 14px; height: 14px; }
+.mode-btn.auto #mode-ic { color: var(--accent); }
+.mode-btn.bypass { background: #ff7a7a1a; border-color: #ff7a7a40; color: #ffb4b4; }
+.mode-menu .menu-row .mt { flex: 1; }
+.mode-menu .menu-row .mi svg { width: 16px; height: 16px; }
+.mode-menu .menu-row .tick { width: 16px; height: 16px; flex: none; color: var(--text); display: grid; place-items: center; }
+.mode-menu .menu-row:not(.on) .tick { visibility: hidden; }
+.mode-menu .menu-row.on { background: #ffffff0a; }
+.mode-menu .menu-row[data-mode="auto"] .mi { color: var(--accent); }
+.mode-menu .menu-row.bypass .mi { background: #ff7a7a1f; color: #ffb4b4; }
+.mode-menu .menu-row.bypass.on { background: #ff7a7a14; }
 
 /* Narrow panel: tighten the row so the reasoning level still fits. */
 @container composer (max-width: 330px) {
   .composer-row { gap: 3px; }
-  .segmented button { padding: 0 6px; }
+  .mode-btn #mode-name { display: none; }
   .model-btn { gap: 4px; padding: 0 7px 0 6px; }
 }
 
@@ -709,7 +718,7 @@ body.panel-closed #composer { transition: border-color var(--fast) var(--ease), 
 .switch input:checked + i::after { transform: translateX(13px); }
 
 .tray { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 6px -4px; }
-.tray[hidden], .plus-menu[hidden], .usage-pop[hidden] { display: none; }
+.tray[hidden], .plus-menu[hidden], .usage-pop[hidden], .mode-menu[hidden] { display: none; }
 .att { position: relative; display: flex; align-items: center; gap: 8px; max-width: 200px; height: 44px; padding: 5px 26px 5px 5px; border-radius: 11px; border: 1px solid var(--line); background: var(--card); }
 .att.pic { width: 44px; padding: 0; overflow: hidden; }
 .att.pic img { width: 100%; height: 100%; object-fit: cover; }

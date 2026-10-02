@@ -199,6 +199,28 @@ test('one model; the thinking-effort slider under the chat box sets how hard it 
   assert.equal(await L.main(() => global.lumio.store.settings.reasoning), 'high');
 });
 
+test('approvals: one button shows the mode, and its menu switches between Ask, Auto and Bypass', async () => {
+  const start = await L.main(() => global.lumio.store.settings.approvalMode);
+  const pick = async (m) => {
+    await L.shell(`document.getElementById('mode-btn').click(); true`);
+    assert.equal(await L.shell(`document.getElementById('mode-menu').hidden`), false);
+    await L.shell(`document.querySelector('#mode-menu [data-mode="${m}"]').click(); true`);
+    assert.ok(await until(() => L.main((_e, x) => global.lumio.store.settings.approvalMode === x, m)), `mode ${m}`);
+    assert.equal(await L.shell(`document.getElementById('mode-menu').hidden`), true);
+  };
+  await pick('auto');
+  assert.equal(await L.shell(`document.getElementById('mode-name').textContent`), 'Auto');
+  await L.shell(`document.getElementById('mode-btn').click(); true`);
+  assert.match(await L.shell(`document.getElementById('mode-menu').innerText`), /Ask[\s\S]*Auto[\s\S]*Bypass/);
+  assert.equal(await L.shell(`document.querySelector('#mode-menu [data-mode="auto"]').getAttribute('aria-checked')`), 'true');
+  await shot('03-approvals-menu');
+  await L.shell(`document.getElementById('mode-btn').click(); true`);
+  await pick('bypass');
+  assert.equal(await L.shell(`document.getElementById('mode-btn').classList.contains('bypass')`), true);
+  await pick(start);
+  assert.equal(await L.shell(`document.getElementById('mode-btn').classList.contains('bypass')`), false);
+});
+
 test('chat streams markdown and includes the page when asked', async () => {
   await ask('summarize this page');
   await idle();
