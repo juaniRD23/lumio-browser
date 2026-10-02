@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "Lumio",
+    "slug": "lumio",
+    "version": "1.0.0",
+    "scheme": "lumio",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#070708",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "online.lumio-usa.companion",
+      "buildNumber": "1"
+    },
+    "android": {
+      "package": "online.lumiousa.companion",
+      "adaptiveIcon": {
+        "backgroundColor": "#070708",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-web-browser",
+      ["expo-notifications", { "icon": "./assets/notification-icon.png", "color": "#86b7ff" }],
+      ["expo-splash-screen", { "image": "./assets/splash-icon.png", "imageWidth": 120, "backgroundColor": "#070708", "resizeMode": "contain" }]
+    ],
+    "extra": {
+      "site": "https://lumio.gw607953.workers.dev"
+    }
+  }
+}

@@ -106,7 +106,7 @@ class CompanionBridge {
         break;
       case 'approval':
         l.approvals = [...l.approvals.filter((a) => a.id !== ev.id), { id: ev.id, label: ev.label, detail: ev.detail || null, risk: ev.risk }];
-        if (this.fromPhone.has(ev.chatId) || !this.focused()) this.notice({ title: 'Lumio needs your OK', body: ev.label || 'A step is waiting for you.', chatId: ev.chatId });
+        if (this.fromPhone.has(ev.chatId) || !this.focused()) this.notice({ title: 'Lumio needs your OK', body: ev.label || 'A step is waiting for you.', chatId: ev.chatId, hint: 'approval' });
         break;
       case 'approval_done':
         l.approvals = l.approvals.filter((a) => a.id !== ev.id);
@@ -118,7 +118,7 @@ class CompanionBridge {
           l.approvals = [];
           if (this.fromPhone.has(ev.chatId)) {
             this.fromPhone.delete(ev.chatId);
-            this.notice({ title: l.title || 'Lumio finished', body: l.reply.replace(/[#*_`>[\]()]/g, '').replace(/\s+/g, ' ').trim().slice(0, 180) || 'Done.', chatId: ev.chatId });
+            this.notice({ title: l.title || 'Lumio finished', body: l.reply.replace(/[#*_`>[\]()]/g, '').replace(/\s+/g, ' ').trim().slice(0, 180) || 'Done.', chatId: ev.chatId, hint: 'done' });
           }
         }
         break;
@@ -143,10 +143,12 @@ class CompanionBridge {
   }
 
   // A notification for the phone(s).
-  async notice({ title, body, chatId = null }) {
+  // hint (done | approval | scheduled | info) is the only part the server can
+  // see: the Lumio app's notification says just that.
+  async notice({ title, body, chatId = null, hint = 'info' }) {
     if (!this.ready()) return;
     const data = await this.seal({ at: Date.now(), title: String(title).slice(0, 100), body: String(body || '').slice(0, 300), chatId, computer: this.sync.deviceName });
-    await this.sync.api('/api/companion/messages', { method: 'POST', body: { kind: 'notice', device: this.sync.deviceId, data } }).catch(() => {});
+    await this.sync.api('/api/companion/messages', { method: 'POST', body: { kind: 'notice', device: this.sync.deviceId, data, hint } }).catch(() => {});
   }
 }
 

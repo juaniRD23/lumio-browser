@@ -46,6 +46,7 @@ const common = {
     /^\/build($|\/)/,
     /^\/website($|\/)/,
     /^\/server($|\/)/,
+    /^\/mobile($|\/)/,
     /\.DS_Store$/,
   ],
 };

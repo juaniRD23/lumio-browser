@@ -195,3 +195,10 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   created_at INTEGER NOT NULL,
   PRIMARY KEY (owner, device)
 );
+
+-- The phone app's sign-in hand-off: one-time codes, 2 minutes.
+CREATE TABLE IF NOT EXISTS app_codes (
+  code_hash TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);

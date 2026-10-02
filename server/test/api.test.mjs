@@ -132,6 +132,7 @@ beforeEach(() => {
     }
     if (u.startsWith(GAPI) || u.startsWith(GRAPH)) { calls.api.push({ url: u, auth: opts.headers?.authorization }); return apiReply(u, opts); }
     if (u.startsWith('https://web.push.apple.com/')) { calls.push.push({ url: u, headers: opts.headers }); return new Response('', { status: 201 }); }
+    if (u === 'https://exp.host/--/api/v2/push/send') { const body = JSON.parse(opts.body); calls.push.push({ url: u, body }); return Response.json({ data: body.map((m) => (m.to.includes('Gone') ? { status: 'error', details: { error: 'DeviceNotRegistered' } } : { status: 'ok', id: 'x' })) }); }
     if (u.startsWith('https://oauth2.googleapis.com/revoke')) { calls.revoked.push(u); return new Response('', { status: 200 }); }
     if (u.startsWith(STRIPE)) {
       const path = new URL(u).pathname;
@@ -1030,6 +1031,42 @@ test('companion: the phone sends commands to a computer, sees its status, and no
   assert.ok(await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, pair.publicKey, Buffer.from(sig, 'base64url'), new TextEncoder().encode(`${h}.${c}`)), 'a valid ES256 signature');
   const notices = await (await sync(`/api/companion/messages?kind=notice&device=${PHONE}&since=0`)).json();
   assert.deepEqual(notices.messages.map((m) => m.data), [sealed('done')]);
+});
+
+test('the Lumio app: signs in in the phone browser, then its web view trades a one-time code for a session', async () => {
+  // Not signed in yet: sent to sign in first.
+  const out = await call('/api/auth/app/finish', { redirect: 'manual' });
+  assert.equal(out.headers.get('location'), '/signin?next=/api/auth/app/finish');
+  const { token } = await signIn();
+  const fin = await call('/api/auth/app/finish', { cookie: token });
+  const code = /^lumio:\/\/auth\?code=([a-f0-9]{48})$/.exec(fin.headers.get('location'))?.[1];
+  assert.ok(code, fin.headers.get('location'));
+  // The app's web view posts it (it may send Origin: null).
+  const post = (c) => worker.fetch(new Request(`${SITE}/api/auth/app/session`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: 'null' }, body: `code=${c}` }), env, { waitUntil: (p) => pending.push(p) });
+  const ok = await post(code);
+  assert.equal(ok.status, 303);
+  assert.equal(ok.headers.get('location'), '/companion');
+  const cookie = /^(__Host-lumio_session|lumio_session)=([a-f0-9]{64});/.exec(ok.headers.get('set-cookie'))?.[2];
+  assert.ok(cookie);
+  assert.notEqual(cookie, token, 'its own session');
+  assert.equal((await (await call('/api/account', { cookie })).json()).email, 'sam@example.com');
+  // Once only.
+  const again = await post(code);
+  assert.equal(again.headers.get('set-cookie'), null);
+});
+
+test('the Lumio app gets notifications through Expo, saying only what kind of event it was', async () => {
+  const { token } = await signIn();
+  const sync = (path, opts = {}) => call(path, { token, ...opts });
+  await sync('/api/sync/devices', { method: 'POST', body: { id: DEV_A, name: 'MacBook', kind: 'computer' } });
+  assert.equal((await sync('/api/companion/push', { method: 'POST', body: { device: PHONE, endpoint: 'expo:ExponentPushToken[abcdefghijklmnop]' } })).status, 200);
+  assert.equal((await sync('/api/companion/push', { method: 'POST', body: { device: 'phone-gone-00000', endpoint: 'expo:ExponentPushToken[GoneGoneGoneGone]' } })).status, 200);
+  assert.equal((await sync('/api/companion/push', { method: 'POST', body: { device: PHONE, endpoint: 'expo:not-a-token' } })).status, 400);
+  await sync('/api/companion/messages', { method: 'POST', body: { kind: 'notice', device: DEV_A, data: sealed('secret details'), hint: 'approval' } });
+  await settled();
+  const sent = calls.push.find((p) => p.url.startsWith('https://exp.host'));
+  assert.deepEqual(sent.body.map((m) => [m.to, m.title, m.body]), [['ExponentPushToken[abcdefghijklmnop]', 'Lumio', 'Lumio needs your OK.'], ['ExponentPushToken[GoneGoneGoneGone]', 'Lumio', 'Lumio needs your OK.']]);
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM push_subscriptions').get().n, 1, 'an uninstalled app is forgotten');
 });
 
 // ---------------------------------------------------------------- connections

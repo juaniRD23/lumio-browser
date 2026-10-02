@@ -25,7 +25,7 @@
 // Website requests use the session cookie; Lumio Browser sends the same
 // session as a bearer token. Cookie-authenticated POSTs must come from our own
 // pages (Origin check).
-import { accountJson, currentUser, googleCallback, googleStart, logout, readToken, type User } from './auth.ts';
+import { accountJson, appFinish, appSession, currentUser, googleCallback, googleStart, logout, readToken, type User } from './auth.ts';
 import { cancelPlan, changePlan, checkout, checkoutStatus, portal, resumePlan, subscription, webhook } from './billing.ts';
 import { capabilities, runTool, step } from './browser.ts';
 import { connectCallback, connectStart, disconnect, listConnections } from './connections.ts';
@@ -56,6 +56,9 @@ export default {
       if (path === '/api/auth/google/callback' && method === 'GET') return await googleCallback(request, env);
       if (path === '/api/stripe/webhook' && method === 'POST') return await webhook(request, env);
       if (path === '/api/billing/plans' && method === 'GET') return json({ plans: PUBLIC_PLANS });
+      // The phone app's sign-in hand-off (its web view posts the one-time code).
+      if (path === '/api/auth/app/finish' && method === 'GET') return await appFinish(request, env);
+      if (path === '/api/auth/app/session' && method === 'POST') return await appSession(request, env);
 
       // Everything below knows who is asking.
       const bearer = /^Bearer /.test(request.headers.get('authorization') || '');

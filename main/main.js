@@ -115,7 +115,7 @@ const services = {
   get account() { return account; },
   get schedules() { return schedules; },
   get workflows() { return workflows; },
-  notify: (w, title, body, chatId) => { notifyChat(w, title, body, chatId); companion?.notice({ title, body, chatId }); },
+  notify: (w, title, body, chatId) => { notifyChat(w, title, body, chatId); companion?.notice({ title, body, chatId, hint: /needs your OK/.test(title) ? 'approval' : 'scheduled' }); },
   onEmit: (w, channel, payload) => companion?.onEmit(w, channel, payload),
   createWindow: (opts) => createWindow(opts),
   onFocus: (w) => { lastFocused = w; },

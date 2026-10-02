@@ -101,11 +101,17 @@ async function boot() {
 
 function render(html) { app.innerHTML = html; }
 
+// Inside the Lumio app (iOS/Android), the app signs in and turns on
+// notifications natively; this page asks it to.
+const inApp = () => !!window.ReactNativeWebView;
+const toApp = (msg) => window.ReactNativeWebView?.postMessage(JSON.stringify(msg));
+
 function signIn() {
   $('#nav').hidden = true;
   render(`<div class="hero"><div class="mark"></div><h1>Lumio, in your pocket</h1>
     <p>See what Lumio is doing on your computer, approve its steps, and pick up your chats, from anywhere.</p>
-    <a class="btn primary block" href="/signin?next=${encodeURIComponent('/companion')}">Sign in to Lumio</a></div>`);
+    ${inApp() ? '<button class="btn primary block" id="app-sign-in">Sign in to Lumio</button>' : `<a class="btn primary block" href="/signin?next=${encodeURIComponent('/companion')}">Sign in to Lumio</a>`}</div>`);
+  $('#app-sign-in')?.addEventListener('click', () => toApp({ type: 'sign-in' }));
 }
 
 function needsSync() {
@@ -181,7 +187,7 @@ function start() {
   // Seen recently: computers check for commands more often.
   setInterval(() => { if (!document.hidden) api('/api/sync/devices', { method: 'POST', body: { id: S.device, name: phoneName(), kind: 'phone' } }).catch(() => {}); }, 20_000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) { pollStatus(); pullAll(); } });
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/companion-sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && !inApp()) navigator.serviceWorker.register('/companion-sw.js').catch(() => {});
 }
 
 function show(view) {
@@ -312,6 +318,7 @@ function renderNow() {
 // ---------------------------------------------------------------- notifications
 const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone;
 function notifyCard() {
+  if (inApp()) return localStorage.getItem('lumioPush') === S.device ? '' : '<div class="card notify"><p>Get a notification when Lumio finishes or needs your OK.</p><button class="btn" id="notify-on">Turn on</button></div>';
   if (!('Notification' in window) && !/iPhone|iPad/.test(navigator.userAgent)) return '';
   if (window.Notification?.permission === 'granted' && localStorage.getItem('lumioPush') === S.device) return '';
   if (/iPhone|iPad/.test(navigator.userAgent) && !standalone()) {
@@ -320,8 +327,20 @@ function notifyCard() {
   if (!('PushManager' in window)) return '';
   return '<div class="card notify"><p>Get a notification when Lumio finishes or needs your OK.</p><button class="btn" id="notify-on">Turn on</button></div>';
 }
+// The app answers with its Expo push token (or why it couldn't).
+window.lumioNativePush = async (token) => {
+  try {
+    await api('/api/companion/push', { method: 'POST', body: { device: S.device, endpoint: `expo:${token}` } });
+    localStorage.setItem('lumioPush', S.device);
+    toast('Notifications are on.');
+    if (S.view === 'now') renderNow();
+  } catch (err) { toast(`Couldn’t turn on notifications: ${err.message}`); }
+};
+window.lumioNativePushError = (msg) => toast(String(msg || 'Notifications are off. You can turn them on in Settings.'));
+
 function bindNotify() {
   $('#notify-on')?.addEventListener('click', async () => {
+    if (inApp()) { toApp({ type: 'push' }); return; }
     try {
       if ((await Notification.requestPermission()) !== 'granted') { toast('Notifications are off. You can turn them on in Settings.'); return; }
       const { publicKey } = await api('/api/companion/vapid');

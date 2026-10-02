@@ -125,3 +125,36 @@ export async function logout(request: Request, env: Env) {
   if (token) await env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?1').bind(await sha256(token)).run();
   return json({ ok: true }, 200, { 'set-cookie': sessionCookie(new URL(request.url), '', 0) });
 }
+
+// ---------------------------------------------------------------- the phone app
+// The Lumio app signs in in the phone's browser (Google doesn't allow its
+// sign-in inside an app's web view), then this hands the app a one-time code
+// for its own session: GET /api/auth/app/finish (signed in, in the browser)
+// sends lumio://auth?code=…; the app's web view posts the code to
+// /api/auth/app/session, which sets its session cookie. Codes last 2 minutes
+// and work once.
+const APP_CODE_MS = 2 * 60 * 1000;
+
+export async function appFinish(request: Request, env: Env) {
+  const user = await currentUser(request, env);
+  if (!user) return redirect('/signin?next=/api/auth/app/finish');
+  const code = randomHex(24);
+  await env.DB.prepare('INSERT INTO app_codes (code_hash, user_id, created_at) VALUES (?1, ?2, ?3)').bind(await sha256(code), user.id, Date.now()).run();
+  return redirect(`lumio://auth?code=${code}`);
+}
+
+export async function appSession(request: Request, env: Env) {
+  const url = new URL(request.url);
+  const form = await request.formData().catch(() => null);
+  const code = String(form?.get('code') || '');
+  if (!/^[a-f0-9]{48}$/.test(code)) return redirect('/companion');
+  const hash = await sha256(code);
+  const row = await env.DB.prepare('SELECT user_id, created_at FROM app_codes WHERE code_hash = ?1').bind(hash).first<{ user_id: string; created_at: number }>();
+  await env.DB.prepare('DELETE FROM app_codes WHERE code_hash = ?1 OR created_at < ?2').bind(hash, Date.now() - APP_CODE_MS).run();
+  if (!row || row.created_at < Date.now() - APP_CODE_MS) return redirect('/companion');
+  const token = randomHex(32);
+  const now = Date.now();
+  await env.DB.prepare('INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?1, ?2, ?3, ?4)')
+    .bind(await sha256(token), row.user_id, now, now + SESSION_DAYS * 86400_000).run();
+  return new Response(null, { status: 303, headers: { location: '/companion', 'set-cookie': sessionCookie(url, token, SESSION_DAYS * 86400) } });
+}

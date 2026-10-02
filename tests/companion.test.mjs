@@ -191,3 +191,13 @@ test('the phone pairs with the computer, sees its chats and work, approves a ste
   assert.deepEqual(errors, []);
   await ctx.close();
 });
+
+test('inside the Lumio app, sign-in and notifications are handed to the app', { skip: !CHROME && 'Google Chrome not installed', timeout: 30_000 }, async () => {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const page = await ctx.newPage();
+  await page.addInitScript(() => { window.__toApp = []; window.ReactNativeWebView = { postMessage: (m) => window.__toApp.push(JSON.parse(m)) }; });
+  await page.goto(`${base}/companion`); // signed out
+  await page.click('#app-sign-in');
+  assert.deepEqual(await page.evaluate(() => window.__toApp), [{ type: 'sign-in' }], 'the app signs in (not the page: Google blocks web views)');
+  await ctx.close();
+});

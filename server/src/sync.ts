@@ -206,7 +206,7 @@ export async function pairAnswer(request: Request, env: Env, user: User, id: str
 // ---------------------------------------------------------------- companion relay
 const KINDS = new Set(['command', 'notice']);
 export async function companionPost(request: Request, env: Env, user: User, ctx: ExecutionContext) {
-  const b = await body<{ kind?: unknown; device?: unknown; target?: unknown; data?: unknown }>(request);
+  const b = await body<{ kind?: unknown; device?: unknown; target?: unknown; data?: unknown; hint?: unknown }>(request);
   const kind = str(b.kind, 10);
   const device = str(b.device, 64);
   const target = str(b.target, 64) || null;
@@ -216,7 +216,7 @@ export async function companionPost(request: Request, env: Env, user: User, ctx:
   if ((recent?.n || 0) >= 120) return fail('Slow down a little.', 429, 'rate_limited');
   const row = await env.DB.prepare('INSERT INTO companion_messages (owner, kind, sender, target, data, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6) RETURNING seq')
     .bind(user.id, kind, device, target, data, now()).first<{ seq: number }>();
-  if (kind === 'notice') ctx.waitUntil(pushAll(env, user.id, device));
+  if (kind === 'notice') ctx.waitUntil(pushAll(env, user.id, device, HINTS[String(b.hint)] || HINTS.info));
   return json({ ok: true, seq: row?.seq || 0 });
 }
 
@@ -264,7 +264,9 @@ export async function pushSubscribe(request: Request, env: Env, user: User) {
   let host = '';
   try { host = new URL(endpoint).hostname; } catch { /* invalid */ }
   // Only the browsers' own push services.
-  if (!DEVICE.test(device) || !/^https:/.test(endpoint) || !/(^|\.)(push\.apple\.com|fcm\.googleapis\.com|googleapis\.com|push\.services\.mozilla\.com|notify\.windows\.com)$/.test(host)) return fail('Invalid subscription.', 400, 'invalid_request');
+  // The browsers' own push services, or the Lumio app's Expo push token.
+  const expo = /^expo:ExponentPushToken\[[A-Za-z0-9_-]{10,100}\]$/.test(endpoint);
+  if (!DEVICE.test(device) || (!expo && (!/^https:/.test(endpoint) || !/(^|\.)(push\.apple\.com|fcm\.googleapis\.com|googleapis\.com|push\.services\.mozilla\.com|notify\.windows\.com)$/.test(host)))) return fail('Invalid subscription.', 400, 'invalid_request');
   await env.DB.prepare(`INSERT INTO push_subscriptions (owner, device, endpoint, created_at) VALUES (?1, ?2, ?3, ?4)
     ON CONFLICT(owner, device) DO UPDATE SET endpoint = ?3, created_at = ?4`).bind(user.id, device, endpoint, now()).run();
   return json({ ok: true });
@@ -276,12 +278,36 @@ export function vapidKey(env: Env) {
 
 const b64url = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
-// A VAPID-signed push with no payload: it only wakes the phone, which then
-// fetches the (encrypted) notice itself.
-async function pushAll(env: Env, owner: string, sender: string) {
-  if (!env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_KEY) return;
+// What the Lumio app's notification says (the details are encrypted; the app
+// shows them when opened). Only this kind of event is visible to the server.
+const HINTS: Record<string, string> = {
+  done: 'Lumio finished a task.',
+  approval: 'Lumio needs your OK.',
+  scheduled: 'A scheduled task finished.',
+  info: 'Lumio has an update.',
+};
+
+// Web Push: VAPID-signed with no payload; it only wakes the phone, which then
+// fetches the (encrypted) notice itself. The Lumio app: Expo's push service.
+async function pushAll(env: Env, owner: string, sender: string, text = HINTS.info) {
   const subs = await env.DB.prepare('SELECT device, endpoint FROM push_subscriptions WHERE owner = ?1 AND device != ?2').bind(owner, sender).all<{ device: string; endpoint: string }>();
-  for (const s of subs.results || []) {
+  const all = subs.results || [];
+  const expo = all.filter((s) => s.endpoint.startsWith('expo:'));
+  if (expo.length) {
+    try {
+      const res = await fetch('https://exp.host/--/api/v2/push/send', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify(expo.map((s) => ({ to: s.endpoint.slice(5), title: 'Lumio', body: text, sound: 'default', data: { notice: true } }))),
+      });
+      const out = await res.json<{ data?: { status?: string; details?: { error?: string } }[] }>().catch(() => null);
+      for (const [i, r] of (out?.data || []).entries()) {
+        if (r?.details?.error === 'DeviceNotRegistered') await env.DB.prepare('DELETE FROM push_subscriptions WHERE owner = ?1 AND device = ?2').bind(owner, expo[i].device).run();
+      }
+    } catch { /* try again next time */ }
+  }
+  if (!env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_KEY) return;
+  for (const s of all.filter((x) => !x.endpoint.startsWith('expo:'))) {
     try {
       const res = await fetch(s.endpoint, { method: 'POST', headers: { TTL: '86400', Urgency: 'high', 'Content-Length': '0', Authorization: await vapidAuth(env, s.endpoint) } });
       if (res.status === 404 || res.status === 410) await env.DB.prepare('DELETE FROM push_subscriptions WHERE owner = ?1 AND device = ?2').bind(owner, s.device).run();
