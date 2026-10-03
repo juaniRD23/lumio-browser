@@ -345,7 +345,7 @@ function openInternal(url) {
 function bookmarksPayload() {
   return {
     show: !!store.settings.showBookmarksBar,
-    items: store.bookmarks().map(({ url, title, favicon }) => ({ url, title, favicon: favicon || null })),
+    items: store.bookmarks().map(({ url, title, favicon }) => ({ url, title, favicon: favicon || store.faviconFor(url) || null })),
   };
 }
 
@@ -777,6 +777,14 @@ function registerIpc() {
       .popup({ window: w.win, x: Math.round(x), y: Math.round(y) });
   });
   on('bookmarks:move', (_w, { url, index }) => { store.moveBookmark(url, index); bookmarksChanged(); });
+  // A link, or the address bar's site icon, dropped on the bar.
+  on('bookmarks:add', (w, { url, title, index }) => {
+    url = String(url || '').trim();
+    if (!/^(https?|file):/i.test(url) || url.length > 4096) return;
+    const tab = w.tabs.tabs.find((t) => t.url === url);
+    store.addBookmarkAt(url, String(title || tab?.title || '').trim().slice(0, 300) || url, Number(index) || 0, tab?.favicon);
+    bookmarksChanged();
+  });
 
   // ---- site info (lock icon) ----
   handle('site:info', (w) => siteInfo(w));
@@ -1155,7 +1163,7 @@ function tabContextMenu(w, id) {
 
 function bookmarkContextMenu(w, url) {
   const b = store.bookmarks().find((x) => x.url === url);
-  if (!b) return;
+  if (!b) { barContextMenu(w); return; }
   Menu.buildFromTemplate([
     { label: 'Open', click: () => openUrl(url, 'current', w) },
     { label: 'Open in New Tab', click: () => openUrl(url, 'tab', w) },
@@ -1164,6 +1172,20 @@ function bookmarkContextMenu(w, url) {
     { type: 'separator' },
     { label: 'Edit…', click: () => openInternal(`lumio://bookmarks/?edit=${encodeURIComponent(url)}`) },
     { label: 'Delete', click: () => { store.removeBookmark(url); bookmarksChanged(); } },
+    { type: 'separator' },
+    { label: 'Show Bookmarks Bar', type: 'checkbox', checked: !!store.settings.showBookmarksBar, click: () => cmd.toggleBookmarksBar() },
+    { label: 'Bookmark Manager', click: () => cmd.bookmarksManager() },
+  ]).popup({ window: w.win });
+}
+
+// Right-click on the bar itself, not on a bookmark.
+function barContextMenu(w) {
+  const tab = w.tabs.active;
+  const url = tab ? w.tabs.displayUrl(tab) : '';
+  const canAdd = /^https?:/.test(url) && !store.isBookmarked(url);
+  Menu.buildFromTemplate([
+    { label: 'Bookmark This Tab', enabled: canAdd, click: () => toggleBookmark(w) },
+    { label: 'Import Bookmarks…', click: () => openInternal('lumio://settings/#import') },
     { type: 'separator' },
     { label: 'Show Bookmarks Bar', type: 'checkbox', checked: !!store.settings.showBookmarksBar, click: () => cmd.toggleBookmarksBar() },
     { label: 'Bookmark Manager', click: () => cmd.bookmarksManager() },
@@ -1191,6 +1213,7 @@ app.on('second-instance', (_e, argv) => {
 
 app.whenReady().then(async () => {
   store = new Store(app.getPath('userData'), safeStorage);
+  store.onBookmarkIcons = () => bookmarksChanged();
   helper = new MacHelper();
   app.userAgentFallback = chromeUserAgent();
   registerUiProtocol(session.defaultSession);

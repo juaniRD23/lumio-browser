@@ -80,6 +80,38 @@ test('bookmarks: toggle, edit, move, import', () => {
   assert.equal(s.isBookmarked('https://a.example/'), false);
 });
 
+test('bookmarks bar: on by default, turned on once for older installs, then the person decides', () => {
+  assert.equal(fresh().settings.showBookmarksBar, true);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lumio-store-'));
+  fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ showBookmarksBar: false }));
+  const s = new Store(dir, null);
+  assert.equal(s.settings.showBookmarksBar, true, 'an older install gets the bar');
+  s.setSetting('showBookmarksBar', false);
+  s.settingsFile.flush();
+  assert.equal(new Store(dir, null).settings.showBookmarksBar, false, 'turning it off sticks');
+});
+
+test('bookmarks learn their icon when the page is open, and drops add them in place', () => {
+  const s = fresh();
+  s.importBookmarks([{ url: 'https://youtube.com/', title: 'YouTube' }, { url: 'https://youtube.com/feed/library', title: 'Library' }, { url: 'https://news.example/', title: 'News' }]);
+  let told = 0;
+  s.onBookmarkIcons = () => told++;
+  // youtube.com redirects to www.youtube.com: same site, so both YouTube bookmarks take the icon.
+  s.updateFavicon('https://www.youtube.com/', 'https://www.youtube.com/favicon.ico');
+  assert.deepEqual(s.bookmarks().map((b) => b.favicon || null), ['https://www.youtube.com/favicon.ico', 'https://www.youtube.com/favicon.ico', null]);
+  assert.equal(told, 1);
+  // The exact page's own icon wins over the site's; nothing changes, nobody is told.
+  s.updateFavicon('https://youtube.com/feed/library', 'https://www.youtube.com/lib.png');
+  assert.equal(s.bookmarks()[1].favicon, 'https://www.youtube.com/lib.png');
+  assert.equal(s.bookmarks()[0].favicon, 'https://www.youtube.com/favicon.ico');
+  s.updateFavicon('https://youtube.com/feed/library', 'https://www.youtube.com/lib.png');
+  assert.equal(told, 2);
+  s.addBookmarkAt('https://new.example/', 'New', 1, 'https://new.example/f.png');
+  assert.deepEqual(s.bookmarks().map((b) => b.title), ['YouTube', 'New', 'Library', 'News']);
+  s.addBookmarkAt('https://news.example/', 'ignored', 0);
+  assert.deepEqual(s.bookmarks().map((b) => b.title), ['News', 'YouTube', 'New', 'Library'], 'an existing bookmark moves instead');
+});
+
 test('sessions: several windows, and the old single-window format', () => {
   const s = fresh();
   s.saveSession([{ tabs: [{ url: 'https://1.example/' }], active: 0 }, { tabs: [], active: 0 }, { tabs: [{ url: 'https://2.example/', pinned: true }], active: 0 }]);

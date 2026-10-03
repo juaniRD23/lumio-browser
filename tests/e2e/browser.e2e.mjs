@@ -88,6 +88,8 @@ before(async () => {
       return;
     }
     if (u.pathname === '/doc.pdf') { r.writeHead(200, { 'content-type': 'application/pdf' }); r.end(pdf); return; }
+    if (u.pathname === '/icon.png') { r.writeHead(200, { 'content-type': 'image/png' }); r.end(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')); return; }
+    if (u.pathname === '/icon-page') { r.writeHead(200, { 'content-type': 'text/html' }); r.end('<title>Icon page</title><link rel="icon" href="/icon.png"><h1>icon</h1>'); return; }
     if (u.pathname === '/cookie') {
       r.writeHead(200, { 'content-type': 'text/html', 'set-cookie': 'lumio_test=incognito; Path=/' });
       r.end('<title>Cookie Page</title><script>localStorage.setItem("where", "incognito")</script>');
@@ -272,7 +274,7 @@ test('bookmarks bar, manager edits and reorder', async () => {
   await L.main(() => global.lumio.cmd.bookmark());
   await go(`${base}/mark-b`, 'mark-b');
   await L.main(() => global.lumio.cmd.bookmark());
-  await L.main(() => global.lumio.cmd.toggleBookmarksBar());
+  // The bar is on by default, right under the address bar.
   await until(() => L.shell(`!document.getElementById('bookmarks-bar').hidden && document.querySelectorAll('.bm-item').length === 2`));
   assert.match(await L.shell(`document.querySelector('.bm-item').textContent`), /mark-a/);
   await shot('15-bookmarks-bar');
@@ -288,8 +290,20 @@ test('bookmarks bar, manager edits and reorder', async () => {
   // Reorder: B first.
   await L.main((_e, u) => global.lumio.store.moveBookmark(u, 0), `${base}/mark-b`);
   assert.equal(await L.main(() => global.lumio.store.bookmarks()[0].title), 'Renamed B');
+  // An imported bookmark comes without an icon; opening the page gives it one.
+  await L.main((_e, u) => global.lumio.store.importBookmarks([{ url: u, title: 'Icon page' }]), `${base}/icon-page`);
+  await go(`${base}/icon-page`, 'Icon page');
+  await until(() => L.shell(`[...document.querySelectorAll('.bm-item img')].some((i) => i.src === '${base}/icon.png')`));
+  assert.equal(await L.main((_e, u) => global.lumio.store.bookmarks().find((b) => b.url === u).favicon, `${base}/icon-page`), `${base}/icon.png`);
+  await shot('15b-bookmarks-bar-icons');
+  // Turned off, it hides on web pages but still shows on the new tab page, like Chrome.
   await L.main(() => global.lumio.cmd.toggleBookmarksBar());
   await until(() => L.shell(`document.getElementById('bookmarks-bar').hidden`));
+  await L.main(() => global.lumio.cmd.newTab());
+  await until(() => L.shell(`!document.getElementById('bookmarks-bar').hidden`));
+  await L.main(() => global.lumio.cmd.closeTab());
+  await until(() => L.shell(`document.getElementById('bookmarks-bar').hidden`));
+  await L.main(() => global.lumio.cmd.toggleBookmarksBar());
 });
 
 test('site info shows permissions and changes them', async () => {

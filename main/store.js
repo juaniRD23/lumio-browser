@@ -41,7 +41,7 @@ const DEFAULT_SETTINGS = {
   panelOpen: true,
   panelWidth: 380,
   sitePermissions: {},
-  showBookmarksBar: false,
+  showBookmarksBar: true, // under the address bar, like Chrome's
   developerMode: false,
   disabledExtensions: [],
   unpackedExtensions: [],
@@ -57,6 +57,7 @@ const DEFAULT_SETTINGS = {
 };
 
 const HISTORY_DAYS = 90;
+const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
 const HISTORY_MAX = 20000;
 
 const SEARCH_ENGINES = {
@@ -86,6 +87,13 @@ class Store {
       delete this.settings.aiSource;
       this.settingsFile.save();
     }
+    // Since 0.6.5 the bookmarks bar is on by default (it used to be off): turned on once for everyone.
+    if (!this.settings.bookmarksBarOn) {
+      this.settings.showBookmarksBar = true;
+      this.settings.bookmarksBarOn = true;
+      this.settingsFile.save();
+    }
+    this.onBookmarkIcons = null; // set by main: a bookmark learned its site's icon
   }
 
   get settings() { return this.settingsFile.data; }
@@ -149,8 +157,23 @@ class Store {
     if (!favicon || !/^https?:|^data:image\//.test(favicon)) return;
     const list = this.historyFile.data;
     for (let i = list.length - 1; i >= Math.max(0, list.length - 20); i--) {
-      if (list[i].url === url) { list[i].favicon = favicon; this.historyFile.save(); return; }
+      if (list[i].url === url) { list[i].favicon = favicon; this.historyFile.save(); break; }
     }
+    this.learnBookmarkIcon(url, favicon);
+  }
+  // Bookmarks get their icon when the page is open (imported ones come without
+  // one). Bookmarks on the same site that have no icon yet take it too.
+  learnBookmarkIcon(url, favicon) {
+    const host = hostOf(url);
+    let changed = false;
+    for (const b of this.bookmarksFile.data) {
+      const match = b.url === url ? b.favicon !== favicon : !b.favicon && host && hostOf(b.url) === host;
+      if (match) { b.favicon = favicon; changed = true; }
+    }
+    if (!changed) return false;
+    this.bookmarksFile.save();
+    this.onBookmarkIcons?.();
+    return true;
   }
   faviconFor(url) {
     const list = this.historyFile.data;
@@ -222,6 +245,14 @@ class Store {
     if (i < 0) return;
     const [b] = list.splice(i, 1);
     list.splice(Math.max(0, Math.min(toIndex, list.length)), 0, b);
+    this.bookmarksFile.save();
+  }
+  // Dropped on the bookmarks bar: added at that spot (moved there if it's already a bookmark).
+  addBookmarkAt(url, title, index, favicon) {
+    const list = this.bookmarksFile.data;
+    const i = list.findIndex((b) => b.url === url);
+    const b = i >= 0 ? list.splice(i, 1)[0] : { url, title: title || url, time: Date.now(), ...(favicon ? { favicon } : {}) };
+    list.splice(Math.max(0, Math.min(index, list.length)), 0, b);
     this.bookmarksFile.save();
   }
   importBookmarks(items) {

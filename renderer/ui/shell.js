@@ -396,17 +396,34 @@ window.addEventListener('mousedown', (e) => { if (overlayKind === 'downloads' &&
 api.on('downloads', ({ items, started }) => { state.downloads = items; renderDownloads(started); });
 
 // ------------------------------------------------------------------ bookmarks bar
+// Under the address bar, like Chrome's: on every page (Show Bookmarks Bar,
+// the default), or else only on the new tab page.
 const bar = $('#bookmarks-bar');
 const escHtml = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// Imported bookmarks have no icon until the page is opened once: until then, the site's /favicon.ico.
+const siteFavicon = (url) => { try { const u = new URL(url); return /^https?:$/.test(u.protocol) ? `${u.origin}/favicon.ico` : ''; } catch { return ''; } };
+const barWanted = () => !!state.bookmarks.show || !activeTab()?.url;
+let barVisible = null;
 function renderBookmarksBar() {
-  const { show, items } = state.bookmarks;
-  bar.hidden = !show;
-  if (!show) { reportSlot(); return; }
+  const { items } = state.bookmarks;
+  barVisible = barWanted();
+  bar.hidden = !barVisible;
+  if (!barVisible) { reportSlot(); return; }
   bar.innerHTML = items.length
-    ? items.map((b, i) => `<button class="bm-item" data-i="${i}" draggable="true" title="${escHtml(b.title)}\n${escHtml(b.url)}">${b.favicon ? `<img src="${escHtml(b.favicon)}" alt="">` : icons.globe}<span>${escHtml(b.title || b.url)}</span></button>`).join('')
+    ? items.map((b, i) => {
+      const fallback = siteFavicon(b.url);
+      const src = b.favicon || fallback;
+      const img = src ? `<img src="${escHtml(src)}" alt=""${b.favicon && fallback && fallback !== b.favicon ? ` data-fallback="${escHtml(fallback)}"` : ''}>` : icons.globe;
+      return `<button class="bm-item" data-i="${i}" draggable="true" title="${escHtml(b.title)}\n${escHtml(b.url)}">${img}<span>${escHtml(b.title || b.url)}</span></button>`;
+    }).join('')
       + `<button id="bm-more" class="icon-btn small" title="More bookmarks" hidden>${icons.more}</button>`
-    : '<span class="bm-empty">Bookmark pages with ⌘D to see them here.</span>';
-  bar.querySelectorAll('.bm-item img').forEach((img) => { img.onerror = () => { img.outerHTML = icons.globe; }; });
+    : `<span class="bm-empty">For quick access, bookmark pages with ${IS_MAC ? '⌘D' : 'Ctrl+D'} or the ☆ in the address bar.</span><button id="bm-import" class="bm-link">Import bookmarks…</button>`;
+  bar.querySelectorAll('.bm-item img').forEach((img) => {
+    img.onerror = () => {
+      if (img.dataset.fallback) { img.src = img.dataset.fallback; delete img.dataset.fallback; return; }
+      img.outerHTML = icons.globe;
+    };
+  });
   fitBookmarks();
   reportSlot();
 }
@@ -425,6 +442,7 @@ function fitBookmarks() {
 }
 new ResizeObserver(() => fitBookmarks()).observe(bar);
 bar.addEventListener('click', (e) => {
+  if (e.target.closest('#bm-import')) { api.send('bookmarks:open', { url: 'lumio://settings/#import', disposition: 'tab' }); return; }
   if (e.target.closest('#bm-more')) {
     const r = $('#bm-more').getBoundingClientRect();
     const urls = [...bar.querySelectorAll('.bm-item[hidden]')].map((el) => state.bookmarks.items[+el.dataset.i].url);
@@ -440,14 +458,32 @@ bar.addEventListener('auxclick', (e) => {
   const el = e.target.closest('.bm-item');
   if (el && e.button === 1) api.send('bookmarks:open', { url: state.bookmarks.items[+el.dataset.i].url, disposition: 'background' });
 });
+// On a bookmark: open, edit, delete…; on the bar itself: bookmark this tab, show the bar, the manager.
 bar.addEventListener('contextmenu', (e) => {
-  const el = e.target.closest('.bm-item');
-  if (!el) return;
   e.preventDefault();
-  api.send('bookmarks:context', state.bookmarks.items[+el.dataset.i].url);
+  const el = e.target.closest('.bm-item');
+  api.send('bookmarks:context', el ? state.bookmarks.items[+el.dataset.i].url : null);
 });
-// Drag to reorder on the bar.
+// Drag a bookmark to move it. Drop a link, or the address bar's site icon, to add one there.
 let dragIndex = null;
+function dropIndex(x) {
+  const els = [...bar.querySelectorAll('.bm-item:not([hidden])')];
+  const el = els.find((it) => { const r = it.getBoundingClientRect(); return x < r.left + r.width / 2; });
+  return el ? +el.dataset.i : els.length ? +els[els.length - 1].dataset.i + 1 : 0;
+}
+function markDrop(index) {
+  bar.querySelectorAll('.drop-before, .drop-after').forEach((it) => it.classList.remove('drop-before', 'drop-after'));
+  if (index == null) return;
+  const els = [...bar.querySelectorAll('.bm-item:not([hidden])')];
+  const el = els.find((it) => +it.dataset.i === index);
+  if (el) el.classList.add('drop-before'); else els[els.length - 1]?.classList.add('drop-after');
+}
+const droppedLink = (dt) => {
+  const url = (dt.getData('text/uri-list') || '').split(/\r?\n/).find((l) => l && !l.startsWith('#')) || '';
+  let title = '';
+  try { title = new DOMParser().parseFromString(dt.getData('text/html') || '', 'text/html').querySelector('a')?.textContent.trim() || ''; } catch {}
+  return { url: url.trim(), title };
+};
 bar.addEventListener('dragstart', (e) => {
   const el = e.target.closest('.bm-item');
   if (!el) return;
@@ -456,15 +492,37 @@ bar.addEventListener('dragstart', (e) => {
   e.dataTransfer.effectAllowed = 'move';
   e.dataTransfer.setData('text/uri-list', state.bookmarks.items[dragIndex].url);
 });
-bar.addEventListener('dragover', (e) => { if (dragIndex != null) e.preventDefault(); });
-bar.addEventListener('drop', (e) => {
-  const el = e.target.closest('.bm-item');
-  if (dragIndex == null || !el) return;
+bar.addEventListener('dragover', (e) => {
+  if (dragIndex == null && !e.dataTransfer.types.includes('text/uri-list')) return;
   e.preventDefault();
-  const to = +el.dataset.i;
-  if (to !== dragIndex) api.send('bookmarks:move', { url: state.bookmarks.items[dragIndex].url, index: to });
+  e.dataTransfer.dropEffect = dragIndex != null ? 'move' : 'copy';
+  markDrop(dropIndex(e.clientX));
 });
-bar.addEventListener('dragend', () => { dragIndex = null; bar.querySelectorAll('.dragging').forEach((x) => x.classList.remove('dragging')); });
+bar.addEventListener('dragleave', (e) => { if (!bar.contains(e.relatedTarget)) markDrop(null); });
+bar.addEventListener('drop', (e) => {
+  if (dragIndex == null && !e.dataTransfer.types.includes('text/uri-list')) return;
+  e.preventDefault();
+  let to = dropIndex(e.clientX);
+  markDrop(null);
+  if (dragIndex != null) {
+    if (to > dragIndex) to--; // counted with the dragged one still in place
+    if (to !== dragIndex) api.send('bookmarks:move', { url: state.bookmarks.items[dragIndex].url, index: to });
+    return;
+  }
+  const { url, title } = droppedLink(e.dataTransfer);
+  if (/^(https?|file):/i.test(url)) api.send('bookmarks:add', { url, title, index: to });
+});
+bar.addEventListener('dragend', () => { dragIndex = null; markDrop(null); bar.querySelectorAll('.dragging').forEach((x) => x.classList.remove('dragging')); });
+// The site icon in the address bar can be dragged onto the bar (or anywhere a link goes).
+$('#site-icon').draggable = true;
+$('#site-icon').addEventListener('dragstart', (e) => {
+  const t = activeTab();
+  if (!t || !/^https?:/.test(t.url || '')) { e.preventDefault(); return; }
+  e.dataTransfer.effectAllowed = 'copyLink';
+  e.dataTransfer.setData('text/uri-list', t.url);
+  e.dataTransfer.setData('text/plain', t.url);
+  e.dataTransfer.setData('text/html', `<a href="${escHtml(t.url)}">${escHtml(t.title || t.url)}</a>`);
+});
 api.on('bookmarks', (b) => { state.bookmarks = b; renderBookmarksBar(); });
 
 // ------------------------------------------------------------------ account button
@@ -632,6 +690,7 @@ api.on('tabs', (s) => {
   state.activeId = s.activeId;
   renderTabs();
   renderToolbar();
+  if (barWanted() !== barVisible) renderBookmarksBar(); // the new tab page shows it even when it's off
   panel.onTabChange(activeTab(), switched);
   if (switched) $('#zoom-badge').hidden = true;
 });
