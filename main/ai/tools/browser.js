@@ -556,4 +556,4 @@ async function tabPdf(tabs, tabId) {
   }
 }
 
-module.exports = { tools, clearCursors, pageContext, allTabsContext, tabPdf, YOUTUBE_VIDEO, pressKey, inPage, settle };
+module.exports = { tools, clearCursors, pageContext, allTabsContext, tabPdf, YOUTUBE_VIDEO, videoText, pressKey, inPage, settle };

@@ -1,5 +1,6 @@
 // Session-level browser features: user agent, downloads, site permissions.
 const { app, shell } = require('electron');
+const { isHidden } = require('./hidden-pages');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -32,7 +33,8 @@ class Downloads {
     this.emit = emit;
     this.store = store;
     this.settings = settings || store;
-    tabSession.on('will-download', (_e, item) => {
+    tabSession.on('will-download', (_e, item, wc) => {
+      if (isHidden(wc)) { item.cancel(); return; } // Lumio AI reading a page out of sight
       const prefs = this.settings?.settings || {};
       let dir = app.getPath('downloads');
       try { if (prefs.downloadDir && fs.statSync(prefs.downloadDir).isDirectory()) dir = prefs.downloadDir; } catch { /* folder gone */ }
@@ -164,11 +166,13 @@ class Permissions {
     let nextId = 1;
 
     tabSession.setPermissionCheckHandler((_wc, permission, origin) => {
+      if (isHidden(_wc)) return false;
       if (ALWAYS.has(permission)) return true;
       return this.remembered(origin, permission) === true;
     });
 
     tabSession.setPermissionRequestHandler((wc, permission, callback, details) => {
+      if (isHidden(wc)) return callback(false);
       if (ALWAYS.has(permission)) return callback(true);
       if (!ASKABLE.has(permission)) return callback(false);
       let origin;

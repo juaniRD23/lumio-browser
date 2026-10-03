@@ -512,6 +512,16 @@ test('browser: capabilities, a streamed step, tool calls, replays and the Free d
   assert.equal(caps.model.id, BROWSER_DEFAULT);
   assert.ok(caps.models.every((m) => m.available));
   assert.ok(caps.tools.includes('update_plan'));
+  assert.ok(caps.tools.includes('web_search') && caps.tools.includes('read_url'), 'research without tabs');
+  // A step that offers them: the model gets both, and the prompt says to use them for looking things up.
+  const research = await call('/v1/agent', { token, method: 'POST', body: step({ stepId: 's-web', tools: ['web_search', 'read_url', 'navigate'] }) });
+  assert.equal(research.status, 200);
+  await events(research);
+  await settled();
+  const sent = calls.or.at(-1).body;
+  assert.deepEqual(sent.tools.map((t) => t.function.name), ['navigate', 'web_search', 'read_url']);
+  assert.match(sent.messages[0].content, /use web_search and read_url/);
+  calls.or.length = 0;
   assert.deepEqual(caps.usage.windows.map((w) => [w.id, w.limit]), [['weekly', 250000]], 'no 5-hour limit');
 
   const ev = await events(await call('/v1/agent', { token, method: 'POST', body: step({ reasoning: 'high' }) }));
@@ -522,6 +532,7 @@ test('browser: capabilities, a streamed step, tool calls, replays and the Free d
   assert.equal(calls.or[0].body.model, BROWSER_DEFAULT);
   assert.deepEqual(calls.or[0].body.provider.max_price, ceiling(findModel(BROWSER_DEFAULT)));
   assert.deepEqual(calls.or[0].body.tools.map((t) => t.function.name), ['read_page', 'click', 'update_plan']);
+  assert.doesNotMatch(calls.or[0].body.messages[0].content, /web_search/, 'older browsers without the research tools aren’t told to use them');
 
   const again = await call('/v1/agent', { token, method: 'POST', body: step({ reasoning: 'high' }) });
   assert.equal(again.headers.get('x-lumio-step-replayed'), 'true');

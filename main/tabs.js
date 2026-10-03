@@ -373,6 +373,7 @@ class TabManager {
       ensureView: (t) => m.ensureView(t),
       displayUrl: (t) => m.displayUrl(t),
       searchTemplate: () => m.searchTemplate(),
+      get session() { return m.session; },
       wc: () => tab.view?.webContents,
       navigate(input) {
         const parsed = parseInput(input, m.searchTemplate());

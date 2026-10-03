@@ -13,7 +13,7 @@ const MAX_HELPERS = COLORS.length;
 const HELPER_STEPS = 15;
 // What a helper may do, in its own tab only. No other tabs, no computer
 // control, no files, no more helpers.
-const HELPER_TOOLS = new Set(['read_page', 'click', 'type', 'select_option', 'scroll', 'navigate', 'go_back', 'wait']);
+const HELPER_TOOLS = new Set(['web_search', 'read_url', 'read_page', 'click', 'type', 'select_option', 'scroll', 'navigate', 'go_back', 'wait']);
 
 function cleanHelpers(list) {
   if (!Array.isArray(list) || !list.length) throw new Error('Give at least one helper a task.');

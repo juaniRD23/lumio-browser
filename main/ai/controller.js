@@ -17,6 +17,7 @@ const make = require('./tools/make');
 const schedule = require('./tools/schedule');
 const helpersTool = require('./tools/helpers');
 const workflowTool = require('./tools/workflow');
+const webTool = require('./tools/web');
 const { fill: fillWorkflow } = require('../workflows');
 const screenAura = require('./screen-aura');
 
@@ -170,7 +171,7 @@ class AIController {
     const helperOk = this.helper.available();
     const off = new Set(this.store.settings.appsOff || []);
     const remote = make.remoteTools(this.capsCache?.remote || []).filter((t) => !off.has(t.app));
-    return [...browser.tools, ...mac.tools, ...plan.tools, ...make.tools, ...(this.schedules ? schedule.tools : []), ...(this.workflows ? workflowTool.tools : []), ...(this.reasoning().id === 'high' ? helpersTool.tools : []), ...remote].filter((t) => (helperOk || !HELPER_TOOLS.has(t.name))
+    return [...browser.tools, ...webTool.tools, ...mac.tools, ...plan.tools, ...make.tools, ...(this.schedules ? schedule.tools : []), ...(this.workflows ? workflowTool.tools : []), ...(this.reasoning().id === 'high' ? helpersTool.tools : []), ...remote].filter((t) => (helperOk || !HELPER_TOOLS.has(t.name))
       && (process.platform === 'darwin' || t.name !== 'run_applescript'));
   }
 
@@ -261,7 +262,7 @@ class AIController {
   async lumioTools() {
     await this.capabilities();
     const allowed = this.capsCache.tools;
-    return this.tools().filter((t) => (allowed ? allowed.has(t.name) : t.name !== 'update_plan' && t.name !== 'send_helpers' && !schedule.NAMES.has(t.name) && !workflowTool.NAMES.has(t.name)));
+    return this.tools().filter((t) => (allowed ? allowed.has(t.name) : t.name !== 'update_plan' && t.name !== 'send_helpers' && !webTool.NAMES.has(t.name) && !schedule.NAMES.has(t.name) && !workflowTool.NAMES.has(t.name)));
   }
 
   async send({ chatId, text, includePage, includeTabs, attachments, voice = false, workflow = null, projectId = null } = {}) {
@@ -465,7 +466,7 @@ class AIController {
       tab.view.webContents.setBackgroundThrottling(false);
       this.tabs.setAgent(tab.id, { color: h.color.hex, name, title: h.title });
       show(h);
-      const note = `[Lumio Browser, not the user] You are ${name}, a helper AI that Lumio (the assistant working with the user) sent to do one part of a bigger task. You work alone, in the background, in tab ${tab.id}${h.url ? `, which is opening ${h.url}` : ' (blank: navigate to start)'}. Use read_page to see it. Do only this task, then reply with a short report of what you found: the facts, numbers, names and page addresses Lumio needs. You can't ask the user anything: if something needs them (signing in, a captcha, payment, personal details), stop and say so in your report. Never buy, sign in, send, post or delete anything.`;
+      const note = `[Lumio Browser, not the user] You are ${name}, a helper AI that Lumio (the assistant working with the user) sent to do one part of a bigger task. You work alone, in the background, in tab ${tab.id}${h.url ? `, which is opening ${h.url}` : ' (blank: navigate to start)'}. To look things up, use web_search and read_url (fast, no tab needed); use read_page and clicking in your tab when the task needs the page itself. Do only this task, then reply with a short report of what you found: the facts, numbers, names and page addresses Lumio needs. You can't ask the user anything: if something needs them (signing in, a captcha, payment, personal details), stop and say so in your report. Never buy, sign in, send, post or delete anything.`;
       const messages = [{ role: 'user', content: `${h.task}\n\n${note}` }];
       const ctx = {
         tabs: this.tabs.scoped(tab),

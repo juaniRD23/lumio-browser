@@ -615,6 +615,37 @@ test('ask about my tabs: the + menu sends every open tab with the message', asyn
   assert.notEqual(await L.shell(`document.querySelector('#context-chip span').textContent`), 'All open tabs', 'one message only');
 });
 
+test('research without tabs: web_search and read_url work out of sight, and no tab opens', async () => {
+  const textOf = (m) => (typeof m.content === 'string' ? m.content : (m.content || []).map((p) => p.text || '').join('\n'));
+  // The search engine is a page on the test site.
+  await L.main((_e, t) => { const m = global.lumio.tabs; m.realSearchTemplate = m.searchTemplate; m.searchTemplate = () => t; }, `${siteUrl}/serp.html?q=%s`);
+  const tabsBefore = await L.main(() => global.lumio.tabs.tabs.length);
+  const windowsBefore = await L.main((e) => e.BrowserWindow.getAllWindows().length);
+  let seen = { results: '', page: '' };
+  lumio.state.agentScript = (body) => {
+    const turns = body.messages.filter((m) => m.role === 'assistant').length;
+    if (turns === 0) return turnEvents({ calls: [{ name: 'web_search', args: { query: 'lighthouse keepers' } }] });
+    if (turns === 1) { seen.results = textOf(body.messages.at(-1)); return turnEvents({ calls: [{ name: 'read_url', args: { url: `${siteUrl}/article.html` } }] }); }
+    seen.page = textOf(body.messages.at(-1));
+    return turnEvents({ text: 'Searched and read it in the background.' });
+  };
+  try {
+    await ask('what did lighthouse keepers do?');
+    await idle();
+  } finally {
+    lumio.state.agentScript = null;
+    await L.main(() => { const m = global.lumio.tabs; m.searchTemplate = m.realSearchTemplate; });
+  }
+  assert.match(await lastReply(), /in the background/);
+  assert.match(seen.results, /1\. Lighthouse Keepers - Example\n {3}https:\/\/lighthouses\.example\.org\/keepers\n {3}Keepers trimmed wicks/);
+  assert.match(seen.page, /The Quiet History of Lighthouses[\s\S]*Keepers/);
+  assert.equal(await L.main(() => global.lumio.tabs.tabs.length), tabsBefore, 'no tab opened');
+  assert.equal(await L.main((e) => e.BrowserWindow.getAllWindows().length), windowsBefore, 'the hidden pages are gone');
+  const labels = await L.shell(`[...document.querySelectorAll('.step .s-label')].map((e) => e.textContent).slice(-2)`);
+  assert.deepEqual(labels, ['Searching “lighthouse keepers”', 'Reading 127.0.0.1']);
+  await shot('48-research-in-background');
+});
+
 test('voice: an empty box offers voice mode where Send is, and voice calls reach the server', async () => {
   const setPrompt = (v) => L.shell(`(() => { const p = document.getElementById('prompt'); p.value = ${JSON.stringify(v)}; p.dispatchEvent(new Event('input')); return true })()`);
   await setPrompt('');

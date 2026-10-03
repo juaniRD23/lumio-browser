@@ -406,4 +406,62 @@ function domScroll(opts) {
   return { scrollY: Math.round(window.scrollY), scrollHeight: document.documentElement.scrollHeight };
 }
 
-module.exports = { domClick, domType, domScroll, youtube, snapshot, locate, focusCheck, selectContents, selectOption, scrollInfo, cursor, aura };
+// A search results page (Google, Bing, DuckDuckGo, Brave…): the results'
+// titles, real URLs and snippets, plus the top of the page (answer boxes) and
+// the side panel (knowledge panels). For web_search, read out of sight.
+function serp(opts) {
+  const max = opts.max || 8;
+  const clean = (t) => String(t || '').replace(/\s+/g, ' ').trim();
+  const here = location.hostname.replace(/^www\./, '');
+  const text = clean(document.body ? document.body.innerText : '');
+  if (/\/sorry\//.test(location.pathname) || /unusual traffic|are you a robot|captcha/i.test(text.slice(0, 2000))) return { blocked: true, url: location.href };
+  const ownSite = (h) => h === here || h.endsWith('.' + here) || (/(^|\.)google\.[a-z.]+$/.test(h) && /google\./.test(here));
+  const realUrl = (a) => {
+    let href = a.href;
+    try {
+      const u = new URL(href);
+      if (/(^|\.)bing\.com$/.test(u.hostname) && u.pathname === '/ck/a') {
+        const p = u.searchParams.get('u') || '';
+        if (p.startsWith('a1')) href = atob(p.slice(2).replace(/-/g, '+').replace(/_/g, '/'));
+      } else if (u.pathname === '/url' && (u.searchParams.get('q') || u.searchParams.get('url'))) href = u.searchParams.get('q') || u.searchParams.get('url');
+      else if (u.searchParams.get('uddg')) href = u.searchParams.get('uddg');
+    } catch (_) { /* keep it */ }
+    return href;
+  };
+  const results = [];
+  const seen = new Set();
+  for (const el of document.querySelectorAll('a h3, a h2, h3 a, h2 a')) {
+    if (results.length >= max) break;
+    const a = el.tagName === 'A' ? el : el.closest('a');
+    const heading = el.tagName === 'A' ? el.closest('h2, h3') : el;
+    if (!a || !heading) continue;
+    const title = clean(heading.innerText);
+    const url = realUrl(a);
+    let host = '';
+    try { host = new URL(url).hostname.replace(/^www\./, ''); } catch (_) { continue; }
+    if (!/^https?:/.test(url) || title.length < 3 || ownSite(host) || seen.has(url)) continue;
+    seen.add(url);
+    // The result's box: grow until it would take in the next result.
+    let box = heading;
+    let best = heading;
+    for (let i = 0; i < 7 && box.parentElement && box.parentElement !== document.body; i++) {
+      box = box.parentElement;
+      if (box.querySelectorAll('h2, h3').length > 1) break;
+      best = box;
+      if (clean(box.innerText).length > title.length + 120) break;
+    }
+    const snippet = clean(clean(best.innerText).replace(title, '')).slice(0, 320);
+    results.push({ title: title.slice(0, 200), url, snippet });
+  }
+  const main = document.querySelector('#rso, #b_results, #links, [data-testid="mainline"], main, [role=main]') || document.body;
+  const side = document.querySelector('#rhs, #b_context, aside');
+  return {
+    url: location.href,
+    engine: here,
+    results,
+    top: clean(main ? main.innerText : '').slice(0, 1500),
+    side: side ? clean(side.innerText).slice(0, 900) : '',
+  };
+}
+
+module.exports = { domClick, domType, domScroll, youtube, snapshot, locate, focusCheck, selectContents, selectOption, scrollInfo, cursor, aura, serp };
