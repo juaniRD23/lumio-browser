@@ -243,6 +243,57 @@ const tools = [
     },
   },
   {
+    name: 'paste_text',
+    risk: 'browser',
+    icon: 'keyboard',
+    description: 'Paste text where the cursor is, or into an element by [ref] (clicked first). Fills a whole spreadsheet range at once with tab-separated rows.',
+    parameters: {
+      type: 'object',
+      properties: { text: { type: 'string' }, ref: { type: 'integer', description: 'Click this element first (optional)' }, tab_id: TAB_ID },
+      required: ['text'],
+    },
+    label: (a) => {
+      const t = String(a.text || '');
+      const rows = t.split('\n').filter(Boolean).length;
+      return t.includes('\t') && rows > 1 ? `Paste ${rows} rows` : `Paste “${t.slice(0, 30)}${t.length > 30 ? '…' : ''}”`;
+    },
+    detail: (a, ctx) => `Paste into ${a.ref ? refName(ctx, a.tab_id, a.ref) : 'the selected place'} on ${activeHost(ctx, a.tab_id)}:\n${a.text}`,
+    async run(a, ctx) {
+      const { wc } = tabFor(ctx, a.tab_id, { activate: true });
+      const text = String(a.text ?? '');
+      if (!text) throw new Error('Nothing to paste.');
+      if (a.ref) {
+        const info = await inPage(wc, scripts.locate, { ref: a.ref });
+        if (info.error) throw new Error(info.error);
+        if (info.sensitive) return { text: 'Refused: this looks like a password, payment, or ID field. Ask the user to fill it in themselves.', summary: 'Sensitive field, left for you', status: 'blocked' };
+        const z = wc.getZoomFactor();
+        await moveCursor(ctx, wc, info.x, info.y, false);
+        await mouseClick(wc, Math.round(info.x * z), Math.round(info.y * z));
+        await moveCursor(ctx, wc, info.x, info.y, true);
+        await wait(80);
+      }
+      const focus = await inPage(wc, scripts.focusCheck).catch(() => ({}));
+      if (focus.sensitive) return { text: 'Refused: focus is on a password, payment, or ID field. Ask the user to fill it in themselves.', summary: 'Sensitive field, left for you', status: 'blocked' };
+      // Through the real clipboard (sites like Google Sheets only split rows and
+      // columns on a real paste); whatever the user had copied is put back.
+      const { clipboard } = require('electron');
+      const formats = clipboard.availableFormats();
+      const saved = { text: clipboard.readText(), html: clipboard.readHTML(), rtf: clipboard.readRTF(), image: formats.some((f) => f.startsWith('image/')) ? clipboard.readImage() : null };
+      try {
+        clipboard.writeText(text);
+        wc.focus();
+        wc.paste();
+        await wait(450);
+      } finally {
+        if (saved.image && !saved.image.isEmpty()) clipboard.write({ image: saved.image, ...(saved.text ? { text: saved.text } : {}) });
+        else if (saved.text || saved.html || saved.rtf) clipboard.write({ text: saved.text, html: saved.html, rtf: saved.rtf });
+        else clipboard.clear();
+      }
+      const rows = text.split('\n').filter(Boolean).length;
+      return { text: `Pasted ${rows > 1 ? `${rows} rows` : `${text.length} characters`}. Check the result with read_page or screenshot_tab if it matters. ${pageLine(wc)}` };
+    },
+  },
+  {
     name: 'select_option',
     risk: 'browser',
     icon: 'cursor',

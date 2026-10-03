@@ -237,19 +237,27 @@ function cursor(opts) {
     return true;
   }
   if (!g.__lumioCursor || !g.__lumioCursor.host.isConnected) {
+    // Built element by element: Google Docs, Sheets, Gmail and YouTube enforce
+    // Trusted Types, which refuse innerHTML strings (even from this world).
     const host = document.createElement('div');
     host.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none;';
     const root = host.attachShadow({ mode: 'closed' });
-    root.innerHTML = `<style>
-      .c{position:fixed;left:0;top:0;transform:translate(-100px,-100px);transition:transform .42s cubic-bezier(.22,1,.36,1);filter:drop-shadow(0 2px 6px rgba(0,0,0,.45)) drop-shadow(0 0 10px rgba(134,183,255,.7));}
+    const css = `.c{position:fixed;left:0;top:0;transform:translate(-100px,-100px);transition:transform .42s cubic-bezier(.22,1,.36,1);filter:drop-shadow(0 2px 6px rgba(0,0,0,.45)) drop-shadow(0 0 10px rgba(134,183,255,.7));}
       .r{position:fixed;left:0;top:0;width:34px;height:34px;margin:-17px 0 0 -17px;border-radius:50%;border:2px solid rgba(134,183,255,.95);opacity:0;}
       .r.go{animation:ring .5s ease-out;}
-      @keyframes ring{from{opacity:1;transform:var(--p) scale(.3)}to{opacity:0;transform:var(--p) scale(1.4)}}
-    </style>
-    <svg class="c" width="22" height="22" viewBox="0 0 24 24"><path d="M4 2.5l15.5 8.2-6.6 1.7-3.3 6.3z" fill="#fff" stroke="#111" stroke-width="1.3" stroke-linejoin="round"/></svg>
-    <div class="r"></div>`;
+      @keyframes ring{from{opacity:1;transform:var(--p) scale(.3)}to{opacity:0;transform:var(--p) scale(1.4)}}`;
+    try { const sheet = new CSSStyleSheet(); sheet.replaceSync(css); root.adoptedStyleSheets = [sheet]; } catch (_) { const st = document.createElement('style'); st.textContent = css; root.append(st); }
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('class', 'c'); svg.setAttribute('width', '22'); svg.setAttribute('height', '22'); svg.setAttribute('viewBox', '0 0 24 24');
+    const arrow = document.createElementNS(NS, 'path');
+    arrow.setAttribute('d', 'M4 2.5l15.5 8.2-6.6 1.7-3.3 6.3z'); arrow.setAttribute('fill', '#fff'); arrow.setAttribute('stroke', '#111'); arrow.setAttribute('stroke-width', '1.3'); arrow.setAttribute('stroke-linejoin', 'round');
+    svg.append(arrow);
+    const ring = document.createElement('div');
+    ring.className = 'r';
+    root.append(svg, ring);
     (document.body || document.documentElement).appendChild(host);
-    g.__lumioCursor = { host, c: root.querySelector('.c'), r: root.querySelector('.r') };
+    g.__lumioCursor = { host, c: svg, r: ring };
   }
   const { c, r } = g.__lumioCursor;
   c.style.transform = `translate(${opts.x - 4}px, ${opts.y - 3}px)`;
@@ -277,13 +285,15 @@ function aura(opts) {
     host.setAttribute('aria-hidden', 'true');
     host.style.cssText = 'position:fixed;inset:0;z-index:2147483646;pointer-events:none;';
     const root = host.attachShadow({ mode: 'closed' });
-    root.innerHTML = `<style>
-      .g{position:fixed;inset:0;pointer-events:none;opacity:0;animation:in .5s ease-out forwards,breathe 2.8s ease-in-out .5s infinite;
+    const css = `.g{position:fixed;inset:0;pointer-events:none;opacity:0;animation:in .5s ease-out forwards,breathe 2.8s ease-in-out .5s infinite;
         box-shadow:inset 0 0 0 1.5px rgba(140,196,255,.95),inset 0 0 14px 4px rgba(70,160,255,.7),inset 0 0 46px 12px rgba(40,136,255,.45),inset 0 0 120px 30px rgba(40,136,255,.18);}
       @keyframes in{to{opacity:1}}
       @keyframes breathe{0%,100%{opacity:1}50%{opacity:.7}}
-      @media (prefers-reduced-motion:reduce){.g{animation:none;opacity:1}}
-    </style><div class="g"></div>`;
+      @media (prefers-reduced-motion:reduce){.g{animation:none;opacity:1}}`;
+    try { const sheet = new CSSStyleSheet(); sheet.replaceSync(css); root.adoptedStyleSheets = [sheet]; } catch (_) { const st = document.createElement('style'); st.textContent = css; root.append(st); }
+    const glow = document.createElement('div');
+    glow.className = 'g';
+    root.append(glow);
     (document.body || document.documentElement).appendChild(host);
     g.__lumioAura = host;
   }

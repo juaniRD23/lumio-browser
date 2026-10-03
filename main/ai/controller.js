@@ -6,7 +6,7 @@
 const { shell } = require('electron');
 const crypto = require('crypto');
 const { lumioChat, lumioCapabilities, lumioVoice } = require('./lumio');
-const { runAgent, repairHistory } = require('./agent');
+const { runAgent, repairHistory, MAX_STEPS } = require('./agent');
 const { buildSystemPrompt } = require('./prompts');
 const { MODES } = require('./policy');
 const { MODEL, REASONING, DEFAULT_REASONING, findReasoning } = require('./models');
@@ -262,7 +262,7 @@ class AIController {
   async lumioTools() {
     await this.capabilities();
     const allowed = this.capsCache.tools;
-    return this.tools().filter((t) => (allowed ? allowed.has(t.name) : t.name !== 'update_plan' && t.name !== 'send_helpers' && !webTool.NAMES.has(t.name) && !schedule.NAMES.has(t.name) && !workflowTool.NAMES.has(t.name)));
+    return this.tools().filter((t) => (allowed ? allowed.has(t.name) : t.name !== 'update_plan' && t.name !== 'send_helpers' && !webTool.NAMES.has(t.name) && t.name !== 'paste_text' && !schedule.NAMES.has(t.name) && !workflowTool.NAMES.has(t.name)));
   }
 
   async send({ chatId, text, includePage, includeTabs, attachments, voice = false, workflow = null, projectId = null } = {}) {
@@ -645,7 +645,7 @@ class AIController {
         break;
       case 'done':
         run.text = null;
-        if (ev.reason === 'max_steps') d.push({ kind: 'note', text: 'Stopped after 30 steps. Say "continue" to keep going.' });
+        if (ev.reason === 'max_steps') d.push({ kind: 'note', text: `Stopped after ${MAX_STEPS} steps. Say "continue" to keep going.` });
         if (ev.reason === 'length') d.push({ kind: 'note', text: 'The reply was cut off because it got too long.' });
         break;
       case 'stopped':

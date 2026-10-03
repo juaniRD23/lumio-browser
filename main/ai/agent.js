@@ -3,7 +3,7 @@
 // can drive the loop with a fake model.
 const { needsApproval } = require('./policy');
 
-const MAX_STEPS = 30;
+const MAX_STEPS = 100;
 const KEEP_IMAGES = 2;
 const SHOT_BATCH = 4;
 const MAX_TOOL_TEXT = 24_000;
@@ -162,7 +162,7 @@ async function runAgent({
     }
     absorb();
   }
-  emit({ type: 'done', reason: 'max_steps' });
+  emit({ type: 'done', reason: 'max_steps', steps: maxSteps });
   return { steps: maxSteps };
 }
 

@@ -646,6 +646,31 @@ test('research without tabs: web_search and read_url work out of sight, and no t
   await shot('48-research-in-background');
 });
 
+test('paste_text fills a field in one step, and the clipboard is put back', async () => {
+  await L.main((_e, u) => global.lumio.tabs.create(u), `${siteUrl}/form.html`);
+  await until(() => L.main(() => !global.lumio.tabs.active.loading && /form\.html/.test(global.lumio.tabs.active.url || '')));
+  await L.page(`document.getElementById('notes').value = ''; document.getElementById('notes').focus(); true`);
+  await L.main((e) => { e.clipboard.writeText('what the user copied'); });
+  const mode = await L.main(() => global.lumio.store.settings.approvalMode);
+  await L.main(() => global.lumio.ai.setMode('bypass'));
+  lumio.state.agentScript = (body) => {
+    const turns = body.messages.filter((m) => m.role === 'assistant').length;
+    if (turns === 0) return turnEvents({ calls: [{ name: 'paste_text', args: { text: 'Row one\tA\nRow two\tB' } }] });
+    return turnEvents({ text: 'Pasted both rows.' });
+  };
+  try {
+    await ask('put my notes in');
+    await idle();
+  } finally {
+    lumio.state.agentScript = null;
+    await L.main((_e, m) => global.lumio.ai.setMode(m), mode);
+  }
+  assert.equal(await L.page(`document.getElementById('notes').value`), 'Row one\tA\nRow two\tB');
+  assert.equal(await L.main((e) => e.clipboard.readText()), 'what the user copied', 'the clipboard is back');
+  assert.equal(await L.shell(`[...document.querySelectorAll('.step .s-label')].at(-1).textContent`), 'Paste 2 rows');
+  await L.main(() => global.lumio.tabs.close(global.lumio.tabs.activeId));
+});
+
 test('voice: an empty box offers voice mode where Send is, and voice calls reach the server', async () => {
   const setPrompt = (v) => L.shell(`(() => { const p = document.getElementById('prompt'); p.value = ${JSON.stringify(v)}; p.dispatchEvent(new Event('input')); return true })()`);
   await setPrompt('');

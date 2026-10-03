@@ -514,13 +514,15 @@ test('browser: capabilities, a streamed step, tool calls, replays and the Free d
   assert.ok(caps.tools.includes('update_plan'));
   assert.ok(caps.tools.includes('web_search') && caps.tools.includes('read_url'), 'research without tabs');
   // A step that offers them: the model gets both, and the prompt says to use them for looking things up.
-  const research = await call('/v1/agent', { token, method: 'POST', body: step({ stepId: 's-web', tools: ['web_search', 'read_url', 'navigate'] }) });
+  const research = await call('/v1/agent', { token, method: 'POST', body: step({ stepId: 's-web', tools: ['web_search', 'read_url', 'navigate', 'paste_text'] }) });
   assert.equal(research.status, 200);
   await events(research);
   await settled();
   const sent = calls.or.at(-1).body;
-  assert.deepEqual(sent.tools.map((t) => t.function.name), ['navigate', 'web_search', 'read_url']);
+  assert.deepEqual(sent.tools.map((t) => t.function.name), ['navigate', 'paste_text', 'web_search', 'read_url']);
   assert.match(sent.messages[0].content, /use web_search and read_url/);
+  assert.match(sent.messages[0].content, /paste_text all the rows in one go/, 'spreadsheets in one paste');
+  assert.match(sent.messages[0].content, /call those tools together in one turn/);
   calls.or.length = 0;
   assert.deepEqual(caps.usage.windows.map((w) => [w.id, w.limit]), [['weekly', 250000]], 'no 5-hour limit');
 

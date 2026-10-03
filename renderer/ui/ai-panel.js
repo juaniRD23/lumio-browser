@@ -800,7 +800,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
       case 'done':
         endText();
         thinking(false);
-        if (ev.reason === 'max_steps') notice('Stopped after 30 steps. Say "continue" to keep going.', 'info');
+        if (ev.reason === 'max_steps') notice(`Stopped after ${ev.steps || 100} steps. Say "continue" to keep going.`, 'info');
         if (ev.reason === 'length') notice('The reply was cut off because it got too long.', 'info');
         break;
       case 'stopped':

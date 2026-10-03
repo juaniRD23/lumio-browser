@@ -9,7 +9,7 @@ import { scriptedTurn, turnEvents } from './mock-scripts.mjs';
 // The model the server says it runs (the browser must use whatever is listed).
 const MODEL = { id: 'mock/agent-1', name: 'Mock Agent', maker: 'Lumio', minimumPlan: 'free', available: true };
 // The tools the real server owns (server/src/agent.ts).
-const TOOLS = ['read_page', 'click', 'type', 'select_option', 'press_key', 'scroll', 'navigate', 'web_search', 'read_url', 'go_back', 'screenshot_tab', 'click_at',
+const TOOLS = ['read_page', 'click', 'type', 'select_option', 'press_key', 'scroll', 'navigate', 'web_search', 'read_url', 'paste_text', 'go_back', 'screenshot_tab', 'click_at',
   'list_tabs', 'open_tab', 'switch_tab', 'close_tab', 'wait', 'computer_screenshot', 'computer_click', 'computer_move', 'computer_drag',
   'computer_scroll', 'computer_type', 'computer_key', 'open_app', 'list_apps', 'run_shell', 'update_plan', 'run_applescript',
   'generate_image', 'create_document', 'schedule_task', 'list_scheduled_tasks', 'cancel_scheduled_task', 'send_helpers', 'save_workflow', 'list_workflows'];
