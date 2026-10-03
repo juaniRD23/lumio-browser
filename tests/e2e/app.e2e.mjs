@@ -679,6 +679,26 @@ test('paste_text fills a field in one step, and the clipboard is put back', asyn
   await L.main(() => global.lumio.tabs.close(global.lumio.tabs.activeId));
 });
 
+test('Lumio pressing Esc in a page doesn’t stop Lumio (only the person’s Esc does)', async () => {
+  await L.shell(`document.getElementById('newchat-btn').click(); true`);
+  const mode = await L.main(() => global.lumio.store.settings.approvalMode);
+  await L.main(() => global.lumio.ai.setMode('bypass'));
+  lumio.state.agentScript = (body) => {
+    const turns = body.messages.filter((m) => m.role === 'assistant').length;
+    if (turns === 0) return turnEvents({ calls: [{ name: 'press_key', args: { keys: 'Escape' } }] });
+    return turnEvents({ text: 'Still working after Esc.' });
+  };
+  try {
+    await ask('close that popup');
+    await idle();
+  } finally {
+    lumio.state.agentScript = null;
+    await L.main((_e, m) => global.lumio.ai.setMode(m), mode);
+  }
+  assert.match(await lastReply(), /Still working after Esc/);
+  assert.doesNotMatch(await L.shell(`[...document.querySelectorAll('.notice')].map((n) => n.textContent).join('|')`), /Stopped\./);
+});
+
 test('voice: an empty box offers voice mode where Send is, and voice calls reach the server', async () => {
   const setPrompt = (v) => L.shell(`(() => { const p = document.getElementById('prompt'); p.value = ${JSON.stringify(v)}; p.dispatchEvent(new Event('input')); return true })()`);
   await setPrompt('');

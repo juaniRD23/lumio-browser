@@ -2,6 +2,7 @@
 // sent as real (trusted) mouse/keyboard events via webContents.sendInputEvent.
 const scripts = require('./page-scripts');
 const { parseInput, displayUrl } = require('../../omnibox');
+const { markSynthetic } = require('../../synthetic-input');
 
 const WORLD = 1001;
 const TAB_ID = { type: 'integer', description: 'Tab id (defaults to the active tab)' };
@@ -114,6 +115,7 @@ function pressKey(wc, combo) {
     if (edit) { wc[edit](); return; }
   }
   const keyCode = KEY_NAMES[lower] || (key.length === 1 ? key.toUpperCase() : key);
+  markSynthetic(wc); // not the person: Esc here doesn't stop Lumio
   wc.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
   const plain = !modifiers.some((m) => m !== 'shift');
   if (plain) {
@@ -278,10 +280,18 @@ const tools = [
       // Through the real clipboard (sites like Google Sheets only split rows and
       // columns on a real paste); whatever the user had copied is put back.
       const { clipboard } = require('electron');
+      // Google Sheets: a cell being edited takes the whole paste as its text,
+      // so leave editing first (Esc keeps the cell selected), and paste the rows
+      // as a table too, which Sheets always spreads over the cells.
+      const sheet = /^https:\/\/docs\.google\.com\/spreadsheets\//.test(wc.getURL());
+      const grid = /[\t\n]/.test(text.trim());
+      if (sheet && grid) { pressKey(wc, 'Escape'); await wait(120); }
+      const esc = (v) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const table = sheet && grid ? `<table>${text.replace(/\r/g, '').replace(/\n+$/, '').split('\n').map((row) => `<tr>${row.split('\t').map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</table>` : null;
       const formats = clipboard.availableFormats();
       const saved = { text: clipboard.readText(), html: clipboard.readHTML(), rtf: clipboard.readRTF(), image: formats.some((f) => f.startsWith('image/')) ? clipboard.readImage() : null };
       try {
-        clipboard.writeText(text);
+        if (table) clipboard.write({ text, html: `<meta charset="utf-8">${table}` }); else clipboard.writeText(text);
         wc.focus();
         wc.paste();
         await wait(450);

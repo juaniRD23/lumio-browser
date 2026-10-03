@@ -4,6 +4,7 @@
 // they're activated). A tab can move to another window (detach + adopt), so
 // its event handlers always look up the manager that currently owns it.
 const { WebContentsView, Menu, clipboard, shell, app } = require('electron');
+const { isSynthetic } = require('./synthetic-input');
 const path = require('path');
 const { parseInput, displayUrl } = require('./omnibox');
 const { SEARCH_ENGINES } = require('./store');
@@ -229,7 +230,7 @@ class TabManager {
     });
 
     wc.on('before-input-event', (e, input) => {
-      if (input.type === 'keyDown' && input.key === 'Escape' && M().hooks.isAgentRunning?.()) {
+      if (input.type === 'keyDown' && input.key === 'Escape' && M().hooks.isAgentRunning?.() && !isSynthetic(wc)) {
         M().hooks.stopAgent();
         e.preventDefault();
       }

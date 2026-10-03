@@ -15,7 +15,7 @@ const MAX_TIP = 300;
 const BUILT_IN = [
   {
     host: 'docs.google.com', path: '/spreadsheets',
-    tip: 'Google Sheets: cells are drawn on a canvas, so read_page doesn’t list them. To go to a cell, type it (like B2) into the Name Box at the top left with submit=true. To fill many cells, go to the top-left cell that way, then paste_text all the rows at once (tabs between columns, new lines between rows). To check cells, use screenshot_tab.',
+    tip: 'Google Sheets: cells are drawn on a canvas, so read_page doesn’t list them. To go to a cell, type it (like B2) into the Name Box at the top left with submit=true. To fill many cells, go to the top-left cell that way, then paste_text all the rows at once (tabs between columns, new lines between rows): one value per cell, short (put notes in their own column). After typing into a single cell, press Enter so it isn’t left in editing. To check cells, use screenshot_tab.',
   },
   {
     host: 'docs.google.com', path: '/document',
