@@ -115,8 +115,6 @@ test('the window and AI panel start without errors, and the composer works', { s
 
 test('bookmarks bar: under the address bar, icons, the new tab page, right-click and drops', { skip: !CHROME && 'Google Chrome not installed' }, async () => {
   const { page, errors } = await openShell(browser);
-  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
-  await page.route('https://b.example/favicon.ico', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PNG }));
   await page.route('https://c.example/favicon.ico', (r) => r.fulfill({ status: 404, body: '' }));
   const lastSent = (channel) => page.evaluate((c) => window.__sent.filter(([x]) => x === c).at(-1)?.[1], channel);
 
@@ -129,19 +127,20 @@ test('bookmarks bar: under the address bar, icons, the new tab page, right-click
   assert.deepEqual(await lastSent('bookmarks:open'), { url: 'lumio://settings/#import', disposition: 'tab' });
 
   // Turned on: on every page, right under the address bar.
-  await page.evaluate(() => {
+  const firstIcon = await page.evaluate(() => {
     window.__emit('tabs', { activeId: 1, tabs: [{ id: 1, title: 'YouTube', url: 'https://www.youtube.com/watch?v=abc' }] });
     window.__emit('bookmarks', { show: true, items: [
       { url: 'https://a.example/', title: 'Alpha', favicon: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==' },
       { url: 'https://b.example/page', title: 'Beta', favicon: null },
       { url: 'https://c.example/', title: 'Gamma', favicon: null },
     ] });
+    return document.querySelector('.bm-item[data-i="1"] img')?.getAttribute('src'); // before it loads (or fails)
   });
   assert.deepEqual(await page.$$eval('.bm-item span', (els) => els.map((e) => e.textContent)), ['Alpha', 'Beta', 'Gamma']);
   const [toolbar, barBox] = await page.evaluate(() => ['toolbar', 'bookmarks-bar'].map((id) => document.getElementById(id).getBoundingClientRect().toJSON()));
   assert.ok(barBox.top >= toolbar.bottom - 1 && barBox.top - toolbar.bottom < 6, 'right under the address bar');
   // A bookmark without an icon yet shows its site's /favicon.ico; a site without one gets the globe.
-  assert.equal(await page.getAttribute('.bm-item[data-i="1"] img', 'src'), 'https://b.example/favicon.ico');
+  assert.equal(firstIcon, 'https://b.example/favicon.ico');
   await page.waitForFunction(() => !document.querySelector('.bm-item[data-i="2"] img') && !!document.querySelector('.bm-item[data-i="2"] svg'));
 
   // Right-click: on a bookmark, its menu; on the bar itself, the bar's menu.
