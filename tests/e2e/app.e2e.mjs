@@ -621,12 +621,14 @@ test('research without tabs: web_search and read_url work out of sight, and no t
   await L.main((_e, t) => { const m = global.lumio.tabs; m.realSearchTemplate = m.searchTemplate; m.searchTemplate = () => t; }, `${siteUrl}/serp.html?q=%s`);
   const tabsBefore = await L.main(() => global.lumio.tabs.tabs.length);
   const windowsBefore = await L.main((e) => e.BrowserWindow.getAllWindows().length);
-  let seen = { results: '', page: '' };
+  let seen = { results: '', page: '', roles: '' };
   lumio.state.agentScript = (body) => {
     const turns = body.messages.filter((m) => m.role === 'assistant').length;
     if (turns === 0) return turnEvents({ calls: [{ name: 'web_search', args: { query: 'lighthouse keepers' } }] });
-    if (turns === 1) { seen.results = textOf(body.messages.at(-1)); return turnEvents({ calls: [{ name: 'read_url', args: { url: `${siteUrl}/article.html` } }] }); }
-    seen.page = textOf(body.messages.at(-1));
+    const results = body.messages.filter((m) => m.role === 'tool').map(textOf);
+    seen.roles = body.messages.map((m) => m.role).join(',');
+    if (turns === 1) { seen.results = results.at(-1) || ''; return turnEvents({ calls: [{ name: 'read_url', args: { url: `${siteUrl}/article.html` } }] }); }
+    seen.page = results.at(-1) || '';
     return turnEvents({ text: 'Searched and read it in the background.' });
   };
   try {
@@ -637,7 +639,7 @@ test('research without tabs: web_search and read_url work out of sight, and no t
     await L.main(() => { const m = global.lumio.tabs; m.searchTemplate = m.realSearchTemplate; });
   }
   assert.match(await lastReply(), /in the background/);
-  assert.match(seen.results, /1\. Lighthouse Keepers - Example\n {3}https:\/\/lighthouses\.example\.org\/keepers\n {3}Keepers trimmed wicks/);
+  assert.match(seen.results, /1\. Lighthouse Keepers - Example\n {3}https:\/\/lighthouses\.example\.org\/keepers\n {3}Keepers trimmed wicks/, `messages: ${seen.roles}`);
   assert.match(seen.page, /The Quiet History of Lighthouses[\s\S]*Keepers/);
   assert.equal(await L.main(() => global.lumio.tabs.tabs.length), tabsBefore, 'no tab opened');
   assert.equal(await L.main((e) => e.BrowserWindow.getAllWindows().length), windowsBefore, 'the hidden pages are gone');
