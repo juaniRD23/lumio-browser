@@ -381,7 +381,11 @@ test('on High effort, Lumio sends helper AIs to work in background tabs, each wi
     const main = reqs.filter((r) => !/You are Helper/.test(textOf(r.messages[0])));
     const helpers = reqs.filter((r) => /You are Helper/.test(textOf(r.messages[0])));
     assert.ok(main[0].tools.includes('send_helpers') && main[0].reasoning === 'high');
-    assert.ok(helpers.length >= 6 && helpers.every((r) => r.reasoning === 'medium' && !r.tools.includes('send_helpers') && !r.tools.includes('run_shell')));
+    assert.ok(helpers.length >= 6 && helpers.every((r) => !r.tools.includes('send_helpers') && !r.tools.includes('run_shell')));
+    // Each helper plans at Medium, then its routine turns are quick (Low).
+    const firstTurns = helpers.filter((r) => !r.messages.some((m) => m.role === 'assistant'));
+    assert.ok(firstTurns.length === 2 && firstTurns.every((r) => r.reasoning === 'medium'), 'helpers plan at Medium');
+    assert.ok(helpers.filter((r) => r.messages.some((m) => m.role === 'assistant')).every((r) => r.reasoning === 'low'), 'then quick turns');
   } finally {
     lumio.state.agentScript = null;
     await L.main(() => global.lumio.ai.setReasoning('medium'));
