@@ -1049,6 +1049,7 @@ function registerIpc() {
   internalHandle('page:billing-change', ['settings'], (_ctx, plan) => billingCall('/api/billing/change', { plan: String(plan || '') }));
   internalHandle('page:billing-cancel', ['settings'], (_ctx, form) => billingCall('/api/billing/cancel', { reason: String(form?.reason || ''), comment: String(form?.comment || '').slice(0, 1000) }));
   internalHandle('page:billing-resume', ['settings'], () => billingCall('/api/billing/resume', {}));
+  internalHandle('page:billing-redeem', ['settings'], (_ctx, code) => billingCall('/api/billing/redeem', { code: String(code || '').slice(0, 40) }));
   internalHandle('page:billing-subscribe', ['settings'], ({ w }, plan) => openCheckout(w, String(plan || '')));
   internalHandle('page:billing-card', ['settings'], ({ w }) => openCardWindow(w));
   internalHandle('page:set-profile', ['settings'], (_ctx, patch) => setProfile(patch || {}));

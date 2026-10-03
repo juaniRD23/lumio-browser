@@ -298,6 +298,43 @@ test('Go ($10): its Stripe price is made the first time someone picks it, then t
   assert.deepEqual([usage.planName, usage.windows[0].limit], ['Go', 1_700_000]);
 });
 
+test('plan codes: the owner makes one-time codes; one gives a month of its plan, once, then Free again', async () => {
+  const { token } = await signIn();
+  const redeem = (code) => call('/api/billing/redeem', { cookie: token, method: 'POST', body: { code } });
+  assert.equal((await call('/api/admin/codes', { cookie: token, method: 'POST', body: { plan: 'plus' } })).status, 404, 'only the owner');
+  sql.prepare("UPDATE users SET role = 'owner'").run();
+  assert.equal((await call('/api/admin/codes', { cookie: token, method: 'POST', body: { plan: 'gold' } })).status, 400);
+  const made = await (await call('/api/admin/codes', { cookie: token, method: 'POST', body: { plan: 'plus', count: 2 } })).json();
+  assert.equal(made.codes.length, 2);
+  assert.match(made.codes[0], /^PLUS-[A-HJKMNP-Z2-9]{4}-[A-HJKMNP-Z2-9]{4}-[A-HJKMNP-Z2-9]{4}$/);
+  assert.ok(!JSON.stringify(sql.prepare('SELECT * FROM plan_codes').all()).includes(made.codes[0].slice(5, 14)), 'stored as a hash');
+  // A wrong code; then the right one, typed loosely.
+  assert.equal((await redeem('PLUS-AAAA-AAAA-AAAA')).status, 400);
+  const ok = await (await redeem(made.codes[0].toLowerCase().replace(/-/g, ' '))).json();
+  assert.deepEqual([ok.plan, ok.planName], ['plus', 'Plus']);
+  assert.ok(Math.abs(ok.until - (Date.now() + 30 * 864e5)) < 60_000, 'a month');
+  assert.deepEqual([userRow().plan, userRow().plan_status], ['plus', 'code']);
+  assert.equal((await (await call('/api/usage', { cookie: token })).json()).usage.planName, 'Plus');
+  assert.deepEqual((await (await call('/api/billing/subscription', { cookie: token })).json()).code, { plan: 'plus', planName: 'Plus', until: ok.until });
+  assert.equal((await (await call('/api/admin/spend', { cookie: token })).json()).monthlyRevenue, 0, 'a code isn’t revenue');
+  // Each code works once.
+  assert.equal((await redeem(made.codes[0])).status, 400);
+  // A second Plus code adds a month.
+  const more = await (await redeem(made.codes[1])).json();
+  assert.ok(Math.abs(more.until - ok.until - 30 * 864e5) < 1000);
+  const list = (await (await call('/api/admin/codes', { cookie: token })).json()).codes;
+  assert.deepEqual(list.map((c) => [c.plan, c.usedBy, c.hint]).sort(), made.codes.map((c) => ['plus', 'sam@example.com', c.slice(-4)]).sort());
+  // When the month is over, the account is on Free again.
+  sql.prepare('UPDATE users SET plan_renews_at = ?').run(Date.now() - 1000);
+  assert.equal((await (await call('/api/usage', { cookie: token })).json()).usage.planName, 'Free');
+  assert.deepEqual([userRow().plan, userRow().plan_status], ['free', null]);
+  // Someone paying through Stripe keeps their subscription.
+  const go = (await (await call('/api/admin/codes', { cookie: token, method: 'POST', body: { plan: 'go' } })).json()).codes[0];
+  sql.prepare("UPDATE users SET plan = 'pro', plan_status = 'active', subscription_id = 'sub_9'").run();
+  assert.equal((await redeem(go)).status, 409);
+  assert.equal(userRow().plan, 'pro');
+});
+
 test('the signed webhook sets the plan from the subscription, and ignores other payments', async () => {
   const { token } = await signIn();
   const id = userRow().id;

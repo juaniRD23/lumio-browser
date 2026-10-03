@@ -54,6 +54,12 @@
     <section class="panel" id="plans" aria-label="Plans">
       <h2>Plans</h2>
       <div class="plans" id="plan-cards"></div>
+      <form class="code-form" id="code-form" autocomplete="off">
+        <label for="code-input">Have a code?</label>
+        <input id="code-input" name="code" placeholder="PLUS-XXXX-XXXX-XXXX" spellcheck="false" autocapitalize="characters" maxlength="40">
+        <button class="btn small" type="submit" id="code-go">Use code</button>
+      </form>
+      <p class="code-msg" id="code-msg" aria-live="polite"></p>
     </section>
 
     <section class="panel cancel-panel" id="cancel-panel" aria-label="Cancel your plan" hidden>

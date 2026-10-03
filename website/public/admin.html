@@ -45,6 +45,18 @@
       <p class="fine">Revenue uses plan prices before Stripe fees. Each plan’s allowance already leaves room for fees and your 15% profit, so AI cost should stay well under revenue.</p>
     </section>
 
+    <section class="panel" id="codes" aria-label="Plan codes" hidden>
+      <h2>Plan codes</h2>
+      <p class="fine first">Each code gives one account a month of its plan, free. It works once. Codes are shown only right after you make them, so copy them then.</p>
+      <form class="code-make" id="code-make">
+        <select id="code-plan" aria-label="Plan"><option value="go">Go ($10)</option><option value="plus" selected>Plus ($20)</option><option value="pro">Pro ($100)</option><option value="max">Max ($200)</option></select>
+        <input id="code-count" type="number" min="1" max="20" value="1" aria-label="How many">
+        <button class="btn small accent" type="submit" id="code-go">Make codes</button>
+      </form>
+      <div class="code-new" id="code-new"></div>
+      <div class="code-rows" id="code-rows"></div>
+    </section>
+
     <section class="panel" id="why" aria-label="Why people cancel" hidden>
       <h2>Why people cancel</h2>
       <div id="why-list"></div>

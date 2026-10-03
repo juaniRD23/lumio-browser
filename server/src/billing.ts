@@ -201,7 +201,8 @@ async function liveSubscription(env: Env, user: User) {
 // GET /api/billing/subscription: the plan, its subscription (if any) and what can be done with it.
 export async function subscription(env: Env, user: User) {
   // `plans` stays what older Lumio Browsers can sell; `allPlans` adds Go (Lumio Browser 0.6.5+, the website).
-  const base = { plan: user.plan, planName: planName(user.plan), plans: LEGACY_PAID.map(publicPlan), allPlans: PAID.map(publicPlan), reasons: Object.entries(CANCEL_REASONS).map(([id, label]) => ({ id, label })) };
+  const code = user.plan_status === 'code' ? { plan: user.plan, planName: planName(user.plan), until: user.plan_renews_at } : null; // a plan from a code
+  const base = { plan: user.plan, planName: planName(user.plan), plans: LEGACY_PAID.map(publicPlan), allPlans: PAID.map(publicPlan), code, reasons: Object.entries(CANCEL_REASONS).map(([id, label]) => ({ id, label })) };
   if (!subscribed(user)) return json({ ...base, subscription: null });
   const sub = await liveSubscription(env, user);
   const applied = await applySubscription(env, sub); // keeps the account in step if a webhook was missed

@@ -18,6 +18,7 @@
 //   GET  /v1/agent, POST /v1/agent, GET /v1/usage, POST /v1/images, POST /v1/tools/run,
 //   POST /v1/extract, POST /v1/voice/transcribe, POST /v1/voice/speak (Lumio Browser)
 //   GET  /api/admin/spend   AI spend vs OpenRouter (the owner only; the /admin page)
+//   GET|POST /api/admin/codes  one-time plan codes (the owner only); POST /api/billing/redeem uses one
 //
 // Every 5 minutes (cron trigger) recent AI calls are checked against
 // OpenRouter's records of what they cost (spend.ts).
@@ -38,6 +39,7 @@ import {
   pushSubscribe, syncChanges, syncCleanup, syncDeleteAll, syncDevice, syncInit, syncPush, syncRemoveDevice, syncStatus, vapidKey,
 } from './sync.ts';
 import { spendReport, verifySpend } from './spend.ts';
+import { createCodes, listCodes, redeemCode } from './codes.ts';
 import { PLANS, allowance } from './usage.ts';
 import { AgentError, type Env, fail, json, sameOrigin } from './util.ts';
 
@@ -126,6 +128,9 @@ function routeFor(path: string, method: string): Route | null {
   if (path === '/api/billing/checkout-status' && method === 'GET') return (r, env, _c, user) => checkoutStatus(r, env, user);
   if (path === '/api/billing/change' && method === 'POST') return (r, env, _c, user) => changePlan(r, env, user);
   if (path === '/api/billing/cancel' && method === 'POST') return (r, env, _c, user) => cancelPlan(r, env, user);
+  if (path === '/api/billing/redeem' && method === 'POST') return (r, env, _c, user) => redeemCode(r, env, user);
+  if (path === '/api/admin/codes' && method === 'GET') return (_r, env, _c, user) => listCodes(env, user);
+  if (path === '/api/admin/codes' && method === 'POST') return (r, env, _c, user) => createCodes(r, env, user);
   if (path === '/api/billing/resume' && method === 'POST') return (_r, env, _c, user) => resumePlan(env, user);
   if (path === '/api/chats' && method === 'GET') return (_r, env, _c, user) => listChats(env, user);
   if (path === '/api/chat' && method === 'POST') return send;

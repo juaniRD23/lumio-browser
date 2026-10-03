@@ -71,6 +71,10 @@ select.field { appearance: none; padding-right: 30px; background: var(--field) u
 .bp-desc { flex: 1; margin: 2px 0 8px; color: var(--dim); font-size: 12.5px; line-height: 1.5; }
 .bill-plan .btn { width: 100%; }
 .bill-fine { margin: -4px 20px 16px; color: var(--label); font-size: 12px; }
+.bill-code { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 16px 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.bill-code label { color: var(--dim); font-size: 13px; }
+.bill-code .field { flex: 1; min-width: 180px; max-width: 260px; text-transform: uppercase; letter-spacing: .04em; }
+.bill-code .field::placeholder { text-transform: none; }
 .bill-top { display: flex; align-items: center; gap: 14px; padding: 16px 20px 10px; }
 .bill-top .grow { flex: 1; min-width: 0; }
 .bill-top .title { font-weight: 600; font-size: 15px; }

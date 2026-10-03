@@ -3,6 +3,7 @@
 // hash of the token, never the token itself.
 import { type Env, base64url, cookies, json, randomHex, redirect, safeNext, sha256 } from './util.ts';
 import type { Plan } from './agent.ts';
+import { expireCodePlan } from './codes.ts';
 
 export const SESSION_DAYS = 30;
 const STATE_MINUTES = 15;
@@ -33,7 +34,7 @@ export async function currentUser(request: Request, env: Env): Promise<User | nu
   if (!token) return null;
   const row = await env.DB.prepare(`SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id
     WHERE s.token_hash = ?1 AND s.expires_at > ?2`).bind(await sha256(token), Date.now()).first<User>();
-  return row || null;
+  return row ? expireCodePlan(env, row) : null;
 }
 
 // The shape lumio-usa.online's /api/account has always had (Lumio Browser reads it).

@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT,
   picture TEXT,
   plan TEXT NOT NULL DEFAULT 'free',     -- free | go | plus | pro | max
-  plan_status TEXT,                      -- Stripe subscription status
+  plan_status TEXT,                      -- Stripe subscription status, or 'code' (a month from a plan code)
   plan_renews_at INTEGER,
   subscription_id TEXT,
   stripe_customer_id TEXT,
@@ -201,4 +201,15 @@ CREATE TABLE IF NOT EXISTS app_codes (
   code_hash TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   created_at INTEGER NOT NULL
+);
+
+-- One-time plan codes made on /admin: a month of a plan, no payment. Stored by hash.
+CREATE TABLE IF NOT EXISTS plan_codes (
+  code_hash TEXT PRIMARY KEY,
+  plan TEXT NOT NULL,
+  hint TEXT NOT NULL,          -- the last 4 characters, to tell codes apart
+  created_at INTEGER NOT NULL,
+  redeemed_by TEXT,            -- users.id
+  redeemed_at INTEGER,
+  plan_until INTEGER
 );

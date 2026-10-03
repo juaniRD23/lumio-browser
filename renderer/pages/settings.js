@@ -188,16 +188,25 @@ function renderBilling() {
   const note = billNote ? `<div class="bill-note ${billNote.bad ? 'bad' : ''}" role="status">${esc(billNote.text)}</div>` : '';
   const sub = bill.subscription;
   $('#billing-title').textContent = sub ? 'Subscription' : 'Choose a plan';
+  // A plan from a code: when it ends; any plan can still be bought.
+  const codeNote = bill.code ? `<div class="bill-note" role="status">You’re on Lumio ${esc(bill.code.planName)} from a code${bill.code.until ? `, until ${esc(day(bill.code.until))}` : ''}. After that you’re on Free, unless you subscribe.</div>` : '';
+  const codeForm = `<form class="bill-code" id="bill-code" autocomplete="off">
+      <label for="bill-code-input">Have a code?</label>
+      <input class="field" id="bill-code-input" placeholder="PLUS-XXXX-XXXX-XXXX" spellcheck="false" maxlength="40">
+      <button class="btn" type="submit" id="bill-code-go">Use code</button>
+    </form>`;
   if (!sub) {
-    card.innerHTML = `${note}<div class="bill-plans">${(bill.allPlans || bill.plans).map((p) => `
+    card.innerHTML = `${note}${codeNote}<div class="bill-plans">${(bill.allPlans || bill.plans).map((p) => `
       <article class="bill-plan ${p.id === 'plus' ? 'pick' : ''}">
         <div class="bp-name">${esc(p.name)}${p.id === 'plus' ? '<span class="pill">Most popular</span>' : ''}</div>
         <div class="bp-price">$${p.price}<small> a month</small></div>
         <p class="bp-desc">${esc(DESCS[p.id] || '')}</p>
         <button class="btn ${p.id === 'plus' ? 'accent' : ''}" data-subscribe="${esc(p.id)}">Subscribe</button>
       </article>`).join('')}</div>
-      <p class="bill-fine">You pay securely inside Lumio. Cancel anytime: you keep your plan until the end of the month you paid for.</p>`;
+      <p class="bill-fine">You pay securely inside Lumio. Cancel anytime: you keep your plan until the end of the month you paid for.</p>
+      ${codeForm}`;
     card.querySelectorAll('[data-subscribe]').forEach((b) => { b.onclick = () => subscribe(b.dataset.subscribe, b); });
+    $('#bill-code').onsubmit = (e) => { e.preventDefault(); redeem(); };
     return;
   }
 
@@ -274,6 +283,27 @@ async function act(button, channel, arg, done) {
   renderBilling();
   s.account = await page.invoke('page:account');
   renderAccount(); // shows the new plan and reloads the subscription
+}
+
+// A plan code: a month of a plan, from the people who make Lumio.
+async function redeem() {
+  const input = $('#bill-code-input');
+  const code = input.value.trim();
+  if (!code) { input.focus(); return; }
+  const button = $('#bill-code-go');
+  button.disabled = true;
+  button.textContent = 'Checking…';
+  const res = await page.invoke('page:billing-redeem', code).catch(() => ({ ok: false }));
+  if (res?.ok) {
+    billNote = { text: `You’re on Lumio ${res.planName} until ${day(res.until)}. Enjoy!` };
+    s.account = await page.invoke('page:account');
+    bill = null;
+    renderAccount();
+    return;
+  }
+  billNote = { text: res?.error || 'That code didn’t work. Try again.', bad: true };
+  renderBilling();
+  $('#bill-code-input').value = code;
 }
 
 async function subscribe(plan, button) {

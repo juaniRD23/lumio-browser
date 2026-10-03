@@ -77,7 +77,44 @@ function render(d) {
   status(d.openrouterError ? esc(d.openrouterError) : '', d.openrouterError ? 'err' : '');
 }
 
+// ---- plan codes
+const short = (t) => new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+async function loadCodes() {
+  const res = await fetch('/api/admin/codes', { cache: 'no-store' }).catch(() => null);
+  if (!res?.ok) return;
+  const { codes } = await res.json();
+  $('#codes').hidden = false;
+  $('#code-rows').innerHTML = codes.length ? codes.map((c) => `<div class="code-row">
+      <span>${esc(c.planName)}</span><span class="hint">…${esc(c.hint)}</span>
+      <span class="grow">made ${esc(short(c.createdAt))}</span>
+      ${c.usedAt ? `<span class="used">${esc(c.usedBy || 'someone')} · until ${esc(short(c.until))}</span>` : '<span>not used yet</span>'}
+    </div>`).join('') : '<p class="fine">No codes yet.</p>';
+}
+$('#code-make').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('#code-go').disabled = true;
+  try {
+    const res = await fetch('/api/admin/codes', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ plan: $('#code-plan').value, count: Number($('#code-count').value) || 1 }) });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(d.error || 'Couldn’t make codes.');
+    $('#code-new').innerHTML = `<p class="fine first">New ${esc(d.planName)} codes (a month each). Copy them now:</p>` + d.codes.map((c) => `<div class="code"><b>${esc(c)}</b><button class="btn small" type="button" data-copy="${esc(c)}">Copy</button></div>`).join('');
+    await loadCodes();
+  } catch (err) {
+    $('#code-new').innerHTML = `<p class="fine" style="color:var(--warn)">${esc(err.message)}</p>`;
+  } finally {
+    $('#code-go').disabled = false;
+  }
+});
+$('#code-new').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-copy]');
+  if (!b) return;
+  await navigator.clipboard.writeText(b.dataset.copy).catch(() => {});
+  b.textContent = 'Copied';
+  setTimeout(() => { b.textContent = 'Copy'; }, 1500);
+});
+
 let loading = false;
+let codesLoaded = false;
 async function load() {
   if (loading) return;
   loading = true;
@@ -87,6 +124,7 @@ async function load() {
     if (res.status === 401) { status('Sign in with the Lumio owner account to see this page. <a href="/signin?next=/admin">Sign in</a>'); return; }
     if (!res.ok) { status('This page is only for the owner of Lumio.'); return; }
     render(await res.json());
+    if (!codesLoaded) { codesLoaded = true; loadCodes(); }
   } catch {
     status('Couldn’t load the numbers. Check your connection and try again.', 'err');
   } finally {

@@ -56,13 +56,14 @@ const REASONS = [
   ['switched_service', 'I’m switching to another app'], ['customer_service', 'I had a billing or support problem'], ['other', 'Something else'],
 ];
 
-function renderPlans(plans, current, wanted, canceling) {
+// viaCode: the plan came from a code (not paid), so any plan can still be bought.
+function renderPlans(plans, current, wanted, canceling, viaCode = false) {
   $('#plan-cards').innerHTML = plans.map((p) => {
     const here = p.id === current;
     const higher = ORDER.indexOf(p.id) > ORDER.indexOf(current);
     const action = here ? (canceling ? `<button class="btn small accent" data-resume>Keep ${esc(p.name)}</button>` : '<button class="btn small" disabled>Your plan</button>')
-      : p.id === 'free' ? (current !== 'free' && !canceling ? '<button class="btn small" data-cancel>Cancel plan</button>' : '')
-        : `<button class="btn small ${higher ? 'accent' : ''}" data-plan="${p.id}">${current === 'free' ? `Get ${esc(p.name)}` : higher ? `Upgrade to ${esc(p.name)}` : `Switch to ${esc(p.name)}`}</button>`;
+      : p.id === 'free' ? (current !== 'free' && !canceling && !viaCode ? '<button class="btn small" data-cancel>Cancel plan</button>' : '')
+        : `<button class="btn small ${higher ? 'accent' : ''}" data-plan="${p.id}">${current === 'free' || viaCode ? `Get ${esc(p.name)}` : higher ? `Upgrade to ${esc(p.name)}` : `Switch to ${esc(p.name)}`}</button>`;
     return `<article class="plan ${here ? 'current' : ''} ${wanted === p.id && !here ? 'wanted' : ''}">
       <div class="p-name">${esc(p.name)}</div>
       <div class="p-price">$${p.price}<small>${p.price ? ' / month' : ''}</small></div>
@@ -73,7 +74,7 @@ function renderPlans(plans, current, wanted, canceling) {
   $('#plan-cards').querySelectorAll('[data-plan]').forEach((b) => b.addEventListener('click', async () => {
     const plan = b.dataset.plan;
     // Free: Lumio's own payment page. Subscribed: switch in place, after a second click to confirm.
-    if (current === 'free') { location.href = `/checkout?plan=${plan}`; return; }
+    if (current === 'free' || viaCode) { location.href = `/checkout?plan=${plan}`; return; }
     if (!b.dataset.sure) {
       b.dataset.sure = '1';
       const up = ORDER.indexOf(plan) > ORDER.indexOf(current);
@@ -134,19 +135,45 @@ async function renderAll() {
   const p = account.plan || {};
   const when = p.renewsAt ? new Date(p.renewsAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '';
   const status = u.plan === 'free' ? null
+    : p.status === 'code' ? { text: when ? `From a code · until ${when}` : 'From a code' }
     : p.status === 'canceling' ? { text: when ? `Ends ${when}` : 'Ends at period end', warn: true }
       : p.status === 'past_due' ? { text: 'Payment issue: update your card (Card and invoices)', warn: true }
         : when ? { text: `Renews ${when}` } : null;
   $('#plan-status').hidden = !status;
   $('#plan-status').textContent = status?.text || '';
   $('#plan-status').classList.toggle('warn', !!status?.warn);
-  $('#billing').hidden = u.plan === 'free';
+  $('#billing').hidden = u.plan === 'free' || p.status === 'code';
   const wanted = new URLSearchParams(location.search).get('plan');
-  renderPlans(plansList, u.plan, wanted, p.status === 'canceling');
+  renderPlans(plansList, u.plan, wanted, p.status === 'canceling', p.status === 'code');
   return u;
 }
 
 $('#billing').addEventListener('click', openPortal);
+
+// A plan code: a month of a plan, from the people who make Lumio.
+$('#code-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = $('#code-msg');
+  const code = $('#code-input').value.trim();
+  if (!code) { $('#code-input').focus(); return; }
+  $('#code-go').disabled = true;
+  msg.className = 'code-msg';
+  msg.textContent = 'Checking…';
+  try {
+    const r = await post('/api/billing/redeem', { code });
+    const until = new Date(r.until).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
+    $('#code-input').value = '';
+    msg.textContent = '';
+    notice(`You’re on Lumio ${r.planName} until ${until}. Enjoy!`);
+    await renderAll();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  } catch (err) {
+    msg.className = 'code-msg bad';
+    msg.textContent = err.message;
+  } finally {
+    $('#code-go').disabled = false;
+  }
+});
 $('#sign-out').addEventListener('click', async () => {
   await post('/api/auth', { action: 'logout' }).catch(() => {});
   location.href = '/';
