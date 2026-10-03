@@ -346,7 +346,7 @@ export function initVoice({ api, prompt, autosize, submit, notice, isReady, isBu
   }
 
   async function startMic() {
-    listener = new Listener({ endMs: dictating ? 1300 : 800 });
+    listener = new Listener({ endMs: dictating ? 1300 : 1000 }); // a short pause mid-sentence doesn't end the phrase
     try {
       mic = await openMic(onFrame);
       return true;

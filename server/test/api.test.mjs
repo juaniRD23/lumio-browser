@@ -988,7 +988,7 @@ test('voice: speech to text and reading aloud are charged to the weekly allowanc
   assert.equal(heard.status, 200);
   assert.deepEqual(await heard.json(), { text: 'What is on this page?' });
   const stt = calls.or.find((c) => c.path?.endsWith('/transcriptions')).body;
-  assert.equal(stt.model, 'openai/whisper-large-v3-turbo');
+  assert.equal(stt.model, 'openai/gpt-4o-transcribe');
   assert.deepEqual(stt.input_audio, { data: audio, format: 'webm' });
   assert.equal(stt.language, 'en');
 
@@ -1014,6 +1014,14 @@ test('voice: speech to text and reading aloud are charged to the weekly allowanc
   assert.equal((await call('/v1/voice/transcribe', { token, method: 'POST', body: { audio: 'not base64!' } })).status, 400);
   assert.equal((await call('/v1/voice/speak', { token, method: 'POST', body: { text: '' } })).status, 400);
   assert.equal(calls.or.length, before);
+  // If the main model fails, Whisper large-v3 hears the same audio.
+  const keepListen = listenReply;
+  listenReply = (body) => (body.model === 'openai/gpt-4o-transcribe' ? Response.json({ error: { message: 'busy' } }, { status: 503 }) : keepListen(body));
+  try {
+    const backup = await call('/v1/voice/transcribe', { token, method: 'POST', body: { audio, format: 'webm', seconds: 2 } });
+    assert.deepEqual(await backup.json(), { text: 'What is on this page?' });
+    assert.deepEqual(calls.or.filter((c) => c.path?.endsWith('/transcriptions')).slice(-2).map((c) => c.body.model), ['openai/gpt-4o-transcribe', 'openai/whisper-large-v3']);
+  } finally { listenReply = keepListen; }
 });
 
 test('voice: a provider failure charges nothing, and an empty allowance refuses', async () => {

@@ -10,7 +10,10 @@ import { hold, settle, toMicro } from './usage.ts';
 import { AgentError, type Env, fail, json, randomHex, sha256 } from './util.ts';
 
 export const VOICE = {
-  listen: { id: 'openai/whisper-large-v3-turbo', perSecond: 0.00000333 },
+  // gpt-4o-transcribe: far fewer mistakes than Whisper with accents, names and
+  // mixed English/Spanish (~$0.006 a minute, billed by OpenRouter's real cost).
+  // If it fails, Whisper large-v3 tries the same audio.
+  listen: { id: 'openai/gpt-4o-transcribe', perSecond: 0.0001, backup: { id: 'openai/whisper-large-v3', perSecond: 0.0000075 } },
   speak: { id: 'hexgrad/kokoro-82m', perChar: 0.00000062, voices: ['af_heart', 'af_bella', 'am_michael', 'bf_emma', 'bm_george'] },
 };
 const MAX_SECONDS = 120;
@@ -53,12 +56,15 @@ export async function transcribe(request: Request, env: Env, user: { id: string;
   let cost = 0;
   const ids: string[] = [];
   try {
-    const res = await openrouter(env, '/audio/transcriptions', {
-      model: VOICE.listen.id,
+    const ask = (model: string) => openrouter(env, '/audio/transcriptions', {
+      model,
       input_audio: { data: audio, format },
       ...(language ? { language } : {}),
       provider: { data_collection: 'deny', allow_fallbacks: true },
     });
+    let used = VOICE.listen as { id: string; perSecond: number };
+    let res = await ask(used.id).catch(() => null);
+    if (!res || !res.ok) { used = VOICE.listen.backup; res = await ask(used.id); }
     const id = res.headers.get('x-generation-id');
     if (id && GEN_ID.test(id)) ids.push(id);
     const data = await res.json<any>().catch(() => null);
@@ -66,7 +72,7 @@ export async function transcribe(request: Request, env: Env, user: { id: string;
     if (typeof data?.usage?.cost === 'number') cost = toMicro(data.usage.cost);
     if (!res.ok || data?.error) throw new ProviderError('Couldn’t understand the audio right now. Try again.', res.status === 429 ? 503 : 502);
     const text = String(data?.text ?? '').trim();
-    cost ||= toMicro((Number(data?.usage?.seconds) || seconds) * VOICE.listen.perSecond);
+    cost ||= toMicro((Number(data?.usage?.seconds) || seconds) * used.perSecond);
     await settle(env, key, cost, 'done', null, ids);
     ctx.waitUntil(verifyNow(env, [{ key, ids }]));
     return json({ text });
