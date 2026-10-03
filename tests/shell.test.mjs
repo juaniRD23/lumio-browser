@@ -248,6 +248,49 @@ test('voice mode: what you say is sent, and the answer is spoken sentence by sen
   }
 });
 
+test('dictation: what you said lands in the box, and when you send it the answer is read aloud', { skip: !CHROME && 'Google Chrome not installed' }, async () => {
+  const wav = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'lumio-dictate-')), 'speech.wav');
+  speechWav(wav);
+  const { chromium } = require('playwright-core');
+  const b = await chromium.launch({
+    executablePath: CHROME, headless: true,
+    args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${wav}%noloop`, '--autoplay-policy=no-user-gesture-required'],
+  });
+  try {
+    const { page, errors } = await openShell(b, {
+      'ai:voice-transcribe': { value: { text: 'What time is it in Tokyo?' } },
+      'ai:send': { value: { ok: true, chatId: 'c7' } },
+      'ai:voice-speak': { value: { error: 'no audio in tests' } },
+    });
+    await page.click('#mic-btn');
+    await page.waitForFunction(() => document.getElementById('prompt').value === 'What time is it in Tokyo?', null, { timeout: 15_000 });
+    // Sent: the reply is spoken as it streams.
+    await page.evaluate(() => {
+      const e = (ev) => window.__emit('ai-event', { chatId: 'c7', ...ev });
+      e({ type: 'user', text: 'What time is it in Tokyo?' });
+      e({ type: 'start' });
+      e({ type: 'text', delta: 'It is 9 in the morning in Tokyo. ' });
+      e({ type: 'text_end' });
+      e({ type: 'end' });
+    });
+    await page.waitForFunction(() => window.__calls.some(([c, a]) => c === 'ai:voice-speak' && /9 in the morning/.test(a.text)), null, { timeout: 5000 });
+    // A typed message stays silent.
+    const before = await page.evaluate(() => window.__calls.filter(([c]) => c === 'ai:voice-speak').length);
+    await page.evaluate(() => {
+      const e = (ev) => window.__emit('ai-event', { chatId: 'c7', ...ev });
+      e({ type: 'user', text: 'and in Paris?' });
+      e({ type: 'start' });
+      e({ type: 'text', delta: 'It is 2 in the morning in Paris. ' });
+      e({ type: 'end' });
+    });
+    await page.waitForTimeout(300);
+    assert.equal(await page.evaluate(() => window.__calls.filter(([c]) => c === 'ai:voice-speak').length), before, 'typed: no voice');
+    assert.deepEqual(errors.filter((e) => !/no audio in tests/.test(e)), []);
+  } finally {
+    await b.close();
+  }
+});
+
 test('workflows: / lists them, the card asks for blanks, and Run sends it', { skip: !CHROME && 'Google Chrome not installed' }, async () => {
   const { page, errors } = await openShell(browser, {
     'shell:init': { value: { ...INIT, ai: { ...AI, workflows: true } } },

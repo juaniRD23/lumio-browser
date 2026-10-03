@@ -1,5 +1,7 @@
 // Voice in the AI panel.
 // - The mic button dictates: talk, and your words land in the message box.
+//   When you send what you said, the answer is read aloud too (you talked to
+//   it, so it talks back); typing a message keeps answers silent.
 // - Voice mode (the waveform button) is a live conversation, like ChatGPT's:
 //   the microphone stays open the whole time. Talk and Lumio answers out
 //   loud, sentence by sentence as it writes. It says what it's doing while it
@@ -250,8 +252,8 @@ class Speaker {
     await new Promise((resolve) => {
       item.done = resolve;
       el.addEventListener('ended', resolve, { once: true });
-      el.addEventListener('error', resolve, { once: true });
-      el.play().catch(resolve);
+      el.addEventListener('error', () => { this.onError('Lumio’s voice couldn’t play. Check your sound output.'); resolve(); }, { once: true });
+      el.play().catch((err) => { if (err?.name !== 'AbortError') this.onError(`Lumio’s voice couldn’t play (${err?.message || err}).`); resolve(); });
     });
     URL.revokeObjectURL(url);
     if (this.current !== item) return;
@@ -289,6 +291,8 @@ export function initVoice({ api, prompt, autosize, submit, notice, isReady, isBu
   let listener = null;
   let mode = false; // the live conversation is on
   let dictating = false;
+  let dictated = ''; // the last dictated words, until a message with them is sent
+  let aloud = null; // a dictated message's chat: its answer is read aloud
   let muted = false;
   let starting = false;
   let hearing = 0; // phrases being turned into text
@@ -406,6 +410,7 @@ export function initVoice({ api, prompt, autosize, submit, notice, isReady, isBu
   async function heard(text) {
     if (dictating) {
       stopDictation();
+      dictated = text;
       prompt.value = prompt.value.trim() ? `${prompt.value.trimEnd()} ${text}` : text;
       autosize();
       prompt.focus();
@@ -445,6 +450,7 @@ export function initVoice({ api, prompt, autosize, submit, notice, isReady, isBu
   // ---------------------------------------------------------------- dictation
   micBtn.addEventListener('click', async () => {
     if (mode) { stopMode(); return; }
+    if (aloud && speaker.busy) { speaker.stop(); aloud = null; render(); return; } // stop reading the answer
     if (dictating) { // done talking
       const ev = listener?.finish();
       if (ev?.samples) phrase(ev); else stopDictation();
@@ -506,7 +512,18 @@ export function initVoice({ api, prompt, autosize, submit, notice, isReady, isBu
   return {
     // Every ai-event: in voice mode, the open chat's replies are spoken.
     onEvent(ev) {
-      if (!mode || ev.chatId !== getChatId()) return;
+      // A message sent with dictated words in it: its answer is read aloud.
+      if (!mode && ev.type === 'user' && !ev.mid) {
+        const said = dictated && String(ev.text || '').includes(dictated);
+        dictated = '';
+        speaker.stop();
+        aloud = said ? ev.chatId : null;
+        if (said) newReply();
+        return;
+      }
+      if (!(mode || aloud === ev.chatId) || ev.chatId !== getChatId()) return;
+      if (!mode && ['step', 'approval'].includes(ev.type)) { speak(stream.flush()); return; } // no narration outside voice mode
+      if (!mode && ev.type === 'end') { speak(stream.flush()); aloud = null; return; }
       switch (ev.type) {
         case 'start':
           newReply();
@@ -542,6 +559,6 @@ export function initVoice({ api, prompt, autosize, submit, notice, isReady, isBu
       render();
     },
     refresh: () => render(),
-    stop: () => { if (mode) stopMode(); else if (dictating) stopDictation(); },
+    stop: () => { if (mode) stopMode(); else if (dictating) stopDictation(); if (aloud) { speaker.stop(); aloud = null; } },
   };
 }
