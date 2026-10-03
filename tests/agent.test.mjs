@@ -204,3 +204,10 @@ test('site tips: given before the first step and when a new site comes up, once 
   assert.match(chat.seen[1].at(-1).content, /page text\n\n\[Lumio Browser, not the user\] Tips for mail\.google\.com/, 'with the result that reached the new site');
   assert.doesNotMatch(chat.seen[2].at(-1).content, /Tips for/);
 });
+
+test('speed: a voice message answers quickly from the first turn', async () => {
+  const { opts, chat } = setup({ turns: [{ calls: [{ id: 'a', name: 'read_page', arguments: '{}' }] }, { text: 'Here it is.' }] });
+  opts.quickStart = true;
+  await runAgent(opts);
+  assert.deepEqual(chat.quick, [true, true]);
+});

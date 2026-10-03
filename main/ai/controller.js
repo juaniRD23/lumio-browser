@@ -381,7 +381,7 @@ class AIController {
     chat.updatedAt = Date.now();
     this.saveChats();
     this.emit('ai-event', { chatId: chat.id, type: 'user', text: clean, ctx: ctxInfo, title: chat.title, ...(shown.length ? { files: shown } : {}), ...(voice ? { voice: true } : {}) });
-    this.start(chat);
+    this.start(chat, { quickStart: voice }); // said out loud: answer quickly, the first words matter most
     return { ok: true, chatId: chat.id };
   }
 
@@ -548,7 +548,7 @@ class AIController {
     }
   }
 
-  async start(chat, { scheduled = null, watch = null } = {}) {
+  async start(chat, { scheduled = null, watch = null, quickStart = false } = {}) {
     const abort = new AbortController();
     const run = { chatId: chat.id, abort, pending: new Map(), grants: new Set(), text: null, steps: new Map(), scheduled, queue: [] };
     this.run = run;
@@ -605,6 +605,7 @@ class AIController {
         ctx,
         grants: run.grants,
         takeQueued: () => run.queue.splice(0),
+        quickStart,
       });
     } catch (err) {
       if (err.name === 'AbortError' || abort.signal.aborted) record({ type: 'stopped' });

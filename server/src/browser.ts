@@ -144,7 +144,7 @@ export async function step(request: Request, env: Env, ctx: ExecutionContext, us
         finishReason: toolCalls.length ? 'tool_calls' : finish || 'stop',
         usage: { input: total.prompt_tokens, output: total.completion_tokens, total: total.total_tokens },
       }, true);
-      await settle(env, key, cost, 'done', out.saved(), ids);
+      await settle(env, key, cost, 'done', out.saved(), ids, `${model.id}@${s.reasoning}`);
     } catch (err) {
       const e = err instanceof AgentError ? err : new AgentError('Lumio AI’s reply was cut off. Try again.', 502, 'provider_error');
       await out.send({ type: 'error', code: e.code, message: e.message });

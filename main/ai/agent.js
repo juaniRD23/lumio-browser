@@ -110,7 +110,7 @@ async function runToolCall(call, env) {
 
 async function runAgent({
   model, messages, tools, systemPrompt, chat, approve, getMode, emit, signal, ctx,
-  maxSteps = MAX_STEPS, grants = new Set(), takeQueued = null,
+  maxSteps = MAX_STEPS, grants = new Set(), takeQueued = null, quickStart = false,
 }) {
   const byName = new Map(tools.map((t) => [t.name, t]));
   // Messages the person sent (typed or said) while Lumio was working join the
@@ -134,7 +134,7 @@ async function runAgent({
   // type, scroll…) think less, which is most of the speed. Anything that
   // needs judgment (an error, a new message, research results, every 10th
   // step) gets the full effort again.
-  let quick = false;
+  let quick = quickStart; // a voice message: the first answer is quick too, so it starts talking sooner
 
   for (let step = 0; step < maxSteps; step++) {
     if (signal?.aborted) throw abortError();

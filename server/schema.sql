@@ -49,7 +49,9 @@ CREATE TABLE IF NOT EXISTS steps (
   created_at INTEGER NOT NULL,
   gen_ids TEXT,                          -- OpenRouter generation IDs (JSON) for the double-check
   verified_at INTEGER,                   -- when OpenRouter's record was looked up
-  billed_microusd INTEGER                -- OpenRouter's official cost (null if it couldn't be found)
+  billed_microusd INTEGER,               -- OpenRouter's official cost (null if it couldn't be found)
+  ms INTEGER,                            -- how long the call took
+  model TEXT                             -- which model answered (voice: speech-to-text or text-to-speech)
 );
 CREATE INDEX IF NOT EXISTS steps_owner_time ON steps (owner, created_at);
 CREATE INDEX IF NOT EXISTS steps_unverified ON steps (verified_at, created_at);

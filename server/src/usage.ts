@@ -113,7 +113,9 @@ export function costOf(usage: { prompt_tokens?: number; completion_tokens?: numb
 }
 
 // `genIds` are OpenRouter's IDs for the calls, so verifySpend (spend.ts) can check the cost.
-export async function settle(env: Env, key: string, cost: number, status: 'done' | 'failed', result: string | null = null, genIds: string[] = []) {
-  await env.DB.prepare('UPDATE steps SET status = ?2, cost_microusd = ?3, result = ?4, gen_ids = ?5 WHERE key = ?1')
-    .bind(key, status, cost, result, genIds.length ? JSON.stringify(genIds) : null).run();
+// Also keeps how long the call took (ms) and, when given, which model answered,
+// so slow steps (like a voice reply taking long to start) can be found.
+export async function settle(env: Env, key: string, cost: number, status: 'done' | 'failed', result: string | null = null, genIds: string[] = [], model: string | null = null) {
+  await env.DB.prepare('UPDATE steps SET status = ?2, cost_microusd = ?3, result = ?4, gen_ids = ?5, ms = ?6 - created_at, model = COALESCE(?7, model) WHERE key = ?1')
+    .bind(key, status, cost, result, genIds.length ? JSON.stringify(genIds) : null, Date.now(), model).run();
 }

@@ -73,7 +73,7 @@ export async function transcribe(request: Request, env: Env, user: { id: string;
     if (!res.ok || data?.error) throw new ProviderError('Couldn’t understand the audio right now. Try again.', res.status === 429 ? 503 : 502);
     const text = String(data?.text ?? '').trim();
     cost ||= toMicro((Number(data?.usage?.seconds) || seconds) * used.perSecond);
-    await settle(env, key, cost, 'done', null, ids);
+    await settle(env, key, cost, 'done', null, ids, used.id);
     ctx.waitUntil(verifyNow(env, [{ key, ids }]));
     return json({ text });
   } catch (err) {
@@ -112,7 +112,7 @@ export async function speak(request: Request, env: Env, user: { id: string; plan
     const audio = await res.arrayBuffer();
     // The response has no cost in it: charge the list price now, and the live
     // check (spend.ts) records what OpenRouter actually billed.
-    await settle(env, key, toMicro(listPrice), 'done', null, ids);
+    await settle(env, key, toMicro(listPrice), 'done', null, ids, VOICE.speak.id);
     ctx.waitUntil(verifyNow(env, [{ key, ids }]));
     return new Response(audio, { headers: { 'content-type': 'audio/mpeg', 'cache-control': 'no-store' } });
   } catch (err) {
