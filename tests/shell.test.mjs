@@ -11,7 +11,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-const { resolveFile } = require('../main/protocol.js');
+const { resolveFile, CSP } = require('../main/protocol.js');
 
 const CHROME = ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/usr/bin/google-chrome', 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'].find((p) => fs.existsSync(p));
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.png': 'image/png' };
@@ -30,7 +30,8 @@ before(async () => {
   server = http.createServer((req, res) => {
     const file = resolveFile(new URL(`lumio://shell${req.url.split('?')[0]}`), new Set(['shell']));
     if (!file || !fs.existsSync(file)) { res.writeHead(404); res.end(); return; }
-    res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream' });
+    // The window's real Content-Security-Policy, so the tests hit what the app enforces.
+    res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', 'content-security-policy': CSP });
     res.end(fs.readFileSync(file));
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
@@ -260,7 +261,12 @@ test('dictation: what you said lands in the box, and when you send it the answer
     const { page, errors } = await openShell(b, {
       'ai:voice-transcribe': { value: { text: 'What time is it in Tokyo?' } },
       'ai:send': { value: { ok: true, chatId: 'c7' } },
-      'ai:voice-speak': { value: { error: 'no audio in tests' } },
+      // A real (tiny, silent) sound file, so playing it is tested too.
+      'ai:voice-speak': { fn: `const n = 800; const b = new Uint8Array(44 + n * 2); const v = new DataView(b.buffer);
+        const w = (o, s) => [...s].forEach((c, i) => { b[o + i] = c.charCodeAt(0); });
+        w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+        v.setUint32(24, 8000, true); v.setUint32(28, 16000, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, n * 2, true);
+        window.__played = (window.__played || 0); return { audio: b };` },
     });
     await page.click('#mic-btn');
     await page.waitForFunction(() => document.getElementById('prompt').value === 'What time is it in Tokyo?', null, { timeout: 15_000 });
@@ -274,6 +280,8 @@ test('dictation: what you said lands in the box, and when you send it the answer
       e({ type: 'end' });
     });
     await page.waitForFunction(() => window.__calls.some(([c, a]) => c === 'ai:voice-speak' && /9 in the morning/.test(a.text)), null, { timeout: 5000 });
+    await page.waitForTimeout(800);
+    assert.deepEqual(await page.$$eval('.notice', (els) => els.map((e) => e.textContent).filter((t) => /voice/i.test(t))), [], 'the voice played (no “couldn’t play”)');
     // A typed message stays silent.
     const before = await page.evaluate(() => window.__calls.filter(([c]) => c === 'ai:voice-speak').length);
     await page.evaluate(() => {

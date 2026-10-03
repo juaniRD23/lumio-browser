@@ -39,6 +39,7 @@ const CSP = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' https: http: data: blob: crx:",
   "font-src 'self'",
+  "media-src 'self' blob:", // Lumio's voice plays from blob: URLs (renderer/ui/voice.js)
   "connect-src 'self'",
   "frame-ancestors 'none'",
 ].join('; ');
@@ -100,4 +101,4 @@ function registerPagesProtocol(tabSession) {
   tabSession.protocol.handle('lumio', makeHandler(PAGE_HOSTS));
 }
 
-module.exports = { registerUiProtocol, registerPagesProtocol, PAGE_HOSTS, resolveFile };
+module.exports = { registerUiProtocol, registerPagesProtocol, PAGE_HOSTS, resolveFile, CSP };
