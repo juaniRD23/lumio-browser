@@ -68,7 +68,7 @@ class LumioAccount {
       username: this.info?.publicUsername || this.info?.username || null,
       plan: this.usage?.plan || null,
       planName: this.usage?.planName || null,
-      paid: ['plus', 'pro', 'max'].includes(this.usage?.plan),
+      paid: ['go', 'plus', 'pro', 'max'].includes(this.usage?.plan),
       usage: this.usage ? {
         remaining: this.usage.remaining,
         limit: this.usage.limit,

@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT NOT NULL,
   name TEXT,
   picture TEXT,
-  plan TEXT NOT NULL DEFAULT 'free',     -- free | plus | pro | max
+  plan TEXT NOT NULL DEFAULT 'free',     -- free | go | plus | pro | max
   plan_status TEXT,                      -- Stripe subscription status
   plan_renews_at INTEGER,
   subscription_id TEXT,

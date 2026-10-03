@@ -3,7 +3,7 @@
 // cancel (with a reason) or resume right in Lumio (Settings in Lumio Browser,
 // /account on the web) through the API below; the Billing Portal is only for
 // updating the card. A signed webhook keeps each account's plan in sync. Prices are found by lookup key (set up by
-// scripts/stripe-setup.mjs), so no price IDs live in config. Everything Lumio
+// scripts/setup.mjs, or made here the first time a newer plan is chosen), so no price IDs live in config. Everything Lumio
 // creates carries metadata app=lumio; other payments on the same Stripe
 // account (Fifty Sites) are ignored.
 import type { Plan } from './agent.ts';
@@ -11,8 +11,12 @@ import type { User } from './auth.ts';
 import { PLANS, planName } from './usage.ts';
 import { AgentError, type Env, json } from './util.ts';
 
-export const PAID: Plan[] = ['plus', 'pro', 'max'];
-export const LOOKUP: Record<string, Plan> = { lumio_plus_monthly: 'plus', lumio_pro_monthly: 'pro', lumio_max_monthly: 'max' };
+export const PAID: Plan[] = ['go', 'plus', 'pro', 'max'];
+// What Lumio Browser 0.6.4 and older can sell in Settings (they'd show Go with a Subscribe button that fails).
+const LEGACY_PAID: Plan[] = ['plus', 'pro', 'max'];
+export const LOOKUP: Record<string, Plan> = { lumio_go_monthly: 'go', lumio_plus_monthly: 'plus', lumio_pro_monthly: 'pro', lumio_max_monthly: 'max' };
+// What subscribers see on their card statement: the business name (Stripe requires it) plus the product.
+const DESCRIPTOR = 'FIFTY SITES LUMIO';
 const lookupFor = (plan: Plan) => Object.keys(LOOKUP).find((k) => LOOKUP[k] === plan)!;
 // Subscription states that keep the plan (past_due: Stripe is retrying the card).
 const ACTIVE = new Set(['active', 'trialing', 'past_due', 'canceling']);
@@ -48,14 +52,46 @@ export async function stripe<T = any>(env: Env, method: 'GET' | 'POST', path: st
 }
 
 let priceCache: { at: number; ids: Record<string, string> } | null = null;
+async function loadPrices(env: Env) {
+  const res = await stripe<{ data: { id: string; lookup_key: string }[] }>(env, 'GET', '/v1/prices', { lookup_keys: Object.keys(LOOKUP), active: true, limit: 10 });
+  priceCache = { at: Date.now(), ids: Object.fromEntries(res.data.map((p) => [p.lookup_key, p.id])) };
+  return priceCache;
+}
 async function priceId(env: Env, plan: Plan) {
-  if (!priceCache || Date.now() - priceCache.at > 10 * 60_000) {
-    const res = await stripe<{ data: { id: string; lookup_key: string }[] }>(env, 'GET', '/v1/prices', { lookup_keys: Object.keys(LOOKUP), active: true });
-    priceCache = { at: Date.now(), ids: Object.fromEntries(res.data.map((p) => [p.lookup_key, p.id])) };
+  const key = lookupFor(plan);
+  let cache = priceCache;
+  if (!cache || Date.now() - cache.at > 10 * 60_000 || !cache.ids[key]) cache = await loadPrices(env);
+  if (!cache.ids[key]) cache.ids[key] = await createPrice(env, plan);
+  return cache.ids[key];
+}
+
+// A plan added after the Stripe setup (Go, October 2026) gets its product and
+// price the first time someone picks it, made the way scripts/setup.mjs makes
+// them, and joins Lumio's billing-portal settings.
+async function createPrice(env: Env, plan: Plan) {
+  const key = lookupFor(plan);
+  const product = await stripe<{ id: string }>(env, 'POST', '/v1/products', { name: `Lumio ${PLANS[plan].name}`, statement_descriptor: DESCRIPTOR, metadata: { app: 'lumio' } });
+  let price: { id: string };
+  try {
+    price = await stripe<{ id: string }>(env, 'POST', '/v1/prices', {
+      product: product.id, currency: 'usd', unit_amount: Math.round(PLANS[plan].price * 100), recurring: { interval: 'month' }, lookup_key: key, metadata: { app: 'lumio' },
+    });
+  } catch (err) {
+    // Made by another request a moment ago (lookup keys are unique): use that one.
+    await stripe(env, 'POST', `/v1/products/${product.id}`, { active: false }).catch(() => {});
+    const found = (await loadPrices(env)).ids[key];
+    if (found) return found;
+    throw err;
   }
-  const id = priceCache.ids[lookupFor(plan)];
-  if (!id) throw new AgentError('That plan isn’t available yet.', 503, 'billing_unavailable');
-  return id;
+  const config = await portalConfig(env).catch(() => undefined);
+  if (config) {
+    try {
+      const c = await stripe<{ features?: { subscription_update?: { products?: { product: string; prices: string[] }[] } } }>(env, 'GET', `/v1/billing_portal/configurations/${config}`);
+      const products = (c.features?.subscription_update?.products || []).map((x) => ({ product: x.product, prices: x.prices }));
+      await stripe(env, 'POST', `/v1/billing_portal/configurations/${config}`, { features: { subscription_update: { products: [{ product: product.id, prices: [price.id] }, ...products] } } });
+    } catch { /* switching happens in Lumio; the portal is only for older pages */ }
+  }
+  return price.id;
 }
 
 // Lumio's own billing-portal settings (tagged app=lumio by the setup script),
@@ -88,7 +124,7 @@ const subscribed = (user: User) => !!user.subscription_id && ACTIVE.has(user.pla
 
 export async function checkout(request: Request, env: Env, user: User) {
   const { plan, embedded, app } = await request.json<{ plan?: string; embedded?: boolean; app?: boolean }>().catch(() => ({ plan: undefined, embedded: false, app: false }));
-  if (!PAID.includes(plan as Plan)) return json({ error: 'Choose Plus, Pro or Max.', code: 'invalid_plan' }, 400);
+  if (!PAID.includes(plan as Plan)) return json({ error: 'Choose Go, Plus, Pro or Max.', code: 'invalid_plan' }, 400);
   const origin = new URL(request.url).origin;
   // Lumio's own payment page: the subscriber switches plans instead.
   if (embedded && subscribed(user)) return json({ error: `You’re already on Lumio ${planName(user.plan)}. Switch plans in Settings or on your account page.`, code: 'already_subscribed' }, 409);
@@ -154,7 +190,7 @@ export const CANCEL_REASONS: Record<string, string> = {
   other: 'Something else',
 };
 
-const PUBLIC_PAID = () => PAID.map((id) => ({ id, name: PLANS[id].name, price: PLANS[id].price }));
+const publicPlan = (id: Plan) => ({ id, name: PLANS[id].name, price: PLANS[id].price });
 type FullSub = Sub & { default_payment_method?: { card?: { brand: string; last4: string; exp_month: number; exp_year: number } } | null;
   customer?: any; items: { data: { id: string; price: { id: string; lookup_key?: string | null }; current_period_end?: number }[] } };
 
@@ -164,7 +200,8 @@ async function liveSubscription(env: Env, user: User) {
 
 // GET /api/billing/subscription: the plan, its subscription (if any) and what can be done with it.
 export async function subscription(env: Env, user: User) {
-  const base = { plan: user.plan, planName: planName(user.plan), plans: PUBLIC_PAID(), reasons: Object.entries(CANCEL_REASONS).map(([id, label]) => ({ id, label })) };
+  // `plans` stays what older Lumio Browsers can sell; `allPlans` adds Go (Lumio Browser 0.6.5+, the website).
+  const base = { plan: user.plan, planName: planName(user.plan), plans: LEGACY_PAID.map(publicPlan), allPlans: PAID.map(publicPlan), reasons: Object.entries(CANCEL_REASONS).map(([id, label]) => ({ id, label })) };
   if (!subscribed(user)) return json({ ...base, subscription: null });
   const sub = await liveSubscription(env, user);
   const applied = await applySubscription(env, sub); // keeps the account in step if a webhook was missed
@@ -192,7 +229,7 @@ export async function subscription(env: Env, user: User) {
 // Switching also undoes a pending cancellation.
 export async function changePlan(request: Request, env: Env, user: User) {
   const { plan } = await request.json<{ plan?: string }>().catch(() => ({ plan: undefined }));
-  if (!PAID.includes(plan as Plan)) return json({ error: 'Choose Plus, Pro or Max.', code: 'invalid_plan' }, 400);
+  if (!PAID.includes(plan as Plan)) return json({ error: 'Choose Go, Plus, Pro or Max.', code: 'invalid_plan' }, 400);
   if (!subscribed(user)) return json({ error: 'You don’t have a plan to switch yet. Choose one to subscribe.', code: 'no_subscription' }, 400);
   const sub = await liveSubscription(env, user);
   const item = sub.items.data[0];

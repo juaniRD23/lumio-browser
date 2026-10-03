@@ -3,7 +3,7 @@
 //   node scripts/setup.mjs --host lumio.gw607953.workers.dev --stripe   (only the Stripe keys, e.g. test → live)
 // Asks for each key with hidden input (Enter skips one) and stores it as a
 // Cloudflare Worker secret. With a Stripe key it also creates Lumio's plans
-// (Plus $20, Pro $100, Max $200 a month), its own billing-portal settings and
+// (Go $10, Plus $20, Pro $100, Max $200 a month), its own billing-portal settings and
 // the webhook, all tagged app=lumio, and stores the webhook's signing secret.
 // It also creates the key that encrypts connected apps' tokens (once).
 // Keys only go to Cloudflare (wrangler) and Stripe; nothing is printed or saved.
@@ -17,6 +17,7 @@ if (!process.argv.includes('--host') || !/^[a-z0-9.-]+$/.test(host)) {
   process.exit(1);
 }
 const PLANS = [
+  { key: 'lumio_go_monthly', name: 'Lumio Go', amount: 1000 },
   { key: 'lumio_plus_monthly', name: 'Lumio Plus', amount: 2000 },
   { key: 'lumio_pro_monthly', name: 'Lumio Pro', amount: 10000 },
   { key: 'lumio_max_monthly', name: 'Lumio Max', amount: 20000 },

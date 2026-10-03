@@ -61,7 +61,7 @@ select.field { appearance: none; padding-right: 30px; background: var(--field) u
 .bill-msg { padding: 18px 20px; color: var(--dim); display: flex; align-items: center; gap: 12px; }
 .bill-note { margin: 14px 16px 0; padding: 10px 14px; border-radius: 12px; background: #7ee2a812; border: 1px solid #7ee2a840; color: #bff1d3; font-size: 13px; }
 .bill-note.bad { background: #ff7a7a12; border-color: #ff7a7a40; color: #ffb4a8; }
-.bill-plans { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 16px; }
+.bill-plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; padding: 16px; }
 .bill-plan { display: flex; flex-direction: column; gap: 6px; padding: 16px; border-radius: 16px; background: var(--card2); border: 1px solid var(--line); }
 .bill-plan.pick { border-color: #86b7ff66; background: radial-gradient(260px 140px at 50% 0%, #86b7ff14, transparent 70%), var(--card2); }
 .bp-name { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-weight: 600; font-size: 15px; }

@@ -462,7 +462,7 @@ async function billingCall(path, body) {
 // after a successful payment), so Settings can show the new plan.
 let checkoutWin = null;
 async function openCheckout(w, plan) {
-  if (!['plus', 'pro', 'max'].includes(plan)) return { ok: false, error: 'Choose Plus, Pro or Max.' };
+  if (!['go', 'plus', 'pro', 'max'].includes(plan)) return { ok: false, error: 'Choose Go, Plus, Pro or Max.' };
   if (checkoutWin && !checkoutWin.isDestroyed()) { checkoutWin.focus(); return { ok: false, error: 'The payment window is already open.' }; }
   const token = account.token();
   if (!token) return { ok: false, error: 'Sign in to Lumio first.' };

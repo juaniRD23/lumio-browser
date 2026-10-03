@@ -202,6 +202,8 @@ test('settings: the subscription manager shows the plan, switches it in place, a
   const tabs = await L.main(() => global.lumio.tabs.tabs.length);
   await L.page(`document.getElementById('bill-change').click(); true`);
   assert.ok(await until(() => L.page(`!!document.querySelector('[data-switch=pro]')`)));
+  // Go ($10) is listed too, as a step down from Plus.
+  assert.match(await L.page(`document.querySelector('[data-switch=go]').closest('.bill-row').innerText`), /Go · \$10 a month[\s\S]*Switch/);
   await L.page(`document.querySelector('[data-switch=pro]').click(); true`);
   assert.match(await L.page(`document.querySelector('[data-switch=pro]').closest('.bill-row').innerText`), /pay the difference/);
   await L.page(`document.querySelector('[data-switch=pro]').click(); true`);

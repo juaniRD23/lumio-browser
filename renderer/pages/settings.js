@@ -152,11 +152,12 @@ function renderPlan() {
 // cancel with a reason, resume, update the card. The Lumio server does the
 // Stripe side (main.js billingCall / openCheckout).
 const DESCS = {
+  go: 'Thousands of messages, about 100 browser tasks and 50 pictures a week, with GPT-6 Luna, Ling and DeepSeek.',
   plus: 'Thousands of messages and hundreds of browser tasks a week, about 100 pictures, and Claude Sonnet, GPT-6.1 Sol, Gemini and Grok in Chat.',
   pro: 'About 6× Plus, and every model, including Claude Opus and GPT-6 Astra.',
   max: 'About 11× Plus, and every model.',
 };
-const ORDER = ['free', 'plus', 'pro', 'max'];
+const ORDER = ['free', 'go', 'plus', 'pro', 'max'];
 const BRANDS = { visa: 'Visa', mastercard: 'Mastercard', amex: 'American Express', discover: 'Discover', jcb: 'JCB', diners: 'Diners Club', unionpay: 'UnionPay' };
 const day = (t) => new Date(t).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: new Date(t).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
 let bill = null; // the last answer from page:billing
@@ -188,7 +189,7 @@ function renderBilling() {
   const sub = bill.subscription;
   $('#billing-title').textContent = sub ? 'Subscription' : 'Choose a plan';
   if (!sub) {
-    card.innerHTML = `${note}<div class="bill-plans">${bill.plans.map((p) => `
+    card.innerHTML = `${note}<div class="bill-plans">${(bill.allPlans || bill.plans).map((p) => `
       <article class="bill-plan ${p.id === 'plus' ? 'pick' : ''}">
         <div class="bp-name">${esc(p.name)}${p.id === 'plus' ? '<span class="pill">Most popular</span>' : ''}</div>
         <div class="bp-price">$${p.price}<small> a month</small></div>
@@ -205,7 +206,7 @@ function renderBilling() {
   const state = sub.status === 'past_due' ? { pill: '<span class="pill bad">Payment problem</span>', desc: 'Your last payment didn’t go through. Update your card to keep your plan.' }
     : sub.canceling ? { pill: '<span class="pill warn">Ending</span>', desc: `Ends on ${day(sub.periodEnd)}. After that you’re on Free.` }
       : { pill: '<span class="pill ok">Active</span>', desc: `Renews on ${day(sub.periodEnd)}${cardText ? ` · ${cardText}` : ''}` };
-  const others = bill.plans.filter((p) => p.id !== bill.plan);
+  const others = (bill.allPlans || bill.plans).filter((p) => p.id !== bill.plan);
   card.innerHTML = `${note}
     <div class="bill-top">
       <div class="grow"><div class="title">${esc(name)} · $${sub.price} a month</div><div class="desc">${esc(state.desc)}</div></div>
@@ -242,7 +243,7 @@ function renderBilling() {
     b.onclick = () => {
       // First click shows what happens; the second one switches.
       if (!b.dataset.sure) { b.dataset.sure = '1'; b.closest('.bill-row').querySelector('.confirm').hidden = false; b.textContent = 'Confirm'; return; }
-      const p = bill.plans.find((x) => x.id === b.dataset.switch);
+      const p = (bill.allPlans || bill.plans).find((x) => x.id === b.dataset.switch);
       act(b, 'page:billing-change', p.id, `You’re on Lumio ${p.name} now.`);
     };
   });

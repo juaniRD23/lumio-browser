@@ -478,7 +478,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
         <h2>Sign in to use Lumio AI</h2>
         ${l.connecting
     ? '<p>Continue with Google on the Lumio tab that opened. Lumio Browser signs in with you.</p>'
-    : `<p>Lumio AI runs on your Lumio account. It’s free to start, and Plus, Pro or Max give you much more.</p>
+    : `<p>Lumio AI runs on your Lumio account. It’s free to start, and paid plans from $10 a month give you much more.</p>
         <button class="btn primary" id="lumio-sign-in">Sign in to Lumio</button>`}`;
       messages.append(el);
       el.querySelector('#lumio-sign-in')?.addEventListener('click', () => api.send('account:sign-in'));

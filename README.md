@@ -10,7 +10,7 @@ A Chromium web browser with **Lumio AI** built in. Lumio sits in a side panel ne
 - **You stay in control.** Three approval modes: **Ask** (confirm every action), **Auto** (browse on its own, ask before touching your computer), **Bypass**. While Lumio works, the page (or, when it controls your computer, the whole screen) glows blue with a **Stop** button. Esc stops it too.
 - **Task progress.** For bigger jobs, Lumio keeps a checklist above the chat box and ticks off steps as it goes.
 - **Safe by design.** Page content is treated as untrusted data, never as instructions. Lumio never types passwords, payment or ID details. It stops to confirm before anything irreversible.
-- **Runs on your Lumio plan.** Sign in with a Lumio account and the AI runs on your plan. Every plan includes some use each week, Free too, and Plus, Pro and Max include much more. It uses one fast, inexpensive model (GPT-6 Luna); you choose how hard it thinks (Low, Medium or High) right under the chat box.
+- **Runs on your Lumio plan.** Sign in with a Lumio account and the AI runs on your plan. Every plan includes some use each week, Free too, and Go, Plus, Pro and Max include much more. It uses one fast, inexpensive model (GPT-6 Luna); you choose how hard it thinks (Low, Medium or High) right under the chat box.
 - **Everything a browser needs:**
   - tabs, multiple windows, pinned tabs, incognito windows, find, zoom, downloads, and a PDF viewer;
   - history search with time-range clearing;

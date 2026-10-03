@@ -143,13 +143,14 @@ export async function startMockLumio({ plan = 'plus' } = {}) {
       // ---- the plan and its subscription (Settings › Plan and usage)
       if (url.pathname.startsWith('/api/billing/')) {
         if (!who(req)) return json(res, 401, { error: 'Sign in.', code: 'sign_in_required' });
-        const names = { free: 'Free', plus: 'Plus', pro: 'Pro', max: 'Max' };
-        const prices = { plus: 20, pro: 100, max: 200 };
+        const names = { free: 'Free', go: 'Go', plus: 'Plus', pro: 'Pro', max: 'Max' };
+        const prices = { go: 10, plus: 20, pro: 100, max: 200 };
         const periodEnd = Date.UTC(2026, 9, 31, 12); // October 31 in any US or European time zone
         if (url.pathname === '/api/billing/subscription') {
           return json(res, 200, {
             plan: state.plan, planName: names[state.plan],
             plans: ['plus', 'pro', 'max'].map((id) => ({ id, name: names[id], price: prices[id] })),
+            allPlans: ['go', 'plus', 'pro', 'max'].map((id) => ({ id, name: names[id], price: prices[id] })),
             reasons: [{ id: 'too_expensive', label: 'It costs too much' }, { id: 'unused', label: 'I don’t use it enough' }, { id: 'other', label: 'Something else' }],
             subscription: state.plan === 'free' ? null : { status: 'active', canceling: state.canceling, periodEnd, price: prices[state.plan], card: { brand: 'visa', last4: '4242', expMonth: 12, expYear: 2030 } },
           });

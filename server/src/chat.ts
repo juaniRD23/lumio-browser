@@ -10,7 +10,7 @@ import { type Aspect, IMAGE_MODEL, makeImage } from './images.ts';
 import { CHAT_DEFAULT, MODELS, canUse, findModel, publicModel } from './models.ts';
 import { complete, ndjsonStream, type Reply } from './openrouter.ts';
 import { verifyNow } from './spend.ts';
-import { costOf, LimitError, reserve, settle } from './usage.ts';
+import { costOf, LimitError, planName, reserve, settle } from './usage.ts';
 import { AgentError, type Env, json, randomHex, sha256 } from './util.ts';
 
 const HISTORY = 40; // messages sent to the model
@@ -102,7 +102,7 @@ export async function send(request: Request, env: Env, ctx: ExecutionContext, us
   if ((!text && !ids.length) || text.length > 20000) return json({ error: 'Write a message (up to 20,000 characters).', code: 'invalid_request' }, 400);
   const model = findModel(body?.model ?? CHAT_DEFAULT);
   if (!model) return json({ error: 'Choose a model from the list.', code: 'model_not_supported' }, 400);
-  if (!canUse(user.plan, model)) return json({ error: `${model.name} needs Lumio ${model.minimumPlan === 'pro' ? 'Pro' : 'Plus'} or higher.`, code: 'model_plan_required', plan: model.minimumPlan }, 403);
+  if (!canUse(user.plan, model)) return json({ error: `${model.name} needs Lumio ${planName(model.minimumPlan)} or higher.`, code: 'model_plan_required', plan: model.minimumPlan }, 403);
   const reasoning = BROWSER_REASONING.includes(body?.reasoning as never) ? body!.reasoning! : 'medium';
   const timeZone = typeof body?.timeZone === 'string' && /^[A-Za-z0-9_+\-/]{1,64}$/.test(body.timeZone) ? body.timeZone : 'UTC';
   const now = Date.now();

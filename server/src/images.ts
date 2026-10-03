@@ -29,7 +29,7 @@ function fromDataUrl(url: string) {
 // Makes one image and bills it. Throws LimitError when the allowance can't cover it.
 export async function makeImage(env: Env, user: { id: string; plan: Plan }, prompt: string, aspect: Aspect = 'square'): Promise<Made> {
   if (!env.OPENROUTER_API_KEY) throw new AgentError('Lumio AI isn’t connected to its model right now.', 503, 'model_not_connected');
-  if (user.plan === 'free' || limits(user.plan).weekly < Math.ceil(IMAGE_MODEL.hold * 1_000_000)) throw new LimitError('Making pictures needs Lumio Plus or higher. Upgrade to make pictures.');
+  if (user.plan === 'free' || limits(user.plan).weekly < Math.ceil(IMAGE_MODEL.hold * 1_000_000)) throw new LimitError('Making pictures needs a paid Lumio plan (Go or higher). Upgrade to make pictures.');
   const key = await sha256(`image|${user.id}|${randomHex(8)}`);
   await hold(env, { key, owner: user.id, plan: user.plan, requestHash: key, kind: 'image', held: Math.ceil(IMAGE_MODEL.hold * 1_000_000) });
   let cost = 0;

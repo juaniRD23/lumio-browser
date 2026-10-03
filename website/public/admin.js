@@ -51,7 +51,7 @@ function render(d) {
   const aiMonth = or?.month ?? m.total;
   $('#money').hidden = false;
   $('#money-split').innerHTML = [
-    ['Free', (p.free || 0).toLocaleString()], ['Plus', (p.plus || 0).toLocaleString()], ['Pro', (p.pro || 0).toLocaleString()], ['Max', (p.max || 0).toLocaleString()],
+    ['Free', (p.free || 0).toLocaleString()], ['Go', (p.go || 0).toLocaleString()], ['Plus', (p.plus || 0).toLocaleString()], ['Pro', (p.pro || 0).toLocaleString()], ['Max', (p.max || 0).toLocaleString()],
     ['Revenue a month', money(d.monthlyRevenue)], ['AI cost this month', money(aiMonth)],
   ].map(([k, v]) => `<div><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('');
 

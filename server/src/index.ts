@@ -43,7 +43,7 @@ import { AgentError, type Env, fail, json, sameOrigin } from './util.ts';
 
 export type { Env };
 
-const PUBLIC_PLANS = (['free', 'plus', 'pro', 'max'] as const).map((id) => ({ id, name: PLANS[id].name, price: PLANS[id].price, weeklyUsd: PLANS[id].weekly }));
+const PUBLIC_PLANS = (['free', 'go', 'plus', 'pro', 'max'] as const).map((id) => ({ id, name: PLANS[id].name, price: PLANS[id].price, weeklyUsd: PLANS[id].weekly }));
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {

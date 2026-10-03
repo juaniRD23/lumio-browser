@@ -142,6 +142,11 @@ beforeEach(() => {
       const cus = /^\/v1\/customers\/(\w+)$/.exec(path);
       if (cus && cus[1] === 'cus_1') return Response.json({ id: 'cus_1' });
       if (cus) return Response.json({ error: { code: 'resource_missing', message: `No such customer: '${cus[1]}'` } }, { status: 404 });
+      // Making a plan's product and price (Go, the first time it's chosen).
+      if (path === '/v1/products' && opts.method === 'POST') return Response.json({ id: `prod_${params.name.toLowerCase().replace(/\W+/g, '_')}` });
+      if (/^\/v1\/products\/\w+$/.test(path)) return Response.json({ id: path.split('/').pop() });
+      if (path === '/v1/prices' && opts.method === 'POST') return Response.json({ id: `price_${params.lookup_key.replace(/^lumio_|_monthly$/g, '')}` });
+      if (path === '/v1/billing_portal/configurations/bpc_lumio') return Response.json({ id: 'bpc_lumio', features: { subscription_update: { products: [{ product: 'prod_plus', prices: ['price_plus'] }] } } });
       if (path === '/v1/prices') return Response.json({ data: [{ id: 'price_plus', lookup_key: 'lumio_plus_monthly' }, { id: 'price_pro', lookup_key: 'lumio_pro_monthly' }, { id: 'price_max', lookup_key: 'lumio_max_monthly' }] });
       if (path === '/v1/checkout/sessions') return Response.json(params.ui_mode === 'embedded' ? { id: 'cs_e1', client_secret: 'cs_e1_secret_abc' } : { id: 'cs_1', url: 'https://checkout.stripe.test/cs_1' });
       const cs = /^\/v1\/checkout\/sessions\/(\w+)$/.exec(path);
@@ -250,7 +255,7 @@ test('logout ends the session; cookie POSTs from other sites are refused', async
 // ---------------------------------------------------------------- billing
 test('plans are public; checkout starts a Stripe subscription tagged as Lumio', async () => {
   const plans = (await (await call('/api/billing/plans')).json()).plans;
-  assert.deepEqual(plans.map((p) => [p.id, p.price]), [['free', 0], ['plus', 20], ['pro', 100], ['max', 200]]);
+  assert.deepEqual(plans.map((p) => [p.id, p.price]), [['free', 0], ['go', 10], ['plus', 20], ['pro', 100], ['max', 200]]);
   const { token } = await signIn();
   assert.equal((await call('/api/billing/checkout', { method: 'POST', body: { plan: 'plus' } })).status, 401);
   assert.equal((await call('/api/billing/checkout', { cookie: token, method: 'POST', body: { plan: 'gold' } })).status, 400);
@@ -267,6 +272,30 @@ test('plans are public; checkout starts a Stripe subscription tagged as Lumio', 
   assert.equal(s.client_reference_id, userRow().id);
   assert.equal(s.success_url, `${SITE}/account?upgraded=1`);
   assert.equal(userRow().stripe_customer_id, 'cus_1');
+});
+
+test('Go ($10): its Stripe price is made the first time someone picks it, then the webhook sets the plan', async () => {
+  const { token } = await signIn();
+  const res = await call('/api/billing/checkout', { cookie: token, method: 'POST', body: { plan: 'go' } });
+  assert.deepEqual(await res.json(), { url: 'https://checkout.stripe.test/cs_1' });
+  const product = calls.stripe.find((c) => c.path === '/v1/products' && c.method === 'POST').params;
+  assert.deepEqual([product.name, product.statement_descriptor, product['metadata[app]']], ['Lumio Go', 'FIFTY SITES LUMIO', 'lumio']);
+  const price = calls.stripe.find((c) => c.path === '/v1/prices' && c.method === 'POST').params;
+  assert.deepEqual([price.unit_amount, price.currency, price['recurring[interval]'], price.lookup_key, price['metadata[app]']], ['1000', 'usd', 'month', 'lumio_go_monthly', 'lumio']);
+  assert.equal(calls.stripe.find((c) => c.path === '/v1/checkout/sessions').params['line_items[0][price]'], 'price_go');
+  const portal = calls.stripe.find((c) => c.path === '/v1/billing_portal/configurations/bpc_lumio' && c.method === 'POST').params;
+  assert.equal(portal['features[subscription_update][products][0][product]'], 'prod_lumio_go');
+  assert.equal(portal['features[subscription_update][products][1][prices][0]'], 'price_plus', 'keeps the other plans');
+  // Made once: the next checkout uses it.
+  await call('/api/billing/checkout', { cookie: token, method: 'POST', body: { plan: 'go' } });
+  assert.equal(calls.stripe.filter((c) => c.path === '/v1/prices' && c.method === 'POST').length, 1);
+  // Paid: the plan is Go, with its weekly allowance.
+  const id = userRow().id;
+  stripeState.subscriptions.sub_go = { id: 'sub_go', customer: 'cus_1', status: 'active', metadata: { app: 'lumio', user_id: id }, items: { data: [{ price: { lookup_key: 'lumio_go_monthly' }, current_period_end: 1893456000 }] } };
+  const done = { id: 'evt_go', type: 'checkout.session.completed', data: { object: { mode: 'subscription', subscription: 'sub_go', customer: 'cus_1', client_reference_id: id, metadata: { app: 'lumio', user_id: id } } } };
+  assert.deepEqual(await (await hook(done)).json(), { ok: true, result: 'go' });
+  const usage = (await (await call('/api/usage', { cookie: token })).json()).usage;
+  assert.deepEqual([usage.planName, usage.windows[0].limit], ['Go', 1_700_000]);
 });
 
 test('the signed webhook sets the plan from the subscription, and ignores other payments', async () => {
@@ -348,7 +377,8 @@ test('managing the plan in Lumio: see it, switch in place, cancel with a reason,
   const { token } = await signIn();
   const free = await (await call('/api/billing/subscription', { token })).json();
   assert.equal(free.subscription, null);
-  assert.deepEqual(free.plans.map((p) => [p.id, p.price]), [['plus', 20], ['pro', 100], ['max', 200]]);
+  assert.deepEqual(free.plans.map((p) => [p.id, p.price]), [['plus', 20], ['pro', 100], ['max', 200]], 'what Lumio Browser 0.6.4 and older can sell');
+  assert.deepEqual(free.allPlans.map((p) => [p.id, p.price]), [['go', 10], ['plus', 20], ['pro', 100], ['max', 200]]);
   assert.ok(free.reasons.some((r) => r.id === 'too_expensive' && r.label === 'It costs too much'));
 
   sql.prepare("UPDATE users SET plan = 'plus', plan_status = 'active', subscription_id = 'sub_1', stripe_customer_id = 'cus_1'").run();
@@ -770,26 +800,28 @@ test('spend page: only the owner sees OpenRouter’s charges next to what Lumio 
   assert.equal((await (await call('/api/admin/spend', { token })).json()).monthlyRevenue, 20);
 });
 
-test('plan budgets: Plus leaves 15% profit after fees; Pro and Max are set higher; no 5-hour limit', async () => {
+test('plan budgets: Go and Plus leave 15% profit after fees; Pro and Max are set higher; no 5-hour limit', async () => {
   // Price - 15% profit - Stripe (3.6% + $0.30) - OpenRouter's 5.5% fee, per week.
+  assert.equal(weeklyBudget(10), 1.7);
   assert.equal(weeklyBudget(20), 3.48);
   assert.equal(weeklyBudget(100), 17.67);
   assert.equal(weeklyBudget(200), 35.42);
   assert.deepEqual([PLANS.free.weekly, PLANS.plus.weekly, PLANS.pro.weekly, PLANS.max.weekly], [0.1, 3.48, 20, 40]);
   // No paid plan loses money even at 100% use.
-  for (const id of ['plus', 'pro', 'max']) {
+  for (const id of ['go', 'plus', 'pro', 'max']) {
     const p = PLANS[id];
     assert.ok(p.price - p.weekly * (365.25 / 12 / 7) * 1.055 - (p.price * 0.036 + 0.3) > 0, `${id} is profitable at full use`);
   }
-  for (const id of ['plus']) {
+  for (const id of ['go', 'plus']) {
     const p = PLANS[id];
     const monthlyAi = p.weekly * (365.25 / 12 / 7) * 1.055;
     const fees = p.price * 0.036 + 0.3;
     const profit = p.price - monthlyAi - fees;
-    assert.ok(profit >= p.price * 0.15 && profit < p.price * 0.151, `${id}: ${profit}`);
+    // The weekly amount is rounded down to whole cents: at most a cent a week more profit.
+    assert.ok(profit >= p.price * 0.15 && profit < p.price * 0.15 + 0.01 * (365.25 / 12 / 7) * 1.055, `${id}: ${profit}`);
   }
   const plans = (await (await call('/api/billing/plans')).json()).plans;
-  assert.deepEqual(plans.map((p) => p.weeklyUsd), [0.1, 3.48, 20, 40]);
+  assert.deepEqual(plans.map((p) => p.weeklyUsd), [0.1, 1.7, 3.48, 20, 40]);
 });
 
 test('Chat: attach pictures and documents; the model sees them; only the owner can read them', async () => {
@@ -870,7 +902,7 @@ test('pictures: out of allowance is a plain refusal; Lumio Browser gets the pict
   sql.prepare("INSERT INTO steps (key, owner, plan, kind, request_hash, status, held_microusd, cost_microusd, created_at) VALUES ('x', ?, 'free', 'chat', 'h', 'done', 0, 40000, ?)").run(userRow().id, Date.now() - 1000);
   const refused = await call('/v1/images', { token, method: 'POST', body: { prompt: 'a cat' } });
   assert.equal(refused.status, 429);
-  assert.deepEqual(await refused.json(), { error: 'Making pictures needs Lumio Plus or higher. Upgrade to make pictures.', code: 'usage_limit' });
+  assert.deepEqual(await refused.json(), { error: 'Making pictures needs a paid Lumio plan (Go or higher). Upgrade to make pictures.', code: 'usage_limit' });
   sql.prepare("UPDATE users SET plan = 'plus'").run();
   const ok = await (await call('/v1/images', { token, method: 'POST', body: { prompt: 'a cat', aspect: 'portrait' } })).json();
   assert.equal(ok.image, PNG_URL);

@@ -30,7 +30,7 @@ const EFFORT = [
   { id: 'medium', name: 'Medium', desc: 'Balanced: good for most things.' },
   { id: 'high', name: 'High', desc: 'Thinks longer on hard problems.' },
 ];
-const PLAN_NAMES = { plus: 'Plus', pro: 'Pro', max: 'Max' };
+const PLAN_NAMES = { go: 'Go', plus: 'Plus', pro: 'Pro', max: 'Max' };
 const IDEAS = [
   { title: 'Explain something', text: 'Explain how compound interest works, with a simple example.' },
   { title: 'Write for me', text: 'Write a friendly email asking my landlord to fix the heating.' },
