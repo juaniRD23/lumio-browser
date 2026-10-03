@@ -6,3 +6,4 @@ preload/dist/
 website/.wrangler/
 *.log
 renderer/ui/web/
+flavor.json

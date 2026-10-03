@@ -14,12 +14,29 @@ const { execFile, spawn } = require('child_process');
 
 const REPO = 'juaniRD23/lumio-browser';
 const LATEST = `https://api.github.com/repos/${REPO}/releases/latest`;
-const BUNDLE_ID = 'online.lumio-usa.browser';
+// Lumio Beta follows pre-releases tagged vX.Y.Z-beta.N (GitHub's "latest" skips them).
+const BETAS = `https://api.github.com/repos/${REPO}/releases?per_page=30`;
 
-// 1.10.0 > 1.9.2; a pre-release suffix sorts before the plain version.
+// 1.10.0 > 1.9.2; a pre-release suffix sorts before the plain version, and
+// beta.10 comes after beta.9.
+function comparePre(a, b) {
+  const x = a.split('.');
+  const y = b.split('.');
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    if (x[i] === undefined) return -1;
+    if (y[i] === undefined) return 1;
+    const nx = /^\d+$/.test(x[i]);
+    const ny = /^\d+$/.test(y[i]);
+    const d = nx && ny ? Number(x[i]) - Number(y[i]) : x[i] < y[i] ? -1 : x[i] > y[i] ? 1 : 0;
+    if (d) return Math.sign(d);
+  }
+  return 0;
+}
 function compareVersions(a, b) {
   const parse = (v) => {
-    const [main, pre = ''] = String(v).trim().replace(/^v/i, '').split('-');
+    const s = String(v).trim().replace(/^v/i, '');
+    const cut = s.indexOf('-');
+    const [main, pre] = cut < 0 ? [s, ''] : [s.slice(0, cut), s.slice(cut + 1)];
     return { nums: main.split('.').map((n) => parseInt(n, 10) || 0), pre };
   };
   const x = parse(a);
@@ -31,7 +48,7 @@ function compareVersions(a, b) {
   if (x.pre === y.pre) return 0;
   if (!x.pre) return 1;
   if (!y.pre) return -1;
-  return x.pre < y.pre ? -1 : 1;
+  return comparePre(x.pre, y.pre);
 }
 
 // The "What's new" text of a release (Markdown from GitHub), without the
@@ -46,13 +63,20 @@ function releaseNotes(body) {
 
 // The installer that fits this computer (fixed names, see build/package.mjs).
 // On Windows: the setup program for copies it installed, the zip otherwise.
-function assetName(platform = process.platform, arch = process.arch, { windowsSetup = false } = {}) {
-  if (platform === 'darwin') return arch === 'arm64' ? 'Lumio-Browser-mac-apple-silicon.dmg' : 'Lumio-Browser-mac-intel.dmg';
-  if (platform === 'win32' && arch === 'x64') return windowsSetup ? 'Lumio-Browser-Setup-windows-x64.exe' : 'Lumio-Browser-windows-x64.zip';
+function assetName(platform = process.platform, arch = process.arch, { windowsSetup = false, prefix = 'Lumio-Browser' } = {}) {
+  if (platform === 'darwin') return arch === 'arm64' ? `${prefix}-mac-apple-silicon.dmg` : `${prefix}-mac-intel.dmg`;
+  if (platform === 'win32' && arch === 'x64') return windowsSetup ? `${prefix}-Setup-windows-x64.exe` : `${prefix}-windows-x64.zip`;
   return null;
 }
 
 // Installed with Lumio's Windows setup (it leaves its uninstaller next to the app).
+// The newest beta that has this computer's installer (from the releases list).
+function newestBeta(list, name) {
+  return (Array.isArray(list) ? list : [])
+    .filter((r) => !r.draft && r.prerelease && /^v?\d+\.\d+\.\d+-beta\.\d+$/.test(r.tag_name || '') && (r.assets || []).some((a) => a.name === name))
+    .sort((a, b) => compareVersions(b.tag_name, a.tag_name))[0] || {};
+}
+
 function installedBySetup(exePath = process.execPath) {
   return fs.existsSync(path.join(path.dirname(exePath), 'Uninstall Lumio Browser.exe'));
 }
@@ -82,8 +106,9 @@ class Updater {
   // quit(): closes Lumio so the swap can happen. installTarget: override for tests.
   constructor({ currentVersion, fetchImpl, workDir, onChange = () => {}, platform = process.platform, arch = process.arch,
     exePath = process.execPath, quit = () => {}, openPath = () => {}, api = LATEST, fakeExit = false, installTarget = null,
-    windowsSetup = platform === 'win32' && installedBySetup(exePath), store = false } = {}) {
-    Object.assign(this, { currentVersion, fetchImpl, workDir, onChange, platform, arch, exePath, quit, openPath, api, fakeExit, installTarget, windowsSetup, store });
+    windowsSetup = platform === 'win32' && installedBySetup(exePath), store = false,
+    beta = false, appName = 'Lumio Browser', bundleId = 'online.lumio-usa.browser', assetPrefix = 'Lumio-Browser' } = {}) {
+    Object.assign(this, { currentVersion, fetchImpl, workDir, onChange, platform, arch, exePath, quit, openPath, api, fakeExit, installTarget, windowsSetup, store, beta, appName, bundleId, assetPrefix });
     this.release = null; // { version, url, size, digest, notesUrl, name }
     this.file = null; // the downloaded, verified installer
     this.busy = null;
@@ -104,12 +129,13 @@ class Updater {
     try {
       const res = await this.fetchImpl(this.api, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Lumio-Browser' }, signal: AbortSignal.timeout(20_000) });
       if (!res.ok) throw new Error(res.status === 404 ? 'No releases yet.' : `GitHub answered ${res.status}.`);
-      const rel = await res.json();
+      const name = assetName(this.platform, this.arch, { windowsSetup: this.windowsSetup, prefix: this.assetPrefix });
+      const answer = await res.json();
+      const rel = this.beta ? newestBeta(answer, name) : answer;
       const version = String(rel.tag_name || '').replace(/^v/i, '');
-      const name = assetName(this.platform, this.arch, { windowsSetup: this.windowsSetup });
       const asset = (rel.assets || []).find((a) => a.name === name);
       const { notes, critical } = releaseNotes(rel.body);
-      if (!version || rel.draft || rel.prerelease || compareVersions(version, this.currentVersion) <= 0 || !asset) {
+      if (!version || rel.draft || (rel.prerelease && !this.beta) || compareVersions(version, this.currentVersion) <= 0 || !asset) {
         this.release = null;
         return this.set({ status: 'current', latest: version || null, error: null, notesUrl: rel.html_url || null, notes: '', critical: false });
       }
@@ -212,8 +238,8 @@ class Updater {
     const fresh = path.join(stage, path.basename(target));
     await run('hdiutil', ['attach', '-nobrowse', '-readonly', '-noautoopen', '-mountpoint', mnt, dmg]);
     try {
-      const src = path.join(mnt, 'Lumio Browser.app');
-      if (!fs.existsSync(src)) throw new Error('the installer has no Lumio Browser.app');
+      const src = path.join(mnt, `${this.appName}.app`);
+      if (!fs.existsSync(src)) throw new Error(`the installer has no ${this.appName}.app`);
       await run('ditto', [src, fresh]);
     } finally {
       await run('hdiutil', ['detach', '-quiet', '-force', mnt]).catch(() => {});
@@ -221,7 +247,7 @@ class Updater {
     const plist = path.join(fresh, 'Contents', 'Info.plist');
     const id = (await run('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleIdentifier', plist])).trim();
     const version = (await run('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleShortVersionString', plist])).trim();
-    if (id !== BUNDLE_ID) throw new Error('the installer is not Lumio Browser');
+    if (id !== this.bundleId) throw new Error(`the installer is not ${this.appName}`);
     if (version !== this.release.version) throw new Error(`the installer is version ${version}, not ${this.release.version}`);
     await run('codesign', ['--verify', '--deep', '--strict', fresh]);
     // Once this copy is signed with a Developer ID, an update must be signed by
@@ -276,4 +302,4 @@ class Updater {
   }
 }
 
-module.exports = { releaseNotes, Updater, compareVersions, assetName, installedBySetup, LATEST };
+module.exports = { releaseNotes, Updater, compareVersions, assetName, installedBySetup, newestBeta, LATEST, BETAS };

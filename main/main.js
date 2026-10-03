@@ -5,9 +5,13 @@ const {
 const fs = require('fs');
 const path = require('path');
 
+const FLAVOR = require('./flavor');
+
+// Lumio Beta keeps its own profile (bookmarks, sign-in, settings) next to the normal app's.
 if (process.env.LUMIO_USER_DATA) app.setPath('userData', process.env.LUMIO_USER_DATA);
+else if (FLAVOR.beta) app.setPath('userData', path.join(app.getPath('appData'), FLAVOR.name));
 if (process.env.LUMIO_DOWNLOADS) app.setPath('downloads', process.env.LUMIO_DOWNLOADS); // tests
-app.setName('Lumio Browser');
+app.setName(FLAVOR.name);
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'lumio', privileges: { standard: true, secure: true, supportFetchAPI: true, codeCache: true } },
@@ -26,7 +30,7 @@ const { ExtensionManager } = require('./extensions');
 const { LumioAccount } = require('./account');
 const { PasswordManager } = require('./password-manager');
 const screenAura = require('./ai/screen-aura');
-const { Updater, LATEST, compareVersions } = require('./updater');
+const { Updater, LATEST, BETAS, compareVersions } = require('./updater');
 const { generatePassword } = require('./passwords');
 const importer = require('./importer');
 const { Schedules, describe: describeSchedule } = require('./schedules');
@@ -698,6 +702,7 @@ function registerIpc() {
     extensions: !w.incognito && !!extensions?.ece,
     platform: process.platform,
     version: app.getVersion(),
+    beta: FLAVOR.beta,
     update: updater?.state || null,
   }));
 
@@ -1334,11 +1339,12 @@ app.whenReady().then(async () => {
   updater = new Updater({
     currentVersion: app.getVersion(),
     fetchImpl: (url, opts) => net.fetch(url, opts),
-    workDir: path.join(app.getPath('temp'), 'Lumio Browser Update'),
+    workDir: path.join(app.getPath('temp'), `${FLAVOR.name} Update`),
     onChange: (state) => { alive().forEach((w) => w.emit('update', state)); announceUpdate(state); },
     quit: process.env.LUMIO_UPDATE_TARGET && process.env.LUMIO_TEST ? () => {} : () => app.quit(),
     openPath: (file) => shell.openPath(file),
-    api: testUpdates ? process.env.LUMIO_UPDATE_API : LATEST,
+    api: testUpdates ? process.env.LUMIO_UPDATE_API : FLAVOR.beta ? BETAS : LATEST,
+    beta: FLAVOR.beta, appName: FLAVOR.name, bundleId: FLAVOR.bundleId, assetPrefix: FLAVOR.assetPrefix,
     store: !!process.windowsStore, // the Microsoft Store updates it
     ...(process.env.LUMIO_TEST && process.env.LUMIO_UPDATE_TARGET ? { installTarget: process.env.LUMIO_UPDATE_TARGET, fakeExit: true } : {}),
   });

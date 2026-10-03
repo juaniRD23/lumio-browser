@@ -712,6 +712,7 @@ $('#menu-btn').addEventListener('click', () => {
   api.send('app:menu', { x: r.right, y: r.bottom + 4 });
 });
 $('#incognito-badge').hidden = !init.incognito;
+$('#beta-badge').hidden = !init.beta; // Lumio Beta (main/flavor.js)
 $('#ext-area').hidden = !init.extensions;
 renderTabs();
 renderToolbar();

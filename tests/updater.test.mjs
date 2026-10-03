@@ -141,3 +141,29 @@ test('Windows: copies installed with the setup update with the setup; zip copies
   assert.equal(asked, 0, 'the Microsoft Store updates it');
   assert.equal(new U({ currentVersion: '1.0.0', platform: 'win32', arch: 'x64', exePath: exe }).windowsSetup, true);
 });
+
+// ---------------------------------------------------------------- Lumio Beta
+test('Lumio Beta: betas sort by number; its own installers; it follows the newest beta only', async () => {
+  assert.equal(compareVersions('0.6.7-beta.10', '0.6.7-beta.9'), 1, 'beta.10 after beta.9');
+  assert.equal(compareVersions('0.6.7', '0.6.7-beta.3'), 1, 'the release after its betas');
+  assert.equal(compareVersions('0.6.7-beta.1', '0.6.6'), 1);
+  assert.equal(assetName('darwin', 'arm64', { prefix: 'Lumio-Beta' }), 'Lumio-Beta-mac-apple-silicon.dmg');
+  const beta = (tag, prerelease = true, name = 'Lumio-Beta-mac-apple-silicon.dmg') => ({ ...release({ tag, name }), prerelease });
+  const list = [beta('v0.6.7-beta.2'), beta('v0.6.7-beta.10'), beta('v0.6.8', false, 'Lumio-Browser-mac-apple-silicon.dmg'), beta('v0.6.7-beta.11', true, 'Lumio-Browser-mac-apple-silicon.dmg')];
+  const { u } = make({ currentVersion: '0.6.7-beta.2', beta: true, assetPrefix: 'Lumio-Beta', appName: 'Lumio Beta', bundleId: 'online.lumio-usa.browser.beta', fetchImpl: fakeFetch(list) });
+  assert.equal((await u.check()).status, 'available');
+  assert.equal(u.state.latest, '0.6.7-beta.10', 'the newest beta that has a Lumio Beta installer');
+  assert.equal(u.release.name, 'Lumio-Beta-mac-apple-silicon.dmg');
+  // The normal app ignores betas.
+  const normal = make({ currentVersion: '0.6.6', fetchImpl: fakeFetch(beta('v0.6.7-beta.10', true, 'Lumio-Browser-mac-apple-silicon.dmg')) }).u;
+  assert.equal((await normal.check()).status, 'current');
+  // Nothing newer: up to date.
+  const done = make({ currentVersion: '0.6.7-beta.10', beta: true, assetPrefix: 'Lumio-Beta', fetchImpl: fakeFetch(list) }).u;
+  assert.equal((await done.check()).status, 'current');
+});
+
+test('Lumio Beta: the next beta version', async () => {
+  const { nextBeta } = await import('../scripts/beta.mjs');
+  assert.equal(nextBeta('0.6.6', []), '0.6.7-beta.1');
+  assert.equal(nextBeta('0.6.6', ['v0.6.7-beta.1', 'v0.6.7-beta.2', 'v0.6.5-beta.9']), '0.6.7-beta.3');
+});

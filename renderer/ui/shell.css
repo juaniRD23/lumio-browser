@@ -965,3 +965,7 @@ body.windows .sb-traffic { min-width: 0; }
 
 /* How long a task took (under its answer). */
 .task-timing { margin: -2px 0 10px; color: var(--label); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+
+/* Lumio Beta's badge, next to the profile button. */
+#beta-badge { align-self: center; flex: none; height: 22px; padding: 0 9px; border-radius: 999px; display: inline-flex; align-items: center; background: #ff9f4320; color: #ffbf80; font-size: 11.5px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
+#beta-badge[hidden] { display: none; }

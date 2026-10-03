@@ -9,6 +9,9 @@
 //   node build/package.mjs --install   → also copy it into /Applications
 //   node build/package.mjs --release   → dist/release/: Mac DMGs (Apple silicon
 //                                        and Intel) and a Windows x64 ZIP
+//   … --release --mac --beta            → Lumio Beta: the same app as a separate
+//                                        "Lumio Beta.app" (own bundle id, icon,
+//                                        profile, update channel) for testing
 import { fileURLToPath } from 'node:url';
 import { packager } from '@electron/packager';
 import { sign as osxSign } from '@electron/osx-sign';
@@ -28,16 +31,28 @@ const NOTARY = process.env.APPLE_API_KEY_PATH && process.env.APPLE_API_KEY_ID &&
   : null;
 const HELPER_ID = 'online.lumio-usa.browser.helper';
 
+// Lumio Beta (main/flavor.js reads flavor.json in the app to know it's the beta).
+const BETA = arg('--beta');
+const APP = BETA ? 'Lumio Beta' : 'Lumio Browser';
+const PREFIX = BETA ? 'Lumio-Beta' : 'Lumio-Browser';
+const flavorFile = path.join(root, 'flavor.json');
+fs.rmSync(flavorFile, { force: true });
+if (BETA) {
+  if (arg('--windows') || !arg('--mac')) throw new Error('Lumio Beta is built for the Mac only: use --release --mac --beta.');
+  fs.writeFileSync(flavorFile, JSON.stringify({ beta: true }) + '\n');
+  process.on('exit', () => fs.rmSync(flavorFile, { force: true }));
+}
+
 const common = {
   dir: root,
-  name: 'Lumio Browser',
-  executableName: 'Lumio Browser',
+  name: APP,
+  executableName: APP,
   out: dist,
   overwrite: true,
   asar: true,
   prune: true,
-  appVersion: pkg.version,
-  buildVersion: pkg.version,
+  appVersion: pkg.version, // 0.6.7, or 0.6.7-beta.2 for Lumio Beta
+  buildVersion: pkg.version.split('-')[0], // CFBundleVersion: numbers only
   appCopyright: 'Lumio · GPL-3.0',
   ignore: [
     /^\/dist($|\/)/,
@@ -58,8 +73,8 @@ function macOptions(arch, helper) {
     ...common,
     platform: 'darwin',
     arch,
-    icon: path.join(root, 'build', 'icon.icns'),
-    appBundleId: 'online.lumio-usa.browser',
+    icon: path.join(root, 'build', BETA ? 'icon-beta.icns' : 'icon.icns'),
+    appBundleId: BETA ? 'online.lumio-usa.browser.beta' : 'online.lumio-usa.browser',
     appCategoryType: 'public.app-category.productivity',
     extraResource: [helper],
     protocols: [{ name: 'Web page', schemes: ['http', 'https'] }],
@@ -147,7 +162,7 @@ async function buildMac(arch) {
   const chip = arch === 'x64' ? 'x86_64' : 'arm64';
   execFileSync('sh', [path.join(root, 'native', 'build.sh')], { env: { ...process.env, ARCH: chip }, stdio: 'inherit' });
   const [out] = await packager(macOptions(arch, path.join(root, 'native', 'bin', chip, 'lumio-helper')));
-  return signApp(path.join(out, 'Lumio Browser.app'));
+  return signApp(path.join(out, `${APP}.app`));
 }
 
 // Windows: the PowerShell helper ships next to the app's resources.
@@ -171,15 +186,15 @@ async function buildWindows(arch = 'x64') {
 
 function dmg(app, arch) {
   const stage = fs.mkdtempSync(path.join(dist, 'dmg-'));
-  execFileSync('ditto', [app, path.join(stage, 'Lumio Browser.app')]);
+  execFileSync('ditto', [app, path.join(stage, `${APP}.app`)]);
   fs.symlinkSync('/Applications', path.join(stage, 'Applications'));
   // No version in the name, so /releases/latest/download/<name> links stay valid.
-  const file = path.join(release, `Lumio-Browser-mac-${arch === 'x64' ? 'intel' : 'apple-silicon'}.dmg`);
+  const file = path.join(release, `${PREFIX}-mac-${arch === 'x64' ? 'intel' : 'apple-silicon'}.dmg`);
   // hdiutil sometimes fails with "Resource busy" while macOS (Spotlight,
   // XProtect) is still scanning the new files, mostly on CI: try a few times.
   for (let attempt = 1; ; attempt++) {
     try {
-      execFileSync('hdiutil', ['create', '-volname', 'Lumio Browser', '-srcfolder', stage, '-ov', '-format', 'UDZO', file], { stdio: ['ignore', 'ignore', 'pipe'] });
+      execFileSync('hdiutil', ['create', '-volname', APP, '-srcfolder', stage, '-ov', '-format', 'UDZO', file], { stdio: ['ignore', 'ignore', 'pipe'] });
       break;
     } catch (err) {
       const why = String(err.stderr || err.message).trim();
