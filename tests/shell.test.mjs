@@ -124,7 +124,7 @@ test('bookmarks bar: under the address bar, icons, the new tab page, right-click
   assert.equal(await page.isVisible('#bookmarks-bar'), false);
   await page.evaluate(() => window.__emit('tabs', { activeId: 2, tabs: [{ id: 2, title: 'New Tab', url: '' }] }));
   assert.equal(await page.isVisible('#bookmarks-bar'), true);
-  assert.match(await page.textContent('#bookmarks-bar'), /For quick access, bookmark pages with ⌘D/);
+  assert.match(await page.textContent('#bookmarks-bar'), /For quick access, bookmark pages with (⌘D|Ctrl\+D)/);
   await page.click('#bm-import');
   assert.deepEqual(await lastSent('bookmarks:open'), { url: 'lumio://settings/#import', disposition: 'tab' });
 
