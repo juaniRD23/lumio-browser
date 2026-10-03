@@ -15,7 +15,7 @@ const crypto = require('crypto');
 const { JsonFile } = require('../store');
 const C = require('./crypto');
 
-const TYPES = ['bookmarks', 'passwords', 'history', 'chats', 'workflows', 'settings', 'tabs'];
+const TYPES = ['bookmarks', 'passwords', 'history', 'chats', 'workflows', 'projects', 'settings', 'tabs'];
 const BATCH = 100;
 const EVERY = 60 * 1000;
 const SOON = 4000;

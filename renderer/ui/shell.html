@@ -6,8 +6,10 @@
   <link rel="stylesheet" href="shell.css" />
 </head>
 <body class="no-anim">
+  <aside id="sidebar" aria-label="Sidebar"></aside>
   <header id="tabstrip">
     <div class="traffic-space"></div>
+    <button id="sb-open" class="icon-btn small" title="Show sidebar (⌘⇧S)" aria-label="Show sidebar"></button>
     <div id="tabs" role="tablist"></div>
     <button id="newtab" class="icon-btn" title="New Tab (⌘T)" aria-label="New Tab"></button>
     <div class="strip-drag"></div>
@@ -133,7 +135,9 @@
           <button id="voice-btn" class="round-btn voice-btn" title="Voice mode: talk with Lumio hands-free" aria-label="Voice mode" aria-pressed="false"></button>
           <button id="send" class="send" title="Send (↵)" aria-label="Send"></button>
         </div>
+        <div id="project-menu" class="popover plus-menu project-menu" role="menu" aria-label="Project" hidden></div>
       </div>
+      <button id="project-btn" class="project-btn" type="button" aria-haspopup="menu" aria-expanded="false" hidden><span class="pi"></span><span class="pn">Choose project</span></button>
     </aside>
   </main>
 

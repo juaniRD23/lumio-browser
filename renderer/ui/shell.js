@@ -1,6 +1,7 @@
 // Browser chrome: tab strip, toolbar, omnibox, info bars and page-slot layout.
 import { icons, markSvg, avatarHtml, THEME_COLORS } from './icons.js';
 import { initPanel } from './ai-panel.js';
+import { initSidebar } from './sidebar.js';
 import './keys.js';
 
 const IS_MAC = /Mac/.test(navigator.platform);
@@ -660,5 +661,16 @@ renderBookmarksBar();
 renderAccount();
 renderUpdate(init.update);
 panel.init(init);
+const sidebar = initSidebar({
+  api,
+  panel,
+  getAi: () => panel.ai(),
+  isNewTab: () => !activeTab()?.url, // asked from the new tab page: the chat opens full size
+  onLayout: () => requestAnimationFrame(() => reportSlot()),
+});
+sidebar.init(init);
+// Signing in or out changes what the sidebar shows.
+let sidebarSignedIn = !!init.ai?.lumio?.signedIn;
+api.on('ai-state', (s) => { if (!!s.lumio?.signedIn !== sidebarSignedIn) { sidebarSignedIn = !!s.lumio?.signedIn; sidebar.refresh(); } });
 reportSlot();
 if (!activeTab()?.url) setTimeout(() => address.focus(), 50);

@@ -66,8 +66,9 @@ const VOICE_NOTE = 'The user is talking to you by voice: their words were transc
 const STOP_WORDS = /^(?:ok(?:ay)?[,.]?\s+)?(?:stop|cancel|never ?mind|forget it|wait,? stop|stop (?:it|that|now))[.!]*$/i;
 
 class AIController {
-  constructor({ store, chats, tabs, emit, helper, account = null, indicator = null, schedules = null, workflows = null, notify = null, onSettingsChanged = () => {} }) {
+  constructor({ store, chats, tabs, emit, helper, account = null, indicator = null, schedules = null, workflows = null, projects = null, notify = null, onSettingsChanged = () => {} }) {
     this.store = store;
+    this.projects = projects; // Projects: chat folders with instructions (main/projects.js)
     this.workflows = workflows; // Workflows: saved tasks (main/workflows.js)
     this.schedules = schedules; // Schedules: tasks Lumio runs on its own (main/schedules.js)
     this.notify = notify; // (title, body, chatId) => shows a notification that opens the chat
@@ -146,7 +147,7 @@ class AIController {
 
   getChat(id) {
     const chat = this.chatStore.get(id);
-    return chat ? { id: chat.id, title: chat.title, display: chat.display, plan: chat.plan || null } : null;
+    return chat ? { id: chat.id, title: chat.title, display: chat.display, plan: chat.plan || null, projectId: chat.projectId || null } : null;
   }
 
   deleteChat(id) {
@@ -263,7 +264,7 @@ class AIController {
     return this.tools().filter((t) => (allowed ? allowed.has(t.name) : t.name !== 'update_plan' && t.name !== 'send_helpers' && !schedule.NAMES.has(t.name) && !workflowTool.NAMES.has(t.name)));
   }
 
-  async send({ chatId, text, includePage, includeTabs, attachments, voice = false, workflow = null } = {}) {
+  async send({ chatId, text, includePage, includeTabs, attachments, voice = false, workflow = null, projectId = null } = {}) {
     if (this.run) return { ok: false, error: 'Lumio is still working on the last request. Stop it first.' };
     if (!this.account?.state().signedIn) return { ok: false, error: 'Sign in to Lumio first (account button, top right). It’s free.' };
     // A saved workflow: its instructions, with the blanks filled in, are the message.
@@ -295,6 +296,7 @@ class AIController {
         updatedAt: Date.now(),
         messages: [],
         display: [],
+        ...(projectId && this.projects?.get(projectId) ? { projectId } : {}),
       };
       this.chatStore.add(chat);
     }
@@ -331,6 +333,12 @@ class AIController {
     // The time and the tab are written into the message once, so every later
     // step sends exactly the same text (the model provider's cache needs it).
     let said = `${clean || '(See the attached files.)'}\n\n${contextNote(this.tabs)}${voice ? ` ${VOICE_NOTE}` : ''}`;
+    // A chat in a project: its instructions come with the first message in it.
+    const project = chat.projectId && this.projects?.get(chat.projectId);
+    if (project && chat.projectNoted !== project.id + project.updatedAt) {
+      said += ` This chat is in the user's project “${project.name.replace(/"/g, "'")}”.${project.instructions ? ` The user's instructions for this project: ${project.instructions}` : ''}`;
+      chat.projectNoted = project.id + project.updatedAt;
+    }
     if (flow) {
       said = `${clean}\n\n<workflow title="${flow.w.title.replace(/"/g, "'")}">\n${flow.w.startUrl ? `Start at ${flow.w.startUrl}\n` : ''}${flow.steps}\n</workflow>\n\n${contextNote(this.tabs)} This is a workflow the user saved earlier: follow its steps. If a page has changed since, adapt and say what was different.${voice ? ` ${VOICE_NOTE}` : ''}`;
       ctxInfo = { title: `Workflow · ${flow.w.title}`, workflow: true };

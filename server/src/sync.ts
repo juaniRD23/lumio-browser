@@ -20,7 +20,7 @@ import { AgentError, type Env, fail, json, randomHex } from './util.ts';
 
 type User = { id: string; plan: Plan };
 
-const COLLECTIONS = new Set(['bookmarks', 'passwords', 'history', 'chats', 'workflows', 'settings', 'tabs']);
+const COLLECTIONS = new Set(['bookmarks', 'passwords', 'history', 'chats', 'workflows', 'projects', 'settings', 'tabs']);
 const MAX_ITEM = 600_000; // base64 ciphertext per record
 const MAX_TOTAL = 60 * 1024 * 1024; // per account
 const MAX_PUSH = 200; // records per request

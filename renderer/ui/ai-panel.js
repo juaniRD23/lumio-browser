@@ -43,6 +43,9 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   let panelOpen = true;
   let includePage = true;
   let includeTabs = false; // "Ask about my tabs": the next message reads every open tab
+  let chatProject = null; // the open chat's project (or the one a new chat will start in)
+  let projectsCache = [];
+  const chatWatchers = new Set(); // the sidebar follows which chat is open
   const includedUrl = new Map(); // chatId -> last page URL sent as context
   let live = null; // { textEl, textBuf, thinkingEl, steps: Map }
   let plan = null; // the current chat's checklist from update_plan
@@ -440,7 +443,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
         includedUrl.set(chatId, url);
       }
     }
-    const res = await api.invoke('ai:send', { chatId, text, includePage: wantPage, includeTabs: tabs, attachments, voice });
+    const res = await api.invoke('ai:send', { chatId, text, includePage: wantPage, includeTabs: tabs, attachments, voice, ...(chatId ? {} : { projectId: chatProject }) });
     if (!res.ok) { notice(res.error); return; }
     if (tabs) { includeTabs = false; renderChip(); }
     if (wantPage || (t?.pdf && includedUrl.get(chatId) === url)) includedUrl.set(res.chatId, url);
@@ -703,7 +706,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
       // A scheduled task shows up in an empty panel, unless you're typing there.
       if ((!chatId && !(ev.background && prompt.value.trim())) || chatId === ev.chatId) {
         if (!chatId) messages.innerHTML = '';
-        chatId = ev.chatId;
+        if (chatId !== ev.chatId) { chatId = ev.chatId; chatChanged(); }
         if (ev.mid) {
           // Said while Lumio works: its next words start a new reply below this.
           if (live) {
@@ -975,6 +978,8 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     if (!chat) return;
     if (id !== chatId) voice.stop();
     chatId = id;
+    chatProject = chat.projectId || null;
+    chatChanged();
     live = ai.running && ai.runChatId === id ? { textEl: null, textBuf: '', thinkingEl: null, steps: new Map() } : null;
     renderChat(chat.display);
     showPlan(chat.plan || null);
@@ -986,9 +991,11 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     }
     renderState();
   }
-  function newChat() {
+  function newChat(projectId = null) {
     voice.stop();
     chatId = null;
+    chatProject = projectId;
+    chatChanged();
     live = null;
     showPlan(null);
     messages.innerHTML = '';
@@ -997,7 +1004,64 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     renderSuggest();
     prompt.focus();
   }
-  $('#newchat-btn').addEventListener('click', () => { chatMenu.hidden = true; newChat(); });
+  $('#newchat-btn').addEventListener('click', () => { chatMenu.hidden = true; newChat(chatProject); });
+
+  // ------------------------------------------------------------ projects
+  // "Choose project" under the chat box: a new chat starts in it; an open
+  // chat moves into it. Projects are made and managed in the sidebar too.
+  const projectBtn = $('#project-btn');
+  const projectMenu = $('#project-menu');
+  projectBtn.querySelector('.pi').innerHTML = icons.folder || '';
+  function chatChanged() {
+    renderProject();
+    for (const fn of chatWatchers) fn({ chatId, projectId: chatProject });
+  }
+  async function loadProjects() {
+    projectsCache = (ai.workflows ? await api.invoke('ai:projects').catch(() => null) : null) || [];
+    renderProject();
+    return projectsCache;
+  }
+  // (Can run before the lines below have: looks its button up each time.)
+  function renderProject() {
+    const btn = $('#project-btn');
+    btn.hidden = !ai.workflows; // not in incognito
+    const p = projectsCache.find((x) => x.id === chatProject);
+    btn.querySelector('.pn').textContent = p ? p.name : 'Choose project';
+    btn.classList.toggle('set', !!p);
+  }
+  function closeProjectMenu() { projectMenu.hidden = true; projectBtn.setAttribute('aria-expanded', 'false'); }
+  async function openProjectMenu() {
+    document.querySelectorAll('#composer .popover').forEach((x) => { if (x !== projectMenu) x.hidden = true; });
+    await loadProjects();
+    projectMenu.innerHTML = `<div class="list-label">${chatId ? 'Move this chat to' : 'Start this chat in'}</div>
+      ${projectsCache.map((p) => `<button type="button" class="menu-row${p.id === chatProject ? ' on' : ''}" data-project="${esc(p.id)}"><span class="mi">${icons.folder || ''}</span><span class="mt"><b>${esc(p.name)}</b>${p.instructions ? `<small>${esc(p.instructions.slice(0, 70))}</small>` : ''}</span></button>`).join('')}
+      <button type="button" class="menu-row${!chatProject ? ' on' : ''}" data-project=""><span class="mi">–</span><span class="mt"><b>No project</b></span></button>
+      <form class="project-new"><input placeholder="New project name" maxlength="60" aria-label="New project name"><button class="btn" type="submit">Create</button></form>`;
+    projectMenu.hidden = false;
+    projectBtn.setAttribute('aria-expanded', 'true');
+  }
+  async function pickProject(id) {
+    chatProject = id || null;
+    if (chatId) await api.invoke('ai:chat-move', chatId, chatProject);
+    closeProjectMenu();
+    chatChanged();
+  }
+  projectBtn.addEventListener('click', () => (projectMenu.hidden ? openProjectMenu() : closeProjectMenu()));
+  projectMenu.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-project]');
+    if (b) pickProject(b.dataset.project);
+  });
+  projectMenu.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = projectMenu.querySelector('.project-new input').value.trim();
+    if (!name) return;
+    const r = await api.invoke('ai:project-add', { name });
+    if (!r.ok) { notice(r.error); return; }
+    await loadProjects();
+    pickProject(r.project.id);
+  });
+  document.addEventListener('mousedown', (e) => { if (!projectMenu.hidden && !e.target.closest('#project-menu, #project-btn')) closeProjectMenu(); });
+  api.on('sidebar-changed', () => loadProjects());
   document.addEventListener('mousedown', (e) => {
     if (!modelMenu.hidden && !e.target.closest('#reasoning-menu, #reasoning-btn')) closeModels();
     if (!e.target.closest('#chat-menu, #chats-btn')) chatMenu.hidden = true;
@@ -1045,11 +1109,37 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
       renderEmpty();
       renderState();
       renderChip();
+      loadProjects();
       // The saved open/closed state applies instantly; only later toggles slide.
       requestAnimationFrame(() => requestAnimationFrame(() => body.classList.remove('no-anim')));
     },
     open() { if (!panelOpen) setOpen(true); },
     sendText(text) { submit(text); },
+    // For the sidebar.
+    newTask({ projectId = null, full: wantFull = false } = {}) {
+      setOpen(true);
+      chatMenu.hidden = true;
+      if (wantFull) setFull(true);
+      newChat(projectId);
+    },
+    async openChat(id, { full: wantFull = false } = {}) {
+      setOpen(true);
+      chatMenu.hidden = true;
+      if (wantFull) setFull(true);
+      await loadChat(id);
+      prompt.focus();
+    },
+    prefill(text) {
+      setOpen(true);
+      prompt.value = text;
+      autosize();
+      prompt.focus();
+      prompt.setSelectionRange(prompt.value.length, prompt.value.length);
+    },
+    runWorkflow(id) { setOpen(true); wf.open(id); },
+    chat() { return { chatId, projectId: chatProject }; },
+    ai() { return ai; },
+    onChatChange(fn) { chatWatchers.add(fn); },
     onTabChange(tab, switched) {
       if (full && (switched || tab?.id !== full.tabId || (tab?.url || '') !== full.url)) setFull(false);
       if (switched) includePage = true;

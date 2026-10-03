@@ -148,6 +148,14 @@ function workflows(store) {
   });
 }
 
+// ---------------------------------------------------------------- projects
+function projects(store) {
+  return simple('projects', {
+    entries: () => Object.entries(store.records()),
+    apply: (changes) => { for (const { key, record } of changes) store.applyRemote(key, record); store.save(); },
+  });
+}
+
 // ---------------------------------------------------------------- settings
 function settings(store, { onApplied = () => {} } = {}) {
   const pick = () => Object.fromEntries(SETTINGS.filter((k) => store.settings[k] !== undefined).map((k) => [k, store.settings[k]]));
@@ -188,4 +196,4 @@ function tabs({ deviceId, deviceName, platform, windows, remote, onApplied = () 
   };
 }
 
-module.exports = { bookmarks, history, passwords, chats, workflows, settings, tabs, shrinkChat, SETTINGS };
+module.exports = { bookmarks, history, passwords, chats, workflows, projects, settings, tabs, shrinkChat, SETTINGS };

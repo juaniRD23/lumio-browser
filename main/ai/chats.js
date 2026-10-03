@@ -11,6 +11,7 @@ function stripForDisk(chat) {
       : m)),
     display: chat.display.map((d) => (d.thumb ? { ...d, thumb: undefined } : d)),
     ...(chat.plan ? { plan: chat.plan } : {}),
+    ...(chat.projectId ? { projectId: chat.projectId } : {}),
   };
 }
 
@@ -29,8 +30,56 @@ class ChatStore {
   list() {
     return [...this.chats]
       .sort((a, b) => b.updatedAt - a.updatedAt)
-      .map(({ id, title, updatedAt }) => ({ id, title, updatedAt }));
+      .map(({ id, title, updatedAt, projectId }) => ({ id, title, updatedAt, projectId: projectId || null }));
   }
+
+  // The sidebar's search: titles first, then what was said.
+  search(q, limit = 20) {
+    const needle = String(q || '').trim().toLowerCase();
+    if (!needle) return [];
+    const out = [];
+    for (const c of [...this.chats].sort((a, b) => b.updatedAt - a.updatedAt)) {
+      const inTitle = String(c.title || '').toLowerCase().includes(needle);
+      const hit = inTitle ? null : c.display.find((d) => (d.kind === 'user' || d.kind === 'ai') && String(d.text || '').toLowerCase().includes(needle));
+      if (!inTitle && !hit) continue;
+      let snippet = '';
+      if (hit) {
+        const t = String(hit.text).replace(/\s+/g, ' ');
+        const i = t.toLowerCase().indexOf(needle);
+        snippet = `${i > 30 ? '…' : ''}${t.slice(Math.max(0, i - 30), i + needle.length + 60)}`;
+      }
+      out.push({ id: c.id, title: c.title, updatedAt: c.updatedAt, snippet, projectId: c.projectId || null });
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+
+  rename(id, title) {
+    const c = this.get(id);
+    const t = String(title || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    if (!c || !t) return false;
+    c.title = t;
+    this.save();
+    return true;
+  }
+
+  // Into a project (or out of it, with null).
+  move(id, projectId) {
+    const c = this.get(id);
+    if (!c) return false;
+    if (projectId) c.projectId = projectId; else delete c.projectId;
+    this.save();
+    return true;
+  }
+
+  // Chats of a project that was deleted stay, without the project.
+  unfile(projectId) {
+    let n = 0;
+    for (const c of this.chats) if (c.projectId === projectId) { delete c.projectId; n++; }
+    if (n) this.save();
+  }
+
+  onChange(fn) { (this.listeners ||= new Set()).add(fn); }
 
   get(id) { return this.chats.find((c) => c.id === id) || null; }
 
@@ -47,6 +96,7 @@ class ChatStore {
   }
 
   save() {
+    for (const fn of this.listeners || []) fn();
     this.chats.sort((a, b) => b.updatedAt - a.updatedAt);
     if (this.chats.length > 100) this.chats.length = 100;
     if (!this.file) return;

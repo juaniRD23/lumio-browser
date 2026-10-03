@@ -80,6 +80,7 @@ function buildMenu(cmd, state = {}) {
         { label: 'Actual Size', accelerator: 'CmdOrCtrl+0', click: () => cmd.zoom(0) },
         { type: 'separator' },
         { label: 'Always Show Bookmarks Bar', type: 'checkbox', checked: !!state.bookmarksBar, accelerator: 'CmdOrCtrl+Shift+B', click: cmd.toggleBookmarksBar },
+        { label: 'Show/Hide Sidebar', accelerator: 'CmdOrCtrl+Shift+S', click: cmd.toggleSidebar },
         { label: 'Show/Hide Lumio AI', accelerator: 'CmdOrCtrl+Shift+L', click: cmd.togglePanel },
         { label: 'Ask Lumio', accelerator: 'CmdOrCtrl+J', click: cmd.focusAI },
         { type: 'separator' },

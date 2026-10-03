@@ -612,7 +612,7 @@ loadWorkflows();
 setInterval(() => { if (!document.hidden) loadWorkflows(); }, 15000);
 
 // ---- Sync
-const SYNC_TYPES = [['bookmarks', 'Bookmarks'], ['passwords', 'Passwords'], ['history', 'History'], ['tabs', 'Open tabs'], ['chats', 'Lumio chats'], ['workflows', 'Workflows'], ['settings', 'Settings']];
+const SYNC_TYPES = [['bookmarks', 'Bookmarks'], ['passwords', 'Passwords'], ['history', 'History'], ['tabs', 'Open tabs'], ['chats', 'Lumio chats'], ['workflows', 'Workflows'], ['projects', 'Projects'], ['settings', 'Settings']];
 const sinceText = (t) => {
   if (!t) return '';
   const s = (Date.now() - t) / 1000;

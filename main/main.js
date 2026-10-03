@@ -31,6 +31,7 @@ const { generatePassword } = require('./passwords');
 const importer = require('./importer');
 const { Schedules, describe: describeSchedule } = require('./schedules');
 const { Workflows } = require('./workflows');
+const { Projects } = require('./projects');
 const { SyncEngine } = require('./sync/engine');
 const syncAdapters = require('./sync/adapters');
 const { CompanionBridge } = require('./sync/companion');
@@ -72,6 +73,7 @@ let account = null;
 let passwords = null;
 let schedules = null; // scheduled tasks (main/schedules.js)
 let workflows = null; // saved workflows (main/workflows.js)
+let projects = null; // chat projects (main/projects.js)
 let sync = null; // Lumio Sync (main/sync)
 let companion = null; // the phone companion's link to this computer
 let quitting = false;
@@ -308,6 +310,7 @@ const cmd = {
   reload: (hard) => cur()?.tabs.reload(hard),
   zoom: (step) => cur()?.tabs.zoom(step),
   togglePanel: () => cur()?.emit('panel-toggle'),
+  toggleSidebar: () => cur()?.emit('sidebar-toggle'),
   focusAI: () => { const w = cur(); if (!w) return; w.win.webContents.focus(); w.emit('ai-focus'); },
   devtools: () => cur()?.tabs.wc()?.openDevTools({ mode: 'detach' }),
   shellDevtools: () => cur()?.win.webContents.openDevTools({ mode: 'detach' }),
@@ -683,6 +686,7 @@ function registerIpc() {
     tabs: w.tabs.state(),
     downloads: w.profile.downloads.list(),
     panel: { open: store.settings.panelOpen, width: store.settings.panelWidth },
+    sidebar: { open: store.settings.sidebarOpen !== false, getStarted: store.settings.getStartedDone !== true },
     ai: w.ai.state(),
     bookmarks: bookmarksPayload(),
     account: account.state(),
@@ -697,6 +701,10 @@ function registerIpc() {
   on('layout:slot', (w, rect) => { w.tabs.setSlot(rect); w.indicator.place(); });
   on('aura:size', (w, size) => { if (w.indicator.bar?.webContents) w.indicator.resize(size); });
   on('panel:full', (w, { on: covered, slot } = {}) => w.tabs.setCovered(!!covered, slot && Number.isFinite(slot.width) ? slot : null));
+  on('sidebar:set', (_w, { open, getStarted } = {}) => {
+    if (typeof open === 'boolean') store.setSetting('sidebarOpen', open);
+    if (getStarted === false) store.setSetting('getStartedDone', true);
+  });
   on('panel:set', (_w, { open, width }) => {
     if (typeof open === 'boolean') store.setSetting('panelOpen', open);
     if (typeof width === 'number') store.setSetting('panelWidth', Math.round(Math.max(320, Math.min(760, width))));
@@ -824,6 +832,16 @@ function registerIpc() {
   handle('ai:send', (w, payload) => w.ai.send(payload));
   handle('ai:steer', (w, payload) => w.ai.steer(payload || {}));
   handle('ai:workflows', (w) => (w.incognito ? [] : workflows.list()));
+  // The sidebar: projects, chats, scheduled tasks.
+  const sidebarReply = (fn) => { try { return { ok: true, ...fn() }; } catch (err) { return { ok: false, error: err.message }; } };
+  handle('ai:projects', (w) => (w.incognito ? [] : projects.list()));
+  handle('ai:project-add', (w, spec) => sidebarReply(() => ({ project: projects.add(spec || {}) })));
+  handle('ai:project-update', (w, id, patch) => sidebarReply(() => ({ project: projects.update(String(id), patch || {}) })));
+  handle('ai:project-remove', (w, id) => sidebarReply(() => { projects.remove(String(id)); normal.chats.unfile(String(id)); return {}; }));
+  handle('ai:chat-rename', (w, id, title) => ({ ok: w.ai.chatStore.rename(String(id), title) }));
+  handle('ai:chat-move', (w, id, projectId) => ({ ok: w.ai.chatStore.move(String(id), projectId && projects.get(String(projectId)) ? String(projectId) : null) }));
+  handle('ai:chat-search', (w, q) => w.ai.chatStore.search(String(q || '')));
+  handle('ai:schedules', (w) => (w.incognito || !schedules ? [] : schedules.list().map(({ id, title, when, nextRun, paused, done }) => ({ id, title, when, nextRun, paused, done }))));
   handle('ai:chats', (w) => w.ai.listChats());
   handle('ai:chat', (w, id) => w.ai.getChat(id));
   handle('ai:delete-chat', (w, id) => w.ai.deleteChat(id));
@@ -1205,6 +1223,15 @@ app.whenReady().then(async () => {
   setInterval(() => { if (account.token()) account.refresh(); }, 10 * 60 * 1000).unref?.();
   workflows = new Workflows(app.getPath('userData'));
   workflows.onChange(() => alive().forEach((w) => w.emit('workflows-changed', {})));
+  projects = new Projects(app.getPath('userData'));
+  // The sidebar refreshes when chats or projects change (a moment after, not per word).
+  let sidebarTimer = null;
+  const sidebarChanged = () => {
+    clearTimeout(sidebarTimer);
+    sidebarTimer = setTimeout(() => alive().forEach((w) => w.emit('sidebar-changed', {})), 400);
+  };
+  projects.onChange(sidebarChanged);
+  normal.chats.onChange(sidebarChanged);
   schedules = new Schedules(app.getPath('userData'));
   schedules.onChange(() => alive().forEach((w) => w.emit('schedules-changed', {})));
   setInterval(runDueSchedules, 20 * 1000).unref?.();
@@ -1245,6 +1272,7 @@ app.whenReady().then(async () => {
     syncAdapters.passwords(passwords.store),
     syncAdapters.chats(normal.chats),
     syncAdapters.workflows(workflows),
+    syncAdapters.projects(projects),
     syncAdapters.settings(store, { onApplied: () => { services.broadcastAIState(); menuChanged(); } }),
     syncAdapters.tabs({
       deviceId: sync.deviceId,
@@ -1257,6 +1285,7 @@ app.whenReady().then(async () => {
   const syncSoon = () => sync.soon();
   for (const f of [store.bookmarksFile, store.historyFile, store.settingsFile, store.chatsFile, store.sessionFile, passwords.store.file]) f.onSave(syncSoon);
   workflows.onChange(syncSoon);
+  projects.onChange(syncSoon);
   // Bookmarks from another device: redraw the bar.
   store.bookmarksFile.onSave(() => { if (sync.busy) bookmarksChanged(); });
   sync.start();

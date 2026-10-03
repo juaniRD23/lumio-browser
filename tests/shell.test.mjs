@@ -201,3 +201,68 @@ test('workflows: / lists them, the card asks for blanks, and Run sends it', { sk
   assert.deepEqual(await page.evaluate(() => window.__calls.filter(([c]) => c === 'ai:send')[1][1].workflow), { id: 'w2', values: {} }, 'no blanks: it runs right away');
   assert.deepEqual(errors, []);
 });
+
+test('the sidebar: templates, recents, projects, the chat menu, search, hide and show', { skip: !CHROME && 'Google Chrome not installed' }, async () => {
+  const { page, errors } = await openShell(browser, {
+    'shell:init': { value: { ...INIT, ai: { ...AI, workflows: true }, sidebar: { open: true, getStarted: true } } },
+    'ai:projects': { value: [{ id: 'p1', name: 'Mom’s birthday', instructions: 'Budget $800, Miami' }] },
+    'ai:chats': { value: [{ id: 'c2', title: 'Cake ideas', updatedAt: Date.now() - 60_000, projectId: 'p1' }, { id: 'c1', title: 'Trip to Lisbon', updatedAt: Date.now() - 3_600_000, projectId: null }] },
+    'ai:workflows': { value: [{ id: 'w1', title: 'Price check', description: '', instructions: 'Check {item}.', inputs: [{ name: 'item', label: 'Item' }] }] },
+    'ai:schedules': { value: [{ id: 's1', title: 'Morning news', when: 'Every day at 8:00 AM', nextRun: Date.now() + 3_600_000 }] },
+    'ai:chat': { fn: "return { id: args[0], title: 'Trip to Lisbon', display: [{ kind: 'user', text: 'Plan it' }, { kind: 'ai', text: 'Day 1: Alfama' }], projectId: null }" },
+    'ai:chat-search': { value: [{ id: 'c1', title: 'Trip to Lisbon', snippet: '…Lisbon in June' }] },
+    'ai:chat-move': { value: { ok: true } },
+    'ai:send': { value: { ok: true, chatId: 'c9' } },
+  });
+  await page.waitForSelector('#sb-recents [data-chat]');
+  assert.equal(await page.isVisible('#sidebar'), true);
+  assert.deepEqual(await page.$$eval('#sb-recents .sb-t', (els) => els.map((e) => e.textContent)), ['Cake ideas', 'Trip to Lisbon']);
+  assert.match(await page.textContent('#sb-projects'), /Mom’s birthday/);
+  assert.match(await page.textContent('#sb-start'), /Get started/);
+  if (process.env.LUMIO_SHOTS) await page.screenshot({ path: path.join(process.env.LUMIO_SHOTS, 'sidebar-1.png') });
+
+  // Templates fill in the chat box with the blank selected.
+  await page.click('[data-sec="templates"]');
+  await page.click('[data-tpl="0"]');
+  const sel = await page.evaluate(() => { const p = document.getElementById('prompt'); return p.value.slice(p.selectionStart, p.selectionEnd); });
+  assert.equal(sel, '[product]');
+
+  // A recent chat opens in the panel and is highlighted.
+  await page.click('[data-chat="c1"]');
+  await page.waitForFunction(() => document.querySelector('[data-chat="c1"]')?.classList.contains('on'));
+  assert.match(await page.textContent('#messages'), /Day 1: Alfama/);
+
+  // A project lists its chats; New task there starts in it.
+  await page.click('[data-project="p1"]');
+  assert.deepEqual(await page.$$eval('#sb-recents .sb-t', (els) => els.map((e) => e.textContent)), ['Cake ideas']);
+  assert.match(await page.textContent('#sb-recents-label'), /Mom’s birthday/);
+  await page.click('#sb-new');
+  assert.match(await page.textContent('#project-btn'), /Mom’s birthday/);
+  await page.fill('#prompt', 'find a bakery');
+  await page.press('#prompt', 'Enter');
+  await page.waitForFunction(() => window.__calls.some(([c]) => c === 'ai:send'));
+  assert.equal(await page.evaluate(() => window.__calls.find(([c]) => c === 'ai:send')[1].projectId), 'p1');
+  await page.click('#sb-back');
+
+  // The chat menu moves a chat into a project.
+  await page.hover('[data-chat="c1"]');
+  await page.click('[data-cmenu="c1"]');
+  await page.click('#sb-menu [data-act="move"][data-arg="p1"]');
+  await page.waitForFunction(() => window.__calls.some(([c]) => c === 'ai:chat-move'));
+
+  // Search.
+  await page.click('#sb-search-btn');
+  await page.fill('#sb-q', 'lisbon');
+  await page.waitForSelector('#sb-results [data-chat="c1"]');
+  assert.match(await page.textContent('#sb-results'), /Lisbon in June/);
+  if (process.env.LUMIO_SHOTS) await page.screenshot({ path: path.join(process.env.LUMIO_SHOTS, 'sidebar-2.png') });
+
+  // Hide and show.
+  await page.click('#sb-close');
+  assert.equal(await page.isVisible('#sidebar'), false);
+  assert.equal(await page.isVisible('#sb-open'), true);
+  assert.deepEqual(await page.evaluate(() => window.__sent.filter(([c]) => c === 'sidebar:set').at(-1)), ['sidebar:set', { open: false }]);
+  await page.click('#sb-open');
+  assert.equal(await page.isVisible('#sidebar'), true);
+  assert.deepEqual(errors, []);
+});
