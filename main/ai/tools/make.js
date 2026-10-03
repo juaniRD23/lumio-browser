@@ -94,7 +94,7 @@ const tools = [
       const saved = freePath(downloads(), `${title}.${format}`);
       fs.writeFileSync(saved, Buffer.from(bytes));
       ctx.made?.({ kind: 'document', name: path.basename(saved), path: saved, format, label: FORMATS[format] });
-      return { text: `Created “${path.basename(saved)}” in the user’s Downloads; it’s shown as a card with Open and Show in Finder. Reply with one or two sentences; don’t repeat the content or write a path.`, summary: path.basename(saved) };
+      return { text: `Created “${path.basename(saved)}” in the user’s Downloads; it’s shown as a card with Open and ${process.platform === 'darwin' ? 'Show in Finder' : 'Show in folder'}. Reply with one or two sentences; don’t repeat the content or write a path.`, summary: path.basename(saved) };
     },
   },
 ];

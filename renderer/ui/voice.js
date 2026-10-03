@@ -350,7 +350,7 @@ export function initVoice({ api, prompt, autosize, submit, notice, isReady, isBu
       listener = null;
       const why = `${err?.name} ${err?.message}`;
       notice(/denied|not allowed|permission/i.test(why)
-        ? 'Lumio can’t use the microphone. Allow Lumio Browser in System Settings › Privacy & Security › Microphone, then try again.'
+        ? (/Mac/.test(navigator.platform) ? 'Lumio can’t use the microphone. Allow Lumio Browser in System Settings › Privacy & Security › Microphone, then try again.' : 'Lumio can’t use the microphone. In Windows Settings › Privacy & security › Microphone, turn on microphone access for desktop apps, then try again.')
         : /notfound|requested device/i.test(why) ? 'No microphone found.' : `The microphone didn’t start: ${err?.message || err}`);
       return false;
     }

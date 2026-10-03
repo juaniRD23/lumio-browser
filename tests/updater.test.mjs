@@ -124,3 +124,20 @@ test("release notes: What's new without the install section; the urgent marker",
   assert.deepEqual(releaseNotes('- Just a fix'), { notes: '- Just a fix', critical: false });
   assert.deepEqual(releaseNotes(null), { notes: '', critical: false });
 });
+
+test('Windows: copies installed with the setup update with the setup; zip copies with the zip; the Store version never checks', async () => {
+  const { assetName: name, installedBySetup: bySetup, Updater: U } = require('../main/updater.js');
+  assert.equal(name('win32', 'x64'), 'Lumio-Browser-windows-x64.zip');
+  assert.equal(name('win32', 'x64', { windowsSetup: true }), 'Lumio-Browser-Setup-windows-x64.exe');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lumio-setup-'));
+  const exe = path.join(dir, 'Lumio Browser.exe');
+  assert.equal(bySetup(exe), false);
+  fs.writeFileSync(path.join(dir, 'Uninstall Lumio Browser.exe'), '');
+  assert.equal(bySetup(exe), true);
+  let asked = 0;
+  const store = new U({ currentVersion: '1.0.0', platform: 'win32', arch: 'x64', exePath: exe, store: true, fetchImpl: async () => { asked++; throw new Error('no'); } });
+  assert.equal(store.state.status, 'store');
+  await store.check({ manual: true });
+  assert.equal(asked, 0, 'the Microsoft Store updates it');
+  assert.equal(new U({ currentVersion: '1.0.0', platform: 'win32', arch: 'x64', exePath: exe }).windowsSetup, true);
+});

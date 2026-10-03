@@ -202,15 +202,28 @@ function dmg(app, arch) {
 function zip(folder, name) {
   const file = path.join(release, name);
   fs.rmSync(file, { force: true });
-  execFileSync('zip', ['-r', '-q', '-X', '-y', file, path.basename(folder)], { cwd: path.dirname(folder) });
+  if (process.platform === 'win32') execFileSync('tar', ['-a', '-c', '-f', file, '-C', path.dirname(folder), path.basename(folder)]);
+  else execFileSync('zip', ['-r', '-q', '-X', '-y', file, path.basename(folder)], { cwd: path.dirname(folder) });
   return file;
 }
 
 if (arg('--release')) {
+  // --mac: the Mac disk images only; --windows: the Windows packages only
+  // (the setup program and Store package need Windows). Neither: both.
   fs.mkdirSync(release, { recursive: true });
   const files = [];
-  for (const arch of ['arm64', 'x64']) files.push(dmg(await buildMac(arch), arch));
-  files.push(zip(await buildWindows('x64'), 'Lumio-Browser-windows-x64.zip'));
+  if (!arg('--windows')) for (const arch of ['arm64', 'x64']) files.push(dmg(await buildMac(arch), arch));
+  if (!arg('--mac')) {
+    const folder = await buildWindows('x64');
+    files.push(zip(folder, 'Lumio-Browser-windows-x64.zip')); // for copies installed from the zip
+    if (process.platform === 'win32') {
+      const win = await import('./windows.mjs');
+      files.push(win.buildSetup(folder, pkg.version, path.join(release, 'Lumio-Browser-Setup-windows-x64.exe')));
+      const identity = win.storeIdentity();
+      if (identity) files.push(win.buildMsix(folder, pkg.version, identity, path.join(release, 'Lumio-Browser-windows-x64.msix')));
+      else console.log('No Microsoft Store identity (STORE_IDENTITY_NAME, STORE_PUBLISHER, STORE_PUBLISHER_NAME): no Store package this time.');
+    }
+  }
   for (const f of files) console.log(`${path.relative(root, f)}  ${(fs.statSync(f).size / 1e6).toFixed(1)} MB`);
 } else {
   const helper = path.join(root, 'native', 'bin', 'lumio-helper');

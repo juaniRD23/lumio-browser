@@ -18,7 +18,9 @@ import path from 'node:path';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REPO = 'juaniRD23/lumio-browser';
-const ASSETS = ['Lumio-Browser-mac-apple-silicon.dmg', 'Lumio-Browser-mac-intel.dmg', 'Lumio-Browser-windows-x64.zip'];
+const ASSETS = ['Lumio-Browser-mac-apple-silicon.dmg', 'Lumio-Browser-mac-intel.dmg', 'Lumio-Browser-Setup-windows-x64.exe', 'Lumio-Browser-windows-x64.zip'];
+// Attached when built: the Microsoft Store package (needs the Store identity).
+const OPTIONAL = ['Lumio-Browser-windows-x64.msix'];
 const pkgFile = path.join(root, 'package.json');
 
 const args = process.argv.slice(2);
@@ -72,7 +74,7 @@ function setVersion(version) {
 }
 
 function publish(version, notes, critical) {
-  for (const a of ASSETS) if (!fs.existsSync(path.join(root, 'dist', 'release', a))) throw new Error(`Missing dist/release/${a}. Run npm run release first.`);
+  for (const a of ASSETS) if (!fs.existsSync(path.join(root, 'dist', 'release', a))) throw new Error(`Missing dist/release/${a}. Release from GitHub (Actions → Release Lumio Browser): the Windows setup is built on Windows.`);
   const notesFile = path.join(root, 'dist', 'release', 'NOTES.md');
   fs.writeFileSync(notesFile, notesMarkdown(notes, critical));
   if (process.env.GITHUB_ACTIONS) {
@@ -84,11 +86,12 @@ function publish(version, notes, critical) {
   sh('git', ['tag', `v${version}`]);
   sh('git', ['push', 'origin', 'HEAD:main']);
   sh('git', ['push', 'origin', `v${version}`]);
-  sh('gh', ['release', 'create', `v${version}`, ...ASSETS.map((a) => path.join('dist', 'release', a)), '--repo', REPO, '--title', `Lumio Browser ${version}`, '--notes-file', notesFile]);
+  const extra = OPTIONAL.filter((a) => fs.existsSync(path.join(root, 'dist', 'release', a)));
+  sh('gh', ['release', 'create', `v${version}`, ...[...ASSETS, ...extra].map((a) => path.join('dist', 'release', a)), '--repo', REPO, '--title', `Lumio Browser ${version}`, '--notes-file', notesFile]);
   // Every installed copy reads releases/latest: make sure it's this one, with checksums.
   const latest = JSON.parse(out('gh', ['api', `repos/${REPO}/releases/latest`]));
   const ok = latest.tag_name === `v${version}` && ASSETS.every((a) => latest.assets.some((x) => x.name === a && /^sha256:/.test(x.digest || '')));
-  if (!ok) throw new Error('The release is up, but GitHub isn’t showing it as the latest with all three files yet. Check the Releases page.');
+  if (!ok) throw new Error('The release is up, but GitHub isn’t showing it as the latest with all its files yet. Check the Releases page.');
   console.log(`\n✓ Lumio Browser ${version} is out. Installed copies will offer it within the hour.\n  ${latest.html_url}`);
 }
 

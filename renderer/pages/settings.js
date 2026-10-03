@@ -24,13 +24,15 @@ function renderUpdate(u) {
     downloading: `Downloading ${u.latest}… ${u.progress || 0}%`,
     ready: `Lumio Browser ${u.latest} is downloaded and ready to install.`,
     installing: 'Restarting to finish the update…',
-    manual: `The ${u.latest} installer is open. Drag Lumio Browser into Applications to finish.`,
+    manual: /Mac/.test(navigator.platform) ? `The ${u.latest} installer is open. Drag Lumio Browser into Applications to finish.` : `The ${u.latest} installer is open. Follow it to finish.`,
+    store: 'The Microsoft Store keeps Lumio Browser up to date.',
   }[u.status] || '';
   status.textContent = u.error || text;
   const canInstall = ['available', 'ready'].includes(u.status);
   action.textContent = canInstall ? (u.status === 'ready' ? 'Restart to update' : 'Update now') : 'Check for updates';
   action.classList.toggle('primary', canInstall);
   action.disabled = ['checking', 'downloading', 'installing'].includes(u.status);
+  action.hidden = u.status === 'store';
 }
 renderUpdate(s.update);
 $('#update-action').addEventListener('click', async () => {

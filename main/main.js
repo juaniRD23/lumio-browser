@@ -43,6 +43,23 @@ process.on('uncaughtException', (err) => console.error('[lumio] uncaught excepti
 process.on('unhandledRejection', (err) => console.error('[lumio] unhandled rejection:', err?.stack || err));
 
 if (!process.env.LUMIO_TEST && !app.requestSingleInstanceLock()) app.quit();
+// Windows shows an app's notifications only under its app ID, matched by its
+// Start menu shortcut (set below). The Microsoft Store version has its own.
+const WIN_APP_ID = 'online.lumio-usa.browser';
+if (process.platform === 'win32' && !process.windowsStore) app.setAppUserModelId(WIN_APP_ID);
+
+// What Lumio was asked to open: web addresses, and web pages or PDFs on disk
+// ("Open with Lumio Browser" on Windows).
+function launchTargets(argv) {
+  const out = [];
+  for (const a of argv) {
+    if (/^https?:\/\//i.test(a)) out.push(a);
+    else if (/\.(html?|xhtml|pdf|svg|webp)$/i.test(a) && !a.startsWith('-')) {
+      try { if (fs.statSync(a).isFile()) out.push(require('url').pathToFileURL(path.resolve(a)).href); } catch { /* not a file */ }
+    }
+  }
+  return out;
+}
 
 let store = null;
 let helper = null;
@@ -151,6 +168,18 @@ const services = {
   contextMenuExtras: (w, tab, params) => (w.incognito || !tab.view ? [] : extensions?.contextMenuItems(tab.view.webContents, params) || []),
   broadcastAIState: () => alive().forEach((w) => w.ai.emitState()),
 };
+
+// Windows: the Start menu shortcut carries Lumio's app ID (notifications need
+// it). The setup program makes the shortcut; copies from the zip get one here.
+function startMenuShortcut() {
+  try {
+    const lnk = path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Lumio Browser.lnk');
+    const exists = fs.existsSync(lnk);
+    shell.writeShortcutLink(lnk, exists ? 'update' : 'create', { target: process.execPath, appUserModelId: WIN_APP_ID, description: 'Lumio Browser', icon: process.execPath, iconIndex: 0 });
+  } catch (err) {
+    console.error('[lumio] start menu shortcut:', err?.message || err);
+  }
+}
 
 function createWindow(opts = {}) {
   const incognito = !!opts.incognito;
@@ -353,8 +382,10 @@ function makeDefaultBrowser() {
   const ok = app.setAsDefaultProtocolClient('http') && app.setAsDefaultProtocolClient('https');
   if (process.platform === 'win32') {
     // Windows only lets the person choose, in Settings → Default apps.
-    require('electron').shell.openExternal('ms-settings:defaultapps');
-    cur()?.emit('toast', { text: 'Choose Lumio Browser under Web browser in Windows Settings.' });
+    // Windows 11 opens Lumio Browser's own page (the setup program registers it);
+    // Windows 10 shows the list.
+    require('electron').shell.openExternal('ms-settings:defaultapps?registeredAppUser=Lumio%20Browser');
+    cur()?.emit('toast', { text: 'In Windows Settings, choose Lumio Browser for web pages (and set it as default).' });
     return ok;
   }
   cur()?.emit('toast', { text: ok ? 'macOS will ask you to confirm Lumio as your default browser.' : 'Could not set the default browser from a development build.' });
@@ -1136,7 +1167,7 @@ app.on('open-url', (e, url) => {
 });
 
 app.on('second-instance', (_e, argv) => {
-  const urls = argv.filter((a) => /^https?:\/\//.test(a));
+  const urls = launchTargets(argv.slice(1));
   if (urls.length) openExternalUrls(urls); else ensureWin().focus();
 });
 
@@ -1249,6 +1280,7 @@ app.whenReady().then(async () => {
     quit: process.env.LUMIO_UPDATE_TARGET && process.env.LUMIO_TEST ? () => {} : () => app.quit(),
     openPath: (file) => shell.openPath(file),
     api: testUpdates ? process.env.LUMIO_UPDATE_API : LATEST,
+    store: !!process.windowsStore, // the Microsoft Store updates it
     ...(process.env.LUMIO_TEST && process.env.LUMIO_UPDATE_TARGET ? { installTarget: process.env.LUMIO_UPDATE_TARGET, fakeExit: true } : {}),
   });
   if (app.isPackaged || testUpdates) {
@@ -1304,7 +1336,8 @@ app.whenReady().then(async () => {
   } else if (saved.length) saved.forEach((s) => createWindow({ tabs: s.tabs, active: s.active, bounds: s.bounds }));
   else createWindow();
   // Windows passes links to open on the command line.
-  if (process.platform !== 'darwin' && !process.env.LUMIO_TEST) pendingUrls.push(...process.argv.slice(1).filter((a) => /^https?:\/\//i.test(a)));
+  if (process.platform !== 'darwin' && !process.env.LUMIO_TEST) pendingUrls.push(...launchTargets(process.argv.slice(1)));
+  if (process.platform === 'win32' && app.isPackaged && !process.windowsStore) startMenuShortcut();
   if (pendingUrls.length) openExternalUrls(pendingUrls.splice(0));
 
   app.on('activate', () => { if (!alive().length) createWindow(); });

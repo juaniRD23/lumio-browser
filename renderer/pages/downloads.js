@@ -33,7 +33,7 @@ function row(d) {
     acts = '<button class="btn small" data-act="retry">Download again</button>';
   } else if (d.state === 'completed') {
     sub = `${size(d.total || d.received)} · ${host(d.url)}`;
-    acts = '<button class="btn small" data-act="show">Show in Finder</button>';
+    acts = `<button class="btn small" data-act="show">${/Mac/.test(navigator.platform) ? 'Show in Finder' : 'Show in folder'}</button>`;
   } else {
     cls = 'failed';
     sub = `${d.state === 'cancelled' ? 'Cancelled' : 'Failed'} · ${host(d.url)}`;

@@ -45,10 +45,16 @@ function releaseNotes(body) {
 }
 
 // The installer that fits this computer (fixed names, see build/package.mjs).
-function assetName(platform = process.platform, arch = process.arch) {
+// On Windows: the setup program for copies it installed, the zip otherwise.
+function assetName(platform = process.platform, arch = process.arch, { windowsSetup = false } = {}) {
   if (platform === 'darwin') return arch === 'arm64' ? 'Lumio-Browser-mac-apple-silicon.dmg' : 'Lumio-Browser-mac-intel.dmg';
-  if (platform === 'win32' && arch === 'x64') return 'Lumio-Browser-windows-x64.zip';
+  if (platform === 'win32' && arch === 'x64') return windowsSetup ? 'Lumio-Browser-Setup-windows-x64.exe' : 'Lumio-Browser-windows-x64.zip';
   return null;
+}
+
+// Installed with Lumio's Windows setup (it leaves its uninstaller next to the app).
+function installedBySetup(exePath = process.execPath) {
+  return fs.existsSync(path.join(path.dirname(exePath), 'Uninstall Lumio Browser.exe'));
 }
 
 // The Apple team that signed an app ("TeamIdentifier=…"), or null when it's
@@ -75,12 +81,13 @@ class Updater {
   // fetchImpl: fetch-compatible (Electron's net.fetch in the app).
   // quit(): closes Lumio so the swap can happen. installTarget: override for tests.
   constructor({ currentVersion, fetchImpl, workDir, onChange = () => {}, platform = process.platform, arch = process.arch,
-    exePath = process.execPath, quit = () => {}, openPath = () => {}, api = LATEST, fakeExit = false, installTarget = null } = {}) {
-    Object.assign(this, { currentVersion, fetchImpl, workDir, onChange, platform, arch, exePath, quit, openPath, api, fakeExit, installTarget });
+    exePath = process.execPath, quit = () => {}, openPath = () => {}, api = LATEST, fakeExit = false, installTarget = null,
+    windowsSetup = platform === 'win32' && installedBySetup(exePath), store = false } = {}) {
+    Object.assign(this, { currentVersion, fetchImpl, workDir, onChange, platform, arch, exePath, quit, openPath, api, fakeExit, installTarget, windowsSetup, store });
     this.release = null; // { version, url, size, digest, notesUrl, name }
     this.file = null; // the downloaded, verified installer
     this.busy = null;
-    this.state = { status: 'idle', current: currentVersion, latest: null, progress: 0, error: null, notesUrl: null, notes: '', critical: false };
+    this.state = { status: store ? 'store' : 'idle', current: currentVersion, latest: null, progress: 0, error: null, notesUrl: null, notes: '', critical: false };
   }
 
   set(patch) {
@@ -91,6 +98,7 @@ class Updater {
 
   // Asks GitHub for the latest release. Quiet unless `manual` (Settings).
   async check({ manual = false } = {}) {
+    if (this.store) return this.state; // the Microsoft Store updates it
     if (['downloading', 'installing'].includes(this.state.status)) return this.state;
     if (!['ready', 'available'].includes(this.state.status)) this.set({ status: 'checking', error: null });
     try {
@@ -98,7 +106,7 @@ class Updater {
       if (!res.ok) throw new Error(res.status === 404 ? 'No releases yet.' : `GitHub answered ${res.status}.`);
       const rel = await res.json();
       const version = String(rel.tag_name || '').replace(/^v/i, '');
-      const name = assetName(this.platform, this.arch);
+      const name = assetName(this.platform, this.arch, { windowsSetup: this.windowsSetup });
       const asset = (rel.assets || []).find((a) => a.name === name);
       const { notes, critical } = releaseNotes(rel.body);
       if (!version || rel.draft || rel.prerelease || compareVersions(version, this.currentVersion) <= 0 || !asset) {
@@ -187,7 +195,7 @@ class Updater {
     this.set({ status: 'installing', error: null });
     try {
       if (this.platform === 'darwin') await this.installMac(file, target);
-      else if (this.platform === 'win32') await this.installWindows(file, target);
+      else if (this.platform === 'win32') await (this.windowsSetup ? this.installWindowsSetup(file) : this.installWindows(file, target));
       else throw new Error('Updating isn’t supported on this system.');
     } catch (err) {
       this.set({ status: 'ready', error: `Couldn't install the update: ${err.message}` });
@@ -251,6 +259,21 @@ class Updater {
       env: { ...process.env, LUMIO_PID: this.fakeExit ? '999999' : String(process.pid), LUMIO_SRC: folder, LUMIO_DEST: target, LUMIO_RELAUNCH: this.fakeExit ? '0' : '1' },
     }).unref();
   }
+
+  // Installed with the setup program: once Lumio has quit, run the new setup
+  // silently (it replaces the app in place) and open Lumio again.
+  async installWindowsSetup(setup) {
+    const script = [
+      'try { Wait-Process -Id ([int]$env:LUMIO_PID) -Timeout 60 -ErrorAction SilentlyContinue } catch {}',
+      'Start-Sleep -Milliseconds 500',
+      "$p = Start-Process -FilePath $env:LUMIO_SETUP -ArgumentList '/S' -Wait -PassThru",
+      "if ($env:LUMIO_RELAUNCH -eq '1' -and $p.ExitCode -eq 0) { Start-Process -FilePath (Join-Path $env:LUMIO_DEST 'Lumio Browser.exe') }",
+    ].join('; ');
+    spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-Command', script], {
+      detached: true, stdio: 'ignore', windowsHide: true,
+      env: { ...process.env, LUMIO_PID: this.fakeExit ? '999999' : String(process.pid), LUMIO_SETUP: setup, LUMIO_DEST: path.dirname(this.exePath), LUMIO_RELAUNCH: this.fakeExit ? '0' : '1' },
+    }).unref();
+  }
 }
 
-module.exports = { releaseNotes, Updater, compareVersions, assetName, LATEST };
+module.exports = { releaseNotes, Updater, compareVersions, assetName, installedBySetup, LATEST };
