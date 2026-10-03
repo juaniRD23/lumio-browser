@@ -202,7 +202,8 @@ function dmg(app, arch) {
 function zip(folder, name) {
   const file = path.join(release, name);
   fs.rmSync(file, { force: true });
-  if (process.platform === 'win32') execFileSync('tar', ['-a', '-c', '-f', file, '-C', path.dirname(folder), path.basename(folder)]);
+  // Windows' own tar (bsdtar). In Git Bash, plain "tar" is GNU tar, which reads "D:" as a host name.
+  if (process.platform === 'win32') execFileSync(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe'), ['-a', '-c', '-f', file, '-C', path.dirname(folder), path.basename(folder)]);
   else execFileSync('zip', ['-r', '-q', '-X', '-y', file, path.basename(folder)], { cwd: path.dirname(folder) });
   return file;
 }
