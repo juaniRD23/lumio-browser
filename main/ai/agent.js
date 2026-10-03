@@ -4,6 +4,9 @@
 const { needsApproval } = require('./policy');
 
 const MAX_STEPS = 100;
+// After these, the next turn weighs what came back (research, other tabs,
+// helpers' reports): it thinks at the chosen effort, not the quick one.
+const THINK_AFTER = new Set(['web_search', 'read_url', 'list_tabs', 'send_helpers', 'save_site_tip']);
 const KEEP_IMAGES = 2;
 const SHOT_BATCH = 4;
 const MAX_TOOL_TEXT = 24_000;
@@ -119,17 +122,32 @@ async function runAgent({
   };
   const schemas = toolSchemas(tools);
   const env = { byName, ctx, approve, getMode, emit, signal, grants };
+  // Where the time goes: the model thinking and answering, or the actions.
+  const started = Date.now();
+  let modelMs = 0;
+  let toolMs = 0;
+  const timing = (steps) => ({ ms: Date.now() - started, modelMs, toolMs, steps });
+  // Tips saved for the site in front of it, before it starts.
+  const intro = ctx?.siteTips?.();
+  if (intro) messages.push({ role: 'user', content: intro });
+  // The first turn plans at the chosen effort; routine turns after it (click,
+  // type, scroll…) think less, which is most of the speed. Anything that
+  // needs judgment (an error, a new message, research results, every 10th
+  // step) gets the full effort again.
+  let quick = false;
 
   for (let step = 0; step < maxSteps; step++) {
     if (signal?.aborted) throw abortError();
     emit({ type: 'thinking' });
-    const gen = chat({ model, messages: prepareMessages(systemPrompt(), messages), tools: schemas, signal });
+    const modelStart = Date.now();
+    const gen = chat({ model, messages: prepareMessages(systemPrompt(), messages), tools: schemas, signal, quick });
     let result;
     for (;;) {
       const { value, done } = await gen.next();
       if (done) { result = value; break; }
       if (value.type === 'text') emit({ type: 'text', delta: value.text });
     }
+    modelMs += Date.now() - modelStart;
 
     const calls = result.toolCalls || [];
     const assistant = { role: 'assistant', content: result.content || (calls.length ? null : '(no reply)') };
@@ -140,17 +158,25 @@ async function runAgent({
     if (result.content) emit({ type: 'text_end' });
 
     if (!calls.length) {
-      if (absorb()) continue; // they said something while it answered: answer that too
-      emit({ type: 'done', reason: result.finishReason === 'length' ? 'length' : 'complete' });
+      if (absorb()) { quick = false; continue; } // they said something while it answered: answer that too
+      emit({ type: 'done', reason: result.finishReason === 'length' ? 'length' : 'complete', timing: timing(step + 1) });
       return { steps: step + 1 };
     }
 
     const images = [];
+    let trouble = false;
     for (const call of calls) {
+      const toolStart = Date.now();
       const out = await runToolCall(call, env);
-      messages.push({ role: 'tool', tool_call_id: call.id, content: out.text || 'Done.' });
+      toolMs += Date.now() - toolStart;
+      const text = out.text || 'Done.';
+      if (/^(Error|Refused)\b/.test(text) || out.status === 'blocked') trouble = true;
+      messages.push({ role: 'tool', tool_call_id: call.id, content: text });
       if (out.image) images.push(out.image);
     }
+    // Tips saved for a site it just arrived on: added to the last result.
+    const tips = ctx?.siteTips?.();
+    if (tips) messages[messages.length - 1].content += `\n\n${tips}`;
     if (images.length) {
       messages.push({
         role: 'user',
@@ -160,9 +186,10 @@ async function runAgent({
         ],
       });
     }
-    absorb();
+    const heard = absorb();
+    quick = !trouble && !heard && !calls.some((c) => THINK_AFTER.has(c.name)) && (step + 1) % 10 !== 0;
   }
-  emit({ type: 'done', reason: 'max_steps', steps: maxSteps });
+  emit({ type: 'done', reason: 'max_steps', steps: maxSteps, timing: timing(maxSteps) });
   return { steps: maxSteps };
 }
 

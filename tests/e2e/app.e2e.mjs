@@ -619,6 +619,7 @@ test('research without tabs: web_search and read_url work out of sight, and no t
   const textOf = (m) => (typeof m.content === 'string' ? m.content : (m.content || []).map((p) => p.text || '').join('\n'));
   // The search engine is a page on the test site.
   await L.main((_e, t) => { const m = global.lumio.tabs; m.realSearchTemplate = m.searchTemplate; m.searchTemplate = () => t; }, `${siteUrl}/serp.html?q=%s`);
+  await L.shell(`document.getElementById('newchat-btn').click(); true`); // the script counts this chat's turns
   const tabsBefore = await L.main(() => global.lumio.tabs.tabs.length);
   const windowsBefore = await L.main((e) => e.BrowserWindow.getAllWindows().length);
   let seen = { results: '', page: '', roles: '' };
@@ -653,6 +654,7 @@ test('paste_text fills a field in one step, and the clipboard is put back', asyn
   await until(() => L.main(() => !global.lumio.tabs.active.loading && /form\.html/.test(global.lumio.tabs.active.url || '')));
   await L.page(`document.getElementById('notes').value = ''; document.getElementById('notes').focus(); true`);
   await L.main((e) => { e.clipboard.writeText('what the user copied'); });
+  await L.shell(`document.getElementById('newchat-btn').click(); true`); // the script counts this chat's turns
   const mode = await L.main(() => global.lumio.store.settings.approvalMode);
   await L.main(() => global.lumio.ai.setMode('bypass'));
   lumio.state.agentScript = (body) => {

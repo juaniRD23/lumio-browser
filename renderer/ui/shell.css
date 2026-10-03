@@ -962,3 +962,6 @@ body.windows .sb-traffic { min-width: 0; }
 .project-new { display: flex; gap: 6px; padding: 8px 6px 4px; border-top: 1px solid var(--line); margin-top: 4px; }
 .project-new input { flex: 1; min-width: 0; height: 30px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--line); background: var(--field); outline: none; font-size: 12.5px; }
 .project-menu[hidden] { display: none; }
+
+/* How long a task took (under its answer). */
+.task-timing { margin: -2px 0 10px; color: var(--label); font-size: 11.5px; font-variant-numeric: tabular-nums; }

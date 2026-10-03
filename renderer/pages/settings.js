@@ -574,6 +574,25 @@ syncRepeat();
 loadSchedules();
 setInterval(() => { if (!document.hidden) loadSchedules(); }, 15000);
 
+// ---- Site tips (main/site-tips.js)
+async function loadTips() {
+  let sites = [];
+  try { sites = (await page.invoke('page:site-tips')).sites || []; } catch { return; }
+  $('#tips-intro').hidden = sites.length > 0;
+  $('#tips-list').innerHTML = sites.map((s) => s.tips.map((t) => `
+    <div class="row tip-row" data-site="${esc(s.site)}" data-tip="${esc(t.tip)}">
+      <div class="grow"><div class="title"><b>${esc(s.site)}</b></div><div class="desc">${esc(t.tip)}</div></div>
+      <div class="acts"><button class="btn ghost icon-btn" data-act="forget" title="Forget this tip" aria-label="Forget this tip for ${esc(s.site)}">${TRASH}</button></div>
+    </div>`).join('')).join('');
+}
+$('#tips-list').addEventListener('click', async (e) => {
+  const row = e.target.closest('[data-act="forget"]')?.closest('.tip-row');
+  if (!row) return;
+  await page.invoke('page:site-tip-remove', row.dataset.site, row.dataset.tip);
+  loadTips();
+});
+loadTips();
+
 // ---- Workflows
 const PENCIL = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
 let workflowsCache = [];

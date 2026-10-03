@@ -18,6 +18,8 @@ const schedule = require('./tools/schedule');
 const helpersTool = require('./tools/helpers');
 const workflowTool = require('./tools/workflow');
 const webTool = require('./tools/web');
+const tipsTool = require('./tools/tips');
+const { tipsNote, siteOf } = require('../site-tips');
 const { fill: fillWorkflow } = require('../workflows');
 const screenAura = require('./screen-aura');
 
@@ -67,10 +69,12 @@ const VOICE_NOTE = 'The user is talking to you by voice: their words were transc
 const STOP_WORDS = /^(?:ok(?:ay)?[,.]?\s+)?(?:stop|cancel|never ?mind|forget it|wait,? stop|stop (?:it|that|now))[.!]*$/i;
 
 class AIController {
-  constructor({ store, chats, tabs, emit, helper, account = null, indicator = null, schedules = null, workflows = null, projects = null, notify = null, onSettingsChanged = () => {} }) {
+  constructor({ store, chats, tabs, emit, helper, account = null, indicator = null, schedules = null, workflows = null, projects = null, siteTips = null, learnTips = true, notify = null, onSettingsChanged = () => {} }) {
     this.store = store;
     this.projects = projects; // Projects: chat folders with instructions (main/projects.js)
     this.workflows = workflows; // Workflows: saved tasks (main/workflows.js)
+    this.siteTips = siteTips; // SiteTips: how to get things done on sites (main/site-tips.js)
+    this.learnTips = learnTips && !!siteTips; // not in incognito
     this.schedules = schedules; // Schedules: tasks Lumio runs on its own (main/schedules.js)
     this.notify = notify; // (title, body, chatId) => shows a notification that opens the chat
     this.indicator = indicator; // PageIndicator: page glow + Stop bar while working in the browser
@@ -167,11 +171,35 @@ class AIController {
   // ------------------------------------------------------------ runs
   isRunning() { return !!this.run; }
 
+  // Each task's timing, the last 300, for finding what's slow (ai-timings.json).
+  logTiming(t) {
+    try {
+      const file = require('path').join(require('electron').app.getPath('userData'), 'ai-timings.json');
+      let list = [];
+      try { list = JSON.parse(require('fs').readFileSync(file, 'utf8')); } catch { /* first one */ }
+      list.push({ at: Date.now(), effort: this.reasoning().id, ...t });
+      require('fs').writeFileSync(file, JSON.stringify(list.slice(-300)));
+    } catch { /* not critical */ }
+  }
+
+  // The tips for the page in `tab()`, the first time this run reaches it.
+  tipsHook(tab) {
+    const shown = new Set();
+    return () => {
+      const url = tab()?.url || '';
+      const tips = this.siteTips?.forUrl(url) || [];
+      const key = tips.join('\n');
+      if (!tips.length || shown.has(key)) return null;
+      shown.add(key);
+      return tipsNote(siteOf(url), tips);
+    };
+  }
+
   tools() {
     const helperOk = this.helper.available();
     const off = new Set(this.store.settings.appsOff || []);
     const remote = make.remoteTools(this.capsCache?.remote || []).filter((t) => !off.has(t.app));
-    return [...browser.tools, ...webTool.tools, ...mac.tools, ...plan.tools, ...make.tools, ...(this.schedules ? schedule.tools : []), ...(this.workflows ? workflowTool.tools : []), ...(this.reasoning().id === 'high' ? helpersTool.tools : []), ...remote].filter((t) => (helperOk || !HELPER_TOOLS.has(t.name))
+    return [...browser.tools, ...webTool.tools, ...mac.tools, ...plan.tools, ...make.tools, ...(this.schedules ? schedule.tools : []), ...(this.workflows ? workflowTool.tools : []), ...(this.learnTips ? tipsTool.tools : []), ...(this.reasoning().id === 'high' ? helpersTool.tools : []), ...remote].filter((t) => (helperOk || !HELPER_TOOLS.has(t.name))
       && (process.platform === 'darwin' || t.name !== 'run_applescript'));
   }
 
@@ -262,7 +290,7 @@ class AIController {
   async lumioTools() {
     await this.capabilities();
     const allowed = this.capsCache.tools;
-    return this.tools().filter((t) => (allowed ? allowed.has(t.name) : t.name !== 'update_plan' && t.name !== 'send_helpers' && !webTool.NAMES.has(t.name) && t.name !== 'paste_text' && !schedule.NAMES.has(t.name) && !workflowTool.NAMES.has(t.name)));
+    return this.tools().filter((t) => (allowed ? allowed.has(t.name) : t.name !== 'update_plan' && t.name !== 'send_helpers' && !webTool.NAMES.has(t.name) && !tipsTool.NAMES.has(t.name) && t.name !== 'paste_text' && !schedule.NAMES.has(t.name) && !workflowTool.NAMES.has(t.name)));
   }
 
   async send({ chatId, text, includePage, includeTabs, attachments, voice = false, workflow = null, projectId = null } = {}) {
@@ -478,6 +506,7 @@ class AIController {
         lastTabShot: null,
         lastMacShot: null,
         account: this.account,
+        siteTips: this.tipsHook(() => tab),
         onPage: () => {},
         onCapture: () => {},
       };
@@ -492,7 +521,7 @@ class AIController {
         messages,
         tools,
         systemPrompt: () => '',
-        chat: (opts) => lumioChat({ account: this.account, ...opts, reasoning: 'medium', context: this.lumioContext(), ids: { taskId: chat.id, runId: `${runId}-h${h.n}`, stepId: `h${h.n}s${++stepNo}` } }),
+        chat: (opts) => lumioChat({ account: this.account, ...opts, reasoning: opts.quick ? 'low' : 'medium', context: this.lumioContext(), ids: { taskId: chat.id, runId: `${runId}-h${h.n}`, stepId: `h${h.n}s${++stepNo}` } }),
         approve: (id) => new Promise((resolve) => run.pending.set(id, resolve)),
         getMode: () => this.store.settings.approvalMode,
         emit,
@@ -540,6 +569,8 @@ class AIController {
       account: this.account,
       schedules: this.schedules,
       workflows: this.workflows,
+      siteTipsStore: this.learnTips ? this.siteTips : null,
+      siteTips: this.tipsHook(() => this.tabs.active),
       made: (file) => record({ type: 'made', file }),
       buildDocument: (spec) => this.buildDocument(spec),
       onPage: (wc) => this.indicator?.touch(wc),
@@ -566,7 +597,7 @@ class AIController {
             mode: this.store.settings.approvalMode,
           });
         },
-        chat: (opts) => lumioChat({ account: this.account, ...opts, reasoning, context: this.lumioContext(), ids: { taskId: chat.id, runId, stepId: `s${++stepNo}` } }),
+        chat: (opts) => lumioChat({ account: this.account, ...opts, reasoning: opts.quick ? 'low' : reasoning, context: this.lumioContext(), ids: { taskId: chat.id, runId, stepId: `s${++stepNo}` } }),
         approve: (id) => new Promise((resolve) => run.pending.set(id, resolve)),
         getMode: () => this.store.settings.approvalMode,
         emit: record,
@@ -647,6 +678,7 @@ class AIController {
         run.text = null;
         if (ev.reason === 'max_steps') d.push({ kind: 'note', text: `Stopped after ${MAX_STEPS} steps. Say "continue" to keep going.` });
         if (ev.reason === 'length') d.push({ kind: 'note', text: 'The reply was cut off because it got too long.' });
+        if (ev.timing?.steps > 1) { d.push({ kind: 'timing', ...ev.timing }); this.logTiming(ev.timing); }
         break;
       case 'stopped':
         run.text = null;

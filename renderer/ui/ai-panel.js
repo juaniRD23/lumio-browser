@@ -456,6 +456,15 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     if (force || near) messages.scrollTop = messages.scrollHeight;
   }
 
+  // Under a finished task: how long it took, and where the time went.
+  function timingEl(t) {
+    const sec = (ms) => (ms < 10_000 ? (ms / 1000).toFixed(1) : Math.round(ms / 1000));
+    const el = document.createElement('div');
+    el.className = 'task-timing';
+    el.textContent = `Done in ${sec(t.ms)} s · ${t.steps} steps · thinking ${sec(t.modelMs)} s, actions ${sec(t.toolMs)} s`;
+    return el;
+  }
+
   function notice(text, cls = '') {
     const el = document.createElement('div');
     el.className = 'notice ' + cls;
@@ -659,6 +668,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
       else if (d.kind === 'step') messages.append(stepEl(d));
       else if (d.kind === 'approval' && !d.decision) messages.append(approvalEl(d));
       else if (d.kind === 'note') notice(d.text, 'info');
+      else if (d.kind === 'timing') messages.append(timingEl(d));
       else if (d.kind === 'error') { if (d.code === 'usage_limit') limitNotice(d.text); else notice(d.text); }
     }
     scrollDown(true);
@@ -802,6 +812,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
         thinking(false);
         if (ev.reason === 'max_steps') notice(`Stopped after ${ev.steps || 100} steps. Say "continue" to keep going.`, 'info');
         if (ev.reason === 'length') notice('The reply was cut off because it got too long.', 'info');
+        if (ev.timing?.steps > 1) { messages.append(timingEl(ev.timing)); scrollDown(); }
         break;
       case 'stopped':
         endText();

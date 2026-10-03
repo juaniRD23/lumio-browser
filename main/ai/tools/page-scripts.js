@@ -242,7 +242,7 @@ function cursor(opts) {
     const host = document.createElement('div');
     host.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none;';
     const root = host.attachShadow({ mode: 'closed' });
-    const css = `.c{position:fixed;left:0;top:0;transform:translate(-100px,-100px);transition:transform .42s cubic-bezier(.22,1,.36,1);filter:drop-shadow(0 2px 6px rgba(0,0,0,.45)) drop-shadow(0 0 10px rgba(134,183,255,.7));}
+    const css = `.c{position:fixed;left:0;top:0;transform:translate(-100px,-100px);transition:transform .24s cubic-bezier(.22,1,.36,1);filter:drop-shadow(0 2px 6px rgba(0,0,0,.45)) drop-shadow(0 0 10px rgba(134,183,255,.7));}
       .r{position:fixed;left:0;top:0;width:34px;height:34px;margin:-17px 0 0 -17px;border-radius:50%;border:2px solid rgba(134,183,255,.95);opacity:0;}
       .r.go{animation:ring .5s ease-out;}
       @keyframes ring{from{opacity:1;transform:var(--p) scale(.3)}to{opacity:0;transform:var(--p) scale(1.4)}}`;

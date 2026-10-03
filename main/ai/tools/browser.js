@@ -22,13 +22,14 @@ function settle(wc, max = 8000) {
       finished = true;
       clearTimeout(timer);
       if (!wc.isDestroyed()) wc.removeListener('did-stop-loading', finish);
-      setTimeout(resolve, 250);
+      setTimeout(resolve, 150);
     };
     const timer = setTimeout(finish, max);
+    // Long enough for a click to start a navigation, short enough not to drag every action.
     setTimeout(() => {
       if (wc.isDestroyed() || !wc.isLoading()) finish();
       else wc.once('did-stop-loading', finish);
-    }, 350);
+    }, 220);
   });
 }
 
@@ -76,7 +77,7 @@ async function moveCursor(ctx, wc, x, y, click) {
   if (!ctx.showCursor) return;
   try {
     await inPage(wc, scripts.cursor, { x, y, click });
-    if (!click) await wait(380);
+    if (!click) await wait(200); // the pointer's glide (.24s) is mostly done
   } catch { /* page may block injection; not critical */ }
 }
 

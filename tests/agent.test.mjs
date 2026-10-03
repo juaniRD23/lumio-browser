@@ -9,13 +9,16 @@ const { needsApproval } = require('../main/ai/policy.js');
 function fakeChat(turns) {
   let i = 0;
   const seen = [];
-  const chat = async function* ({ messages }) {
+  const quick = [];
+  const chat = async function* ({ messages, quick: q }) {
     seen.push(messages);
+    quick.push(!!q);
     const t = turns[Math.min(i++, turns.length - 1)];
     if (t.text) yield { type: 'text', text: t.text };
     return { content: t.text || '', toolCalls: t.calls || [], finishReason: t.calls ? 'tool_calls' : 'stop' };
   };
   chat.seen = seen;
+  chat.quick = quick;
   return chat;
 }
 
@@ -162,4 +165,42 @@ test('messages sent while Lumio works join before its next step, even after its 
   const roles = messages.map((m) => `${m.role}${typeof m.content === 'string' && m.role === 'user' ? `:${m.content}` : ''}`);
   assert.deepEqual(roles, ['user:go', 'assistant', 'tool', 'user:actually use Best Buy', 'assistant', 'user:and the cheapest one?', 'assistant']);
   assert.equal(chat.seen.length, 3);
+});
+
+test('speed: the first turn plans at full effort; routine turns are quick; errors, research and new messages think fully', async () => {
+  const tools = [
+    tool('read_page', 'read', () => 'page text'),
+    tool('click', 'read', () => 'clicked'),
+    tool('type', 'read', () => { throw new Error('field gone'); }),
+    tool('web_search', 'read', () => 'results'),
+  ];
+  const { opts, chat, events } = setup({
+    tools,
+    turns: [
+      { calls: [{ id: 'a', name: 'read_page', arguments: '{}' }] },
+      { calls: [{ id: 'b', name: 'click', arguments: '{}' }] },
+      { calls: [{ id: 'c', name: 'type', arguments: '{}' }] },
+      { calls: [{ id: 'd', name: 'web_search', arguments: '{}' }] },
+      { calls: [{ id: 'e', name: 'click', arguments: '{}' }] },
+      { text: 'Done.' },
+    ],
+  });
+  await runAgent(opts);
+  //               plan   after read  after click  after error  after search  after click
+  assert.deepEqual(chat.quick, [false, true, true, false, false, true]);
+  const done = events.find((e) => e.type === 'done');
+  assert.equal(done.timing.steps, 6);
+  assert.ok(done.timing.ms >= done.timing.modelMs + done.timing.toolMs - 5);
+});
+
+test('site tips: given before the first step and when a new site comes up, once each', async () => {
+  const shown = ['[Lumio Browser, not the user] Tips for docs.google.com: paste rows', '[Lumio Browser, not the user] Tips for mail.google.com: compose'];
+  const { opts, chat, messages } = setup({
+    turns: [{ calls: [{ id: 'a', name: 'read_page', arguments: '{}' }] }, { calls: [{ id: 'b', name: 'read_page', arguments: '{}' }] }, { text: 'Done.' }],
+  });
+  opts.ctx = { siteTips: () => shown.shift() ?? null };
+  await runAgent(opts);
+  assert.equal(messages[1].content, '[Lumio Browser, not the user] Tips for docs.google.com: paste rows', 'before the first step');
+  assert.match(chat.seen[1].at(-1).content, /page text\n\n\[Lumio Browser, not the user\] Tips for mail\.google\.com/, 'with the result that reached the new site');
+  assert.doesNotMatch(chat.seen[2].at(-1).content, /Tips for/);
 });

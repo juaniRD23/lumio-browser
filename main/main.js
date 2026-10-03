@@ -31,6 +31,7 @@ const { generatePassword } = require('./passwords');
 const importer = require('./importer');
 const { Schedules, describe: describeSchedule } = require('./schedules');
 const { Workflows } = require('./workflows');
+const { SiteTips } = require('./site-tips');
 const { Projects } = require('./projects');
 const { SyncEngine } = require('./sync/engine');
 const syncAdapters = require('./sync/adapters');
@@ -73,6 +74,7 @@ let account = null;
 let passwords = null;
 let schedules = null; // scheduled tasks (main/schedules.js)
 let workflows = null; // saved workflows (main/workflows.js)
+let siteTips = null; // how to get things done on sites (main/site-tips.js)
 let projects = null; // chat projects (main/projects.js)
 let sync = null; // Lumio Sync (main/sync)
 let companion = null; // the phone companion's link to this computer
@@ -134,6 +136,7 @@ const services = {
   get account() { return account; },
   get schedules() { return schedules; },
   get workflows() { return workflows; },
+  get siteTips() { return siteTips; },
   notify: (w, title, body, chatId) => { notifyChat(w, title, body, chatId); companion?.notice({ title, body, chatId, hint: /needs your OK/.test(title) ? 'approval' : 'scheduled' }); },
   onEmit: (w, channel, payload) => companion?.onEmit(w, channel, payload),
   createWindow: (opts) => createWindow(opts),
@@ -365,7 +368,7 @@ function toggleBookmark(w) {
   if (!tab) return;
   const url = w.tabs.displayUrl(tab);
   if (!/^https?:/.test(url)) return;
-  const added = store.toggleBookmark(url, tab.title, tab.favicon);
+  const added = store.toggleBookmark(url, tab.view?.webContents.getTitle() || tab.title, tab.favicon); // the page's title now, not a moment ago
   bookmarksChanged();
   w.emit('toast', { text: added ? 'Bookmarked' : 'Bookmark removed' });
 }
@@ -977,6 +980,8 @@ function registerIpc() {
 
   // Saved workflows (Settings › Workflows, and the new tab page)
   internalHandle('page:workflows', ['settings', 'newtab'], () => ({ workflows: workflows.list() }));
+  internalHandle('page:site-tips', ['settings'], () => ({ sites: siteTips.list() }));
+  internalHandle('page:site-tip-remove', ['settings'], (_ctx, site, tip) => siteTips.remove(String(site || ''), String(tip || '')));
   internalHandle('page:workflow-update', ['settings'], (_ctx, id, patch) => { try { return { ok: true, workflow: workflows.update(String(id), patch || {}) }; } catch (err) { return { ok: false, error: err.message }; } });
   internalHandle('page:workflow-remove', ['settings'], (_ctx, id) => ({ ok: workflows.remove(String(id)) }));
   // Running one happens in the panel, which asks for any blanks first.
@@ -1246,6 +1251,7 @@ app.whenReady().then(async () => {
   watchLumioCookie();
   setInterval(() => { if (account.token()) account.refresh(); }, 10 * 60 * 1000).unref?.();
   workflows = new Workflows(app.getPath('userData'));
+  siteTips = new SiteTips(app.getPath('userData'));
   workflows.onChange(() => alive().forEach((w) => w.emit('workflows-changed', {})));
   projects = new Projects(app.getPath('userData'));
   // The sidebar refreshes when chats or projects change (a moment after, not per word).
@@ -1455,6 +1461,7 @@ global.lumio = {
   get account() { return account; },
   get passwords() { return passwords; },
   get workflows() { return workflows; },
+  get siteTips() { return siteTips; },
   get schedules() { return schedules; },
   get sync() { return sync; },
   get profiles() { return { normal, incognito: incog }; },
