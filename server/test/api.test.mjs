@@ -139,6 +139,9 @@ beforeEach(() => {
       const params = opts.method === 'POST' ? Object.fromEntries(new URLSearchParams(String(opts.body))) : Object.fromEntries(new URL(u).searchParams);
       calls.stripe.push({ method: opts.method || 'GET', path, params });
       if (path === '/v1/customers') return Response.json({ id: 'cus_1' });
+      const cus = /^\/v1\/customers\/(\w+)$/.exec(path);
+      if (cus && cus[1] === 'cus_1') return Response.json({ id: 'cus_1' });
+      if (cus) return Response.json({ error: { code: 'resource_missing', message: `No such customer: '${cus[1]}'` } }, { status: 404 });
       if (path === '/v1/prices') return Response.json({ data: [{ id: 'price_plus', lookup_key: 'lumio_plus_monthly' }, { id: 'price_pro', lookup_key: 'lumio_pro_monthly' }, { id: 'price_max', lookup_key: 'lumio_max_monthly' }] });
       if (path === '/v1/checkout/sessions') return Response.json(params.ui_mode === 'embedded' ? { id: 'cs_e1', client_secret: 'cs_e1_secret_abc' } : { id: 'cs_1', url: 'https://checkout.stripe.test/cs_1' });
       const cs = /^\/v1\/checkout\/sessions\/(\w+)$/.exec(path);
@@ -291,6 +294,16 @@ test('the signed webhook sets the plan from the subscription, and ignores other 
   await hook({ id: 'evt_4', type: 'customer.subscription.deleted', data: { object: { ...updated, status: 'canceled' } } });
   assert.equal(userRow().plan, 'free');
   assert.equal(userRow().plan_status, 'canceled');
+});
+
+test('a customer left over from Stripe test mode is replaced by a new one at checkout', async () => {
+  const { token } = await signIn();
+  sql.prepare("UPDATE users SET stripe_customer_id = 'cus_testmode'").run();
+  const res = await call('/api/billing/checkout', { cookie: token, method: 'POST', body: { plan: 'plus' } });
+  assert.deepEqual(await res.json(), { url: 'https://checkout.stripe.test/cs_1' });
+  assert.ok(calls.stripe.some((c) => c.path === '/v1/customers' && c.method === 'POST'), 'made a new customer');
+  assert.equal(calls.stripe.find((c) => c.path === '/v1/checkout/sessions').params.customer, 'cus_1');
+  assert.equal(userRow().stripe_customer_id, 'cus_1');
 });
 
 test('subscribed accounts change plans in the billing portal, never a second subscription', async () => {

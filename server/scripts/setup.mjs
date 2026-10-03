@@ -1,5 +1,6 @@
 // One-time setup for the Lumio server, run in your own terminal:
 //   node scripts/setup.mjs --host lumio.gw607953.workers.dev
+//   node scripts/setup.mjs --host lumio.gw607953.workers.dev --stripe   (only the Stripe keys, e.g. test → live)
 // Asks for each key with hidden input (Enter skips one) and stores it as a
 // Cloudflare Worker secret. With a Stripe key it also creates Lumio's plans
 // (Plus $20, Pro $100, Max $200 a month), its own billing-portal settings and
@@ -20,6 +21,9 @@ const PLANS = [
   { key: 'lumio_pro_monthly', name: 'Lumio Pro', amount: 10000 },
   { key: 'lumio_max_monthly', name: 'Lumio Max', amount: 20000 },
 ];
+// What subscribers see on their card statement: the business name (Stripe requires it) plus the product.
+const DESCRIPTOR = 'FIFTY SITES LUMIO';
+const onlyStripe = process.argv.includes('--stripe');
 const EVENTS = ['checkout.session.completed', 'customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted'];
 
 function ask(question) {
@@ -68,8 +72,13 @@ async function stripeSetup(key) {
   const prices = {};
   for (const plan of PLANS) {
     const found = existing.data.find((p) => p.lookup_key === plan.key);
-    if (found) { prices[plan.key] = found; console.log(`  ✓ ${plan.name} already exists`); continue; }
-    const product = await call('POST', '/v1/products', { name: plan.name, metadata: { app: 'lumio' } });
+    if (found) {
+      prices[plan.key] = found;
+      await call('POST', `/v1/products/${found.product}`, { statement_descriptor: DESCRIPTOR });
+      console.log(`  ✓ ${plan.name} already exists`);
+      continue;
+    }
+    const product = await call('POST', '/v1/products', { name: plan.name, statement_descriptor: DESCRIPTOR, metadata: { app: 'lumio' } });
     prices[plan.key] = await call('POST', '/v1/prices', {
       product: product.id, currency: 'usd', unit_amount: plan.amount, recurring: { interval: 'month' }, lookup_key: plan.key, metadata: { app: 'lumio' },
     });
@@ -99,36 +108,43 @@ async function stripeSetup(key) {
   const url = `https://${host}/api/stripe/webhook`;
   const hooks = await call('GET', '/v1/webhook_endpoints', { limit: 100 });
   const hook = hooks.data.find((h) => h.metadata?.app === 'lumio');
+  let webhookSecret = null;
   if (hook) {
     await call('POST', `/v1/webhook_endpoints/${hook.id}`, { url, enabled_events: EVENTS });
     console.log(`  ✓ Webhook now points at ${url} (its signing secret is already stored)`);
   } else {
     const created = await call('POST', '/v1/webhook_endpoints', { url, enabled_events: EVENTS, description: 'Lumio plans', metadata: { app: 'lumio' } });
-    await putSecret('STRIPE_WEBHOOK_SECRET', created.secret);
-    console.log(`  ✓ Webhook created for ${url}, signing secret stored`);
+    webhookSecret = created.secret;
+    console.log(`  ✓ Webhook created for ${url}`);
   }
+  // Stored only once everything above worked, so a failed run never mixes test and live.
+  if (webhookSecret) { await putSecret('STRIPE_WEBHOOK_SECRET', webhookSecret); console.log('  ✓ Webhook signing secret stored'); }
   await putSecret('STRIPE_SECRET_KEY', key);
-  console.log('  ✓ Stripe key stored');
+  console.log(`  ✓ Stripe key stored (card statements say "${DESCRIPTOR}")`);
 }
 
 console.log(`Lumio server setup for https://${host}\nPaste each key when asked (typing is hidden). Press Enter to skip one.\n`);
-const openrouter = await ask('OpenRouter API key: ');
-if (openrouter) { await putSecret('OPENROUTER_API_KEY', openrouter); console.log('  ✓ OpenRouter key stored'); }
-const google = await ask('Google OAuth client secret: ');
-if (google) { await putSecret('GOOGLE_CLIENT_SECRET', google); console.log('  ✓ Google client secret stored'); }
+if (!onlyStripe) {
+  const openrouter = await ask('OpenRouter API key: ');
+  if (openrouter) { await putSecret('OPENROUTER_API_KEY', openrouter); console.log('  ✓ OpenRouter key stored'); }
+  const google = await ask('Google OAuth client secret: ');
+  if (google) { await putSecret('GOOGLE_CLIENT_SECRET', google); console.log('  ✓ Google client secret stored'); }
+}
 const stripeKey = await ask('Stripe secret key (sk_test_… to try it first, sk_live_… for real payments): ');
 // The publishable key shows Stripe's payment form inside Lumio's own /checkout page.
 const publishable = await ask('Stripe publishable key (pk_test_… or pk_live_…, the same mode as the secret key): ');
-if (publishable) {
-  if (!/^pk_(test|live)_[A-Za-z0-9]+$/.test(publishable)) console.log('  ✗ That doesn’t look like a publishable key (pk_test_… or pk_live_…). Skipped.');
-  else { await putSecret('STRIPE_PUBLISHABLE_KEY', publishable); console.log('  ✓ Stripe publishable key stored (payment form inside Lumio)'); }
+// Both are checked before anything is stored, so a typo can't leave test and live keys mixed.
+const modeOf = (k) => (/_live_/.test(k) ? 'live' : 'test');
+if (stripeKey && !/^(sk|rk)_(test|live)_/.test(stripeKey)) { console.error('That doesn’t look like a Stripe secret key (sk_live_… or rk_live_…). Nothing changed.'); process.exit(1); }
+if (publishable && !/^pk_(test|live)_[A-Za-z0-9]+$/.test(publishable)) { console.error('That doesn’t look like a publishable key (pk_live_… or pk_test_…). Nothing changed.'); process.exit(1); }
+if (stripeKey && publishable && modeOf(stripeKey) !== modeOf(publishable)) { console.error(`The secret key is ${modeOf(stripeKey)} but the publishable key is ${modeOf(publishable)}: use both from the same mode. Nothing changed.`); process.exit(1); }
+if (stripeKey && !publishable && modeOf(stripeKey) === 'live') { console.error('Switching to live needs the live publishable key too (pk_live_…), or Lumio’s payment form would still be in test mode. Nothing changed.'); process.exit(1); }
+if (stripeKey) await stripeSetup(stripeKey);
+if (publishable) { await putSecret('STRIPE_PUBLISHABLE_KEY', publishable); console.log('  ✓ Stripe publishable key stored (payment form inside Lumio)'); }
+if (!onlyStripe) {
+  const microsoft = await ask('Microsoft app client secret (for Outlook/OneDrive connections): ');
+  if (microsoft) { await putSecret('MICROSOFT_CLIENT_SECRET', microsoft); console.log('  ✓ Microsoft client secret stored'); }
 }
-if (stripeKey) {
-  if (!/^(sk|rk)_(test|live)_/.test(stripeKey)) { console.error('That doesn’t look like a Stripe secret key.'); process.exit(1); }
-  await stripeSetup(stripeKey);
-}
-const microsoft = await ask('Microsoft app client secret (for Outlook/OneDrive connections): ');
-if (microsoft) { await putSecret('MICROSOFT_CLIENT_SECRET', microsoft); console.log('  ✓ Microsoft client secret stored'); }
 
 // Connections need a key to encrypt people's Google/Microsoft tokens. Made
 // once, here; never shown. (Replacing it would disconnect everyone.)

@@ -42,6 +42,7 @@ export async function stripe<T = any>(env: Env, method: 'GET' | 'POST', path: st
   const data = await res.json<any>().catch(() => null);
   // A declined card: Stripe's own words are meant for the customer ("Your card was declined.").
   if (res.status === 402) throw new AgentError(`${data?.error?.message || 'Your card was declined.'} Nothing changed.`, 402, 'card_declined');
+  if (res.status === 404 && data?.error?.code === 'resource_missing') throw new AgentError(`Stripe: ${data.error.message || 'not found'}`, 502, 'stripe_missing');
   if (!res.ok) throw new AgentError(data?.error?.message ? `Stripe: ${data.error.message}` : 'Stripe didn’t answer. Try again.', 502, 'billing_error');
   return data as T;
 }
@@ -69,7 +70,12 @@ async function portalConfig(env: Env) {
 }
 
 async function customerFor(env: Env, user: User) {
-  if (user.stripe_customer_id) return user.stripe_customer_id;
+  if (user.stripe_customer_id) {
+    // One made in Stripe's test mode doesn't exist with the live key (nor a deleted one): make a new one.
+    const found = await stripe<{ id: string; deleted?: boolean }>(env, 'GET', `/v1/customers/${encodeURIComponent(user.stripe_customer_id)}`)
+      .catch((e) => { if (e?.code === 'stripe_missing') return null; throw e; });
+    if (found && !found.deleted) return found.id;
+  }
   const c = await stripe<{ id: string }>(env, 'POST', '/v1/customers', {
     email: user.email, name: user.name || undefined, metadata: { app: 'lumio', user_id: user.id },
   });
