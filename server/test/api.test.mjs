@@ -295,7 +295,7 @@ test('Go ($10): its Stripe price is made the first time someone picks it, then t
   const done = { id: 'evt_go', type: 'checkout.session.completed', data: { object: { mode: 'subscription', subscription: 'sub_go', customer: 'cus_1', client_reference_id: id, metadata: { app: 'lumio', user_id: id } } } };
   assert.deepEqual(await (await hook(done)).json(), { ok: true, result: 'go' });
   const usage = (await (await call('/api/usage', { cookie: token })).json()).usage;
-  assert.deepEqual([usage.planName, usage.windows[0].limit], ['Go', 1_700_000]);
+  assert.deepEqual([usage.planName, usage.windows[0].limit], ['Go', 2_030_000]);
 });
 
 test('plan codes: the owner makes one-time codes; one gives a month of its plan, once, then Free again', async () => {
@@ -494,7 +494,7 @@ test('web Chat streams a reply, saves the conversation, and bills the allowance'
 
 test('out of allowance, Chat and the browser are refused before any model call', async () => {
   const { token } = await signIn();
-  sql.prepare("INSERT INTO steps (key, owner, plan, kind, request_hash, status, held_microusd, cost_microusd, created_at) VALUES ('old', ?, 'free', 'chat', 'h', 'done', 0, 99950, ?)").run(userRow().id, Date.now() - 1000);
+  sql.prepare("INSERT INTO steps (key, owner, plan, kind, request_hash, status, held_microusd, cost_microusd, created_at) VALUES ('old', ?, 'free', 'chat', 'h', 'done', 0, 249950, ?)").run(userRow().id, Date.now() - 1000);
   const res = await call('/api/chat', { cookie: token, method: 'POST', body: { text: 'hi' } });
   assert.equal(res.status, 429);
   const body = await res.json();
@@ -512,7 +512,7 @@ test('browser: capabilities, a streamed step, tool calls, replays and the Free d
   assert.equal(caps.model.id, BROWSER_DEFAULT);
   assert.ok(caps.models.every((m) => m.available));
   assert.ok(caps.tools.includes('update_plan'));
-  assert.deepEqual(caps.usage.windows.map((w) => [w.id, w.limit]), [['weekly', 100000]], 'no 5-hour limit');
+  assert.deepEqual(caps.usage.windows.map((w) => [w.id, w.limit]), [['weekly', 250000]], 'no 5-hour limit');
 
   const ev = await events(await call('/v1/agent', { token, method: 'POST', body: step({ reasoning: 'high' }) }));
   await settled();
@@ -830,7 +830,7 @@ test('spend page: only the owner sees OpenRouter’s charges next to what Lumio 
   assert.deepEqual(d.lumio.today, { total: 0.000321, free: 0.000321, paid: 0, byKind: { browser: 0.000321, chat: 0, image: 0, voice: 0 }, calls: 1, checked: 1 });
   assert.deepEqual(d.people, { free: 1 });
   assert.equal(d.monthlyRevenue, 0);
-  assert.deepEqual(d.freeCap, { usedToday: 0.000321, cap: 3 });
+  assert.deepEqual(d.freeCap, { usedToday: 0.000321, cap: 10 });
   assert.equal(d.waitingForCheck, 0, 'checked live');
   // A paying account counts toward revenue.
   sql.prepare("UPDATE users SET plan = 'plus', plan_status = 'active'").run();
@@ -840,16 +840,17 @@ test('spend page: only the owner sees OpenRouter’s charges next to what Lumio 
 test('plan budgets: Go and Plus leave 15% profit after fees; Pro and Max are set higher; no 5-hour limit', async () => {
   // Price - 15% profit - Stripe (3.6% + $0.30) - OpenRouter's 5.5% fee, per week.
   assert.equal(weeklyBudget(10), 1.7);
+  assert.equal(weeklyBudget(10, 0), 2.03, 'Go: break-even');
   assert.equal(weeklyBudget(20), 3.48);
   assert.equal(weeklyBudget(100), 17.67);
   assert.equal(weeklyBudget(200), 35.42);
-  assert.deepEqual([PLANS.free.weekly, PLANS.plus.weekly, PLANS.pro.weekly, PLANS.max.weekly], [0.1, 3.48, 20, 40]);
+  assert.deepEqual([PLANS.free.weekly, PLANS.go.weekly, PLANS.plus.weekly, PLANS.pro.weekly, PLANS.max.weekly], [0.25, 2.03, 3.48, 20, 40]);
   // No paid plan loses money even at 100% use.
   for (const id of ['go', 'plus', 'pro', 'max']) {
     const p = PLANS[id];
     assert.ok(p.price - p.weekly * (365.25 / 12 / 7) * 1.055 - (p.price * 0.036 + 0.3) > 0, `${id} is profitable at full use`);
   }
-  for (const id of ['go', 'plus']) {
+  for (const id of ['plus']) {
     const p = PLANS[id];
     const monthlyAi = p.weekly * (365.25 / 12 / 7) * 1.055;
     const fees = p.price * 0.036 + 0.3;
@@ -858,7 +859,7 @@ test('plan budgets: Go and Plus leave 15% profit after fees; Pro and Max are set
     assert.ok(profit >= p.price * 0.15 && profit < p.price * 0.15 + 0.01 * (365.25 / 12 / 7) * 1.055, `${id}: ${profit}`);
   }
   const plans = (await (await call('/api/billing/plans')).json()).plans;
-  assert.deepEqual(plans.map((p) => p.weeklyUsd), [0.1, 1.7, 3.48, 20, 40]);
+  assert.deepEqual(plans.map((p) => p.weeklyUsd), [0.25, 2.03, 3.48, 20, 40]);
 });
 
 test('Chat: attach pictures and documents; the model sees them; only the owner can read them', async () => {
@@ -1007,7 +1008,7 @@ test('voice: a provider failure charges nothing, and an empty allowance refuses'
   const r = await call('/v1/voice/speak', { token, method: 'POST', body: { text: 'Hello' } });
   assert.ok(r.status >= 500);
   assert.equal(sql.prepare("SELECT cost_microusd FROM steps WHERE kind = 'voice'").get().cost_microusd, 0);
-  sql.prepare("INSERT INTO steps (key, owner, plan, kind, request_hash, status, held_microusd, cost_microusd, created_at) VALUES ('x', ?, 'free', 'chat', 'h', 'done', 0, 100000, ?)").run(userRow().id, Date.now() - 1000);
+  sql.prepare("INSERT INTO steps (key, owner, plan, kind, request_hash, status, held_microusd, cost_microusd, created_at) VALUES ('x', ?, 'free', 'chat', 'h', 'done', 0, 250000, ?)").run(userRow().id, Date.now() - 1000);
   const out = await call('/v1/voice/transcribe', { token, method: 'POST', body: { audio: 'AAAA', seconds: 2 } });
   assert.equal(out.status, 429);
   assert.equal((await out.json()).code, 'usage_limit');

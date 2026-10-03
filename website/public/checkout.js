@@ -4,7 +4,7 @@
 const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const PERKS = {
-  go: ['Thousands of messages and about 100 browser tasks a week', 'About 50 pictures a week', 'GPT-6 Luna, Ling and DeepSeek in Chat'],
+  go: ['Thousands of messages and about 120 browser tasks a week', 'About 55 pictures a week', 'GPT-6 Luna, Ling and DeepSeek in Chat'],
   plus: ['Thousands of messages and hundreds of browser tasks a week', 'About 100 pictures a week', 'Claude Sonnet, GPT-6.1 Sol, Gemini and Grok in Chat'],
   pro: ['About 6× the usage of Plus', 'Every model, including Claude Opus and GPT-6 Astra', 'For people who use Lumio all day'],
   max: ['About 11× the usage of Plus', 'Every model', 'The most Lumio AI there is'],

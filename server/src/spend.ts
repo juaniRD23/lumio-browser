@@ -142,7 +142,7 @@ export async function spendReport(env: Env, user: User, now = Date.now()) {
   const people = Object.fromEntries(plans.map((p) => [p.plan, p.n]));
   const monthlyRevenue = plans.reduce((a, p) => a + p.paying * (PLANS[p.plan as keyof typeof PLANS]?.price ?? 0), 0);
 
-  const cap = Number(env.FREE_DAILY_CAP_USD || '3');
+  const cap = Number(env.FREE_DAILY_CAP_USD || '10');
   const free24 = await env.DB.prepare(`SELECT COALESCE(SUM(CASE WHEN status = 'running' THEN held_microusd ELSE COALESCE(cost_microusd, 0) END), 0) AS used
     FROM steps WHERE plan = 'free' AND created_at >= ?1`).bind(now - DAY).first<{ used: number }>();
   const pending = await env.DB.prepare(`SELECT COUNT(*) AS n FROM steps WHERE verified_at IS NULL AND gen_ids IS NOT NULL AND created_at >= ?1`).bind(now - 2 * DAY).first<{ n: number }>();

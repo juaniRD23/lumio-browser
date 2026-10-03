@@ -16,19 +16,21 @@ export const PRICING = {
   openRouterFee: 0.055, // on credit purchases
   weeksPerMonth: 365.25 / 12 / 7,
 };
-export function weeklyBudget(monthlyPrice: number) {
+export function weeklyBudget(monthlyPrice: number, profit = PRICING.profit) {
   const p = PRICING;
-  const forModels = (monthlyPrice * (1 - p.profit - p.stripePercent) - p.stripeFixed) / (1 + p.openRouterFee);
+  const forModels = (monthlyPrice * (1 - profit - p.stripePercent) - p.stripeFixed) / (1 + p.openRouterFee);
   return Math.floor((forModels / p.weeksPerMonth) * 100) / 100;
 }
 
-// Go and Plus use the formula above (Free is small enough to pay for itself
-// at a few percent conversion). Pro and Max are set by hand above it, on
+// Plus uses the formula above. Go is at break-even (no profit even at full use,
+// a little at typical use) so it stretches as far as $10 can; Free is a taste
+// that a few percent of people upgrading pays for, with a daily cap across all
+// Free accounts (FREE_DAILY_CAP_USD) as the safety net. Pro and Max are set by hand above it, on
 // purpose, but never at a loss: at 100% use Pro keeps ~4% ($4.36) and Max
 // ~4.5% ($9.02); at typical use both keep far more.
 export const PLANS: Record<Plan, { name: string; weekly: number; price: number }> = {
-  free: { name: 'Free', weekly: 0.1, price: 0 }, // about 6 website tasks or 200 chats with GPT-6 Luna
-  go: { name: 'Go', weekly: weeklyBudget(10), price: 10 }, // Free's models and pictures, 17× Free's use
+  free: { name: 'Free', weekly: 0.25, price: 0 }, // about 15 website tasks or 500 chats with GPT-6 Luna
+  go: { name: 'Go', weekly: weeklyBudget(10, 0), price: 10 }, // $2.03: Free's models and pictures, about 8× Free's use
   plus: { name: 'Plus', weekly: weeklyBudget(20), price: 20 },
   pro: { name: 'Pro', weekly: 20, price: 100 },
   max: { name: 'Max', weekly: 40, price: 200 },
@@ -39,7 +41,7 @@ const HOUR = 3600_000;
 export const WEEK = 7 * 24 * HOUR;
 
 export function limits(plan: Plan) {
-  return { weekly: Math.floor((PLANS[plan]?.weekly ?? PLANS.free.weekly) * 1_000_000) };
+  return { weekly: Math.round((PLANS[plan]?.weekly ?? PLANS.free.weekly) * 1_000_000) }; // dollars with cents: round away float error
 }
 
 // What counts: settled cost, or the hold while a step runs.
@@ -76,7 +78,7 @@ function outOfAllowance(plan: Plan) {
 export async function hold(env: Env, { key, owner, plan, requestHash, kind, held, now = Date.now() }:
   { key: string; owner: string; plan: Plan; requestHash: string; kind: 'browser' | 'chat' | 'image' | 'voice'; held: number; now?: number }) {
   if (plan === 'free') {
-    const cap = Math.floor(Number(env.FREE_DAILY_CAP_USD || '3') * 1_000_000);
+    const cap = Math.floor(Number(env.FREE_DAILY_CAP_USD || '10') * 1_000_000);
     const today = await env.DB.prepare(`SELECT ${SPENT} AS used FROM steps WHERE plan = 'free' AND created_at >= ?1`).bind(now - 24 * HOUR).first<{ used: number }>();
     if ((today?.used ?? 0) >= cap) throw new LimitError('Lumio AI is at capacity for Free accounts today. Try again later, or upgrade for more.');
   }

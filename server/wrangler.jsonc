@@ -25,7 +25,7 @@
   "triggers": { "crons": ["*/5 * * * *"] },
   "vars": {
     "GOOGLE_CLIENT_ID": "1034095196731-3gfal3tuf9goo6ejtnhgi07h3pgtkhdr.apps.googleusercontent.com",
-    "FREE_DAILY_CAP_USD": "3",
+    "FREE_DAILY_CAP_USD": "10",
     // Microsoft Entra app (Outlook, OneDrive connections); its secret is set by scripts/setup.mjs.
     "MICROSOFT_CLIENT_ID": ""
   }
