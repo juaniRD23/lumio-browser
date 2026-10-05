@@ -28,10 +28,13 @@ class ExtensionsUI {
     this.current = current;
     this.openInternal = openInternal;
     this.menuChanged = menuChanged;
-    this.recording = false; // a shortcut is being typed on the shortcuts page
+    this.recording = null; // the shortcuts page where a shortcut is being typed (its webContents)
+    this.keys = null; // the extension shortcuts, kept until extensions or shortcuts change
+    this.reserved = null; // Lumio's own menu shortcuts
     this.menuClosedAt = new WeakMap(); // window -> when its puzzle menu last closed
     this.ntpAsked = new Set(); // asked this launch (answered "later")
     this.ntp = undefined; // the extension new tab page, worked out again after changes
+    extensions.reservedKeys = () => this.reservedAccelerators();
   }
 
   get ready() { return !!this.ext?.ece; }
@@ -52,8 +55,11 @@ class ExtensionsUI {
     page('page:extension-file-access', async (_ctx, key, on_) => { await this.ext.setFileAccess(String(key || ''), !!on_); return { ok: true }; });
     page('page:extension-pin', (_ctx, id, on_) => { this.ext.setPinned(String(id || ''), !!on_); return { ok: true }; });
     page('page:extension-shortcuts', () => ({ available: this.ready, mac: MAC, extensions: this.ready ? this.ext.shortcuts() : [] }));
-    page('page:extension-set-shortcut', (_ctx, id, name, shortcut) => this.ext.setShortcut(String(id || ''), String(name || ''), String(shortcut || ''), this.reservedAccelerators()));
-    page('page:extension-recording', (_ctx, on_) => { this.recording = !!on_; this.menuChanged(); });
+    page('page:extension-set-shortcut', (_ctx, id, name, shortcut) => {
+      this.keys = null;
+      return this.ext.setShortcut(String(id || ''), String(name || ''), String(shortcut || ''), this.reservedAccelerators());
+    });
+    page('page:extension-recording', ({ sender }, on_) => this.setRecording(on_ ? sender : null));
     page('page:extension-update', () => this.ext.updateAll());
     page('page:extension-pack', ({ w }) => this.pack(w));
   }
@@ -158,11 +164,26 @@ class ExtensionsUI {
   }
 
   // ---------------------------------------------------------------- shortcuts
+  // While a shortcut is typed on the shortcuts page, extension shortcuts are
+  // off. They come back when that page is closed or leaves, even if it never
+  // said it stopped.
+  setRecording(wc) {
+    if (this.recording === wc) return;
+    const was = this.recording;
+    this.recording = wc;
+    if (was && !was.isDestroyed()) { was.off('destroyed', this.stopRecording); was.off('did-start-navigation', this.stopRecording); }
+    if (wc) { wc.once('destroyed', this.stopRecording); wc.once('did-start-navigation', this.stopRecording); }
+    this.menuChanged();
+  }
+
+  stopRecording = () => this.setRecording(null);
+
   // Hidden application-menu items for the extension shortcuts (none while
   // the person is typing a new one).
   menuKeys() {
     if (!this.ready || this.recording) return [];
-    return this.ext.activeShortcuts().filter((s) => s.accelerator).map((s) => ({
+    this.keys ||= this.ext.activeShortcuts();
+    return this.keys.filter((s) => s.accelerator).map((s) => ({
       id: `ext-cmd:${s.id}:${s.name}`,
       label: s.accelerator,
       accelerator: s.accelerator,
@@ -176,8 +197,10 @@ class ExtensionsUI {
     }));
   }
 
-  // Shortcuts Lumio's own menu uses (canonical spelling).
+  // Shortcuts Lumio's own menu uses (canonical spelling). They don't change
+  // while Lumio runs, so they're worked out once the menu is there.
   reservedAccelerators() {
+    if (this.reserved) return this.reserved;
     const out = new Set();
     const walk = (menu) => {
       for (const item of menu?.items || []) {
@@ -185,7 +208,9 @@ class ExtensionsUI {
         if (item.submenu) walk(item.submenu);
       }
     };
-    walk(Menu.getApplicationMenu());
+    const menu = Menu?.getApplicationMenu?.() || null; // (no menu in tests)
+    walk(menu);
+    if (menu && out.size) this.reserved = out;
     return out;
   }
 
@@ -270,6 +295,7 @@ class ExtensionsUI {
   // Changes from the manager: refresh any open puzzle menu.
   changed() {
     this.ntp = undefined;
+    this.keys = null;
     for (const w of this.windows()) this.refreshMenu(w);
   }
 }

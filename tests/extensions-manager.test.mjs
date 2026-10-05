@@ -15,6 +15,7 @@ const require = createRequire(import.meta.url);
 
 process.env.LUMIO_TEST = '1';
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lumio-extmgr-'));
+const commands = require('../main/extension-commands');
 const stub = (name, exports) => { require.cache[require.resolve(name)] = { id: name, loaded: true, exports }; };
 
 // The library's router and APIs, as much as Lumio uses.
@@ -219,6 +220,13 @@ test('keyboard shortcuts: Chrome’s rules, no clashes, and they run the extensi
   assert.equal(m.setShortcut(dev, 'go', '', reserved).ok, true, 'cleared');
   assert.ok(!m.activeShortcuts().some((s) => s.id === dev));
 
+  // A key the manifest only suggests is dropped when Lumio already uses it.
+  m.reservedKeys = () => [mac ? 'command+shift+y' : 'control+shift+y'];
+  const dropped = m.shortcuts().find((x) => x.id === ID).commands[0];
+  assert.deepEqual([dropped.shortcut, dropped.label], ['', commands.label('', {})], 'Not set, like Chrome');
+  assert.ok(!m.activeShortcuts().some((s) => s.id === ID && /Y$/.test(s.accelerator)));
+  m.reservedKeys = () => [];
+
   m.runCommand(ID, '_execute_action', null);
   assert.deepEqual(events.activated, [ID], 'the toolbar button runs');
   m.runCommand(ID, 'toggle', { id: 7, isDestroyed: () => false });
@@ -326,6 +334,38 @@ test('an extension’s new tab page asks “Change it back?” once; Keep it and
   assert.equal(ui.newTabUrl(w), null);
   await m.setEnabled(ID, true);
   store.settings.ntpOverrideKept = [];
+});
+
+test('the new tab question waits for other popups (address suggestions) instead of replacing them', async () => {
+  store.settings.ntpOverrideKept = [];
+  const w = fakeWindow();
+  w.overlayKind = 'suggest'; // the person is typing an address
+  const ui = new ExtensionsUI({ extensions: m, store, windows: () => [w], current: () => w, openInternal() {}, menuChanged() {} });
+  const o = ui.override();
+  ui.askNtp(w, o);
+  assert.equal(w.shown.length, 0, 'the suggestions stay');
+  w.overlayKind = null;
+  ui.askNtp(w, o);
+  assert.deepEqual(w.shown.map((s) => s.payload.kind), ['ntp-override']);
+});
+
+test('typing a shortcut turns extension shortcuts off until that page closes or leaves', () => {
+  let rebuilt = 0;
+  const ui = new ExtensionsUI({ extensions: m, store, windows: () => [], current: () => null, openInternal() {}, menuChanged() { rebuilt++; } });
+  const page = () => Object.assign(new EventEmitter(), { isDestroyed: () => false });
+  assert.ok(ui.menuKeys().length > 0);
+  const a = page();
+  ui.setRecording(a);
+  assert.deepEqual(ui.menuKeys(), []);
+  a.emit('destroyed'); // closed with ⌘W while typing
+  assert.equal(ui.recording, null);
+  assert.ok(ui.menuKeys().length > 0);
+  const b = page();
+  ui.setRecording(b);
+  b.emit('did-start-navigation');
+  assert.equal(ui.recording, null);
+  assert.equal(b.listenerCount('destroyed'), 0, 'no listeners left behind');
+  assert.equal(rebuilt, 4);
 });
 
 test('a Web Store update keeps the person’s limits and clears out the old version', async () => {

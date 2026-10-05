@@ -11,20 +11,25 @@ const BOOKMARKS = 40;
 const cut = (s, n = 60) => (s.length > n ? s.slice(0, n) + '…' : s);
 const k = (mac, win) => (MAC ? mac : win);
 
-// What the menus show from Lumio's data (main.js menuState spreads it in).
-function state({ store, account, devtoolsDock }) {
+// History › Recently Visited: the latest web pages, each once.
+function recentHistory(store) {
   const seen = new Set();
-  const recentHistory = [];
+  const out = [];
   const history = store.history();
-  for (let i = history.length - 1; i >= 0 && recentHistory.length < RECENT; i--) {
+  for (let i = history.length - 1; i >= 0 && out.length < RECENT; i--) {
     const h = history[i];
     if (!/^https?:/.test(h.url || '') || seen.has(h.url)) continue;
     seen.add(h.url);
-    recentHistory.push({ url: h.url, title: h.title || h.url });
+    out.push({ url: h.url, title: h.title || h.url });
   }
+  return out;
+}
+
+// What the menus show from Lumio's data (main.js menuState spreads it in).
+function state({ store, account, devtoolsDock }) {
   const a = account?.state() || {}; // not there yet in the first moments after launch
   return {
-    recentHistory,
+    recentHistory: recentHistory(store),
     bookmarkItems: store.bookmarks().slice(0, BOOKMARKS).map((b) => ({ url: b.url, title: b.title || b.url })),
     profileName: store.settings.profile?.name || a.name || 'Lumio Browser',
     signedIn: !!a.signedIn,
@@ -125,4 +130,4 @@ const helpSubmenu = (cmd) => ({
   submenu: [{ label: 'About Lumio Browser', click: cmd.about }, { type: 'separator' }, ...HELP_ITEMS(cmd)],
 });
 
-module.exports = { state, historyItems, bookmarkItems, editExtras, developerMenu, profilesMenu, tabMenu, helpMenu, helpSubmenu, RECENT, BOOKMARKS };
+module.exports = { state, recentHistory, historyItems, bookmarkItems, editExtras, developerMenu, profilesMenu, tabMenu, helpMenu, helpSubmenu, RECENT, BOOKMARKS };

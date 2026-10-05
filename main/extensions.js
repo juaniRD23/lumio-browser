@@ -102,6 +102,7 @@ class ExtensionManager {
     // createTab, selectTab, removeTab, createWindow, removeWindow, changed,
     // activate (run an extension's toolbar button), commandsChanged, toast
     this.hooks = hooks;
+    this.reservedKeys = () => []; // canonical keys Lumio's own menu uses (set by main/extensions-ui.js)
     this.root = path.join(app.getPath('userData'), 'Extensions');
     this.ece = null;
     this.errors = new Map(); // id or path -> last load error
@@ -505,17 +506,35 @@ class ExtensionManager {
   // Extensions with commands, for lumio://extensions/shortcuts. The menu
   // asks often and has no use for the icons.
   shortcuts({ icons = true } = {}) {
-    return this.api.getAllExtensions().map((ext) => {
+    const all = this.settings.extensionShortcuts || {};
+    const list = this.api.getAllExtensions().map((ext) => {
       const src = this.sourceDir(this.keyOf(ext)) || ext.path;
       const manifest = readManifest(src) || ext.manifest;
+      const saved = all[ext.id] || {};
       return {
         id: ext.id,
         name: localize(src, manifest, manifest.name),
         icon: icons ? iconDataUrl(src, manifest) : null,
-        commands: commands.commandsFor(manifest, (this.settings.extensionShortcuts || {})[ext.id] || {}, PLATFORM)
-          .map((c) => ({ ...c, description: localize(src, manifest, c.description), label: commands.label(c.shortcut, PLATFORM) })),
+        commands: commands.commandsFor(manifest, saved, PLATFORM)
+          .map((c) => ({ ...c, description: localize(src, manifest, c.description), suggestion: !Object.hasOwn(saved, c.name) })),
       };
-    }).filter((x) => x.commands.length).sort((a, b) => a.name.localeCompare(b.name));
+    });
+    // Like Chrome, a key an extension only suggests is dropped ("Not set")
+    // when Lumio or another extension already uses it. Keys the person set
+    // were checked then, so they come first.
+    const key = (s) => commands.canonical(commands.toAccelerator(s, PLATFORM), PLATFORM);
+    const taken = new Set(this.reservedKeys());
+    for (const x of list) for (const c of x.commands) if (!c.suggestion && c.shortcut) taken.add(key(c.shortcut));
+    for (const x of list) {
+      for (const c of x.commands) {
+        if (c.suggestion && c.shortcut) {
+          if (taken.has(key(c.shortcut))) c.shortcut = ''; else taken.add(key(c.shortcut));
+        }
+        c.label = commands.label(c.shortcut, PLATFORM);
+        delete c.suggestion;
+      }
+    }
+    return list.filter((x) => x.commands.length).sort((a, b) => a.name.localeCompare(b.name));
   }
 
   // Every shortcut in use by an extension: [{ id, name, shortcut, accelerator }].

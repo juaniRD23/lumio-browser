@@ -266,11 +266,16 @@ function menuChanged() {
   clearTimeout(menuTimer);
   menuTimer = setTimeout(() => Menu.setApplicationMenu(buildMenu(cmd, menuState())), 50);
 }
-// History changes with every page, so its menu items follow a little later.
+// History changes with every page, so its menu items follow a little later,
+// and only when they changed (a rebuild closes an open menu on the Mac).
 let historyMenuTimer = null;
+let historyMenuItems = '';
 function historyMenuSoon() {
   clearTimeout(historyMenuTimer);
-  historyMenuTimer = setTimeout(menuChanged, 2000);
+  historyMenuTimer = setTimeout(() => {
+    const now = JSON.stringify(menuExtras.recentHistory(store));
+    if (now !== historyMenuItems) { historyMenuItems = now; menuChanged(); }
+  }, 2000);
 }
 function menuState() {
   return {
