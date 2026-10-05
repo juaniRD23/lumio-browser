@@ -1,0 +1,14 @@
+/* The address bar's chip while it searches one place ("Search YouTube",
+   "Search tabs"), and what screen readers hear (renderer/ui/omnibox.js). */
+#omni-chip {
+  flex: none; display: inline-flex; align-items: center;
+  height: 22px; padding: 0 9px; margin-left: -2px; border-radius: 7px;
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+  /* Accent words on an accent tint: deeper on light, so they keep 4.5:1 (like #toast). */
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: light-dark(color-mix(in srgb, var(--accent) 70%, var(--text-strong)), var(--accent));
+  animation: omni-chip-in .18s var(--ease);
+}
+@keyframes omni-chip-in { from { opacity: 0; transform: scale(.92); } }
+@media (prefers-reduced-motion: reduce) { #omni-chip { animation: none; } }
+.omni-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

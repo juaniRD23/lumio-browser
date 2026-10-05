@@ -35,7 +35,8 @@ function windowLabel(w) {
 }
 
 // The tab menu. c says what it acts on; act(command, arg) runs a command.
-function tabMenuTemplate(c, act) {
+// extra: other parts' items, { groups } (tab groups) and { reading } (reading list).
+function tabMenuTemplate(c, act, extra = {}) {
   const s = c.many ? 's' : '';
   const shortcut = (accelerator) => ({ accelerator, registerAccelerator: false });
   const move = c.windows.length
@@ -50,12 +51,14 @@ function tabMenuTemplate(c, act) {
     : { label: `Move Tab${s} to New Window`, enabled: c.canNewWindow, click: () => act('moveToNew') };
   return [
     { label: 'New Tab to the Right', click: () => act('newRight') },
+    ...(extra.groups || []),
     move,
     { type: 'separator' },
     { label: 'Reload', click: () => act('reload') },
     { label: 'Duplicate', click: () => act('duplicate') },
     { label: c.pinned ? `Unpin Tab${s}` : `Pin Tab${s}`, click: () => act('pin') },
     { label: c.siteMuted ? `Unmute Site${s}` : `Mute Site${s}`, click: () => act('mute') },
+    ...(extra.reading || []),
     { type: 'separator' },
     { label: `Close Tab${s}`, ...shortcut('CmdOrCtrl+W'), click: () => act('close') },
     { label: 'Close Other Tabs', enabled: c.othersClosable, click: () => act('closeOthers') },
@@ -77,7 +80,8 @@ function stripMenuTemplate(c, act) {
 
 class TabStrip {
   // deps: { alive(), createWindow(opts), recentlyClosed: [], reopenClosed(w),
-  //         bookmarkAllTabs(w), removeExtensionTab(wc), siteMute }
+  //         bookmarkAllTabs(w), removeExtensionTab(wc), siteMute,
+  //         menuExtras(w, ids, tab): { groups, reading } items for the tab menu }
   constructor(deps) {
     this.deps = deps;
     this.wired = new WeakSet();
@@ -127,7 +131,8 @@ class TabStrip {
     const id = Number(msg.id);
     if (!w.tabs.get(id)) return null;
     const ids = this.targets(w, id);
-    const menu = Menu.buildFromTemplate(tabMenuTemplate(this.menuContext(w, ids), (cmd, arg) => this.run(w, cmd, ids, id, arg)));
+    const extra = this.deps.menuExtras?.(w, ids, w.tabs.get(id)) || {};
+    const menu = Menu.buildFromTemplate(tabMenuTemplate(this.menuContext(w, ids), (cmd, arg) => this.run(w, cmd, ids, id, arg), extra));
     menu.popup({ window: w.win });
     return menu;
   }
@@ -145,7 +150,7 @@ class TabStrip {
     const unpinned = (t) => !t.pinned && !ids.includes(t.id);
     switch (cmd) {
       case 'newTab': return m.create(NEWTAB);
-      case 'newRight': return m.create(NEWTAB, { index: m.tabs.indexOf(m.get(id)) + 1 });
+      case 'newRight': return m.create(NEWTAB, { index: m.tabs.indexOf(m.get(id)) + 1, groupId: m.get(id)?.groupId || null });
       case 'moveToNew': return this.moveToNewWindow(w, live());
       case 'moveTo': {
         const to = this.deps.alive().find((x) => x.id === arg && x.incognito === w.incognito);

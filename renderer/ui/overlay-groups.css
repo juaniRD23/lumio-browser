@@ -1,0 +1,38 @@
+/* The tab group editor (renderer/ui/overlay-groups.js), under the group's
+   chip in the see-through layer above the page. */
+#tg-root { position: fixed; inset: 0; }
+#tg-root[hidden] { display: none; }
+.tg-bubble {
+  position: absolute; width: 268px; padding: 12px 10px 8px;
+  background: var(--popover); border: 1px solid var(--line-strong); border-radius: 14px;
+  box-shadow: var(--shadow-sm);
+  animation: tg-in .14s var(--ease);
+}
+@keyframes tg-in { from { opacity: 0; transform: translateY(-4px); } }
+#tg-name {
+  display: block; width: calc(100% - 4px); margin: 0 2px; height: 32px; padding: 0 10px;
+  font: inherit; font-size: 13px; color: var(--text); background: var(--card);
+  border: 1px solid var(--overlay-5); border-radius: 8px; outline: none; user-select: text;
+}
+#tg-name:focus { border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
+.tg-colors { display: flex; justify-content: space-between; padding: 12px 4px 10px; }
+.tg-color {
+  width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%;
+  background: var(--sw); cursor: default; outline: none;
+  box-shadow: 0 0 0 0 transparent; transition: box-shadow .12s var(--ease);
+}
+.tg-color[aria-checked="true"] { box-shadow: 0 0 0 2px var(--popover), 0 0 0 4px var(--sw); }
+.tg-color:focus-visible { box-shadow: 0 0 0 2px var(--popover), 0 0 0 4px var(--focus-ring); }
+.tg-sep { height: 1px; margin: 0 2px 4px; background: var(--line); }
+.tg-actions { display: flex; flex-direction: column; }
+.tg-row {
+  display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 8px;
+  border: 0; border-radius: 7px; background: none; color: var(--text); font: inherit; font-size: 13px; text-align: left; outline: none;
+}
+.tg-row:hover { background: var(--overlay-3); }
+.tg-row:focus-visible { box-shadow: inset 0 0 0 2px var(--focus-ring); }
+.tg-row .ic { display: grid; place-items: center; width: 16px; color: var(--dim); }
+@media (prefers-reduced-motion: reduce) {
+  .tg-bubble { animation: none; }
+  .tg-color { transition: none; }
+}

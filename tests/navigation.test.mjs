@@ -346,7 +346,7 @@ test('Home and start pages: settings are checked, and the Home button follows th
   assert.equal(nav.setPref('somethingElse', 1).ok, false);
 });
 
-test('view source, Bookmark All Tabs, Use Selection for Find and Open File', async () => {
+test('view source, Use Selection for Find and Open File', async () => {
   const { store, nav, win, bookmarks } = setup();
   const w = win();
   const t = w.tabs.add([{ url: 'https://a.example/', title: 'A' }], 0);
@@ -355,11 +355,7 @@ test('view source, Bookmark All Tabs, Use Selection for Find and Open File', asy
   const src = nav.viewSource(w);
   assert.equal(src.url, 'view-source:https://a.example/');
   assert.equal(w.tabs.tabs.indexOf(src), w.tabs.tabs.indexOf(t) + 1);
-  store.toggleBookmark('https://b.example/', 'B');
-  assert.equal(nav.bookmarkAllTabs(w), 1);
-  assert.equal(bookmarks(), 1);
-  assert.deepEqual(w.emitted.at(-1), ['toast', { text: 'Bookmarked 1 tab' }]);
-  assert.equal(nav.bookmarkAllTabs(w), 0);
+  // (Bookmark All Tabs is main/bookmarks-service.js allTabs: a new folder, like Chrome.)
   w.tabs.activate(t.id);
   assert.equal(await nav.useSelectionForFind(w), 'some selected words');
   assert.deepEqual(w.emitted.at(-1), ['find-text', { text: 'some selected words' }]);

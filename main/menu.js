@@ -126,10 +126,13 @@ function buildMenu(cmd, state = {}) {
     {
       label: 'Bookmarks',
       submenu: [
-        { label: 'Bookmark This Page', accelerator: 'CmdOrCtrl+D', click: cmd.bookmark },
-        { label: 'Bookmark All Tabs', accelerator: 'CmdOrCtrl+Shift+D', click: cmd.bookmarkAllTabs },
+        { label: 'Bookmark This Page…', accelerator: 'CmdOrCtrl+D', click: cmd.bookmark },
+        { label: 'Bookmark All Tabs…', accelerator: 'CmdOrCtrl+Shift+D', click: cmd.bookmarkAllTabs },
         { label: 'Bookmark Manager', accelerator: MAC ? 'Cmd+Alt+B' : 'Ctrl+Shift+O', click: cmd.bookmarksManager },
         ...(MAC ? [hidden('Cmd+Shift+O', cmd.bookmarksManager)] : []),
+        { type: 'separator' },
+        { label: 'Add Tab to Reading List', click: cmd.addToReadingList },
+        { label: 'Show Reading List', click: () => cmd.sidePanel('reading') },
       ],
     },
     {
@@ -201,7 +204,11 @@ function buildBrowserMenu(cmd, state = {}) {
       submenu: [
         { label: state.bookmarked ? 'Remove bookmark' : 'Bookmark this tab', icon: state.bookmarked ? 'starFilled' : 'star', accel: 'CmdOrCtrl+D', run: cmd.bookmark },
         { label: 'Show bookmarks bar', type: 'checkbox', checked: !!state.bookmarksBar, accel: 'CmdOrCtrl+Shift+B', run: cmd.toggleBookmarksBar },
+        { label: 'Bookmark all tabs…', icon: 'tabs', accel: 'CmdOrCtrl+Shift+D', run: cmd.bookmarkAllTabs },
         { label: 'Bookmark manager', icon: 'folder', accel: k('Cmd+Alt+B', 'Ctrl+Shift+O'), run: cmd.bookmarksManager },
+        SEP,
+        { label: 'Add tab to reading list', icon: 'list', run: cmd.addToReadingList },
+        { label: 'Show reading list', icon: 'list', run: cmd.sidePanel && (() => cmd.sidePanel('reading')) },
         SEP,
         ...marks.map((b) => ({ label: b.title || b.url, favicon: b.favicon, icon: 'globe', run: () => state.open(b.url) })),
       ],

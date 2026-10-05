@@ -74,7 +74,19 @@
       </div>
     </section>
 
-    <!-- 4. Done -->
+    <!-- 4. Search engine: a choice, shown in a random order, nothing picked for you -->
+    <section class="step" data-step="search" hidden>
+      <h1>Choose your <em>search engine</em></h1>
+      <p class="lead">The address bar searches with it when you type something that isn’t a web address. You can change it any time in Settings.</p>
+      <div class="engines" id="engines" role="radiogroup" aria-label="Search engines"></div>
+      <p class="note" id="se-note"></p>
+      <div class="actions">
+        <button class="btn" data-back>Back</button>
+        <button class="btn primary big" id="se-go" disabled>Set as default</button>
+      </div>
+    </section>
+
+    <!-- 5. Done -->
     <section class="step" data-step="done" hidden>
       <h1>You’re all <em>set</em></h1>
       <p class="lead">Two more things you might like:</p>

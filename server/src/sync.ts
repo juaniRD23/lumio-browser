@@ -20,7 +20,9 @@ import { AgentError, type Env, fail, json, randomHex } from './util.ts';
 
 type User = { id: string; plan: Plan };
 
-const COLLECTIONS = new Set(['bookmarks', 'passwords', 'history', 'chats', 'workflows', 'projects', 'settings', 'tabs']);
+// bookmarkTree (bookmark folders), readingList and savedGroups (tab groups): newer
+// browsers sync these only when this lists them.
+const COLLECTIONS = new Set(['bookmarks', 'bookmarkTree', 'readingList', 'savedGroups', 'passwords', 'history', 'chats', 'workflows', 'projects', 'settings', 'tabs']);
 const MAX_ITEM = 600_000; // base64 ciphertext per record
 const MAX_TOTAL = 60 * 1024 * 1024; // per account
 const MAX_PUSH = 200; // records per request
@@ -49,6 +51,7 @@ export async function syncStatus(env: Env, user: User) {
     since: meta?.created_at || null,
     devices: (devices.results || []).map((d) => ({ id: d.id, name: d.name, kind: d.kind, platform: d.platform, lastSeen: d.last_seen })),
     usage: { items: usage?.items || 0, bytes: usage?.bytes || 0, limit: MAX_TOTAL },
+    collections: [...COLLECTIONS], // what this server keeps, so newer collections wait for it
   });
 }
 

@@ -1,0 +1,73 @@
+/* The bookmark manager (renderer/pages/bookmarks.js): folders on the left,
+   the open folder on the right. The rows' basics are in lists.css. */
+.bmm { max-width: 1080px; margin: 0 auto; padding: 40px 28px 80px; }
+.bmm-top { display: flex; align-items: center; gap: 10px; margin-bottom: 22px; }
+.bmm-top h1 { margin: 0; }
+#search { width: 300px; }
+#more[aria-expanded="true"] { background: var(--overlay-4); color: var(--text); }
+.iconbtn:focus-visible, .btn:focus-visible, .crumb:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+.bmm-body { display: grid; grid-template-columns: minmax(180px, 240px) minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 680px) { .bmm-body { grid-template-columns: minmax(0, 1fr); } .bmm-side { position: static; max-height: 220px; } }
+
+/* ---- the folder tree */
+.bmm-side { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow-y: auto; padding: 6px; border-radius: 14px; background: var(--card); border: 1px solid var(--line); }
+.bmm-tree { outline: none; }
+.tf { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 8px 0 calc(4px + var(--depth) * 16px); border-radius: 8px; color: var(--dim); cursor: pointer; white-space: nowrap; outline: none; }
+.tf:hover { background: var(--overlay-3); color: var(--text); }
+.tf.on { background: color-mix(in srgb, var(--accent) 13%, transparent); color: var(--text); font-weight: 550; }
+.tf.on svg { color: var(--accent); }
+.tf:focus-visible { box-shadow: inset 0 0 0 2px var(--focus-ring); }
+.tf svg { flex: none; }
+.tf .tt { overflow: hidden; text-overflow: ellipsis; }
+.tf .tw { width: 16px; height: 16px; flex: none; display: grid; place-items: center; color: var(--label); border-radius: 4px; transition: transform .15s var(--ease); }
+.tf .tw:hover { background: var(--overlay-4); }
+.tf[aria-expanded="true"] .tw { transform: rotate(90deg); }
+.tf.drop-into { background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 55%, transparent); }
+
+/* ---- the list */
+.bmm-bar { display: flex; align-items: center; min-height: 40px; margin-bottom: 6px; }
+.bmm-crumbs { display: flex; align-items: center; gap: 2px; min-width: 0; overflow: hidden; font-size: 13px; }
+.crumb { border: 0; background: none; color: var(--dim); padding: 3px 6px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+button.crumb:hover { background: var(--overlay-3); color: var(--text); }
+.crumb.now { color: var(--text); font-weight: 600; cursor: default; }
+.bmm-crumbs .sep { color: var(--label); }
+.bmm-selbar { flex: 1; display: flex; align-items: center; gap: 6px; height: 40px; padding: 0 6px 0 14px; border-radius: 12px; background: light-dark(color-mix(in srgb, var(--accent) 8%, var(--card)), color-mix(in srgb, var(--accent) 17%, var(--bg))); border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent); animation: bmm-rise .2s var(--ease); }
+.bmm-selbar #selcount { font-weight: 600; margin-right: auto; }
+.btn.danger { color: var(--danger-text); }
+
+.bmm-list { outline: none; }
+.bmm-list .bm-row { position: relative; height: 44px; gap: 10px; cursor: default; user-select: none; outline: none; }
+.bmm-list .bm-row:hover { background: var(--overlay-2); }
+.bmm-list .bm-row.sel { background: color-mix(in srgb, var(--accent) 11%, transparent); }
+.bmm-list .bm-row:focus-visible { box-shadow: inset 0 0 0 2px var(--focus-ring); }
+.bm-row .ic { width: 18px; height: 18px; flex: none; display: grid; place-items: center; }
+.bm-row .ic.folder { color: var(--muted); }
+.bm-row .ic img, .bm-row .ic .dot { width: 16px; height: 16px; border-radius: 4px; }
+.bm-row .ic .dot { display: block; background: var(--overlay-4); }
+.bm-row .t { max-width: 50%; }
+.bm-row .p { flex: none; max-width: 30%; color: var(--label); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bm-row .more { flex: none; opacity: 0; }
+.bm-row:hover .more, .bm-row.sel .more, .bm-row:focus-within .more, .bm-row .more[aria-expanded="true"] { opacity: 1; }
+.bm-row.editing { gap: 8px; background: var(--card); border: 1px solid var(--line); }
+.bm-row.editing .acts { display: flex; gap: 6px; }
+.bmm-list .bm-row.drop-before::before, .bmm-list .bm-row.drop-after::after { content: ''; position: absolute; left: 10px; right: 10px; height: 2px; border-radius: 2px; background: var(--accent); }
+.bmm-list .bm-row.drop-before { box-shadow: none; }
+.bmm-list .bm-row.drop-before::before { top: -1px; }
+.bmm-list .bm-row.drop-after::after { bottom: -1px; }
+.bmm-list .bm-row.drop-into { background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 55%, transparent); }
+
+/* ---- menus and the Undo toast */
+.bmm-menu { position: fixed; z-index: 20; min-width: 200px; padding: 5px; display: flex; flex-direction: column; background: var(--popover); border: 1px solid var(--line-strong); border-radius: 12px; box-shadow: var(--shadow-sm); animation: bmm-in .14s var(--ease); }
+.bmm-menu .mi { display: flex; align-items: center; height: 32px; padding: 0 10px; border: 0; border-radius: 7px; background: none; color: var(--text); text-align: left; cursor: pointer; }
+.bmm-menu .mi:hover, .bmm-menu .mi:focus-visible { background: var(--overlay-3); outline: none; }
+.bmm-menu .mi:disabled { color: var(--label); cursor: default; background: none; }
+.bmm-menu .tick { margin-left: auto; color: var(--accent); }
+.bmm-menu .sep { height: 1px; margin: 4px 6px; background: var(--line); }
+.bmm-toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 30; display: flex; align-items: center; gap: 12px; padding: 6px 6px 6px 16px; border-radius: 999px; background: var(--primary-bg); color: var(--primary-fg); box-shadow: var(--shadow-md); font-size: 13px; animation: bmm-up .2s var(--ease); }
+.bmm-toast .btn { background: none; border-color: transparent; color: inherit; font-weight: 600; }
+.bmm-toast .btn:hover { background: color-mix(in srgb, var(--primary-fg) 14%, transparent); }
+@keyframes bmm-in { from { opacity: 0; transform: translateY(-4px); } }
+@keyframes bmm-rise { from { opacity: 0; transform: translateY(4px); } }
+@keyframes bmm-up { from { opacity: 0; transform: translate(-50%, 8px); } }
+@media (prefers-reduced-motion: reduce) { .bmm-menu, .bmm-selbar, .bmm-toast { animation: none; } .tf .tw { transition: none; } }

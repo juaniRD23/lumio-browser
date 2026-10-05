@@ -10,6 +10,10 @@ import { reduced, dur, animate, cancel, slide, instantly } from './motion.js';
 import { initNavigation } from './navigation.js';
 import { initTabStrip, SAD_ICON } from './tabstrip.js';
 import { initInfobars } from './infobars.js';
+import { initOmnibox } from './omnibox.js';
+import { initBookmarksBar } from './bookmarks-bar.js';
+import { initTabGroups } from './tab-groups.js';
+import { initSidePanel } from './side-panel.js';
 import './keys.js';
 import '/assets/ui-prefs.js';
 import { initA11y, textScale } from './a11y.js';
@@ -21,7 +25,7 @@ const modKey = (e) => (IS_MAC ? e.metaKey : e.ctrlKey);
 const api = window.lumio;
 const $ = (sel) => document.querySelector(sel);
 
-const state = { tabs: [], activeId: null, downloads: [], bookmarks: { show: false, items: [] }, incognito: false, account: {}, profile: {} };
+const state = { tabs: [], groups: [], activeId: null, downloads: [], incognito: false, account: {}, profile: {} };
 const activeTab = () => state.tabs.find((t) => t.id === state.activeId) || null;
 
 // ------------------------------------------------------------------ icons
@@ -57,7 +61,9 @@ window.addEventListener('resize', reportSlot);
 const tabsEl = $('#tabs');
 const tabEls = new Map();
 // Closed tabs stay in the strip, folding away, until their animation ends.
-const liveTabs = () => [...tabsEl.children].filter((el) => !el.classList.contains('closing'));
+// (Group chips sit among them: tabs only.)
+const liveTabs = () => [...tabsEl.children].filter((el) => el.classList.contains('tab') && !el.classList.contains('closing'));
+let stripGroups = '[[],[]]'; // the groups the strip was laid out for (renderTabs)
 // Tabs animate on what you do, not when the window first draws them.
 const stripMoves = () => !document.body.classList.contains('no-anim') && !reduced() && !document.hidden;
 let tabDrag = null; // a tab being dragged: other changes to the strip wait for the drop
@@ -98,6 +104,7 @@ function createTabEl(id) {
   const el = document.createElement('div');
   el.className = 'tab';
   el._id = id;
+  el.dataset.id = id;
   el.setAttribute('role', 'tab');
   el.innerHTML = '<span class="fav"></span><i class="agent-dot" hidden></i><span class="title"></span><button class="audio" hidden></button><button class="x" aria-label="Close tab"></button>';
   el.querySelector('.x').innerHTML = icons.close;
@@ -152,15 +159,32 @@ function stripOrder() {
   return order;
 }
 
+// Tab groups: their chips go before their tabs (renderer/ui/tab-groups.js).
+const tabGroups = initTabGroups({
+  api,
+  tabsEl,
+  getState: () => state,
+  accent: () => accent(),
+  overlay: {
+    kind: () => overlayKind,
+    show: (kind, rect, payload) => { overlayKind = kind; api.send('overlay:show', { rect, payload }); },
+    hide: (kind) => { if (overlayKind === kind) hideOverlay(); },
+    closed: (kind) => { if (overlayKind === kind) overlayKind = null; },
+  },
+});
+
 function renderTabs() {
   const order = stripOrder();
   const live = liveTabs();
-  const same = live.length === order.length && order.every((t, i) => live[i]._id === t.id && live[i].classList.contains('pinned') === !!t.pinned);
+  // Groups changed (a tab joined or left one, a group collapsed): the strip is laid out again.
+  const groupsKey = JSON.stringify([state.groups || [], order.map((t) => t.groupId || '')]);
+  const same = groupsKey === stripGroups && live.length === order.length && order.every((t, i) => live[i]._id === t.id && live[i].classList.contains('pinned') === !!t.pinned);
   if (same || tabDrag) {
     if (tabDrag) tabDrag.pending = true; // tabs opened or closed meanwhile show after the drop
     for (const t of order) { const el = tabEls.get(t.id); if (el) updateTabEl(el, t); }
     return;
   }
+  stripGroups = groupsKey;
   hideCard(true);
   layoutStrip(() => {
     const ids = new Set(order.map((t) => t.id));
@@ -170,16 +194,19 @@ function renderTabs() {
       el.classList.add('closing');
       el.setAttribute('aria-hidden', 'true');
     }
-    let prev = null;
     for (const t of order) {
       let el = tabEls.get(t.id);
       if (!el) { el = createTabEl(t.id); tabEls.set(t.id, el); }
-      // Right after the previous tab, passing over tabs that are folding away.
+      updateTabEl(el, t);
+    }
+    // The tabs in order, each group's chip before its tabs (renderer/ui/tab-groups.js).
+    let prev = null;
+    for (const el of tabGroups.layout(order, tabEls, state.groups)) {
+      // Right after the previous one, passing over tabs that are folding away.
       let at = prev ? prev.nextElementSibling : tabsEl.firstElementChild;
       while (at && at !== el && at.classList.contains('closing')) at = at.nextElementSibling;
       if (at !== el) tabsEl.insertBefore(el, at);
       prev = el;
-      updateTabEl(el, t);
     }
   });
 }
@@ -274,8 +301,9 @@ function layoutStrip(change) {
   // Where everything was: the old widths, new tabs folded.
   for (const el of live) { const b = before.get(el); if (b) holdWidth(el, b.width); else fold(el); }
   for (const el of closing) holdWidth(el, before.get(el)?.width ?? 0);
-  const start = new Map(live.map((el) => [el, el.getBoundingClientRect().left]));
-  for (const el of live) {
+  const chips = [...tabsEl.querySelectorAll(':scope > .tab-group-chip')];
+  const start = new Map([...live, ...chips].map((el) => [el, el.getBoundingClientRect().left]));
+  for (const el of [...live, ...chips]) {
     const b = before.get(el);
     if (b && Math.abs(b.left - start.get(el)) > 3) slide(el, b.left - start.get(el));
   }
@@ -321,7 +349,7 @@ function startTabDrag(e, el, id) {
   hideCard(true);
   if (strip.pointerDown(e, el, id)) return; // Shift/⌘-clicks, and dragging several tabs
   api.send('tab:activate', id);
-  const els = liveTabs();
+  const els = liveTabs().filter((x) => !x.classList.contains('collapsed-away')); // (group chips stay put)
   const from = els.indexOf(el);
   // Pinned tabs stay first (main/tabs.js insert), so a tab moves within its group.
   const pins = els.filter((x) => x.classList.contains('pinned')).length;
@@ -392,8 +420,10 @@ function startTabDrag(e, el, id) {
     el.classList.remove('dragging');
     if (target !== from) {
       tabsEl.insertBefore(el, target > from ? els[target].nextElementSibling : els[target]);
-      localMove = { id, index: target, until: Date.now() + 800 };
-      api.send('tab:move', { id, index: target });
+      // Its place among all the tabs (a collapsed group's tabs aren't in els).
+      const index = state.tabs.findIndex((t) => t.id === els[target]._id);
+      localMove = { id, index, until: Date.now() + 800 };
+      api.send('tab:move', { id, index });
     }
     for (const x of els) {
       const dx = seen.get(x) - x.getBoundingClientRect().left;
@@ -495,9 +525,6 @@ const address = $('#address');
 const omnibox = $('#omnibox');
 let omniFocused = false;
 let omniEdited = false; // the user typed since focusing the address bar
-let suggestions = [];
-let selIndex = 0;
-let suggestSeq = 0;
 let overlayKind = null;
 
 function prettyUrl(url) {
@@ -555,6 +582,7 @@ address.addEventListener('focus', () => {
   swapSiteIcon(() => siteIcon(t));
   // (select() would take focus back if it moved on within the frame: F6 twice.)
   requestAnimationFrame(() => { if (document.activeElement === address) address.select(); });
+  omni.onFocus();
 });
 address.addEventListener('mousedown', () => { if (!omniFocused) address.dataset.justFocused = '1'; });
 address.addEventListener('mouseup', (e) => {
@@ -566,6 +594,7 @@ address.addEventListener('mouseup', (e) => {
 address.addEventListener('blur', () => {
   omniFocused = false;
   omnibox.classList.remove('focused');
+  omni.onBlur();
   setTimeout(() => { if (!omniFocused && overlayKind === 'suggest') hideOverlay(); }, 160);
   swapSiteIcon(renderToolbar);
 });
@@ -576,49 +605,21 @@ function swapSiteIcon(change) {
   change();
   if (el.innerHTML !== was) animate(el, [{ opacity: 0, scale: 0.8 }, { opacity: 1, scale: 1 }], { duration: 2 });
 }
-address.addEventListener('input', () => { omniEdited = true; refreshSuggestions(); });
-address.addEventListener('keydown', (e) => {
-  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-    if (!suggestions.length) return;
-    e.preventDefault();
-    selIndex = (selIndex + (e.key === 'ArrowDown' ? 1 : -1) + suggestions.length) % suggestions.length;
-    showSuggest();
-  } else if (e.key === 'Enter') {
-    e.preventDefault();
-    const text = address.value.trim();
-    if (!text) return;
-    if (overlayKind === 'suggest' && suggestions[selIndex] && selIndex > 0) pick(suggestions[selIndex]);
-    else if (modKey(e)) { api.send('open-url', text); address.blur(); }
-    else pick({ type: 'typed', url: text });
-  } else if (e.key === 'Escape') {
-    e.preventDefault();
-    if (overlayKind === 'suggest') { hideOverlay(); return; }
-    address.value = activeTab()?.url || '';
-    address.blur();
-    api.send('tab:focus-page');
-  }
+// Typing, suggestions, chips and the address bar's keys (renderer/ui/omnibox.js).
+const omni = initOmnibox({
+  api,
+  address,
+  box: omnibox,
+  activeTab,
+  ask: (text) => { panel.open(); panel.sendText(text); },
+  edited: () => { omniEdited = true; },
+  textScale,
+  overlay: {
+    open: () => overlayKind === 'suggest',
+    show: (rect, payload) => { overlayKind = 'suggest'; api.send('overlay:show', { rect, payload }); },
+    hide: () => { if (overlayKind === 'suggest') hideOverlay(); },
+  },
 });
-
-async function refreshSuggestions() {
-  const text = address.value;
-  const seq = ++suggestSeq;
-  if (!text.trim()) { suggestions = []; hideOverlay(); return; }
-  const list = await api.invoke('omnibox:suggest', text);
-  if (seq !== suggestSeq || !omniFocused) return;
-  suggestions = list;
-  selIndex = 0;
-  showSuggest();
-}
-
-function showSuggest() {
-  if (!suggestions.length) { hideOverlay(); return; }
-  const r = omnibox.getBoundingClientRect();
-  overlayKind = 'suggest';
-  api.send('overlay:show', {
-    rect: { x: r.left - 12, y: r.bottom + 2, width: r.width + 24, height: Math.ceil(suggestions.length * 38 * textScale()) + 12 + 26 },
-    payload: { kind: 'suggest', items: suggestions, selected: selIndex, query: address.value },
-  });
-}
 
 function hideOverlay() {
   if (!overlayKind) return;
@@ -635,27 +636,15 @@ function overlayClosed() {
 // Where a dropdown grows from: the middle of its button.
 const anchorOf = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
 
-function pick(item) {
-  hideOverlay();
-  if (item.type === 'ai') {
-    panel.open();
-    panel.sendText(item.title);
-  } else {
-    api.send('tab:navigate', item.url);
-  }
-  address.blur();
-}
-
 // Main closed what this window opened (a tab switch, a choice in it, a
 // click outside the ⋮ menu), or the pointer moved to a suggestion, which
 // Enter now opens.
 api.on('overlay-state', ({ kind, closed, hover } = {}) => {
-  if (kind === 'suggest' && overlayKind === 'suggest' && suggestions[hover]) selIndex = hover;
+  if (kind === 'suggest' && overlayKind === 'suggest' && Number.isInteger(hover)) omni.onHover(hover);
   if (closed && kind === overlayKind) overlayClosed();
 });
-
 api.on('overlay-picked', (msg) => {
-  if (msg.kind === 'suggest' && suggestions[msg.index]) pick(suggestions[msg.index]);
+  if (msg.kind === 'suggest') omni.onPicked(msg);
   if (['downloads', 'siteinfo', 'account', 'autofill', 'update', 'zoom'].includes(msg.kind)) { overlayKind = null; accountBtn.classList.remove('open'); }
   if (msg.kind === 'popups') { overlayKind = null; if (!$('#popups-btn').hidden) $('#popups-btn').focus(); }
   if (msg.kind === 'zoom' && msg.refocus) zoomBadge.focus();
@@ -847,124 +836,24 @@ api.on('downloads', ({ items, started }) => { state.downloads = items; renderDow
 
 // ------------------------------------------------------------------ bookmarks bar
 // Under the address bar, like Chrome's: on every page (Show Bookmarks Bar,
-// the default), or else only on the new tab page.
-const bar = $('#bookmarks-bar');
+// the default), or else only on the new tab page. Folders, their menus, drag
+// and drop and the star's bubble: renderer/ui/bookmarks-bar.js.
 const escHtml = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-// Imported bookmarks have no icon until the page is opened once: until then, the site's /favicon.ico.
-const siteFavicon = (url) => { try { const u = new URL(url); return /^https?:$/.test(u.protocol) ? `${u.origin}/favicon.ico` : ''; } catch { return ''; } };
-const barWanted = () => !!state.bookmarks.show || !activeTab()?.url;
-let barVisible = null;
-function renderBookmarksBar() {
-  const { items } = state.bookmarks;
-  barVisible = barWanted();
-  bar.hidden = !barVisible;
-  if (!barVisible) { reportSlot(); return; }
-  bar.innerHTML = items.length
-    ? items.map((b, i) => {
-      const fallback = siteFavicon(b.url);
-      const src = b.favicon || fallback;
-      const img = src ? `<img src="${escHtml(src)}" alt=""${b.favicon && fallback && fallback !== b.favicon ? ` data-fallback="${escHtml(fallback)}"` : ''}>` : icons.globe;
-      return `<button class="bm-item" data-i="${i}" draggable="true" title="${escHtml(b.title)}\n${escHtml(b.url)}">${img}<span>${escHtml(b.title || b.url)}</span></button>`;
-    }).join('')
-      + `<button id="bm-more" class="icon-btn small" title="More bookmarks" hidden>${icons.more}</button>`
-    : `<span class="bm-empty">For quick access, bookmark pages with ${IS_MAC ? '⌘D' : 'Ctrl+D'} or the ☆ in the address bar.</span><button id="bm-import" class="bm-link">Import bookmarks…</button>`;
-  bar.querySelectorAll('.bm-item img').forEach((img) => {
-    img.onerror = () => {
-      if (img.dataset.fallback) { img.src = img.dataset.fallback; delete img.dataset.fallback; return; }
-      img.outerHTML = icons.globe;
-    };
-  });
-  fitBookmarks();
-  reportSlot();
-}
-// Hide what doesn't fit and list it under the » button.
-function fitBookmarks() {
-  const more = $('#bm-more');
-  if (!more) return;
-  const els = [...bar.querySelectorAll('.bm-item')];
-  els.forEach((el) => { el.hidden = false; });
-  more.hidden = true;
-  const limit = bar.getBoundingClientRect().right - 12;
-  if (!els.length || els[els.length - 1].getBoundingClientRect().right <= limit) return;
-  more.hidden = false;
-  const room = limit - 30;
-  els.forEach((el) => { if (el.getBoundingClientRect().right > room) el.hidden = true; });
-}
-// Only a new width changes what fits (not the bar sliding open or shut).
-let barWidth = 0;
-new ResizeObserver(([e]) => { if (e.contentRect.width !== barWidth) { barWidth = e.contentRect.width; fitBookmarks(); } }).observe(bar);
-bar.addEventListener('click', (e) => {
-  if (e.target.closest('#bm-import')) { api.send('bookmarks:open', { url: 'lumio://settings/#import', disposition: 'tab' }); return; }
-  if (e.target.closest('#bm-more')) {
-    const r = $('#bm-more').getBoundingClientRect();
-    const urls = [...bar.querySelectorAll('.bm-item[hidden]')].map((el) => state.bookmarks.items[+el.dataset.i].url);
-    api.send('bookmarks:overflow', { urls, x: r.left, y: r.bottom + 4 });
-    return;
-  }
-  const el = e.target.closest('.bm-item');
-  if (!el) return;
-  const b = state.bookmarks.items[+el.dataset.i];
-  api.send('bookmarks:open', { url: b.url, disposition: modKey(e) ? (e.shiftKey ? 'tab' : 'background') : e.shiftKey ? 'window' : 'current' });
+const bookmarksBar = initBookmarksBar({
+  api,
+  bar: $('#bookmarks-bar'),
+  isMac: IS_MAC,
+  modKey,
+  activeTab,
+  reportSlot,
+  accent: () => accent(),
+  overlay: {
+    kind: () => overlayKind,
+    show: (kind, rect, payload) => { overlayKind = kind; api.send('overlay:show', { rect, payload }); },
+    hide: (kind) => { if (overlayKind === kind) hideOverlay(); },
+    closed: (kind) => { if (overlayKind === kind) overlayKind = null; },
+  },
 });
-bar.addEventListener('auxclick', (e) => {
-  const el = e.target.closest('.bm-item');
-  if (el && e.button === 1) api.send('bookmarks:open', { url: state.bookmarks.items[+el.dataset.i].url, disposition: 'background' });
-});
-// On a bookmark: open, edit, delete…; on the bar itself: bookmark this tab, show the bar, the manager.
-bar.addEventListener('contextmenu', (e) => {
-  e.preventDefault();
-  const el = e.target.closest('.bm-item');
-  api.send('bookmarks:context', el ? state.bookmarks.items[+el.dataset.i].url : null);
-});
-// Drag a bookmark to move it. Drop a link, or the address bar's site icon, to add one there.
-let dragIndex = null;
-function dropIndex(x) {
-  const els = [...bar.querySelectorAll('.bm-item:not([hidden])')];
-  const el = els.find((it) => { const r = it.getBoundingClientRect(); return x < r.left + r.width / 2; });
-  return el ? +el.dataset.i : els.length ? +els[els.length - 1].dataset.i + 1 : 0;
-}
-function markDrop(index) {
-  bar.querySelectorAll('.drop-before, .drop-after').forEach((it) => it.classList.remove('drop-before', 'drop-after'));
-  if (index == null) return;
-  const els = [...bar.querySelectorAll('.bm-item:not([hidden])')];
-  const el = els.find((it) => +it.dataset.i === index);
-  if (el) el.classList.add('drop-before'); else els[els.length - 1]?.classList.add('drop-after');
-}
-const droppedLink = (dt) => {
-  const url = (dt.getData('text/uri-list') || '').split(/\r?\n/).find((l) => l && !l.startsWith('#')) || '';
-  let title = '';
-  try { title = new DOMParser().parseFromString(dt.getData('text/html') || '', 'text/html').querySelector('a')?.textContent.trim() || ''; } catch {}
-  return { url: url.trim(), title };
-};
-bar.addEventListener('dragstart', (e) => {
-  const el = e.target.closest('.bm-item');
-  if (!el) return;
-  dragIndex = +el.dataset.i;
-  el.classList.add('dragging');
-  e.dataTransfer.effectAllowed = 'move';
-  e.dataTransfer.setData('text/uri-list', state.bookmarks.items[dragIndex].url);
-});
-bar.addEventListener('dragover', (e) => {
-  if (dragIndex == null && !e.dataTransfer.types.includes('text/uri-list')) return;
-  e.preventDefault();
-  e.dataTransfer.dropEffect = dragIndex != null ? 'move' : 'copy';
-  markDrop(dropIndex(e.clientX));
-});
-bar.addEventListener('dragleave', (e) => { if (!bar.contains(e.relatedTarget)) markDrop(null); });
-bar.addEventListener('drop', (e) => {
-  if (dragIndex == null && !e.dataTransfer.types.includes('text/uri-list')) return;
-  e.preventDefault();
-  let to = dropIndex(e.clientX);
-  markDrop(null);
-  if (dragIndex != null) {
-    if (to > dragIndex) to--; // counted with the dragged one still in place
-    if (to !== dragIndex) api.send('bookmarks:move', { url: state.bookmarks.items[dragIndex].url, index: to });
-    return;
-  }
-  const { url, title } = droppedLink(e.dataTransfer);
-  if (/^(https?|file):/i.test(url)) api.send('bookmarks:add', { url, title, index: to });
-});
-bar.addEventListener('dragend', () => { dragIndex = null; markDrop(null); bar.querySelectorAll('.dragging').forEach((x) => x.classList.remove('dragging')); });
 // The site icon in the address bar can be dragged onto the bar (or anywhere a link goes).
 $('#site-icon').draggable = true;
 $('#site-icon').addEventListener('dragstart', (e) => {
@@ -975,7 +864,6 @@ $('#site-icon').addEventListener('dragstart', (e) => {
   e.dataTransfer.setData('text/plain', t.url);
   e.dataTransfer.setData('text/html', `<a href="${escHtml(t.url)}">${escHtml(t.title || t.url)}</a>`);
 });
-api.on('bookmarks', (b) => { state.bookmarks = b; renderBookmarksBar(); });
 
 // ------------------------------------------------------------------ account button
 const accountBtn = $('#account-btn');
@@ -1189,15 +1077,16 @@ api.on('tabs', (s) => {
   const switched = s.activeId !== state.activeId;
   const was = activeTab();
   state.tabs = s.tabs;
+  state.groups = s.groups || [];
   state.activeId = s.activeId;
   renderTabs();
   const toolbar = () => {
     renderToolbar();
-    if (barWanted() !== barVisible) renderBookmarksBar(); // the new tab page shows it even when it's off
+    bookmarksBar.onTabs(); // the new tab page shows the bar even when it's off
   };
   // A tab switch swaps the toolbar and bookmarks bar at once, like the page;
   // changes on the same tab (a bookmark, an icon appearing) animate.
-  if (switched) instantly([$('#toolbar'), bar], toolbar); else toolbar();
+  if (switched) instantly([$('#toolbar'), $('#bookmarks-bar')], toolbar); else toolbar();
   const t = activeTab();
   if (!switched && t?.bookmarked && was?.id === t.id && !was.bookmarked) popStar();
   renderLoad(t, switched);
@@ -1256,9 +1145,10 @@ function renderLoad(t, switched) {
 
 const init = await api.invoke('shell:init');
 state.tabs = init.tabs.tabs;
+state.groups = init.tabs.groups || [];
 state.activeId = init.tabs.activeId;
 state.downloads = init.downloads;
-state.bookmarks = init.bookmarks;
+bookmarksBar.set(init.bookmarks, init.savedGroups);
 state.incognito = init.incognito;
 state.account = init.account || {};
 state.profile = init.profile || {};
@@ -1271,10 +1161,13 @@ renderTabs();
 renderToolbar();
 renderLoad(activeTab(), true);
 renderDownloads(false);
-renderBookmarksBar();
+bookmarksBar.render();
 renderAccount();
 renderUpdate(init.update);
 panel.init(init);
+// The side panel's views share the panel's column (renderer/ui/side-panel.js).
+const sidePanel = initSidePanel({ api, panel, modKey, activeTab });
+sidePanel.init(init);
 const sidebar = initSidebar({
   api,
   panel,

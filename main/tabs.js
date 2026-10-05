@@ -7,13 +7,14 @@ const { WebContentsView, Menu, clipboard, app } = require('electron');
 const { isSynthetic } = require('./synthetic-input');
 const path = require('path');
 const { parseInput, displayUrl } = require('./omnibox');
-const { SEARCH_ENGINES } = require('./store');
+const searchEngines = require('./search-engines');
 const theme = require('./theme');
 const certErrors = require('./cert-errors');
 const { classify, originOf } = require('./external-protocols');
 const zoomPrefs = require('./zoom');
 const sessions = require('./sessions');
 const sadTab = require('./sad-tab');
+const { TabGroups } = require('./tab-groups');
 
 const NEWTAB = 'lumio://newtab/';
 const INTERNAL_PRELOAD = path.join(__dirname, '..', 'preload', 'internal.js');
@@ -68,12 +69,13 @@ class TabManager {
     this.slot = { x: 0, y: 84, width: 800, height: 600 };
     this.fullscreenTab = null;
     this.pushTimer = null;
+    this.groups = new TabGroups(this); // main/tab-groups.js
   }
 
   get active() { return this.tabs.find((t) => t.id === this.activeId) || null; }
   get(id) { return this.tabs.find((t) => t.id === id) || null; }
   byWebContents(wc) { return this.tabs.find((t) => t.view?.webContents === wc) || null; }
-  searchTemplate() { return (SEARCH_ENGINES[this.store.settings.searchEngine] || SEARCH_ENGINES.google).url; }
+  searchTemplate() { return searchEngines.defaultEngine(this.store.settings).url; }
   pinnedCount() { return this.tabs.filter((t) => t.pinned).length; }
   // What a tab shows before its page paints: Lumio's own pages follow light
   // or dark; websites get white, like in Chrome.
@@ -85,7 +87,8 @@ class TabManager {
   // page that opened it may still be writing into, so it says about:blank.
   // history: back/forward pages to bring back (main/sessions.js), from a
   // saved session, a closed tab or the tab it duplicates.
-  create(url = NEWTAB, { active = true, index, title, lazy = false, pinned = false, webContents = null, history = null } = {}) {
+  // groupId: the group it opens in (a link opened from a grouped tab).
+  create(url = NEWTAB, { active = true, index, title, lazy = false, pinned = false, webContents = null, history = null, groupId = null } = {}) {
     if (webContents) url = 'about:blank';
     const tab = {
       id: nextId++,
@@ -101,6 +104,7 @@ class TabManager {
       muted: false,
       crashed: false,
       pinned: !!pinned,
+      groupId: pinned ? null : groupId,
       pendingUrl: lazy ? url : null,
       savedHistory: history ? sessions.trimHistory(history.entries, history.index) : null,
       lastActive: Date.now(),
@@ -121,6 +125,9 @@ class TabManager {
     const hi = tab.pinned ? pins : this.tabs.length;
     const at = index == null ? hi : Math.max(lo, Math.min(index, hi));
     this.tabs.splice(at, 0, tab);
+    // Opened inside a group: it joins it.
+    const left = this.tabs[at - 1]?.groupId;
+    if (!tab.pinned && !tab.groupId && left && left === this.tabs[at + 1]?.groupId) tab.groupId = left;
   }
 
   ensureView(tab) {
@@ -465,7 +472,7 @@ class TabManager {
         return { action: 'deny' };
       }
       const index = m.tabs.indexOf(tab) + 1;
-      m.create(url, { active: disposition !== 'background-tab', index });
+      m.create(url, { active: disposition !== 'background-tab', index, ...(tab.groupId ? { groupId: tab.groupId } : {}) });
       return { action: 'deny' };
     });
 
@@ -766,6 +773,7 @@ class TabManager {
     if (prev && prev !== tab) setTimeout(() => { if (prev.id !== this.activeId) this.capturePreview(prev); }, 150);
     tab.lastActive = Date.now();
     this.activeId = id;
+    this.groups.onActivate(tab);
     this.ensureView(tab);
     for (const t of this.tabs) if (t.view) { t.view.setVisible(t.id === id); t.view.lumioCovered = false; }
     // Keep the active page on top of the other tabs (and below any overlay).
@@ -782,6 +790,7 @@ class TabManager {
     if (i < 0) return;
     const [tab] = this.tabs.splice(i, 1);
     this.insert(tab, toIndex);
+    this.groups.afterMove(tab);
     this.changed();
   }
 
@@ -1039,11 +1048,13 @@ class TabManager {
         crashed: t.crashed,
         pinned: t.pinned,
         zoom: this.zoomShown(t),
+        groupId: t.groupId || null,
         bookmarked: this.store.isBookmarked(this.displayUrl(t)),
         popupsBlocked: t.blockedPopups?.length || 0,
         // A certificate warning, or a site you went past one for: "Not secure" in red.
         notSecure: (t.pendingUrl || t.url || '').startsWith('lumio://error/cert') || certErrors.bypassed(this.session, this.displayUrl(t)),
       })),
+      groups: this.groups.state(),
     };
   }
 
@@ -1053,7 +1064,7 @@ class TabManager {
     return this.tabs
       .map((t) => {
         const h = history ? sessions.historyOf(t) : null;
-        return { url: sessions.realUrl(t.pendingUrl || t.url), title: t.title, ...(t.pinned ? { pinned: true } : {}), ...(h ? { history: h } : {}) };
+        return { url: sessions.realUrl(t.pendingUrl || t.url), title: t.title, ...(t.pinned ? { pinned: true } : {}), ...(t.groupId ? { group: t.groupId } : {}), ...(h ? { history: h } : {}) };
       })
       .filter((t) => t.url);
   }
@@ -1062,15 +1073,17 @@ class TabManager {
     if (this.pushTimer) return;
     this.pushTimer = setImmediate(() => {
       this.pushTimer = null;
+      this.groups.normalize();
       this.emit('tabs', this.state());
       this.hooks.onChanged?.(this);
     });
   }
 
-  restore(list = [], active = 0) {
+  restore(list = [], active = 0, groups = []) {
     if (!list.length) return false;
     // The tab to show is one of these (the window may already have others).
     const made = list.map((t, i) => this.create(t.url, { active: false, lazy: i !== active, title: t.title, pinned: !!t.pinned, history: t.history }));
+    this.groups.restore(groups, list, made);
     const target = made[Math.min(active, made.length - 1)];
     if (target) this.activate(target.id);
     return true;
@@ -1082,7 +1095,7 @@ class TabManager {
     const items = [];
     const sep = () => { if (items.length && items[items.length - 1].type !== 'separator') items.push({ type: 'separator' }); };
     const index = this.tabs.indexOf(tab) + 1;
-    const engine = SEARCH_ENGINES[this.store.settings.searchEngine] || SEARCH_ENGINES.google;
+    const engine = searchEngines.defaultEngine(this.store.settings);
     const ai = !!this.hooks.askAI; // a pop-up has no Lumio AI
 
     if (params.misspelledWord) {
@@ -1102,6 +1115,7 @@ class TabManager {
         { type: 'separator' },
         { label: 'Save Link As…', click: () => this.hooks.saveAs(wc, params.linkURL) },
         { label: 'Copy Link Address', click: () => clipboard.writeText(params.linkURL) },
+        ...(this.incognito || !/^https?:/.test(params.linkURL) || !this.hooks.readingList ? [] : [{ label: 'Add Link to Reading List', click: () => this.hooks.readingList(params.linkURL, params.linkText) }]),
         ...(ai ? [{ label: 'Ask Lumio About This Link', click: () => this.hooks.askAI(`What is at this link? ${params.linkURL}`, { includePage: false }) }] : []),
       );
       sep();
@@ -1156,6 +1170,7 @@ class TabManager {
         { type: 'separator' },
         { label: 'Save Page As…', click: () => this.hooks.savePage?.(tab) },
         { label: 'Print…', click: () => wc.print() },
+        ...(this.incognito || !/^https?:/.test(wc.getURL()) ? [] : [{ label: 'Add Page to Reading List', click: () => this.hooks.readingList?.(wc.getURL(), wc.getTitle()) }]),
         { type: 'separator' },
         ...(ai ? [{ label: 'Summarize This Page with Lumio', click: () => this.hooks.askAI('Summarize this page.', { includePage: true }) }] : []),
         { label: 'View Page Source', click: () => this.create('view-source:' + wc.getURL(), { index }) },

@@ -34,6 +34,12 @@ const go = async (url, expectTitle) => {
   if (expectTitle) assert.ok(await until(async () => (await title()).includes(expectTitle)), `page "${expectTitle}" loaded`);
 };
 const windows = () => L.main(() => global.lumio.windows.map((w) => ({ id: w.id, incognito: w.incognito, tabs: w.tabs.tabs.map((t) => t.pendingUrl || t.url) })));
+// The star's bubble, drawn in the overlay above the page: wait for it, then Done.
+const closeBubble = async () => {
+  assert.ok(await until(() => L.main(() => global.lumio.current.overlayKind === 'bm-edit')), 'the bubble opened');
+  await L.main(() => global.lumio.current.overlay.webContents.executeJavaScript(`document.querySelector('[data-act=done]').click(); true`));
+  assert.ok(await until(() => L.main(() => global.lumio.current.overlayKind === null)), 'Done closed it');
+};
 
 // A tiny PDF with one page of text.
 function makePdf() {
@@ -273,14 +279,16 @@ test('downloads finish, show on the downloads page and are remembered', async ()
 test('bookmarks bar, manager edits and reorder', async () => {
   await go(`${base}/mark-a`, 'mark-a');
   await L.main(() => global.lumio.cmd.bookmark());
+  await closeBubble();
   await go(`${base}/mark-b`, 'mark-b');
   await L.main(() => global.lumio.cmd.bookmark());
+  await closeBubble();
   // The bar is on by default, right under the address bar.
-  await until(() => L.shell(`!document.getElementById('bookmarks-bar').hidden && document.querySelectorAll('.bm-item').length === 2`));
-  assert.match(await L.shell(`document.querySelector('.bm-item').textContent`), /mark-a/);
+  await until(() => L.shell(`!document.getElementById('bookmarks-bar').hidden && document.querySelectorAll('.bm-items .bm-item').length === 2`));
+  assert.match(await L.shell(`document.querySelector('.bm-items .bm-item').textContent`), /mark-a/);
   await shot('15-bookmarks-bar');
   // Clicking a bookmark opens it in the current tab.
-  await L.shell(`document.querySelector('.bm-item').click(); true`);
+  await L.shell(`document.querySelector('.bm-items .bm-item').click(); true`);
   await until(async () => (await title()).includes('mark-a'));
   // Edit the title in the manager.
   await go(`lumio://bookmarks/?edit=${encodeURIComponent(base + '/mark-b')}`, 'Bookmarks');
@@ -289,8 +297,9 @@ test('bookmarks bar, manager edits and reorder', async () => {
   await until(async () => (await L.main(() => global.lumio.store.bookmarks().some((b) => b.title === 'Renamed B'))));
   await until(() => L.shell(`[...document.querySelectorAll('.bm-item')].some((b) => b.textContent.includes('Renamed B'))`));
   // Reorder: B first.
-  await L.main((_e, u) => global.lumio.store.moveBookmark(u, 0), `${base}/mark-b`);
+  await L.main((_e, u) => { const m = global.lumio.store.marks; m.move([m.byUrl(u)[0].id], 'bar', 0); global.lumio.bookmarks.changed(); }, `${base}/mark-b`);
   assert.equal(await L.main(() => global.lumio.store.bookmarks()[0].title), 'Renamed B');
+  assert.ok(await until(() => L.shell(`document.querySelector('.bm-items .bm-item').textContent.includes('Renamed B')`)));
   // An imported bookmark comes without an icon; opening the page gives it one.
   await L.main((_e, u) => global.lumio.store.importBookmarks([{ url: u, title: 'Icon page' }]), `${base}/icon-page`);
   await go(`${base}/icon-page`, 'Icon page');
@@ -388,6 +397,9 @@ test('imports bookmarks and history from Chrome', async () => {
   assert.match(msg, /Imported 2 bookmarks, 2 history entries from Google Chrome/);
   const marks = await L.main(() => global.lumio.store.bookmarks().map((b) => b.title));
   assert.ok(marks.includes('Imported One') && marks.includes('Imported Two'));
+  // Chrome's folders come along.
+  const work = await L.main(() => { const m = global.lumio.store.marks; const f = m.folders().find((x) => x.title === 'Work'); return f ? m.folder(f.id).children.map((n) => n.title) : null; });
+  assert.deepEqual(work, ['Imported Two']);
   const hist = await L.main(() => global.lumio.store.history().filter((h) => h.url.includes('chrome-history.example')).length);
   assert.equal(hist, 2);
   // Importing again doesn't duplicate anything.

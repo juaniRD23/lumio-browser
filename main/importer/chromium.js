@@ -28,19 +28,42 @@ const BROWSERS = [
 const supportDir = () => process.env.LUMIO_IMPORT_ROOT
   || (WIN ? process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local') : path.join(os.homedir(), 'Library', 'Application Support'));
 
-function profileDir(browser) {
+const hasData = (dir) => ['Bookmarks', 'History', 'Login Data'].some((f) => fs.existsSync(path.join(dir, f)));
+
+// The browser's profiles that have something to import, with the names the
+// browser shows (from its Local State file), the one used last first.
+function profiles(browser) {
   const base = path.join(supportDir(), browser.dir);
-  for (const name of ['Default', 'Profile 1']) {
-    const p = path.join(base, name);
-    if (fs.existsSync(path.join(p, 'Bookmarks')) || fs.existsSync(path.join(p, 'History')) || fs.existsSync(path.join(p, 'Login Data'))) return p;
-  }
-  return null;
+  let info = {};
+  let order = [];
+  try {
+    const p = JSON.parse(fs.readFileSync(path.join(base, 'Local State'), 'utf8')).profile || {};
+    info = p.info_cache || {};
+    order = [p.last_used, ...(p.profiles_order || [])];
+  } catch { /* no Local State: look for the usual folders */ }
+  let found = [];
+  try { found = fs.readdirSync(base).filter((n) => n === 'Default' || /^Profile \d+$/.test(n)); } catch { /* not installed */ }
+  const dirs = [...new Set([...order, ...Object.keys(info), 'Default', ...found.sort()])]
+    .filter((d) => typeof d === 'string' && d && !d.includes('/') && !d.includes('\\') && d !== '..' && hasData(path.join(base, d)));
+  return dirs.map((d) => ({ dir: d, path: path.join(base, d), name: String(info[d]?.name || info[d]?.gaia_name || d).slice(0, 60) }));
 }
 
+// One entry per browser, or per profile when it has several ("chrome:Profile 2").
 function detect() {
-  return BROWSERS.map((b) => ({ ...b, profile: profileDir(b) }))
-    .filter((b) => b.profile)
-    .map(({ id, name }) => ({ id, name, kind: 'chromium', passwords: process.platform === 'darwin' }));
+  return BROWSERS.flatMap((b) => {
+    const list = profiles(b);
+    const one = (p, many) => ({ id: many ? `${b.id}:${p.dir}` : b.id, name: many ? `${b.name} (${p.name})` : b.name, kind: 'chromium', passwords: process.platform === 'darwin' });
+    return list.length > 1 ? list.map((p) => one(p, true)) : list.map((p) => one(p, false));
+  });
+}
+
+// "chrome" (its first profile) or "chrome:Profile 2" -> { browser, profile }.
+function resolve(id) {
+  const [bid, dir] = String(id).split(/:(.*)/s);
+  const browser = BROWSERS.find((b) => b.id === bid);
+  const list = browser ? profiles(browser) : [];
+  const profile = dir ? list.find((p) => p.dir === dir) : list[0];
+  return profile ? { browser, profile } : null;
 }
 
 // Chromium time: microseconds since 1601-01-01. These are bigger than
@@ -49,22 +72,18 @@ const EPOCH_DIFF_MS = 11644473600000;
 const fromChromeTime = (t) => (typeof t === 'bigint' ? Number(t / 1000n) : Math.round(Number(t) / 1000)) - EPOCH_DIFF_MS;
 const toChromeTime = (ms) => (BigInt(Math.round(ms)) + BigInt(EPOCH_DIFF_MS)) * 1000n;
 
+// { bar, other, mobile }, with folders.
 function readBookmarks(profile) {
   const file = path.join(profile, 'Bookmarks');
-  if (!fs.existsSync(file)) return [];
+  if (!fs.existsSync(file)) return { bar: [], other: [], mobile: [] };
   const data = JSON.parse(fs.readFileSync(file, 'utf8'));
-  const out = [];
-  const walk = (node) => {
-    if (!node) return;
-    if (node.type === 'url' && node.url) {
-      let time = Date.now();
-      try { if (node.date_added) time = fromChromeTime(BigInt(node.date_added)); } catch { /* keep now */ }
-      out.push({ url: node.url, title: node.name || node.url, time });
-    }
-    for (const child of node.children || []) walk(child);
-  };
-  for (const root of Object.values(data.roots || {})) walk(root);
-  return out;
+  const time = (node) => { try { if (node.date_added) return fromChromeTime(BigInt(node.date_added)); } catch { /* keep now */ } return Date.now(); };
+  const list = (node, depth = 0) => (depth > 40 ? [] : (node?.children || []).flatMap((n) => {
+    if (n.type === 'folder') return [{ title: n.name || 'Folder', time: time(n), children: list(n, depth + 1) }];
+    return n.type === 'url' && n.url ? [{ url: n.url, title: n.name || n.url, time: time(n) }] : [];
+  }));
+  const r = data.roots || {};
+  return { bar: list(r.bookmark_bar), other: list(r.other), mobile: list(r.synced) };
 }
 
 function readHistory(profile, { days = 90, limit = 20000 } = {}) {
@@ -134,12 +153,13 @@ async function readPasswords(browser, profile, { secret } = {}) {
 }
 
 async function importFrom(id, store, { bookmarks = true, history = true, passwords = false, passwordStore = null, secret } = {}) {
-  const browser = BROWSERS.find((b) => b.id === id);
-  const profile = browser && profileDir(browser);
-  if (!profile) return { ok: false, error: 'That browser was not found on this computer.' };
+  const found = resolve(id);
+  if (!found) return { ok: false, error: 'That browser was not found on this computer.' };
+  const { browser } = found;
+  const profile = found.profile.path;
   const res = { ok: true, browser: browser.name, bookmarks: 0, history: 0, passwords: null };
   try {
-    if (bookmarks) res.bookmarks = store.importBookmarks(readBookmarks(profile));
+    if (bookmarks) res.bookmarks = store.importBookmarks(readBookmarks(profile), { folder: `Imported from ${browser.name}` });
     if (history) res.history = store.importHistory(readHistory(profile));
   } catch (err) {
     return { ok: false, error: `Couldn't read ${browser.name}'s data: ${err.message}` };
@@ -160,4 +180,4 @@ async function importFrom(id, store, { bookmarks = true, history = true, passwor
   return res;
 }
 
-module.exports = { detect, importFrom, readBookmarks, readHistory, readPasswords, fromChromeTime, toChromeTime, BROWSERS };
+module.exports = { detect, importFrom, profiles, readBookmarks, readHistory, readPasswords, fromChromeTime, toChromeTime, BROWSERS };

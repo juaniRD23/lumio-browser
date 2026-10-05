@@ -45,7 +45,7 @@ class BrowserWin {
   // app: services from main.js. profile: { session, downloads, permissions, chats }.
   // maximized: as it was when the session was saved. inactive: shown without
   // taking focus (a tab being dragged out, main/tab-drag.js).
-  constructor(app, profile, { incognito = false, tabs = null, active = 0, bounds = null, urls = [], adopt = null, near = null, maximized = false, inactive = false } = {}) {
+  constructor(app, profile, { incognito = false, tabs = null, active = 0, groups = [], bounds = null, urls = [], adopt = null, near = null, maximized = false, inactive = false } = {}) {
     this.app = app;
     this.profile = profile;
     this.id = nextWindowId++;
@@ -132,6 +132,7 @@ class BrowserWin {
         saveAs: (wc, url) => profile.downloads.saveAs(wc, url),
         savePage: (tab) => app.savePage(this, tab),
         contextMenuExtras: (tab, params) => app.contextMenuExtras(this, tab, params),
+        readingList: (url, title) => app.addToReadingList(this, url, title),
       },
     });
     this.indicator = new PageIndicator(this);
@@ -155,7 +156,7 @@ class BrowserWin {
     });
 
     if (adopt) this.tabs.adopt(adopt);
-    else if (!(tabs && this.tabs.restore(tabs, active))) {
+    else if (!(tabs && this.tabs.restore(tabs, active, groups))) {
       if (urls.length) urls.forEach((u, i) => this.tabs.create(u, { active: i === 0 }));
       else this.tabs.create(NEWTAB);
     }
@@ -273,7 +274,10 @@ class BrowserWin {
     this.overlayKind = kind;
     this.overlayBounds = bounds;
     this.overlayFits = false;
-    this.overlayFocus = !!payload?.focus;
+    // Focus goes to it once it's on screen: dropdowns opened from the
+    // keyboard, and the ones you type in (tab search, the bookmark bubble,
+    // the tab group editor).
+    this.overlayFocus = !!(payload?.focus || payload?.keyboard || ['tabsearch', 'bm-edit', 'tab-group'].includes(kind));
     const seq = ++this.overlaySeq;
     const a = payload?.anchor;
     const origin = a && Number.isFinite(a.x) && Number.isFinite(a.y) ? { x: Math.round(a.x - x), y: Math.round(a.y - y) } : null;
@@ -422,6 +426,7 @@ class BrowserWin {
   session() {
     return {
       tabs: this.tabs.sessionTabs({ history: true }),
+      groups: this.tabs.groups.session(),
       active: Math.max(0, this.tabs.tabs.findIndex((t) => t.id === this.tabs.activeId)),
       bounds: this.win.isMaximized() ? this.win.getNormalBounds() : this.win.getBounds(),
       ...(this.win.isMaximized() ? { maximized: true } : {}),

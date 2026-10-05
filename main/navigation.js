@@ -68,7 +68,7 @@ const helpUrl = () => `${(require('../package.json').homepage || 'https://lumio-
 
 class Navigation {
   // deps: { store, alive(), cur(), ensureWin(), normalWin(), createWindow(opts),
-  //         openInternal(url), bookmarksChanged(), tabOfWc(wc) }
+  //         openInternal(url), tabOfWc(wc) }
   constructor(deps) {
     this.deps = deps;
     this.wired = new WeakSet(); // tab webContents already set up
@@ -344,19 +344,6 @@ class Navigation {
     return w.tabs.navigate(url);
   }
 
-  bookmarkAllTabs(w) {
-    let added = 0;
-    for (const t of w.tabs.tabs) {
-      const url = w.tabs.displayUrl(t);
-      if (!/^https?:/.test(url) || this.store.isBookmarked(url)) continue;
-      this.store.toggleBookmark(url, t.title, t.favicon);
-      added++;
-    }
-    if (added) this.deps.bookmarksChanged();
-    w.emit('toast', { text: added ? `Bookmarked ${added} tab${added === 1 ? '' : 's'}` : 'These tabs are already bookmarked' });
-    return added;
-  }
-
   // ⌘E: the page's selected text becomes what Find looks for (and, on the Mac,
   // what every app's Find Next uses).
   async useSelectionForFind(w) {
@@ -399,7 +386,6 @@ class Navigation {
       home: withWin((w) => this.goHome(w)),
       clearBrowsingData: () => this.clearBrowsingData(),
       help: () => this.openWeb(helpUrl()),
-      bookmarkAllTabs: withWin((w) => this.bookmarkAllTabs(w)),
       useSelectionForFind: withWin((w) => this.useSelectionForFind(w)),
     };
   }

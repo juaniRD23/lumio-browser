@@ -407,9 +407,7 @@ page.on('appearance', showAppearance);
 $('#bm-bar').checked = s.showBookmarksBar;
 $('#bm-bar').addEventListener('change', (e) => page.invoke('page:set-setting', 'showBookmarksBar', e.target.checked));
 
-$('#engine').innerHTML = s.engines.map((e) => `<option value="${e.id}">${esc(e.name)}</option>`).join('');
-$('#engine').value = s.searchEngine;
-$('#engine').addEventListener('change', (e) => page.invoke('page:set-setting', 'searchEngine', e.target.value));
+// The search engine select and its settings: search-engines.js.
 
 $('#dl-dir').textContent = s.downloadDir;
 // Memory Saver

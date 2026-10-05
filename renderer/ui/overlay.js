@@ -7,6 +7,8 @@ import { animate } from './motion.js';
 import '/assets/ui-prefs.js';
 import { renderZoom, initZoom } from './overlay-zoom.js';
 import { renderTabSearch, initTabSearch } from './overlay-tabsearch.js';
+import './overlay-bookmarks.js'; // the bookmarks bar's folder menus and the star's bubble
+import './overlay-groups.js'; // the tab group editor
 
 const api = window.lumio;
 const card = document.getElementById('card');
@@ -15,12 +17,22 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const pretty = (u) => String(u || '').replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '');
 const size = (n) => (n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : n >= 1e6 ? (n / 1e6).toFixed(1) + ' MB' : n >= 1e3 ? Math.round(n / 1e3) + ' KB' : n + ' B');
 
-// Omnibox suggestions: the site's icon, the words you typed in bold, and
-// what kind of suggestion it is (search, Ask Lumio, history, bookmark). One
-// highlight (.sel-pill) glides to the selected row, from the arrow keys in
-// the address bar or the pointer here (which tells the address bar).
-const KIND_ICON = { history: icons.clock, bookmark: icons.star, url: icons.globe };
-const KIND_NAME = { history: 'From your history', bookmark: 'Bookmarked' };
+// Omnibox suggestions (main/omnibox.js makes the rows): the site's icon, the
+// words you typed in bold, and what kind of suggestion it is (search, Ask
+// Lumio, history, bookmark, open tab, action…). One highlight (.sel-pill)
+// glides to the selected row, from the arrow keys in the address bar or the
+// pointer here (which tells the address bar).
+const KIND_ICON = { history: icons.clock, bookmark: icons.star, url: icons.globe, tab: icons.tabs };
+const KIND_NAME = { history: 'From your history', bookmark: 'Bookmarked', tab: 'Open tab' };
+const ACTION_ICONS = { clearData: 'trash', passwords: 'key', settings: 'gear', incognito: 'incognito' };
+const SCOPE_ICONS = { tabs: 'tabs', bookmarks: 'star', history: 'clock' };
+function suggestIcon(it) {
+  if (it.type === 'ai' || it.scope === 'lumio') return markSvg(15);
+  if (it.type === 'answer') return '<b class="eq" aria-hidden="true">=</b>';
+  if (it.type === 'action') return icons[ACTION_ICONS[it.action]] || icons.bolt;
+  if (it.type === 'keyword') return icons[SCOPE_ICONS[it.scope]] || icons.search;
+  return icons[{ search: 'search', bookmark: 'star', history: 'clock', tab: 'tabs', clipboard: 'copy' }[it.type]] || icons.globe;
+}
 function marked(text, query) {
   const words = String(query || '').trim().split(/\s+/).filter(Boolean)
     .sort((a, b) => b.length - a.length)
@@ -36,19 +48,29 @@ function renderSuggest({ items, selected, query }, fresh) {
   if (fresh || key !== suggestKey) {
     suggestKey = key;
     card.setAttribute('role', 'listbox');
+    card.setAttribute('aria-label', 'Suggestions');
+    const hint = (text, cls = '') => `<span class="spacer"></span><span class="hint ${cls}">${text}</span>`;
     card.innerHTML = '<i class="sel-pill" aria-hidden="true"></i>' + items.map((it, i) => {
-      let lead = it.type === 'ai' ? markSvg(15) : it.type === 'search' ? icons.search : KIND_ICON[it.type] || icons.globe;
+      let lead = suggestIcon(it);
       let tag = '';
       if (it.favicon && KIND_ICON[it.type]) {
         lead = `<img src="${esc(it.favicon)}" alt="">`;
         if (KIND_NAME[it.type]) tag = `<span class="tag" title="${KIND_NAME[it.type]}">${KIND_ICON[it.type]}</span>`;
       }
+      const t = `<span class="t">${marked(it.title, query)}</span>`;
+      const u = it.url ? `<span class="u">${marked(pretty(it.url), query)}</span>` : '';
       let body;
-      if (it.type === 'ai') body = `<span class="t">${esc(it.title)}</span><span class="spacer"></span><span class="hint">Ask Lumio</span>`;
-      else if (it.type === 'search') body = `<span class="t">${esc(it.title)}</span><span class="spacer"></span><span class="hint">Search</span>`;
-      else if (it.type === 'url') body = `<span class="t">${marked(it.title, query)}</span><span class="spacer"></span>`;
-      else body = `<span class="t">${marked(it.title, query)}</span><span class="u">${marked(pretty(it.url), query)}</span>${tag}`;
-      return `<div class="row ${it.type}" data-i="${i}" role="option" aria-selected="false"><span class="ic">${lead}</span>${body}</div>`;
+      if (it.type === 'ai') body = `<span class="t">${esc(it.title)}</span>` + hint('Ask Lumio');
+      else if (it.type === 'search') body = `<span class="t">${esc(it.title)}</span>` + (it.remote ? '' : hint(esc(it.hint || 'Search')));
+      else if (it.type === 'url') body = t + '<span class="spacer"></span>';
+      else if (it.type === 'tab') body = t + u + hint('Switch to this tab', 'pill');
+      else if (it.type === 'action') body = `<span class="t">${esc(it.title)}</span>` + hint('Action', 'pill');
+      else if (it.type === 'answer') body = `<span class="t">${esc(it.title)}</span>` + hint('Copy');
+      else if (it.type === 'keyword') body = `<span class="t">${esc(it.title)}</span>` + hint('<kbd>Tab</kbd>');
+      else body = t + u + tag;
+      const rmLabel = it.type === 'clipboard' ? 'Remove' : 'Remove from history';
+      const remove = it.removable || it.type === 'clipboard' ? `<button class="rm" data-rm="${i}" tabindex="-1" title="${rmLabel}" aria-label="${rmLabel}">${icons.close}</button>` : '';
+      return `<div class="row ${it.type}${it.remote ? ' remote' : ''}" data-i="${i}" role="option" aria-selected="false"><span class="ic">${lead}</span>${body}${remove}</div>`;
     }).join('');
     // A site icon that won't load gives way to the kind's.
     card.querySelectorAll('.row .ic img').forEach((img) => {
@@ -617,7 +639,10 @@ const RENDER = {
   zoom: (p) => renderZoom(card, p), tabsearch: (p) => renderTabSearch(card, p),
 };
 // These keep the size main gives them; the rest are as tall as what's in them.
-const FIXED = new Set(['suggest', 'downloads', 'screenshare', 'menu']);
+const FIXED = new Set(['suggest', 'downloads', 'screenshare', 'menu', 'bm-menu', 'bm-edit', 'tab-group']);
+// These draw in a layer of their own over the whole view (overlay-bookmarks.js,
+// overlay-groups.js); the card stays out of the way.
+const OWN_LAYER = new Set(['bm-menu', 'bm-edit', 'tab-group']);
 // Where each comes in from (scaled toward its button, unless said here).
 const ENTER_FROM = { suggest: 'scale(.99, .96)', hovercard: 'translateY(-4px) scale(.98)' };
 let kind = null;
@@ -641,7 +666,9 @@ function show(p) {
   stopMotion();
   card.classList.remove('shown');
   card.removeAttribute('style');
+  if (OWN_LAYER.has(p.kind)) card.style.display = 'none';
   card.removeAttribute('role');
+  card.removeAttribute('aria-label');
   kind = p.kind;
   document.body.dataset.kind = kind;
   if (kind !== 'hovercard') cardTab = null;
@@ -851,8 +878,13 @@ card.addEventListener('mousedown', async (e) => {
   }
   e.preventDefault();
   if (kind === 'suggest') {
+    if (e.button === 2) return;
+    const rm = e.target.closest('[data-rm]');
+    if (rm) { api.send('overlay:pick', { kind, index: Number(rm.dataset.rm), action: 'remove' }); return; }
     const row = e.target.closest('.row');
-    if (row) api.send('overlay:pick', { kind, index: Number(row.dataset.i) });
+    // ⌘/Ctrl-click: a new tab; middle click: a background tab; ⇧-click: a new window.
+    const disposition = e.button === 1 ? 'background' : e.metaKey || e.ctrlKey ? 'tab' : e.shiftKey ? 'window' : 'current';
+    if (row) api.send('overlay:pick', { kind, index: Number(row.dataset.i), disposition });
   } else if (kind === 'downloads') {
     const btn = e.target.closest('button[data-act]');
     if (!btn) return;

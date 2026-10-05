@@ -5,8 +5,8 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 const { injectBrowserAction } = require('electron-chrome-extensions/browser-action');
 
-const INVOKE = /^(shell|omnibox|ai|site|account|passwords|update|popup):/;
-const SEND = /^(layout|panel|sidebar|tab|overlay|find|download|permission|ai|bookmarks|site|window|extensions|account|passwords|app|aura|update|dialog|popup|notice|hud):|^open-url$/;
+const INVOKE = /^(shell|omnibox|ai|site|account|passwords|update|popup|side):/;
+const SEND = /^(layout|panel|sidebar|tab|overlay|find|download|permission|ai|bookmarks|site|window|extensions|account|passwords|app|aura|update|dialog|popup|notice|hud|omnibox|groups|side):|^open-url$/;
 const EVENTS = new Set([
   'tabs', 'downloads', 'permission', 'permission-cancel', 'find-result', 'find-open', 'find-close', 'find-step',
   'focus-omnibox', 'panel-toggle', 'panel-open', 'ai-focus', 'ai-prefill', 'ai-event', 'ai-state', 'overlay-data',
@@ -16,6 +16,7 @@ const EVENTS = new Set([
   'ui-prefs', 'focus-pane',
   'hud', 'nav-prefs', 'find-text', // main/navigation.js
   'infobars', 'tab-search', 'tab-drag-hint', // main/infobars.js, tab-search.js, tab-drag.js
+  'saved-groups', 'tab-group-edit', 'side-panel', 'side-changed', // tab groups, side panel
 ]);
 
 contextBridge.exposeInMainWorld('lumio', {

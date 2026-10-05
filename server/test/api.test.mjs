@@ -1057,13 +1057,18 @@ test('sync: the first device sets the key; records go up and come down; a device
     { id: 'password-id-001', collection: 'passwords', data: sealed(2) },
   ] } })).json();
   assert.equal(push.cursor, 2);
+  // Bookmark folders are a newer collection: the server says it keeps them, so newer browsers send them.
+  const kept = (await (await sync('/api/sync')).json()).collections;
+  assert.ok(['bookmarkTree', 'readingList', 'savedGroups'].every((c) => kept.includes(c)), 'bookmark folders, the reading list and saved tab groups');
+  assert.equal((await sync('/api/sync/push', { method: 'POST', body: { device: DEV_A, items: [{ id: 'folder-id-0001', collection: 'bookmarkTree', data: sealed(9) }] } })).status, 200);
+  await sync('/api/sync/push', { method: 'POST', body: { device: DEV_A, items: [{ id: 'folder-id-0001', collection: 'bookmarkTree', deleted: true }] } });
   const mine = await (await sync(`/api/sync/changes?since=0&device=${DEV_A}`)).json();
-  assert.deepEqual([mine.items.length, mine.cursor], [0, 2], 'its own changes only move the cursor');
+  assert.deepEqual([mine.items.length, mine.cursor], [0, 4], 'its own changes only move the cursor');
   const theirs = await (await sync(`/api/sync/changes?since=0&device=${DEV_B}`)).json();
-  assert.deepEqual(theirs.items.map((i) => [i.id, i.collection, i.data, i.deleted]), [['bookmark-id-001', 'bookmarks', sealed(1), false], ['password-id-001', 'passwords', sealed(2), false]]);
+  assert.deepEqual(theirs.items.map((i) => [i.id, i.collection, i.data, i.deleted]), [['bookmark-id-001', 'bookmarks', sealed(1), false], ['password-id-001', 'passwords', sealed(2), false], ['folder-id-0001', 'bookmarkTree', null, true]]);
   // B deletes the bookmark: A learns about it as a tombstone after its cursor.
   await sync('/api/sync/push', { method: 'POST', body: { device: DEV_B, items: [{ id: 'bookmark-id-001', collection: 'bookmarks', deleted: true }] } });
-  const later = await (await sync(`/api/sync/changes?since=2&device=${DEV_A}`)).json();
+  const later = await (await sync(`/api/sync/changes?since=4&device=${DEV_A}`)).json();
   assert.deepEqual(later.items.map((i) => [i.id, i.deleted, i.data]), [['bookmark-id-001', true, null]]);
   // The phone asks for just some collections.
   const phone = await (await sync(`/api/sync/changes?since=0&device=${PHONE}&collections=passwords`)).json();
@@ -1078,7 +1083,9 @@ test('sync: the first device sets the key; records go up and come down; a device
   assert.equal(status.usage.items, 1);
   // Turning sync off for the account deletes everything.
   await sync('/api/sync', { method: 'DELETE' });
-  assert.deepEqual(await (await sync('/api/sync')).json(), { keyCheck: null, since: null, devices: [], usage: { items: 0, bytes: 0, limit: 60 * 1024 * 1024 } });
+  const { collections, ...cleared } = await (await sync('/api/sync')).json();
+  assert.deepEqual(cleared, { keyCheck: null, since: null, devices: [], usage: { items: 0, bytes: 0, limit: 60 * 1024 * 1024 } });
+  assert.ok(collections.includes('bookmarks'));
 });
 
 test('sync: a new device asks, another approves with the wrapped key, and it is collected once', async () => {

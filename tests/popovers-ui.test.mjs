@@ -341,7 +341,7 @@ test('the window: ⋮ on every platform opens the menu and sends it keys; popove
   await page.waitForFunction(() => window.__sent.some(([c, p]) => c === 'overlay:show' && p.payload.kind === 'suggest' && p.payload.query === 'git'));
   await page.evaluate(() => window.__emit('overlay-state', { kind: 'suggest', hover: 1 }));
   await page.keyboard.press('Enter');
-  assert.equal((await sent(page, 'tab:navigate')).at(-1), 'https://github.com/');
+  assert.equal((await sent(page, 'omnibox:open')).at(-1).url, 'https://github.com/');
   assert.deepEqual(errors, []);
   await page.close();
 });

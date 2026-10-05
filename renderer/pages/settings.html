@@ -6,6 +6,7 @@
   <link rel="stylesheet" href="pages.css" />
   <link rel="stylesheet" href="settings.css" />
   <link rel="stylesheet" href="settings-nav.css" />
+  <link rel="stylesheet" href="search-engines.css" />
 </head>
 <body>
   <div class="layout">
@@ -250,6 +251,13 @@
       <section id="privacy">
         <h2>Privacy and security</h2>
         <div class="card">
+          <label class="row" style="cursor:pointer">
+            <div class="grow"><div class="title">Improve searches and browsing</div><div class="desc">Autocomplete searches and URLs: sends what you type in the address bar to your search engine to suggest searches. Never in Incognito, and never for addresses or text that looks private.</div></div>
+            <span class="switch"><input type="checkbox" id="search-suggest" aria-label="Autocomplete searches and URLs"><i></i></span>
+          </label>
+        </div>
+        <h3>Clear browsing data</h3>
+        <div class="card">
           <div class="row checks">
             <label><input type="checkbox" value="history" checked /> History</label>
             <label><input type="checkbox" value="downloads" /> Download history</label>
@@ -346,9 +354,14 @@
         <div class="card">
           <div class="row">
             <div class="grow"><div class="title">Search engine</div><div class="desc">Used by the address bar and the new tab page.</div></div>
-            <select id="engine" class="field"></select>
+            <select id="engine" class="field" aria-label="Search engine"></select>
+          </div>
+          <div class="row">
+            <div class="grow"><div class="title">Manage search engines and site search</div><div class="desc">Add your own, and search a site from the address bar with a shortcut, like “yt cats”.</div></div>
+            <button class="btn" id="se-manage" aria-expanded="false" aria-controls="se-panel">Manage</button>
           </div>
         </div>
+        <div id="se-panel" hidden></div>
       </section>
 
       <!-- Downloads -->
@@ -438,5 +451,6 @@
   <script type="module" src="settings-a11y.js"></script>
   <script type="module" src="settings-nav.js"></script>
   <script type="module" src="settings-tabs.js"></script>
+  <script type="module" src="search-engines.js"></script>
 </body>
 </html>
