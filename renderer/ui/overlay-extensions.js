@@ -50,13 +50,13 @@ function renderMenu(payload, card) {
         <button class="xm-choice" role="menuitem" data-act="details"><span class="xm-ic-sm">${icons.gear}</span><span>Manage extension</span></button>
       </div>` : '';
     return `
-      <div class="xm-row ${x.hasAction ? '' : 'no-action'}" data-id="${esc(x.id)}" data-key="${esc(x.key)}">
+      <div class="xm-row ${x.hasAction ? '' : 'no-action'}" role="none" data-id="${esc(x.id)}" data-key="${esc(x.key)}">
         <button class="xm-main" role="menuitem" data-act="activate" ${x.hasAction ? '' : 'aria-disabled="true"'} title="${esc(x.hasAction ? x.name : `${x.name} has no toolbar button`)}">
           <span class="xm-ic">${x.icon ? `<img src="${esc(x.icon)}" alt="">` : icons.puzzle}</span>
           <span class="xm-text"><span class="xm-name">${esc(x.name)}</span>${status ? `<span class="xm-status ${x.here}">${esc(status)}</span>` : ''}</span>
         </button>
         ${x.hasAction ? `<button class="xm-btn xm-pin ${x.pinned ? 'on' : ''}" role="menuitemcheckbox" aria-checked="${x.pinned}" data-act="${x.pinned ? 'unpin' : 'pin'}" aria-label="${x.pinned ? 'Unpin' : 'Pin'} ${esc(x.name)}" title="${x.pinned ? 'Unpin from toolbar' : 'Pin to toolbar'}">${icons.pin}</button>` : ''}
-        <button class="xm-btn xm-more" aria-haspopup="true" aria-expanded="${open === x.id}" data-act="more" aria-label="More options for ${esc(x.name)}" title="More options">${icons.dots}</button>
+        <button class="xm-btn xm-more" role="menuitem" aria-haspopup="true" aria-expanded="${open === x.id}" data-act="more" aria-label="More options for ${esc(x.name)}" title="More options">${icons.dots}</button>
       </div>${panel}`;
   };
   card.innerHTML = `

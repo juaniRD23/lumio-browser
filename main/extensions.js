@@ -95,6 +95,13 @@ function iconDataUrl(extPath, manifest) {
 
 const readManifest = (dir) => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8')); } catch { return null; } };
 
+// The same folder, even if one path went through a symlink (/var and
+// /private/var on the Mac); otherwise every load would look like someone else's.
+function samePath(a, b) {
+  if (!a || !b) return false;
+  try { return fs.realpathSync(a) === fs.realpathSync(b); } catch { return a === b; }
+}
+
 class ExtensionManager {
   constructor({ session, store, hooks }) {
     this.session = session;
@@ -217,7 +224,7 @@ class ExtensionManager {
     const limits = this.siteAccess(key);
     let target = dir;
     if (limits.mode !== 'all' && !this.isUnpacked(key) && access.canRestrict(manifest)) {
-      target = access.buildRestrictedCopy(dir, dir + access.RESTRICTED_SUFFIX, limits);
+      target = access.buildRestrictedCopy(dir, dir + access.RESTRICTED_SUFFIX, { ...limits, files: this.fileAccess(key) });
     }
     // Noted first, so onLoaded knows this load is Lumio's own (an unpacked
     // extension's ID is only known once it's loaded).
@@ -253,7 +260,7 @@ class ExtensionManager {
     }
     // Something else loaded it (the Web Store's updater after an update, or a
     // reinstall): put Lumio's limits back, and clear out the old version.
-    if (this.loadedVia.get(ext.id) === ext.path) return;
+    if (samePath(this.loadedVia.get(ext.id), ext.path)) return;
     this.loadedVia.set(ext.id, ext.path);
     const key = this.keyOf(ext);
     if (key !== ext.id) return;

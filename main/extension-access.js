@@ -65,10 +65,12 @@ function intersectHosts(a, b) {
 // Does a host pattern allow this page's host?
 const hostAllowed = (pattern, host) => covers(pattern, String(host || '').toLowerCase());
 
-// Narrow one match pattern to the listed sites. Web schemes only: file://
-// access is its own switch ("Allow access to file URLs").
-function narrowPattern(pattern, sites) {
+// Narrow one match pattern to the listed sites. file:// access is its own
+// switch ("Allow access to file URLs"): with it on, file patterns stay.
+function narrowPattern(pattern, sites, { files = false } = {}) {
   const p = parsePattern(pattern);
+  if (files && p?.scheme === 'file') return [pattern];
+  if (files && pattern === '<all_urls>') return [...narrowPattern(pattern, sites), 'file:///*'];
   if (!p || !['*', 'http', 'https', 'ws', 'wss'].includes(p.scheme)) return [];
   const out = [];
   for (const site of sites) {
@@ -81,10 +83,10 @@ function narrowPattern(pattern, sites) {
 const uniq = (list) => [...new Set(list)];
 
 // A copy of the manifest that only reaches the allowed sites.
-// access: { mode: 'click' | 'sites', sites: [...] }
+// access: { mode: 'click' | 'sites', sites: [...], files: allowed on file URLs }
 function restrictManifest(manifest, access) {
   const sites = access?.mode === 'sites' ? uniq((access.sites || []).map(normalizeSite).filter(Boolean)) : [];
-  const narrow = (patterns) => uniq((patterns || []).flatMap((p) => (isHostPattern(p) ? narrowPattern(p, sites) : [p])));
+  const narrow = (patterns) => uniq((patterns || []).flatMap((p) => (isHostPattern(p) ? narrowPattern(p, sites, { files: !!access?.files }) : [p])));
   const out = JSON.parse(JSON.stringify(manifest));
   if (Array.isArray(out.content_scripts)) {
     // An entry without matches won't load, so entries that lose them all go.
@@ -219,7 +221,7 @@ function limitations(manifest) {
 // made from, so an unchanged copy is reused at the next launch.
 function buildRestrictedCopy(src, dest, access) {
   const manifest = JSON.parse(fs.readFileSync(path.join(src, 'manifest.json'), 'utf8'));
-  const marker = JSON.stringify({ src, access: { mode: access.mode, sites: access.sites || [] }, version: manifest.version });
+  const marker = JSON.stringify({ src, access: { mode: access.mode, sites: access.sites || [], files: !!access.files }, version: manifest.version });
   try {
     if (fs.readFileSync(path.join(dest, '.lumio-access.json'), 'utf8') === marker) return dest;
   } catch { /* build it */ }

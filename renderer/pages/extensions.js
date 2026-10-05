@@ -191,7 +191,12 @@ async function showDetails(key) {
     return;
   }
   details = d;
+  // Redrawn after a change or when the window comes back: the keyboard stays
+  // on the same control.
+  const was = document.activeElement;
+  const sel = !$('#view-details').contains(was) ? null : was.id ? `#${CSS.escape(was.id)}` : was.name === 'access' ? `input[name=access][value="${CSS.escape(was.value)}"]` : null;
   renderDetails();
+  if (sel) document.querySelector(sel)?.focus({ preventScroll: true });
 }
 const refreshDetails = () => showDetails(details.key);
 

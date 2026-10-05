@@ -38,3 +38,7 @@
 .iconbtn-space { width: 30px; flex: none; }
 #sc-msg { color: var(--danger-text); }
 @media (prefers-reduced-motion: reduce) { .switch i, .switch i::after { transition: none; } }
+
+/* Developer mode: on a narrow window the note moves under the buttons. */
+.devbar { flex-wrap: wrap; }
+.devbar .note { flex: 1 1 220px; }

@@ -105,6 +105,11 @@ test('a limited manifest only reaches the allowed sites, and keeps everything el
   assert.deepEqual(click.permissions, ['storage', 'tabs']);
   assert.equal(MANIFEST.content_scripts.length, 2, 'the original is untouched');
 
+  // "Allow access to file URLs" still works when site access is limited.
+  const files = access.restrictManifest({ content_scripts: [{ matches: ['<all_urls>'], js: ['a.js'] }, { matches: ['file:///docs/*'], js: ['b.js'] }] }, { mode: 'click', files: true });
+  assert.deepEqual(files.content_scripts.map((c) => c.matches), [['file:///*'], ['file:///docs/*']]);
+  assert.deepEqual(access.restrictManifest({ content_scripts: [{ matches: ['<all_urls>'] }] }, { mode: 'click' }).content_scripts, [], 'not without the switch');
+
   assert.ok(access.wantsSites(MANIFEST));
   assert.ok(!access.wantsSites({ permissions: ['storage'] }));
   assert.ok(access.canRestrict(MANIFEST));

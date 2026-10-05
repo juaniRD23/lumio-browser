@@ -380,7 +380,12 @@ for (const scheme of ['light', 'dark']) {
       [A, { mode: 'sites', sites: [] }],
       [A, { mode: 'all', sites: ['news.com'] }],
     ]);
-    await page.click('label:has(#d-files)');
+    // By keyboard: the switch keeps the focus when the page redraws.
+    const redraws = (await calls(page, 'page:extension-details')).length;
+    await page.focus('#d-files');
+    await page.keyboard.press('Space');
+    await page.waitForFunction((n) => window.__calls.filter(([c]) => c === 'page:extension-details').length > n, redraws);
+    await page.waitForFunction(() => document.activeElement?.id === 'd-files');
     await page.click('label:has(#d-pin)');
     await page.waitForFunction(() => window.__calls.some(([c]) => c === 'page:extension-pin'));
     assert.deepEqual(await calls(page, 'page:extension-file-access'), [[A, true]]);

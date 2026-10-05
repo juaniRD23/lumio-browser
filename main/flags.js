@@ -15,7 +15,7 @@ const FLAGS = [
   {
     id: 'forceDark',
     name: 'Dark mode for all websites',
-    description: 'Show websites in dark colors, even ones that don’t have a dark mode. Some sites may look wrong.',
+    description: 'Show websites in dark colors, even ones that don’t have a dark mode. Some sites, and Lumio’s own light pages, may look wrong.',
     default: false,
     features: (on) => (on ? ['WebContentsForceDark'] : []),
   },
