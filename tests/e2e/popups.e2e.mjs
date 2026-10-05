@@ -89,6 +89,10 @@ const PAGES = {
   // A page with a frame from another site (localhost vs 127.0.0.1): its own process.
   '/embed': `<title>Embed</title><iframe id="f" src="http://localhost:PORT/frame" width="320" height="120" style="border:0"></iframe>`,
   '/frame': `<title>Frame</title><button id="b" style="width:200px;height:60px" onclick="window.open('/target')">Open</button>`,
+  // An ad from another site that tries a pop-up every 100 ms, on a page with its own button.
+  '/article': `<title>Article</title><button id="read" style="width:200px;height:60px">Read more</button>
+    <iframe src="http://localhost:PORT/ad" width="320" height="120" style="border:0"></iframe>`,
+  '/ad': `<title>Ad</title><script>setInterval(() => window.open('/target'), 100);</script>`,
   '/links': `<title>Links</title><style>a { display: block; margin: 12px; font-size: 20px }</style>
     <a id="mail" href="mailto:ada@example.com">Mail Ada</a>
     <a id="search" href="search-ms:query=passwords">Search this computer</a>
@@ -190,6 +194,14 @@ test('a click on a button in a frame from another site opens its pop-up, the fir
   assert.ok(await until(async () => (await tabCount()) === before + 1), 'the next click (focus already in the frame)');
   await backToEmbed();
   assert.equal(await L.main(() => global.lumio.tabs.active.blockedPopups?.length || 0), 0, 'nothing was blocked');
+});
+
+test('a click on the page doesn’t let a frame from another site (an ad) open a pop-up', async () => {
+  await go(`${base}/article`, 'Article');
+  const before = await tabCount();
+  assert.ok(await until(async () => (await L.main(() => global.lumio.tabs.active.blockedPopups?.length || 0)) > 0), 'the ad’s tries are blocked');
+  for (let i = 0; i < 3; i++) { await clickPage('#read'); await L.wait(400); }
+  assert.equal(await tabCount(), before, 'no tab opened for the ad');
 });
 
 test('a sized pop-up opens in its own window with a bar, talks back to its page, and closes itself', async (t) => {
