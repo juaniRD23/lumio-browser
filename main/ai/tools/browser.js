@@ -421,8 +421,12 @@ const tools = [
       const { tab, wc } = tabFor(ctx, a.tab_id);
       const bounds = tab.view.getBounds();
       await ctx.onCapture?.(wc, true); // keep Lumio's own glow out of the picture
+      await inPage(wc, scripts.maskCards, { on: true }).catch(() => {}); // and card numbers
       let img;
-      try { img = await wc.capturePage(); } finally { await ctx.onCapture?.(wc, false); }
+      try { img = await wc.capturePage(); } finally {
+        await inPage(wc, scripts.maskCards, { on: false }).catch(() => {});
+        await ctx.onCapture?.(wc, false);
+      }
       const width = Math.min(1280, bounds.width);
       const shot = img.resize({ width, quality: 'good' });
       const size = shot.getSize();

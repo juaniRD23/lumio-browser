@@ -1,7 +1,10 @@
 // Passkeys (WebAuthn): Lumio is the authenticator. When a website asks to
-// create or use a passkey, Lumio makes or uses an ES256 (P-256) key pair kept
-// on this computer. The private key is encrypted with safeStorage, like saved
-// passwords. Passkeys are device-bound: not synced (backup flags off).
+// create or use a passkey, Lumio makes or uses an ES256 (P-256) key pair. The
+// private key is encrypted with safeStorage, like saved passwords, and Lumio
+// Sync carries it end-to-end encrypted to the person's other computers, so
+// new passkeys tell sites they can be backed up (and are, while Sync is on).
+// Passkeys made before Lumio synced them said they were device-bound, which a
+// passkey can't change later: those stay on their computer.
 // This file is the authenticator itself (no UI); password-manager.js asks the
 // person and confirms it's them (Touch ID / Windows Hello) first.
 const crypto = require('crypto');
@@ -10,6 +13,12 @@ const { JsonFile } = require('./store');
 // Lumio's authenticator model id (AAGUID), so sites can show "Lumio" as the provider.
 const AAGUID = Buffer.from('lumio-passkey-v1', 'latin1'); // 16 bytes
 const ES256 = -7;
+// Authenticator data flags.
+const UP = 0x01; // user present
+const UV = 0x04; // user verified
+const BE = 0x08; // backup eligible (synced passkey)
+const BS = 0x10; // backed up right now
+const AT = 0x40; // attested credential data follows
 
 const b64url = (buf) => Buffer.from(buf).toString('base64url');
 const fromB64url = (s) => Buffer.from(String(s || ''), 'base64url');
@@ -81,6 +90,7 @@ class PasskeyStore {
     this.safe = safeStorage;
     this.file = new JsonFile(dir, 'passkeys.json', { version: 1, keys: [] });
     if (!Array.isArray(this.file.data.keys)) this.file.data = { version: 1, keys: [] };
+    this.backedUp = () => false; // main/main.js: true while Lumio Sync carries passkeys
   }
 
   available() { return !!this.safe?.isEncryptionAvailable(); }
@@ -90,7 +100,7 @@ class PasskeyStore {
 
   // What the Passwords page may see.
   list() {
-    return this.keys.map((k) => ({ id: k.id, rpId: k.rpId, userName: k.userName, displayName: k.displayName, created: k.created, lastUsed: k.lastUsed || null }))
+    return this.keys.map((k) => ({ id: k.id, rpId: k.rpId, userName: k.userName, displayName: k.displayName, created: k.created, lastUsed: k.lastUsed || null, syncable: !!k.be }))
       .sort((a, b) => a.rpId.localeCompare(b.rpId) || a.userName.localeCompare(b.userName));
   }
 
@@ -126,7 +136,7 @@ class PasskeyStore {
     const jwk = publicKey.export({ format: 'jwk' });
     const credId = crypto.randomBytes(32);
     const cose = cbor(new Map([[1, 2], [3, ES256], [-1, 1], [-2, fromB64url(jwk.x)], [-3, fromB64url(jwk.y)]]));
-    const flags = 0x01 | (verified ? 0x04 : 0) | 0x40; // user present, verified, attested credential data
+    const flags = UP | (verified ? UV : 0) | BE | (this.backedUp() ? BS : 0) | AT;
     const len = Buffer.alloc(2);
     len.writeUInt16BE(credId.length);
     const authData = Buffer.concat([sha256(Buffer.from(rpId)), Buffer.from([flags]), Buffer.alloc(4), AAGUID, len, credId, cose]);
@@ -138,7 +148,7 @@ class PasskeyStore {
       id: b64url(credId), rpId, userId: b64url(userId),
       userName: String(pk.user?.name || '').slice(0, 200), displayName: String(pk.user?.displayName || '').slice(0, 200),
       key: this.safe.encryptString(privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64')).toString('base64'),
-      created: now, lastUsed: now,
+      created: now, lastUsed: now, be: true,
     });
     this.file.save(true);
     return {
@@ -165,13 +175,45 @@ class PasskeyStore {
     if (pk.userVerification === 'required' && !verified) throw new WebAuthnError('NotAllowedError', 'Lumio couldn’t confirm it’s you.');
     const challenge = fromB64url(pk.challenge);
     if (challenge.length < 16) throw new WebAuthnError('TypeError', 'Invalid challenge.');
-    const flags = 0x01 | (verified ? 0x04 : 0);
+    const flags = UP | (verified ? UV : 0) | (k.be ? BE | (this.backedUp() ? BS : 0) : 0);
     const authData = Buffer.concat([sha256(Buffer.from(rpId)), Buffer.from([flags]), Buffer.alloc(4)]); // sign count 0: not tracked
     const clientDataJSON = Buffer.from(JSON.stringify({ type: 'webauthn.get', challenge: b64url(challenge), origin, crossOrigin: false }));
     const signature = crypto.sign('sha256', Buffer.concat([authData, sha256(clientDataJSON)]), { key: this.privateKey(k), dsaEncoding: 'der' });
     k.lastUsed = Date.now();
     this.file.save();
     return { id: k.id, clientDataJSON: b64url(clientDataJSON), authenticatorData: b64url(authData), signature: b64url(signature), userHandle: k.userId };
+  }
+
+  // ---------------------------------------------------------------- Lumio Sync
+  // A passkey for sync, private key included (the sync engine encrypts it
+  // end to end), and other computers' passkeys stored here.
+  syncRecord(id) {
+    const k = this.find(id);
+    if (!k?.be) return null;
+    let key;
+    try { key = this.safe.decryptString(Buffer.from(k.key, 'base64')); } catch { return null; }
+    return { rpId: k.rpId, userId: k.userId, userName: k.userName, displayName: k.displayName, created: k.created, key };
+  }
+
+  applySynced(changes) {
+    if (!this.available()) return changes.map((c) => c.key);
+    const rejected = [];
+    for (const { key: id, record: r } of changes) {
+      const i = this.keys.findIndex((k) => k.id === id);
+      if (!r) { if (i >= 0) this.keys.splice(i, 1); continue; }
+      try {
+        if (typeof r.rpId !== 'string' || !r.rpId || !fromB64url(r.userId).length) throw new Error('bad');
+        crypto.createPrivateKey({ key: Buffer.from(String(r.key), 'base64'), format: 'der', type: 'pkcs8' }); // a real key
+      } catch { rejected.push(id); continue; }
+      const fields = {
+        rpId: r.rpId.toLowerCase(), userId: String(r.userId), userName: String(r.userName || '').slice(0, 200), displayName: String(r.displayName || '').slice(0, 200),
+        key: this.safe.encryptString(String(r.key)).toString('base64'), created: Number(r.created) || Date.now(), be: true,
+      };
+      if (i >= 0) Object.assign(this.keys[i], fields);
+      else this.keys.push({ id, ...fields, lastUsed: null });
+    }
+    this.file.save(true);
+    return rejected;
   }
 }
 

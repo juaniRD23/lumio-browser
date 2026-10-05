@@ -1,0 +1,24 @@
+/* Autofill above the page (renderer/ui/overlay-autofill.js). Row and footer
+   heights are fixed: main/autofill.js sizes the dropdown from them. */
+
+/* the dropdown under a form field */
+.ff-row { display: flex; align-items: center; gap: 12px; height: 46px; margin-bottom: 2px; padding: 0 6px 0 10px; border-radius: 8px; color: var(--text); cursor: default; }
+.ff-row.one { height: 36px; }
+.ff-row:hover, .ff-row.sel { background: var(--active); }
+.ff-row .ic { width: 18px; color: var(--dim); display: grid; place-items: center; flex: none; }
+.ff-main { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.ff-label, .ff-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ff-sub { color: var(--label); font-size: 12px; }
+.ff-row.sel .ff-sub { color: var(--muted); }
+.ff-x { flex: none; width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 7px; background: none; color: var(--muted); opacity: 0; }
+.ff-row:hover .ff-x, .ff-row.sel .ff-x { opacity: 1; }
+.ff-x:hover { background: var(--active-hover); color: var(--text-strong); }
+.ff-foot { display: block; width: 100%; height: 34px; margin-top: 2px; padding: 0 10px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--accent); font: inherit; font-size: 12.5px; text-align: left; }
+.ff-foot:hover { background: var(--overlay-3); }
+
+/* "Save address?" / "Save card?" */
+.fs-title { font: 400 22px/1.15 'Instrument Serif', Georgia, serif; padding: 6px 8px 10px; }
+.fs-box { margin: 0 4px; padding: 10px 12px; border-radius: 12px; background: var(--overlay-2); border: 1px solid var(--line); color: var(--text-soft); font-size: 12.5px; line-height: 1.55; overflow-wrap: anywhere; }
+.fs-box .fs-first { color: var(--text); font-weight: 600; }
+.fs-note { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 8px 8px 2px; }
+.fs .acc-btn:focus-visible, .ff-foot:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Shipping — Test Shop</title>
+  <style>
+    body { font: 16px/1.5 -apple-system, sans-serif; max-width: 560px; margin: 30px auto; padding: 0 20px; }
+    label, input, select { display: block; width: 100%; box-sizing: border-box; margin: 4px 0 8px; }
+    input, select { padding: 6px; font: inherit; }
+  </style>
+</head>
+<body>
+  <h1>Where should we ship it?</h1>
+  <!-- Labels, placeholders, names and autocomplete, the way real shops mix them. -->
+  <form id="ship" action="/shipped.html" method="get">
+    <label for="fn">First name</label><input id="fn" name="firstName" />
+    <label for="ln">Last name</label><input id="ln" name="lastName" />
+    <label>Company <input id="company" name="company" /></label>
+    <input id="a1" name="address1" placeholder="Street address" />
+    <input id="a2" name="address2" placeholder="Apt, suite, etc. (optional)" />
+    <input id="city" name="city" autocomplete="shipping address-level2" placeholder="City" />
+    <select id="state" name="state" aria-label="State"><option value="">State</option><option value="CA">California</option><option value="FL">Florida</option><option value="NY">New York</option></select>
+    <input id="zip" name="postal" placeholder="ZIP code" />
+    <select id="country" name="country" aria-label="Country"><option value="CA">Canada</option><option value="US">United States</option><option value="MX">Mexico</option></select>
+    <input id="phone" type="tel" name="phone" placeholder="Phone" />
+    <input id="email" type="email" name="email" placeholder="Email" />
+    <!-- A field the person can't see must never get their address. -->
+    <input id="trap" name="trap_address" placeholder="Street address" style="position:absolute;left:-9999px" tabindex="-1" />
+    <input id="note" name="gift_note" placeholder="Gift message" />
+    <button id="go" type="submit">Ship it</button>
+  </form>
+
+  <h2>En español</h2>
+  <form id="es" action="/shipped.html" method="get">
+    <label for="nombre">Nombre</label><input id="nombre" name="nombre" />
+    <label for="dir">Dirección</label><input id="dir" name="direccion" />
+    <label for="ciudad">Ciudad</label><input id="ciudad" name="ciudad" />
+    <label for="cp">Código postal</label><input id="cp" name="cp" />
+    <label for="telefono">Teléfono</label><input id="telefono" name="telefono" />
+    <button type="submit">Enviar</button>
+  </form>
+
+  <h2>Newsletter</h2>
+  <form id="news" action="/shipped.html" method="get">
+    <input id="nick" name="nickname" placeholder="What should we call you?" />
+    <input id="otp" name="otp" placeholder="One-time code" />
+    <input id="promo" name="promo" autocomplete="off" placeholder="Promo code" />
+    <input id="topic" name="topic" role="combobox" aria-autocomplete="list" placeholder="Favorite topic" />
+    <button id="join" type="submit">Join</button>
+  </form>
+
+  <form id="find" role="search" action="/shipped.html" method="get">
+    <input id="q" name="q" type="search" placeholder="Search the shop" />
+  </form>
+
+  <h2>Sign in</h2>
+  <form id="login" action="/shipped.html" method="get">
+    <input id="user" name="user" placeholder="Username" />
+    <input id="pass" name="pass" type="password" />
+    <button type="submit">Sign in</button>
+  </form>
+  <script>
+    // Stays on the page so tests can look at what was filled after "sending".
+    document.addEventListener('submit', (e) => { e.preventDefault(); window.sent = (window.sent || 0) + 1; document.title = 'Shipped — Test Shop'; });
+  </script>
+</body>
+</html>

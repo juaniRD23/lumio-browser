@@ -41,12 +41,15 @@ class TabManager {
 
   // ---------- lifecycle ----------
   create(url = NEWTAB, { active = true, index, title, lazy = false, pinned = false } = {}) {
+    const newTab = url === NEWTAB;
+    // An extension may replace the new tab page (chrome_url_overrides.newtab).
+    if (newTab) url = this.hooks.newTabUrl?.() || url;
     const tab = {
       id: nextId++,
       owner: this,
       view: null,
       url,
-      title: title || (url === NEWTAB ? 'New Tab' : displayUrl(url)),
+      title: title || (newTab ? 'New Tab' : displayUrl(url)),
       favicon: null,
       loading: false,
       canGoBack: false,
@@ -498,7 +501,7 @@ class TabManager {
   // ---------- state for the shell ----------
   displayUrl(tab) {
     const url = tab.pendingUrl || tab.url || '';
-    if (url.startsWith(NEWTAB)) return '';
+    if (url.startsWith(NEWTAB) || this.isExtensionNewTab(url)) return '';
     if (url.startsWith('lumio://error')) {
       try { return new URL(url).searchParams.get('url') || url; } catch { return url; }
     }
@@ -530,10 +533,14 @@ class TabManager {
     };
   }
 
-  // What the session file keeps for this window.
+  // An extension's new tab page shows an empty address bar, like Lumio's own.
+  isExtensionNewTab(url) { return url.startsWith('chrome-extension://') && !!this.hooks.isNewTabUrl?.(url); }
+
+  // What the session file keeps for this window (an extension's new tab page
+  // is saved as the new tab page, so it follows if the extension goes).
   sessionTabs() {
     return this.tabs
-      .map((t) => ({ url: t.pendingUrl || t.url, title: t.title, ...(t.pinned ? { pinned: true } : {}) }))
+      .map((t) => ({ url: this.isExtensionNewTab(t.pendingUrl || t.url || '') ? NEWTAB : t.pendingUrl || t.url, title: t.title, ...(t.pinned ? { pinned: true } : {}) }))
       .filter((t) => t.url && !t.url.startsWith('lumio://error'));
   }
 
@@ -635,7 +642,7 @@ class TabManager {
       );
       sep();
     }
-    const extra = this.hooks.contextMenuExtras?.(tab, params) || [];
+    const extra = this.hooks.contextMenuExtras?.(tab, params, items) || [];
     if (extra.length) { items.push(...extra); sep(); }
     items.push({ label: 'Inspect Element', click: () => wc.inspectElement(params.x, params.y) });
     Menu.buildFromTemplate(items).popup({ window: this.win });

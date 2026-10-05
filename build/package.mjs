@@ -84,6 +84,8 @@ function macOptions(arch, helper) {
       NSCameraUsageDescription: 'Websites you allow can use your camera.',
       NSMicrophoneUsageDescription: 'Lumio’s voice mode and websites you allow can use your microphone.',
       NSLocationWhenInUseUsageDescription: 'Websites you allow can see your location.',
+      // Handoff: the page you're on continues on your iPhone, iPad or other Mac (main/mac-integration.js).
+      NSUserActivityTypes: ['NSUserActivityTypeBrowsingWeb'],
       CFBundleDocumentTypes: [
         { CFBundleTypeName: 'HTML document', CFBundleTypeRole: 'Viewer', LSItemContentTypes: ['public.html', 'public.xhtml'] },
       ],

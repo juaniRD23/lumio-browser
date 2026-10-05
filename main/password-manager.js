@@ -8,7 +8,9 @@
 //    showing, copying or exporting passwords;
 //  - passkeys: when a site calls navigator.credentials.create()/get(), ask in
 //    Lumio's own prompt, confirm it's them, then create or use a passkey
-//    (passkeys.js is the authenticator).
+//    (passkeys.js is the authenticator);
+//  - security keys (USB or NFC): the page uses the browser's own WebAuthn
+//    instead, while Lumio says to touch the key (Windows shows its own dialog).
 // Page messages come from the isolated tab preload (preload/internal.js).
 const { ipcMain, clipboard, dialog, webContents } = require('electron');
 const fs = require('fs');
@@ -25,6 +27,7 @@ class PasswordManager {
     this.store = new PasswordStore(dir, safeStorage);
     this.passkeys = new PasskeyStore(dir, safeStorage);
     this.pkPending = new Map(); // prompt id -> { resolve, kind, pk, origin, rpId, w, wcId, accounts }
+    this.keyWaits = new Map(); // webContents id -> { id, w, resolve } while a page waits for a security key
     this.settings = settings; // the app Store (for offer/autofill switches)
     this.helper = helper;
     this.findTab = findTab; // (webContents) -> { w, tab } | null
@@ -53,6 +56,8 @@ class PasswordManager {
     ipcMain.on('pw:show', (e, rect) => this.show(e, rect));
     ipcMain.handle('pk:request', (e, req) => this.passkeyRequest(e, req || {}));
     ipcMain.on('pk:cancel', (e) => this.passkeyCancel(e.sender.id));
+    ipcMain.handle('pk:key-wait', (e) => this.keyWait(e));
+    ipcMain.on('pk:key-done', (e) => this.keyDone(e.sender.id));
     ipcMain.on('pw:hide', (e) => {
       const found = this.findTab(e.sender);
       if (found && found.w.overlayKind === 'autofill') found.w.hideOverlay();
@@ -210,13 +215,15 @@ class PasswordManager {
     let accounts = [];
     try {
       if (kind === 'create') {
-        if (pk.authenticatorSelection?.authenticatorAttachment === 'cross-platform') return no('Lumio can’t use security keys yet. Try a passkey saved in Lumio.');
+        if (pk.authenticatorSelection?.authenticatorAttachment === 'cross-platform') return { native: true }; // a security key
         rpId = String(pk.rp?.id || new URL(origin).hostname).toLowerCase();
         if (!validRpId(rpId, origin)) throw new WebAuthnError('SecurityError', 'This site can’t use that passkey domain.');
       } else {
         const c = this.passkeys.candidates(pk, origin);
         rpId = c.rpId;
         accounts = c.list.map((k) => ({ id: k.id, userName: k.userName, displayName: k.displayName }));
+        // The site wants a passkey Lumio doesn't have: a security key may have it.
+        if (!accounts.length && (pk.allowCredentials || []).length && req.mediation !== 'conditional') return { native: true };
       }
     } catch (err) {
       return no(err.message, err.name || 'NotAllowedError');
@@ -259,15 +266,48 @@ class PasswordManager {
       this.pkPending.delete(id);
       p.resolve({ error: 'NotAllowedError', message: 'The operation either timed out or was not allowed.' });
     }
+    // A page waiting for a security key keeps waiting; only the note went away.
+    for (const [wcId, k] of this.keyWaits) if (k.w === w) { this.keyWaits.delete(wcId); k.resolve('closed'); }
+  }
+
+  // A page is waiting for a security key (the browser's own WebAuthn): say
+  // what to do, with a way to stop. Resolves 'cancel' if the person cancels.
+  // Windows shows its own security key dialog, so there's nothing to add there.
+  keyWait(e) {
+    const origin = PasswordManager.origin(e);
+    const found = this.findTab(e.sender);
+    if (!origin || !found || process.platform === 'win32') return 'none';
+    this.keyDone(e.sender.id, 'closed'); // one note per tab
+    const { w, tab } = found;
+    const id = this.nextPromptId();
+    return new Promise((resolve) => {
+      this.keyWaits.set(e.sender.id, { id, w, resolve });
+      const b = tab.view?.getBounds() || { x: 0, y: 90, width: 800 };
+      const width = 380;
+      w.showOverlay(
+        { x: b.x + b.width - width - 4, y: b.y + 4, width: width + 24, height: 200 },
+        { kind: 'passkey', prompt: { id, mode: 'key', rpId: '', host: new URL(origin).host, userName: '', displayName: '', accounts: [] }, accent: '' },
+      );
+    });
+  }
+
+  keyDone(wcId, answer = 'done') {
+    const k = this.keyWaits.get(wcId);
+    if (!k) return;
+    this.keyWaits.delete(wcId);
+    k.resolve(answer);
+    if (k.w.overlayKind === 'passkey') k.w.hideOverlay();
   }
 
   // The person answered the prompt: confirm it's them, then create or sign.
   async passkeyDecide(w, { id, decision, account } = {}) {
+    for (const [wcId, k] of this.keyWaits) if (k.id === Number(id) && k.w === w) { this.keyDone(wcId, 'cancel'); return; }
     const p = this.pkPending.get(Number(id));
     if (!p || p.w !== w) return;
     this.pkPending.delete(p.id);
     if (w.overlayKind === 'passkey') w.hideOverlay();
     const deny = (message = 'The operation either timed out or was not allowed.') => p.resolve({ error: 'NotAllowedError', message });
+    if (decision === 'key') return p.resolve({ native: true }); // the page uses a security key instead
     if (decision !== 'ok') return deny();
     if (p.kind === 'get' && !p.accounts.some((a) => a.id === account)) return deny();
     const check = await this.verifyPerson(w, p.kind === 'create' ? `save a passkey for ${p.rpId}` : `sign in to ${p.rpId} with a passkey`);

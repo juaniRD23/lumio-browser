@@ -2,6 +2,9 @@
 // and the site-information popup (lock icon).
 import { icons, markSvg, avatarHtml } from './icons.js';
 import { setAccent } from '/assets/theme-colors.js';
+import * as autofillUi from './overlay-autofill.js';
+import * as extUi from './overlay-extensions.js';
+import * as helpUi from './overlay-help.js';
 
 const api = window.lumio;
 const card = document.getElementById('card');
@@ -123,7 +126,9 @@ function renderPwSave({ prompt }) {
   card.dataset.prompt = String(prompt.id);
 }
 
-// "Save a passkey?" / "Sign in with a passkey" when a site asks (Lumio is the authenticator).
+// "Save a passkey?" / "Sign in with a passkey" when a site asks (Lumio is the
+// authenticator), with a way to use a security key instead, and the note
+// shown while a site waits for one.
 function renderPasskey({ prompt }) {
   const p = prompt;
   const who = (a) => esc(a.displayName && a.displayName !== a.userName ? a.displayName : a.userName || 'Account');
@@ -133,19 +138,24 @@ function renderPasskey({ prompt }) {
   if (p.mode === 'create') {
     body = `<div class="pk-title">Save a passkey for ${esc(p.rpId)}?</div>
       <div class="pk-account">${icons.person}<span><b>${who(p)}</b>${sub(p)}</span></div>
-      <p class="pk-note">Lumio keeps it on this computer and asks for ${navigator.platform.startsWith('Mac') ? 'Touch ID' : 'Windows Hello'} when you use it. No password needed next time.</p>`;
+      <p class="pk-note">Lumio saves it with your passwords, syncs it if Lumio Sync is on, and asks for ${navigator.platform.startsWith('Mac') ? 'Touch ID' : 'Windows Hello'} when you use it. No password needed next time.</p>`;
     ok = 'Save passkey';
   } else if (p.mode === 'get') {
     body = `<div class="pk-title">Sign in to ${esc(p.rpId)}</div>
       <div class="pk-list">${p.accounts.map((a, i) => `<label class="pk-acc"><input type="radio" name="pk" value="${esc(a.id)}" ${i === 0 ? 'checked' : ''}>${icons.person}<span><b>${who(a)}</b>${sub(a)}</span></label>`).join('')}</div>
       <p class="pk-note">With your passkey saved in Lumio.</p>`;
     ok = 'Continue';
+  } else if (p.mode === 'key') {
+    body = `<div class="pk-title">Use your security key</div>
+      <p class="pk-note">Insert your security key and touch it when it blinks. If you don’t have one for ${esc(p.host)}, cancel and sign in another way.</p>`;
   } else {
     body = `<div class="pk-title">No passkey for ${esc(p.rpId)}</div>
-      <p class="pk-note">You don’t have a passkey for this site saved in Lumio. Sign in another way, then the site can offer to create one.</p>`;
+      <p class="pk-note">You don’t have a passkey for this site saved in Lumio. Use a security key, or sign in another way and the site can offer to create a passkey.</p>`;
+    ok = 'Use a security key';
   }
-  card.innerHTML = `<div class="pk-head">${icons.key}<span>Passkey · ${esc(p.host)}</span></div>${body}
-    <div class="pws-actions"><span style="flex:1"></span><button class="acc-btn ghost" data-pk="cancel">${ok ? 'Cancel' : 'OK'}</button>${ok ? `<button class="acc-btn primary" data-pk="ok">${ok}</button>` : ''}</div>`;
+  const other = p.mode === 'create' || p.mode === 'get' ? '<button class="acc-btn ghost" data-pk="key">Use a security key</button>' : '';
+  card.innerHTML = `<div class="pk-head">${icons.key}<span>${p.mode === 'key' ? 'Security key' : 'Passkey'} · ${esc(p.host)}</span></div>${body}
+    <div class="pws-actions">${other}<span style="flex:1"></span><button class="acc-btn ghost" data-pk="cancel">Cancel</button>${ok ? `<button class="acc-btn primary" data-pk="${p.mode === 'none' ? 'key' : 'ok'}">${ok}</button>` : ''}</div>`;
   card.dataset.prompt = String(p.id);
 }
 
@@ -226,7 +236,13 @@ api.on('overlay-data', (payload) => {
   else if (kind === 'passkey') { renderPasskey(payload); reportSize(); }
   else if (kind === 'update') { renderUpdateCard(payload); reportSize(); }
   else if (kind === 'screenshare') renderScreenShare(payload);
+  else if (autofillUi.KINDS.has(kind)) autofillUi.render(kind, payload, card, api);
+  else if (extUi.KINDS.has(kind)) extUi.render(kind, payload, card, api);
+  else if (helpUi.KINDS.has(kind)) helpUi.render(kind, payload, card, api);
 });
+card.addEventListener('click', (e) => { autofillUi.click(kind, e, card); extUi.click(kind, e, card); });
+document.addEventListener('keydown', (e) => { autofillUi.keydown(kind, e, card); extUi.keydown(kind, e, card); helpUi.keydown(kind, e, card); });
+window.addEventListener('blur', () => extUi.blur(kind));
 
 card.addEventListener('change', (e) => {
   const sel = e.target.closest('select[data-perm]');
@@ -234,6 +250,8 @@ card.addEventListener('change', (e) => {
 });
 
 card.addEventListener('mousedown', async (e) => {
+  if (autofillUi.KINDS.has(kind)) { autofillUi.mousedown(kind, e, card); return; }
+  if (extUi.KINDS.has(kind) || helpUi.KINDS.has(kind)) return; // buttons and fields work normally
   if (kind === 'screenshare') {
     const tile = e.target.closest('[data-src]');
     if (tile) {

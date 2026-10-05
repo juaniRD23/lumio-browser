@@ -9,6 +9,8 @@
 //  - Passkeys: navigator.credentials.create()/get() for public keys go to
 //    Lumio (main/password-manager.js), which asks the person, confirms it's
 //    them and answers as the authenticator. The page only gets the result.
+//    For a security key, Lumio hands the request back to the browser's own
+//    WebAuthn and says to touch the key.
 const { contextBridge, ipcRenderer } = require('electron');
 
 if (window.location.protocol === 'lumio:') {
@@ -27,6 +29,8 @@ if (/^https?:$/.test(window.location.protocol) && window === window.top) {
       args: [{
         request: (kind, payload) => ipcRenderer.invoke('pk:request', { ...payload, kind }),
         cancel: () => ipcRenderer.send('pk:cancel'),
+        keyWait: () => ipcRenderer.invoke('pk:key-wait'),
+        keyDone: () => ipcRenderer.send('pk:key-done'),
       }],
     });
   } catch { /* the page keeps its own navigator.credentials */ }
@@ -93,10 +97,26 @@ function installPasskeys(bridge) {
     const aborted = new Promise((_, reject) => { onAbort = () => { bridge.cancel(); reject(abortError()); }; signal?.addEventListener('abort', onAbort, { once: true }); });
     try {
       const res = await Promise.race([bridge.request(kind, { publicKey: plain(options.publicKey), mediation: options.mediation || null }), aborted]);
+      if (res && res.native) {
+        signal?.removeEventListener('abort', onAbort); // the browser's own request follows the page's signal from here
+        return await securityKey(kind, options);
+      }
       if (!res || res.error) throw new DOMException(res?.message || 'The operation either timed out or was not allowed.', res?.error || 'NotAllowedError');
       return build(kind, res.credential);
     } finally {
       signal?.removeEventListener('abort', onAbort);
+    }
+  }
+  // A security key, through the browser's own WebAuthn. Lumio shows a note
+  // meanwhile; cancelling it stops the request.
+  async function securityKey(kind, options) {
+    const stop = new AbortController();
+    const signal = options.signal && AbortSignal.any ? AbortSignal.any([options.signal, stop.signal]) : stop.signal;
+    bridge.keyWait().then((r) => { if (r === 'cancel') stop.abort(new DOMException('The operation either timed out or was not allowed.', 'NotAllowedError')); }, () => {});
+    try {
+      return await (kind === 'create' ? nativeCreate : nativeGet)({ ...options, signal });
+    } finally {
+      bridge.keyDone();
     }
   }
   const native = (name, fn) => {

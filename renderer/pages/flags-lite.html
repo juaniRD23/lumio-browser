@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Experiments</title>
+  <link rel="stylesheet" href="pages.css" />
+  <link rel="stylesheet" href="lists.css" />
+  <link rel="stylesheet" href="internals.css" />
+</head>
+<body>
+  <div class="wrap">
+    <h1>Experiments</h1>
+    <p class="sub">Features that are still being tried out. They may change, stop working, or be removed. Changes apply after Lumio restarts.</p>
+    <div class="restart" id="restart" role="status" hidden>
+      <span>Restart Lumio to use your changes.</span>
+      <span class="grow"></span>
+      <button class="btn accent small" id="relaunch" type="button">Restart</button>
+    </div>
+    <div class="card" id="flags"></div>
+    <div class="acts"><button class="btn" id="reset" type="button">Reset all</button></div>
+  </div>
+  <script type="module" src="flags-lite.js"></script>
+</body>
+</html>

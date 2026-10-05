@@ -214,14 +214,8 @@ body.windows #tabstrip { padding-right: 146px; }
 .account-btn.connecting .avatar { animation: ring-breathe 1.4s ease-in-out infinite; }
 @keyframes ring-breathe { 50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent); } }
 
-/* extension buttons (<browser-action-list> from electron-chrome-extensions) */
+/* extension buttons: the pinned ones and the puzzle menu (extensions-bar.css) */
 #ext-area { display: flex; align-items: center; gap: 2px; flex: none; }
-#ext-actions { display: flex; align-items: center; gap: 2px; }
-#ext-actions::part(action) {
-  width: 30px; height: 30px; border-radius: 8px; background-size: 18px;
-  --browser-action-hover-bg: var(--hover);
-}
-#ext-actions::part(badge) { font-size: 9px; border-radius: 4px; box-shadow: none; }
 
 #downloads { position: relative; }
 #downloads .ring {

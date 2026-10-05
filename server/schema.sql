@@ -215,3 +215,19 @@ CREATE TABLE IF NOT EXISTS plan_codes (
   redeemed_at INTEGER,
   plan_until INTEGER
 );
+
+-- Reports from Lumio Browser's Help › Report an issue… (src/feedback.ts). Only
+-- what the person chose to include; deleted after 180 days.
+CREATE TABLE IF NOT EXISTS feedback (
+  id TEXT PRIMARY KEY,
+  user_id TEXT,                -- users.id when signed in
+  sender TEXT NOT NULL,        -- 'u:<user id>' or 'ip:<hash>', for the hourly limit
+  email TEXT,                  -- to reply to, if they gave one
+  description TEXT NOT NULL,
+  url TEXT,                    -- the page, if they ticked it
+  screenshot TEXT,             -- a data: URL, if they ticked it
+  system TEXT,                 -- JSON: versions and OS, if they left it ticked
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS feedback_sender ON feedback (sender, created_at);
+CREATE INDEX IF NOT EXISTS feedback_time ON feedback (created_at);

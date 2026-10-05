@@ -3,6 +3,7 @@ import { icons, markSvg, avatarHtml } from './icons.js';
 import { THEME_COLORS, accentFor, setAccent } from '/assets/theme-colors.js';
 import { initPanel } from './ai-panel.js';
 import { initSidebar } from './sidebar.js';
+import { initExtensionsBar } from './extensions-bar.js';
 import './keys.js';
 
 const IS_MAC = /Mac/.test(navigator.platform);
@@ -605,9 +606,6 @@ window.addEventListener('mousedown', (e) => { if (overlayKind === 'update' && !e
 api.on('update', renderUpdate);
 api.on('update-announce', (u) => { if (!overlayKind) { renderUpdate(u); showUpdateCard(u); } });
 
-// ------------------------------------------------------------------ extensions
-$('#ext-btn').addEventListener('click', () => api.send('extensions:manage'));
-
 // ------------------------------------------------------------------ permission bar
 const permQueue = [];
 function renderPerm() {
@@ -716,6 +714,8 @@ $('#menu-btn').addEventListener('click', () => {
 $('#incognito-badge').hidden = !init.incognito;
 $('#beta-badge').hidden = !init.beta; // Lumio Beta (main/flavor.js)
 $('#ext-area').hidden = !init.extensions;
+// The pinned extension buttons and the puzzle-piece menu (renderer/ui/extensions-bar.js).
+if (init.extensions) initExtensionsBar({ api, button: $('#ext-btn'), list: $('#ext-actions') });
 renderTabs();
 renderToolbar();
 renderDownloads(false);

@@ -96,7 +96,9 @@ class BrowserWin {
         onViewDestroyed: (wc) => profile.permissions.dropFor(wc.id),
         openInNewWindow: (url, inc) => app.createWindow({ incognito: inc, urls: [url] }),
         savePage: (tab) => app.savePage(this, tab),
-        contextMenuExtras: (tab, params) => app.contextMenuExtras(this, tab, params),
+        contextMenuExtras: (tab, params, existing) => app.contextMenuExtras(this, tab, params, existing),
+        newTabUrl: () => app.newTabUrl?.(this),
+        isNewTabUrl: (url) => !!app.isNewTabUrl?.(url),
       },
     });
     this.indicator = new PageIndicator(this);

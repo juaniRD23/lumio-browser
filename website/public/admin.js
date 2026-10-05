@@ -113,6 +113,30 @@ $('#code-new').addEventListener('click', async (e) => {
   setTimeout(() => { b.textContent = 'Copy'; }, 1500);
 });
 
+// ---- issue reports (Help › Report an issue in Lumio Browser)
+const when = (t) => new Date(t).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+async function loadReports() {
+  const res = await fetch('/api/admin/feedback', { cache: 'no-store' }).catch(() => null);
+  if (!res?.ok) return;
+  const { reports, total } = await res.json();
+  $('#reports').hidden = false;
+  $('#report-rows').innerHTML = reports.length ? `<p class="fine">${total.toLocaleString()} report${total === 1 ? '' : 's'}${total > reports.length ? `, newest ${reports.length} shown` : ''}</p>` + reports.map((r) => `<article class="report" data-id="${esc(r.id)}">
+      <div class="report-top"><span>${esc(when(r.at))}</span><span class="grow">${esc(r.account || 'Not signed in')}${r.email && r.email !== r.account ? ` · reply to ${esc(r.email)}` : ''}</span>
+        ${r.screenshot ? `<a class="btn small" href="/api/admin/feedback/${esc(r.id)}/screenshot" target="_blank" rel="noopener">Screenshot</a>` : ''}
+        <button class="btn small" type="button" data-delete="${esc(r.id)}">Delete</button></div>
+      <blockquote class="why-quote report-text">${esc(r.description)}</blockquote>
+      ${r.url ? `<p class="fine report-meta">Page: ${esc(r.url)}</p>` : ''}
+      ${r.system ? `<p class="fine report-meta">${esc(Object.values(r.system).join(' · '))}</p>` : ''}
+    </article>`).join('') : '<p class="fine">No reports yet.</p>';
+}
+$('#report-rows').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-delete]');
+  if (!b || !confirm('Delete this report?')) return;
+  b.disabled = true;
+  await fetch(`/api/admin/feedback/${encodeURIComponent(b.dataset.delete)}`, { method: 'DELETE' }).catch(() => null);
+  loadReports();
+});
+
 let loading = false;
 let codesLoaded = false;
 async function load() {
@@ -124,7 +148,7 @@ async function load() {
     if (res.status === 401) { status('Sign in with the Lumio owner account to see this page. <a href="/signin?next=/admin">Sign in</a>'); return; }
     if (!res.ok) { status('This page is only for the owner of Lumio.'); return; }
     render(await res.json());
-    if (!codesLoaded) { codesLoaded = true; loadCodes(); }
+    if (!codesLoaded) { codesLoaded = true; loadCodes(); loadReports(); }
   } catch {
     status('Couldn’t load the numbers. Check your connection and try again.', 'err');
   } finally {

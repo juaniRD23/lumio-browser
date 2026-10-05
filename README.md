@@ -18,6 +18,7 @@ A Chromium web browser with **Lumio AI** built in. Lumio sits in a side panel ne
   - site permissions, and importing from Chrome, Edge, Brave, Arc or Vivaldi;
   - **Chrome extensions** from the Chrome Web Store;
   - a **password manager** that saves, fills, generates, and imports or exports CSV, encrypted with your system keychain;
+  - **autofill** for addresses, payment cards (filled only after Touch ID or Windows Hello; security codes are never saved) and earlier form entries, plus passkeys and security keys;
   - **updates in one click**: when a new release is out, a blue Update button appears next to your profile picture.
 
 ## Install
@@ -47,9 +48,11 @@ npm run release          # dist/release: Mac DMGs (Apple silicon, Intel) and a W
 - **Agent:** `main/ai` holds the agent loop, the approval policy, browser tools, and computer tools. Computer tools go through a small native helper: Swift on macOS (`native/LumioHelper`), PowerShell on Windows (`native/windows`).
 - **Lumio account:** `main/account.js` uses the lumio-usa.online desktop sign-in hand-off. `main/ai/lumio.js` runs the AI through the account's plan (`/api/browser/agent`); the server owns the model, the tool definitions and the system prompt.
 - **Passwords:** `main/passwords.js` and `main/password-manager.js`, plus the isolated preload in `preload/internal.js`. Each password is encrypted with Electron `safeStorage`.
+- **Autofill:** `main/autofill.js` and `main/autofill-store.js` (addresses, cards and form entries, encrypted with `safeStorage`), the session preload `preload/autofill.js` that finds form fields, and `renderer/ui/overlay-autofill.js` for the dropdown and the save bubble. Passkeys sync end-to-end encrypted through Lumio Sync; security keys use Chromium's own WebAuthn.
 - **While it works:** `main/ai/indicators.js` (page glow and Stop bar) and `main/ai/screen-aura.js` (screen glow and Stop pill, left out of screen captures). `main/ai/tools/plan.js` is the Task progress checklist.
 - **Updates:** `main/updater.js` checks GitHub Releases, verifies the installer's SHA-256 and swaps the app in after it quits.
-- **Extensions:** [electron-chrome-extensions](https://github.com/samuelmaddock/electron-browser-shell) and electron-chrome-web-store.
+- **Extensions:** [electron-chrome-extensions](https://github.com/samuelmaddock/electron-browser-shell) and electron-chrome-web-store. `main/extensions-ui.js` runs the puzzle-piece menu, pinned buttons, shortcuts and new tab page override; `main/extension-access.js` limits site access; `main/extension-shims.js` fills API gaps (see `docs/extensions-support.md`).
+- **Help and the Mac:** `main/help.js` (Report an issue, which posts to the server's `/api/feedback`; lumio://version and lumio://flags-lite), `main/menu-extras.js` (Chrome's Mac menus), `main/devtools.js` (docking) and `main/mac-integration.js` (Handoff, Look Up).
 
 ## License
 

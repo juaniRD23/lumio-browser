@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <title>Lumio Browser</title>
   <link rel="stylesheet" href="shell.css" />
+  <link rel="stylesheet" href="extensions-bar.css" />
 </head>
 <body class="no-anim">
   <aside id="sidebar" aria-label="Sidebar"></aside>
@@ -36,7 +37,7 @@
       <button class="icon-btn small" id="find-close" title="Close (Esc)"></button>
     </div>
     <div id="ext-area" hidden>
-      <browser-action-list id="ext-actions" partition="persist:lumio" alignment="bottom left"></browser-action-list>
+      <div id="ext-actions" role="group" aria-label="Pinned extensions"></div>
       <button id="ext-btn" class="icon-btn" title="Extensions" aria-label="Extensions"></button>
     </div>
     <button id="downloads" class="icon-btn" title="Downloads" aria-label="Downloads" hidden><span class="ring"></span></button>

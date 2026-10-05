@@ -1,7 +1,8 @@
 // lumio:// serves the browser's own UI and internal pages from disk.
 //   lumio://shell/, overlay/, aura/           -> renderer/ui   (default session only)
 //   lumio://newtab/, settings, history, downloads, bookmarks, extensions,
-//   error, welcome                                     -> renderer/pages (tab sessions)
+//   error, welcome, version, flags-lite                -> renderer/pages (tab sessions)
+//   a page's sub-pages (lumio://extensions/shortcuts)  -> that page's HTML
 //   */assets/*  -> renderer/assets,  */vendor/* -> whitelisted node_modules files
 //   shell/ai-files/* -> pictures Lumio made (userData/ai-files)
 //   shell/web/*      -> Lumio Chat's file code (docmaker, attach) and its libraries, copied at build
@@ -18,7 +19,7 @@ const VENDOR = {
 };
 
 const UI_HOSTS = new Set(['shell', 'overlay', 'aura']);
-const PAGE_HOSTS = new Set(['newtab', 'settings', 'history', 'downloads', 'bookmarks', 'extensions', 'passwords', 'error', 'welcome']);
+const PAGE_HOSTS = new Set(['newtab', 'settings', 'history', 'downloads', 'bookmarks', 'extensions', 'passwords', 'error', 'welcome', 'version', 'flags-lite']);
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -66,6 +67,7 @@ function resolveFile(url, hosts) {
   }
   const base = UI_HOSTS.has(host) ? UI_DIR : PAGES_DIR;
   if (pathname === '/' || pathname === '') return path.join(base, host + '.html');
+  if (!UI_HOSTS.has(host) && !path.extname(pathname)) return path.join(base, host + '.html'); // the page routes it
   const f = path.join(base, pathname.slice(1));
   return inside(base, f) ? f : null;
 }

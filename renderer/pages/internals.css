@@ -1,0 +1,10 @@
+/* lumio://version and lumio://flags-lite. */
+.kv { display: flex; gap: 16px; padding: 12px 20px; align-items: baseline; }
+.kv + .kv { border-top: 1px solid var(--line); }
+.kv span { width: 140px; flex: none; color: var(--dim); font-size: 13px; }
+.kv code { flex: 1; min-width: 0; font: 12.5px/1.5 var(--mono); color: var(--text); overflow-wrap: anywhere; user-select: text; }
+.acts { display: flex; gap: 8px; margin-top: 16px; }
+.restart { display: flex; align-items: center; gap: 12px; padding: 12px 16px; margin-bottom: 14px; border-radius: 14px; background: color-mix(in srgb, var(--accent) 10%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
+.restart .grow { flex: 1; }
+.switch input:focus-visible + i { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .switch i, .switch i::after { transition: none; } }

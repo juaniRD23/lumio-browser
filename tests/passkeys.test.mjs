@@ -9,6 +9,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { PasskeyStore, validRpId, cborDecode, AAGUID } = require('../main/passkeys.js');
+const adapters = require('../main/sync/adapters.js');
 
 // safeStorage stand-in (reversible, but never plain text on disk).
 const safe = {
@@ -39,7 +40,7 @@ test('a new passkey is a valid "none" attestation for the site, with an ES256 pu
   assert.equal(att.get('attStmt').size, 0);
   const auth = att.get('authData');
   assert.deepEqual(auth.subarray(0, 32), sha256('example.com'), 'RP ID hash');
-  assert.equal(auth[32], 0x45, 'user present + verified + attested data (not backed up)');
+  assert.equal(auth[32], 0x4d, 'user present + verified + backup eligible (Lumio Sync) + attested data, not backed up yet');
   assert.deepEqual(auth.subarray(37, 53), AAGUID);
   const idLen = auth.readUInt16BE(53);
   assert.equal(b64(auth.subarray(55, 55 + idLen)), c.id);
@@ -68,7 +69,7 @@ test('signing in: the assertion verifies with the registered key, and returns th
   assert.equal(JSON.parse(clientData).type, 'webauthn.get');
   assert.equal(JSON.parse(clientData).challenge, challenge);
   assert.deepEqual(authData.subarray(0, 32), sha256('example.com'));
-  assert.equal(authData[32], 0x05);
+  assert.equal(authData[32], 0x0d);
   const key = crypto.createPublicKey({ key: Buffer.from(reg.publicKey, 'base64url'), format: 'der', type: 'spki' });
   const ok = crypto.verify('sha256', Buffer.concat([authData, sha256(clientData)]), { key, dsaEncoding: 'der' }, Buffer.from(a.signature, 'base64url'));
   assert.equal(ok, true, 'signature verifies like a website would check it');
@@ -96,4 +97,28 @@ test('rules: RP IDs, excluded credentials, algorithms, verification', () => {
   assert.throws(() => store.create(createOptions({ rp: { id: 'other.com' } }), ORIGIN, { verified: true }), { name: 'SecurityError' });
   assert.equal(store.remove(first.id), true);
   assert.equal(store.list().length, 0);
+});
+
+test('sync: a passkey made before syncing stays device-bound; others go out with their key and come back usable', () => {
+  const a = new PasskeyStore(tmp(), safe);
+  const synced = a.create(createOptions(), ORIGIN, { verified: true });
+  const old = a.create(createOptions({ user: { id: b64(Buffer.from('user-9')), name: 'old@example.com' } }), ORIGIN, { verified: true });
+  delete a.find(old.id).be; // as saved before Lumio synced passkeys
+  const challenge = b64(crypto.randomBytes(32));
+  assert.equal(Buffer.from(a.assert({ challenge, rpId: 'example.com' }, ORIGIN, old.id, { verified: true }).authenticatorData, 'base64url')[32], 0x05, 'it keeps saying device-bound');
+  const out = adapters.passkeys(a).entries();
+  assert.deepEqual(out.map((e) => e.key), [synced.id]);
+  const record = out[0].get();
+  assert.equal(record.rpId, 'example.com');
+  // Applied on another computer: stored encrypted, and it signs.
+  const dir = tmp();
+  const b = new PasskeyStore(dir, safe);
+  assert.deepEqual(adapters.passkeys(b).apply([{ key: synced.id, record }, { key: 'broken', record: { ...record, key: 'nope' } }]), ['broken']);
+  assert.ok(!fs.readFileSync(path.join(dir, 'passkeys.json'), 'utf8').includes(record.key), 'the key is encrypted on disk');
+  assert.equal(adapters.passkeys(b).hashOf(record), out[0].hash, 'same record, same hash: no echo');
+  const sig = b.assert({ challenge, rpId: 'example.com' }, ORIGIN, synced.id, { verified: true });
+  const key = crypto.createPublicKey({ key: Buffer.from(synced.publicKey, 'base64url'), format: 'der', type: 'spki' });
+  assert.equal(crypto.verify('sha256', Buffer.concat([Buffer.from(sig.authenticatorData, 'base64url'), sha256(Buffer.from(sig.clientDataJSON, 'base64url'))]), { key, dsaEncoding: 'der' }, Buffer.from(sig.signature, 'base64url')), true);
+  adapters.passkeys(b).apply([{ key: synced.id, record: null }]);
+  assert.equal(b.list().length, 0, 'deleted elsewhere, deleted here');
 });

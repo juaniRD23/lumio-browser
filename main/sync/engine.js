@@ -1,7 +1,8 @@
-// Lumio Sync on this computer: keeps bookmarks, passwords, history, chats,
-// workflows, settings and open tabs the same on every device signed in to the
-// same Lumio account. Records are encrypted here (main/sync/crypto.js) before
-// they leave; the server stores ciphertext.
+// Lumio Sync on this computer: keeps bookmarks, passwords, passkeys,
+// addresses, cards (when turned on), history, chats, workflows, settings and
+// open tabs the same on every device signed in to the same Lumio account.
+// Records are encrypted here (main/sync/crypto.js) before they leave; the
+// server stores ciphertext.
 //
 // How it works: each collection (main/sync/adapters.js) lists its records
 // with a hash. The engine remembers the hash of every record as last synced;
@@ -15,7 +16,9 @@ const crypto = require('crypto');
 const { JsonFile } = require('../store');
 const C = require('./crypto');
 
-const TYPES = ['bookmarks', 'passwords', 'history', 'chats', 'workflows', 'projects', 'settings', 'tabs'];
+const TYPES = ['bookmarks', 'passwords', 'passkeys', 'addresses', 'cards', 'history', 'chats', 'workflows', 'projects', 'settings', 'tabs'];
+// Synced only after the person turns them on: card numbers stay on each computer by default.
+const OFF_BY_DEFAULT = new Set(['cards']);
 const BATCH = 100;
 const EVERY = 60 * 1000;
 const SOON = 4000;
@@ -61,7 +64,7 @@ class SyncEngine {
   // ---------------------------------------------------------------- settings
   get prefs() {
     const s = this.store.settings.sync || {};
-    return { on: s.on !== false, types: Object.fromEntries(TYPES.map((t) => [t, s.types?.[t] !== false])) };
+    return { on: s.on !== false, types: Object.fromEntries(TYPES.map((t) => [t, (s.types?.[t] ?? !OFF_BY_DEFAULT.has(t)) !== false])) };
   }
   setPrefs({ on, types } = {}) {
     const cur = this.prefs;

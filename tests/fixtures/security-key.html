@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Security Key Test Site</title>
+<h1>Security key test site</h1>
+<script>
+// A relying party that only takes security keys (cross-platform authenticators).
+const rand = (n) => crypto.getRandomValues(new Uint8Array(n));
+const fromB64 = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)), (c) => c.charCodeAt(0));
+window.state = {};
+window.registerKey = async () => {
+  try {
+    const cred = await navigator.credentials.create({ publicKey: {
+      challenge: rand(32), rp: { name: 'Security Key Test Site' },
+      user: { id: new TextEncoder().encode('key-user'), name: 'key@example.com', displayName: 'Key Person' },
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+      authenticatorSelection: { authenticatorAttachment: 'cross-platform', userVerification: 'discouraged' },
+      timeout: 20000,
+    } });
+    window.state.reg = { id: cred.id, attachment: cred.authenticatorAttachment, transports: cred.response.getTransports() };
+  } catch (err) { window.state.regError = `${err.name}: ${err.message}`; }
+};
+window.signInKey = async () => {
+  try {
+    const cred = await navigator.credentials.get({ publicKey: {
+      challenge: rand(32), allowCredentials: [{ type: 'public-key', id: fromB64(window.state.reg.id), transports: ['usb'] }],
+      userVerification: 'discouraged', timeout: 20000,
+    } });
+    window.state.auth = { id: cred.id, attachment: cred.authenticatorAttachment };
+  } catch (err) { window.state.authError = `${err.name}: ${err.message}`; }
+};
+</script>

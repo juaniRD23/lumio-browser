@@ -12,6 +12,8 @@ if (process.env.LUMIO_USER_DATA) app.setPath('userData', process.env.LUMIO_USER_
 else if (FLAVOR.beta) app.setPath('userData', path.join(app.getPath('appData'), FLAVOR.name));
 if (process.env.LUMIO_DOWNLOADS) app.setPath('downloads', process.env.LUMIO_DOWNLOADS); // tests
 app.setName(FLAVOR.name);
+// Experiments (lumio://flags-lite) are Chromium switches, so they're set before the app starts.
+require('./flags').applyAtStartup(app, app.getPath('userData'));
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'lumio', privileges: { standard: true, secure: true, supportFetchAPI: true, codeCache: true } },
@@ -28,8 +30,15 @@ const { suggest, topSites } = require('./omnibox');
 const { ChatStore } = require('./ai/chats');
 const { MacHelper } = require('./mac/helper');
 const { ExtensionManager } = require('./extensions');
+const { ExtensionsUI } = require('./extensions-ui');
+const { Help } = require('./help');
+const devtools = require('./devtools');
+const menuExtras = require('./menu-extras');
+const { menuCommands } = require('./menu-commands');
+const { Handoff, contextMenuItems: macContextItems } = require('./mac-integration');
 const { LumioAccount } = require('./account');
 const { PasswordManager } = require('./password-manager');
+const { AutofillManager, attachAutofill } = require('./autofill');
 const screenAura = require('./ai/screen-aura');
 const { Updater, LATEST, BETAS, compareVersions } = require('./updater');
 const { generatePassword } = require('./passwords');
@@ -74,9 +83,13 @@ let normal = null; // the normal profile: { session, downloads, permissions, cha
 let incog = null; // the current incognito profile, while any incognito window is open
 let incogSeq = 0;
 let extensions = null;
+let extUi = null; // the extensions' toolbar, puzzle menu, shortcuts and new tab page (main/extensions-ui.js)
+let help = null; // Help menu, Report an issue, lumio://version and flags-lite (main/help.js)
+const handoff = new Handoff(app); // the page you're on, offered to your other Apple devices
 let updater = null;
 let account = null;
 let passwords = null;
+let autofill = null; // addresses, cards and form entries (main/autofill.js)
 let schedules = null; // scheduled tasks (main/schedules.js)
 let workflows = null; // saved workflows (main/workflows.js)
 let siteTips = null; // how to get things done on sites (main/site-tips.js)
@@ -106,6 +119,8 @@ const tabOfWc = (wc) => {
 function setupTabSession(ses, { incognito = false } = {}) {
   ses.setUserAgent(app.userAgentFallback);
   registerPagesProtocol(ses, { dark: incognito });
+  attachAutofill(ses);
+  if (store.settings.spellcheck === false) ses.setSpellCheckerEnabled(false); // Edit › Spelling and Grammar
 }
 
 function incognitoProfile() {
@@ -145,7 +160,7 @@ const services = {
   notify: (w, title, body, chatId) => { notifyChat(w, title, body, chatId); companion?.notice({ title, body, chatId, hint: /needs your OK/.test(title) ? 'approval' : 'scheduled' }); },
   onEmit: (w, channel, payload) => companion?.onEmit(w, channel, payload),
   createWindow: (opts) => createWindow(opts),
-  onFocus: (w) => { lastFocused = w; },
+  onFocus: (w) => { lastFocused = w; handoff.update(w); },
   onClose: (w) => {
     if (quitting || w.incognito || !w.tabs.tabs.length) return;
     recentlyClosed.push({ kind: 'window', ...w.session(), title: w.tabs.active?.title || 'Window', time: Date.now() });
@@ -157,6 +172,7 @@ const services = {
     if (lastFocused === w) lastFocused = null;
     if (w.incognito && !alive().some((x) => x.incognito)) endIncognito();
     saveSession();
+    handoff.update(cur());
   },
   onTabClosed: (w, entry) => {
     if (quitting || w.closing) return;
@@ -169,13 +185,19 @@ const services = {
     if (recentlyClosed.length > 25) recentlyClosed.shift();
     menuChanged();
   },
-  onSessionChanged: () => saveSession(),
+  onSessionChanged: () => { saveSession(); handoff.update(cur()); },
   onViewCreated: (w, tab) => { if (!w.incognito && tab.view) extensions?.addTab(tab.view.webContents, w.win); },
   onPasskeyPromptClosed: (w) => passwords?.passkeyClosed(w),
   onScreenSharePickerClosed: (w) => shareCancel(w),
   onTabActivated: (w, tab) => { if (!w.incognito && tab.view) extensions?.selectTab(tab.view.webContents); },
   savePage: (w, tab) => savePage(w, tab),
-  contextMenuExtras: (w, tab, params) => (w.incognito || !tab.view ? [] : extensions?.contextMenuItems(tab.view.webContents, params) || []),
+  contextMenuExtras: (w, tab, params, existing) => [
+    ...(w.incognito || !tab.view ? [] : extensions?.contextMenuItems(tab.view.webContents, params) || []),
+    ...(tab.view ? macContextItems(tab.view.webContents, params, existing) : []), // Look Up and Speech on the Mac
+  ],
+  // An extension's new tab page (chrome_url_overrides), if one replaces Lumio's.
+  newTabUrl: (w) => extUi?.newTabUrl(w) || null,
+  isNewTabUrl: (url) => !!extUi?.isNewTabUrl(url),
   broadcastAIState: () => alive().forEach((w) => w.ai.emitState()),
 };
 
@@ -244,8 +266,16 @@ function menuChanged() {
   clearTimeout(menuTimer);
   menuTimer = setTimeout(() => Menu.setApplicationMenu(buildMenu(cmd, menuState())), 50);
 }
+// History changes with every page, so its menu items follow a little later.
+let historyMenuTimer = null;
+function historyMenuSoon() {
+  clearTimeout(historyMenuTimer);
+  historyMenuTimer = setTimeout(menuChanged, 2000);
+}
 function menuState() {
   return {
+    ...menuExtras.state({ store, account, devtoolsDock: devtools.mode(store) }),
+    extensionKeys: extUi?.menuKeys() || [],
     bookmarksBar: !!store.settings.showBookmarksBar,
     appearance: theme.appearance(),
     recentlyClosed: recentlyClosed.slice(-10).reverse().map((e, i) => ({
@@ -321,7 +351,7 @@ const cmd = {
   togglePanel: () => cur()?.emit('panel-toggle'),
   toggleSidebar: () => cur()?.emit('sidebar-toggle'),
   focusAI: () => { const w = cur(); if (!w) return; w.win.webContents.focus(); w.emit('ai-focus'); },
-  devtools: () => cur()?.tabs.wc()?.openDevTools({ mode: 'detach' }),
+  devtools: () => devtools.open(cur()?.tabs.wc(), store), // docked where they were last (main/devtools.js)
   shellDevtools: () => cur()?.win.webContents.openDevTools({ mode: 'detach' }),
   back: () => cur()?.tabs.back(),
   forward: () => cur()?.tabs.forward(),
@@ -362,6 +392,7 @@ function bookmarksPayload() {
 function bookmarksChanged() {
   const payload = bookmarksPayload();
   for (const w of alive()) { w.tabs.changed(); w.emit('bookmarks', payload); }
+  menuChanged(); // the Bookmarks menu lists them
 }
 
 function setBookmarksBar(show) {
@@ -697,7 +728,7 @@ function internalHandle(channel, hosts, fn) {
   });
 }
 
-const ALL_PAGES = ['newtab', 'error', 'history', 'settings', 'downloads', 'bookmarks', 'extensions', 'passwords', 'welcome'];
+const ALL_PAGES = ['newtab', 'error', 'history', 'settings', 'downloads', 'bookmarks', 'extensions', 'passwords', 'welcome', 'version', 'flags-lite'];
 
 function registerIpc() {
   handle('shell:init', (w) => ({
@@ -844,7 +875,6 @@ function registerIpc() {
   on('passwords:passkey', (w, d) => passwords.passkeyDecide(w, d || {}));
   handle('passwords:reveal-pending', (w, id) => passwords.revealPending(w, Number(id)));
   on('passwords:manage', (w) => { w.hideOverlay(); openInternal('lumio://passwords/'); });
-  on('extensions:manage', () => openInternal('lumio://extensions/'));
 
   // ---- updates ----
   handle('update:state', () => updater?.state || null);
@@ -1230,6 +1260,9 @@ app.on('open-url', (e, url) => {
   if (store && windows.size) openExternalUrls([url]); else pendingUrls.push(url);
 });
 
+// A page handed off from an iPhone, iPad or another Mac.
+handoff.listen((url) => { if (store && windows.size) openExternalUrls([url]); else pendingUrls.push(url); });
+
 app.on('second-instance', (_e, argv) => {
   const urls = launchTargets(argv.slice(1));
   if (urls.length) openExternalUrls(urls); else ensureWin().focus();
@@ -1266,11 +1299,34 @@ app.whenReady().then(async () => {
 
   account = new LumioAccount({
     store,
-    onChange: (state) => { alive().forEach((w) => { w.emit('account', state); w.ai.refreshCapabilities(); }); services.broadcastAIState(); sync?.soon(500); },
+    onChange: (state) => { alive().forEach((w) => { w.emit('account', state); w.ai.refreshCapabilities(); }); services.broadcastAIState(); sync?.soon(500); menuChanged(); },
   });
   account.refresh();
   watchLumioCookie();
   setInterval(() => { if (account.token()) account.refresh(); }, 10 * 60 * 1000).unref?.();
+  store.historyFile.onSave(historyMenuSoon);
+  // The Mac menu bar's Tab, Profiles and View › Developer menus, History and
+  // Bookmarks items (main/menu-extras.js), and Help.
+  Object.assign(cmd, menuCommands({
+    cur,
+    store,
+    sessions: () => [normal.session, incog?.session].filter(Boolean),
+    openUrl,
+    openInternal,
+    signedIn: () => !!account.state().signedIn,
+    signIn,
+    openAccountPage,
+    menuChanged,
+  }));
+  help = new Help({
+    account,
+    store,
+    current: cur,
+    // The help center and release notes open in a normal window.
+    openUrl: (url) => { const w = normalWin(); if (w) { w.tabs.create(url); w.focus(); } else createWindow({ urls: [url] }); },
+    openInternal,
+  });
+  Object.assign(cmd, help.commands());
   workflows = new Workflows(app.getPath('userData'));
   siteTips = new SiteTips(app.getPath('userData'));
   workflows.onChange(() => alive().forEach((w) => w.emit('workflows-changed', {})));
@@ -1302,6 +1358,15 @@ app.whenReady().then(async () => {
     findTab: tabOfWc,
     toast: (w, text) => w.emit('toast', { text }),
   });
+  autofill = new AutofillManager({
+    dir: app.getPath('userData'),
+    safeStorage,
+    settings: store,
+    helper,
+    findTab: tabOfWc,
+    toast: (w, text) => w.emit('toast', { text }),
+    openPage: (url) => openInternal(url),
+  });
 
   // Lumio Sync: bookmarks, passwords, history, chats, workflows, settings and
   // open tabs on every device signed in to this Lumio account (encrypted here).
@@ -1321,6 +1386,9 @@ app.whenReady().then(async () => {
     syncAdapters.bookmarks(store),
     syncAdapters.history(store),
     syncAdapters.passwords(passwords.store),
+    syncAdapters.passkeys(passwords.passkeys),
+    syncAdapters.addresses(autofill.store),
+    syncAdapters.cards(autofill.store),
     syncAdapters.chats(normal.chats),
     syncAdapters.workflows(workflows),
     syncAdapters.projects(projects),
@@ -1334,7 +1402,9 @@ app.whenReady().then(async () => {
     }),
   ]);
   const syncSoon = () => sync.soon();
-  for (const f of [store.bookmarksFile, store.historyFile, store.settingsFile, store.chatsFile, store.sessionFile, passwords.store.file]) f.onSave(syncSoon);
+  for (const f of [store.bookmarksFile, store.historyFile, store.settingsFile, store.chatsFile, store.sessionFile, passwords.store.file, passwords.passkeys.file, autofill.store.file]) f.onSave(syncSoon);
+  // Passkeys tell sites they're backed up while Lumio Sync carries them.
+  passwords.passkeys.backedUp = () => sync.status === 'ready' && sync.prefs.on && sync.prefs.types.passkeys;
   workflows.onChange(syncSoon);
   projects.onChange(syncSoon);
   // Bookmarks from another device: redraw the bar.
@@ -1348,6 +1418,7 @@ app.whenReady().then(async () => {
   });
   companion.start();
   passwords.register();
+  autofill.register({ on, internalHandle });
   screenAura.register();
 
   // Updates from GitHub Releases (packaged builds; tests point it at a mock).
@@ -1394,9 +1465,13 @@ app.whenReady().then(async () => {
         return createWindow({ urls }).win;
       },
       removeWindow: (win) => alive().find((w) => w.win === win)?.close(),
-      changed: () => alive().filter((w) => !w.incognito).forEach((w) => w.emit('extensions-changed')),
+      changed: () => { alive().filter((w) => !w.incognito).forEach((w) => w.emit('extensions-changed')); extUi?.changed(); },
+      activate: (id) => extUi?.activate(id),
+      commandsChanged: () => menuChanged(),
+      toast: (text) => normalWin()?.emit('toast', { text }),
     },
   });
+  extUi = new ExtensionsUI({ extensions, store, windows: alive, current: cur, openInternal, menuChanged });
   // Load extensions before restoring tabs so their content scripts run there,
   // but never hold up the first window for long.
   await Promise.race([
@@ -1405,6 +1480,8 @@ app.whenReady().then(async () => {
   ]);
 
   registerIpc();
+  extUi.register({ handle, on, internalHandle });
+  help.register({ handle, on, internalHandle });
   Menu.setApplicationMenu(buildMenu(cmd, menuState()));
 
   const saved = store.settings.startup === 'newtab' ? [] : store.sessionWindows();
@@ -1480,8 +1557,12 @@ global.lumio = {
   get windows() { return alive(); },
   get store() { return store; },
   get extensions() { return extensions; },
+  get extUi() { return extUi; },
+  get help() { return help; },
+  handoff,
   get account() { return account; },
   get passwords() { return passwords; },
+  get autofill() { return autofill; },
   get workflows() { return workflows; },
   get siteTips() { return siteTips; },
   get schedules() { return schedules; },

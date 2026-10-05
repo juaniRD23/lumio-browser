@@ -138,5 +138,6 @@ test('Chrome timestamps and chrome:// addresses', () => {
   assert.equal(parseInput('chrome://settings/#import').url, 'lumio://settings/#import');
   assert.equal(parseInput('about:history').url, 'lumio://history/');
   assert.equal(parseInput('chrome-extension://abcdefghijklmnopabcdefghijklmnop/options.html').url, 'chrome-extension://abcdefghijklmnopabcdefghijklmnop/options.html');
-  assert.equal(parseInput('chrome://flags').isSearch, true);
+  assert.equal(parseInput('chrome://flags').url, 'lumio://flags-lite/'); // Lumio's short list of experiments
+  assert.equal(parseInput('chrome://gpu').isSearch, true);
 });
