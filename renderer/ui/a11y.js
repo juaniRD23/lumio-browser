@@ -5,6 +5,7 @@
 //  - F6 / Shift+F6 (the app menu sends focus-pane, so it works from the page
 //    too) go round the toolbar, the bookmarks bar, the page, the AI panel and
 //    the sidebar, skipping parts that are hidden.
+//  - Screen readers hear when a download finishes (politely).
 
 export function initA11y({ api, tabsEl, address }) {
   const tabs = () => [...tabsEl.querySelectorAll('.tab:not(.closing)')];
@@ -49,6 +50,30 @@ export function initA11y({ api, tabsEl, address }) {
       requestAnimationFrame(() => focusTab(next && next.isConnected && !next.classList.contains('closing') ? next : tabs()[Math.min(i, tabs().length - 1)]));
     } else return;
     e.preventDefault();
+  });
+
+  // ---- icon-only buttons get their tooltip as a name (without the shortcut)
+  for (const b of document.querySelectorAll('button[title]:not([aria-label])')) {
+    if (!b.textContent.trim()) b.setAttribute('aria-label', b.title.replace(/\s*\([^)]*\)\s*$/, ''));
+  }
+
+  // ---- downloads, announced once each
+  const live = document.createElement('div');
+  live.className = 'sr-only';
+  live.setAttribute('aria-live', 'polite');
+  live.id = 'a11y-announce';
+  document.body.append(live);
+  const was = new Map(); // id -> state
+  api.on('downloads', ({ items = [] } = {}) => {
+    const said = [];
+    for (const d of items) {
+      const before = was.get(d.id);
+      if (before === 'progressing' && d.state === 'completed') said.push(`${d.name} finished downloading`);
+      was.set(d.id, d.state);
+    }
+    if (said.length) live.textContent = said.join('. ');
+    const busy = items.filter((d) => d.state === 'progressing').length;
+    document.querySelector('#downloads')?.setAttribute('aria-label', busy ? `Downloads, ${busy} in progress` : 'Downloads');
   });
 
   // ---- F6

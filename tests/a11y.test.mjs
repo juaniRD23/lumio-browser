@@ -65,6 +65,9 @@ test('tab strip: one Tab stop, arrows, Home/End, Enter switches, Delete closes; 
   assert.deepEqual((await sent(page, 'tab:close')).at(-1), 2);
   await page.keyboard.press('Tab');
   assert.notEqual(await active(page), 'tab:Page 1', 'Tab leaves the strip');
+  // Icon-only buttons have names.
+  assert.deepEqual(await page.$$eval('#toolbar button, #tabstrip > button, #panel-head button, #findbar button', (els) => els.filter((b) => !b.textContent.trim() && !b.getAttribute('aria-label')).map((b) => b.id)), []);
+  assert.equal(await page.getAttribute('#find-close', 'aria-label'), 'Close');
   assert.deepEqual(errors, []);
   await page.close();
 });
@@ -92,6 +95,18 @@ test('F6 and Shift+F6 go round the toolbar, bookmarks bar, page, AI panel and si
   await emit(page, 'focus-pane', { dir: 1 });
   assert.match(await active(page), /bm-item/);
   assert.deepEqual(errors, []);
+  await page.close();
+});
+
+test('a finished download is announced once, politely', { skip }, async () => {
+  const { page } = await openPage(browser, base, { init: THREE });
+  const d = { id: 'd1', name: 'report.pdf', url: 'https://example.com/report.pdf', received: 1, total: 2 };
+  await emit(page, 'downloads', { items: [{ ...d, state: 'progressing' }], started: true });
+  assert.equal(await page.textContent('#a11y-announce'), '');
+  assert.equal(await page.getAttribute('#downloads', 'aria-label'), 'Downloads, 1 in progress');
+  await emit(page, 'downloads', { items: [{ ...d, state: 'completed' }] });
+  assert.equal(await page.textContent('#a11y-announce'), 'report.pdf finished downloading');
+  assert.equal(await page.getAttribute('#a11y-announce', 'aria-live'), 'polite');
   await page.close();
 });
 
