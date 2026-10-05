@@ -30,6 +30,7 @@ export const icons = {
   muted: s('<path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M17 9l4 6M21 9l-4 6"/>', 'width="13" height="13"'),
   check: s('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 'width="14" height="14"'),
   x: s('<path d="M7 7l10 10M17 7L7 17"/>', 'width="14" height="14"'),
+  arrowDown: s('<path d="M12 5v14M6 13l6 6 6-6"/>', 'width="14" height="14"'),
   copy: s('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>', 'width="14" height="14"'),
   trash: s('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>', 'width="14" height="14"'),
   workflow: s('<path d="M4 6.5h9M4 12h6M4 17.5h9"/><path d="M15.5 9.5 21 13l-5.5 3.5z"/>', 'width="15" height="15"'),
