@@ -680,6 +680,13 @@ test('Mac launchers: a tiny app that asks Lumio to open the web app', () => {
   assert.match(files['Contents/Info.plist'], /<key>LSUIElement<\/key>\n {2}<true\/>/);
   const dev = launchers.macBundleFiles({ id: '0123456789abcdef', name: 'X', lumio: { appBundle: '/dev/Electron.app', appPath: "/src/it's" }, icon: Buffer.alloc(1) });
   assert.match(dev['Contents/MacOS/launch'], /open -n -a '\/dev\/Electron\.app' --args '\/src\/it'\\''s' '--lumio-app=0123456789abcdef'/);
+  // Two apps with the same name: the second launcher never replaces the first.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lumio-launchers-'));
+  const a = launchers.writeMacBundle(dir, { id: '0123456789abcdef', name: 'Mail', lumio: { bundleId: 'x' }, icon: Buffer.alloc(1) });
+  const b = launchers.writeMacBundle(dir, { id: 'fedcba9876543210', name: 'Mail', lumio: { bundleId: 'x' }, icon: Buffer.alloc(1) });
+  assert.deepEqual([path.basename(a), path.basename(b)], ['Mail.app', 'Mail 2.app']);
+  assert.match(fs.readFileSync(path.join(a, 'Contents/MacOS/launch'), 'utf8'), /--lumio-app=0123456789abcdef/);
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test('installing an app: its record, icon and launcher; removing it takes them away', async () => {

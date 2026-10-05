@@ -203,8 +203,7 @@ class Apps {
       const sized = (n) => img.resize({ width: n, height: n, quality: 'best' }).toPNG();
       const icon = launchers.icns({ 128: sized(128), 256: sized(256), 512: sized(512) });
       const lumio = app.isPackaged ? { bundleId: FLAVOR.bundleId } : { appBundle: path.resolve(process.execPath, '../../..'), appPath: app.getAppPath() };
-      const owned = (file) => this.list().some((a) => a.launchers?.includes(file));
-      return [launchers.writeMacBundle(this.launcherDir, { id: rec.id, name: rec.name, lumio, icon, owned })];
+      return [launchers.writeMacBundle(this.launcherDir, { id: rec.id, name: rec.name, lumio, icon })];
     } catch (err) {
       console.error('[lumio] app launcher:', err?.message || err);
       return [];

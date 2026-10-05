@@ -77,13 +77,13 @@ ${Object.entries(info).map(([k, v]) => `  <key>${k}</key>\n  ${v === true ? '<tr
   };
 }
 
-// Writes the Mac launcher; returns its path. An existing launcher for
-// another app keeps its name: this one gets " 2", " 3"…
-function writeMacBundle(dir, { id, name, lumio, icon, owned = () => false }) {
+// Writes the Mac launcher; returns its path. Nothing already there is
+// replaced (another app's launcher, or something the person put there):
+// this one gets " 2", " 3"…
+function writeMacBundle(dir, { id, name, lumio, icon }) {
   fs.mkdirSync(dir, { recursive: true });
   let file = path.join(dir, `${safeName(name)}.app`);
-  for (let n = 2; fs.existsSync(file) && !owned(file); n++) file = path.join(dir, `${safeName(name)} ${n}.app`);
-  fs.rmSync(file, { recursive: true, force: true });
+  for (let n = 2; fs.existsSync(file); n++) file = path.join(dir, `${safeName(name)} ${n}.app`);
   for (const [rel, data] of Object.entries(macBundleFiles({ id, name, lumio, icon }))) {
     const target = path.join(file, rel);
     fs.mkdirSync(path.dirname(target), { recursive: true });
