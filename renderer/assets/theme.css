@@ -61,6 +61,17 @@
   --warn-text: light-dark(#9a5300, #ffcf99);
   --danger-fill: light-dark(#c5221f, #ff7a7a); /* solid red buttons; red tints are mixed from it */
   --on-danger: light-dark(#ffffff, #1a0a0a); /* text on --danger-fill */
+  --rec: light-dark(#d93025, #ff6b5e); /* a tab using your camera, microphone or screen */
+
+  /* The dangerous-site warning (renderer/pages/interstitial.css): a red page in both. */
+  --alarm-bg: light-dark(#b3261e, #3a1411);
+  --alarm-text: light-dark(#ffffff, #ffdad4);
+  --alarm-dim: light-dark(#fde4e1, #f0c4bd);
+  --alarm-tint: light-dark(#ffffff26, #ffdad41f);
+  --alarm-line: light-dark(#ffffff80, #ffdad466);
+  --alarm-btn-bg: light-dark(#ffffff, #ffdad4);
+  --alarm-btn-hover: light-dark(#ffe9e6, #ffffff);
+  --alarm-btn-text: light-dark(#8c1d18, #3a1411);
 
   /* Lumio's pages (renderer/pages) */
   --card-hover: light-dark(#f0f0f3, #1c1c1f); /* a card or chip under the pointer */

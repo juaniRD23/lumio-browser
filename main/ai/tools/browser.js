@@ -67,7 +67,8 @@ function hostOf(url) {
   try { return new URL(url).host || url; } catch { return url; }
 }
 
-function tabFor(ctx, id, { activate = false } = {}) {
+// leaving: the tool only takes the tab elsewhere (navigate, go_back).
+function tabFor(ctx, id, { activate = false, leaving = false } = {}) {
   const tab = id ? ctx.tabs.get(id) : ctx.tabs.active;
   if (!tab) throw new Error(id ? `There is no tab ${id}. Use list_tabs.` : 'No tab is open.');
   ctx.tabs.ensureView(tab);
@@ -76,10 +77,13 @@ function tabFor(ctx, id, { activate = false } = {}) {
   const url = wc.getURL() || tab.url || '';
   if (url.startsWith('lumio://settings')) throw new Error("Lumio can't read or operate its own Settings page. Ask the user to change settings themselves.");
   // Going past a security warning is the person's call alone.
-  if (url.startsWith('lumio://error/cert')) throw new Error("This tab shows a security warning (the site's certificate isn't valid). Lumio can't continue past it: ask the user what to do.");
+  if (!leaving && url.startsWith('lumio://error/cert')) throw new Error("This tab shows a security warning (the site's certificate isn't valid). Lumio can't continue past it: ask the user what to do.");
   const note = dialogNote(tab);
   if (note) throw new Error(note);
   pageTabs.set(wc, tab);
+  // Continuing past a security warning (main/navigation-guard.js) is the
+  // person's call: a page could have told the AI to click through it.
+  if (!leaving && url.startsWith('lumio://interstitial')) throw new Error("This tab shows a Lumio security warning about the site. Lumio can't continue past it: go back, open another page, or ask the user.");
   ctx.onPage?.(wc); // the page glows while Lumio works on it
   return { tab, wc, url };
 }
@@ -106,6 +110,7 @@ function safeUrl(ctx, input) {
   if (!parsed) throw new Error('Empty URL.');
   if (/^(file|view-source|data|javascript):/i.test(parsed.url)) throw new Error('Lumio can only open web pages (http/https).');
   if (/^lumio:\/\/settings/i.test(parsed.url)) throw new Error("Lumio can't open its own Settings page.");
+  if (/^lumio:\/\/(interstitial|error)/i.test(parsed.url)) throw new Error('Lumio can only open web pages (http/https).');
   return parsed.url;
 }
 
@@ -423,7 +428,7 @@ const tools = [
     detail: (a) => `Open ${a.url}`,
     async run(a, ctx) {
       const url = safeUrl(ctx, a.url);
-      const { tab, wc } = tabFor(ctx, a.tab_id, { activate: true });
+      const { tab, wc } = tabFor(ctx, a.tab_id, { activate: true, leaving: true });
       ctx.tabs.navigate(url, tab.id);
       await settle(wc, 15000);
       return pageLine(wc);
@@ -437,7 +442,7 @@ const tools = [
     parameters: { type: 'object', properties: { forward: { type: 'boolean' }, tab_id: TAB_ID } },
     label: (a) => (a.forward ? 'Go forward' : 'Go back'),
     async run(a, ctx) {
-      const { tab, wc } = tabFor(ctx, a.tab_id, { activate: true });
+      const { tab, wc } = tabFor(ctx, a.tab_id, { activate: true, leaving: true });
       const h = wc.navigationHistory;
       if (a.forward ? !h.canGoForward() : !h.canGoBack()) return `Can't go ${a.forward ? 'forward' : 'back'}. ${pageLine(wc)}`;
       // Through the tabs, so a page with unsaved changes asks the person first.

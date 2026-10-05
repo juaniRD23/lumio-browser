@@ -1,0 +1,28 @@
+/* The permission chip in the address bar (renderer/ui/permission-chip.js):
+   a question in the accent tint, or a quiet, crossed-out notice that
+   shrinks to its icon. */
+.perm-chip {
+  display: inline-flex; align-items: center; gap: 6px; flex: none;
+  height: 24px; max-width: 230px; padding: 0 10px 0 7px; margin-left: -4px;
+  border-radius: 999px; overflow: hidden; white-space: nowrap;
+  font-size: 12px; font-weight: 550; letter-spacing: -.1px;
+  color: var(--dim); background: var(--active);
+  transition: max-width .32s var(--ease), padding .32s var(--ease), background var(--fast) var(--ease);
+  animation: chip-in .36s var(--ease);
+}
+.perm-chip svg { flex: none; }
+.perm-chip .pc-t { overflow: hidden; text-overflow: ellipsis; transition: opacity .2s ease; }
+.perm-chip:hover { background: var(--active-hover); color: var(--text); }
+/* Accent words on an accent tint: deeper on light, so they keep 4.5:1 (like #toast). */
+.perm-chip.ask { background: color-mix(in srgb, var(--accent) 14%, transparent); color: light-dark(color-mix(in srgb, var(--accent) 70%, var(--text-strong)), var(--accent)); }
+.perm-chip.ask:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.perm-chip.collapsed { max-width: 28px; padding: 0 6px; }
+.perm-chip.collapsed .pc-t { opacity: 0; }
+.perm-chip[aria-expanded="true"] { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 55%, transparent); }
+.perm-chip:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+@keyframes chip-in { from { max-width: 0; opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .perm-chip, .perm-chip .pc-t { animation: none; transition: none; }
+}
+/* Read by screen readers only. */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

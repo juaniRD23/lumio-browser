@@ -304,7 +304,7 @@ export function initOmnibox({ api, address, box, activeTab, ask, edited, overlay
         return;
       }
       exitMode();
-      address.value = activeTab()?.url || '';
+      address.value = activeTab()?.shown || activeTab()?.url || ''; // shown: lookalike-safe (main/lookalike.js)
       address.blur();
       api.send('tab:focus-page');
     }

@@ -1,0 +1,31 @@
+/* Lumio's warning pages (renderer/pages/interstitial.js). A dangerous site
+   fills the page with red (the alarm tokens in theme.css); the others use
+   the page colors with a warning-colored icon. */
+body { display: grid; place-items: center; min-height: 100vh; padding: 32px 24px; }
+.warn { width: min(640px, 100%); animation: rise .4s var(--ease); }
+.ico { width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center; margin-bottom: 22px; color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+h1 { font: 600 clamp(26px, 3.4vw, 32px)/1.2 var(--sans); letter-spacing: -.02em; margin: 0 0 14px; overflow-wrap: anywhere; }
+.lead, .more, .details p { color: var(--dim); font-size: 15px; line-height: 1.6; margin: 0 0 12px; overflow-wrap: anywhere; }
+.host { color: var(--text); font-weight: 600; }
+.more { font-size: 13.5px; }
+.acts { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 30px; }
+.acts .btn { height: 38px; padding: 0 20px; }
+.details { margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--line); }
+.details p { font-size: 14px; }
+.link { border: 0; padding: 0; background: none; font: inherit; color: inherit; text-decoration: underline; cursor: pointer; }
+:is(.btn, .link, a):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+/* A dangerous site: the whole page is red, like Chrome's, in light and dark. */
+body.alarm { background: var(--alarm-bg); color: var(--alarm-text); }
+body.alarm .ico { color: var(--alarm-text); background: var(--alarm-tint); }
+body.alarm :is(.lead, .more, .details p) { color: var(--alarm-dim); }
+body.alarm .host { color: var(--alarm-text); }
+body.alarm .details { border-top-color: var(--alarm-tint); }
+body.alarm .btn { color: var(--alarm-text); background: transparent; border-color: var(--alarm-line); }
+body.alarm .btn:hover { background: var(--alarm-tint); }
+body.alarm .btn.primary { background: var(--alarm-btn-bg); color: var(--alarm-btn-text); border-color: transparent; }
+body.alarm .btn.primary:hover { background: var(--alarm-btn-hover); }
+body.alarm :is(.btn, .link):focus-visible { outline-color: var(--alarm-text); }
+
+@media (max-width: 520px) { .acts { flex-direction: column-reverse; } .acts .btn { width: 100%; } }
+@media (prefers-reduced-motion: reduce) { .warn { animation: none; } }

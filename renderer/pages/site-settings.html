@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Site settings</title>
+  <!-- Served at lumio://settings/content/… and /cookies: links start at the host. -->
+  <link rel="stylesheet" href="/pages.css" />
+  <link rel="stylesheet" href="/settings.css" />
+  <link rel="stylesheet" href="/site-settings.css" />
+</head>
+<body>
+  <main class="sub">
+    <header class="sub-head">
+      <a class="back" id="back" href="lumio://settings/#privacy" aria-label="Back"></a>
+      <div class="grow">
+        <div class="crumb" id="crumb">Privacy and security</div>
+        <h1 id="title">Site settings</h1>
+      </div>
+    </header>
+    <div id="view" aria-busy="true"></div>
+  </main>
+
+  <dialog id="confirm" aria-labelledby="confirm-title">
+    <form method="dialog">
+      <h2 class="dlg-title" id="confirm-title"></h2>
+      <p class="dlg-text" id="confirm-text"></p>
+      <div class="dlg-actions">
+        <button class="btn" value="cancel">Cancel</button>
+        <button class="btn danger-fill" value="ok" id="confirm-ok">Delete</button>
+      </div>
+    </form>
+  </dialog>
+  <script type="module" src="/site-settings.js"></script>
+</body>
+</html>

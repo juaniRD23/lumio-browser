@@ -196,24 +196,16 @@ function switchView(v) {
 }
 document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => switchView(b.dataset.view)));
 
-// ---- clear browsing data ----
-const dlg = $('#clear-dialog');
-$('#clear-open').addEventListener('click', () => dlg.showModal());
-// ⌘⇧⌫ / Ctrl+Shift+Delete opens lumio://history/#clear (main/navigation.js).
-const clearAsked = () => { if (location.hash === '#clear' && !dlg.open) dlg.showModal(); };
-clearAsked();
-window.addEventListener('hashchange', clearAsked);
-dlg.addEventListener('close', async () => {
-  if (dlg.returnValue !== 'clear') return;
-  const what = [...dlg.querySelectorAll('input[type=checkbox]:checked')].map((c) => c.value);
-  if (!what.length) return;
-  await page.invoke('page:clear-data', { range: Number($('#range').value), what });
+// ---- delete browsing data: its own page (renderer/pages/clear-data.*) ----
+$('#clear-open').addEventListener('click', () => page.invoke('page:open', 'lumio://settings/clearBrowserData', 'tab'));
+// Coming back from it (or another tab): show what's left.
+document.addEventListener('visibilitychange', async () => {
+  if (document.hidden) return;
   all = await page.invoke('page:history');
-  selected.clear();
+  for (const key of [...selected]) if (!all.some((h) => `${h.time}|${h.url}` === key)) selected.delete(key);
   if (view === 'closed') renderClosed(); else render();
 });
 
 const params = new URLSearchParams(location.search);
 if (params.get('q')) $('#search').value = params.get('q');
 if (params.get('view') === 'closed') switchView('closed'); else render();
-if (params.has('clear')) dlg.showModal(); // the ⋮ menu's Clear browsing data…

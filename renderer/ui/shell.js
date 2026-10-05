@@ -4,7 +4,6 @@ import { THEME_COLORS, accentFor, setAccent } from '/assets/theme-colors.js';
 import { initPanel } from './ai-panel.js';
 import { initSidebar } from './sidebar.js';
 import { paintSiteIcon } from './site-icon.js';
-import { initPermBar } from './permbar.js';
 import { popupsButton } from './popups-button.js';
 import { reduced, dur, animate, cancel, slide, instantly } from './motion.js';
 import { initNavigation } from './navigation.js';
@@ -14,6 +13,8 @@ import { initOmnibox } from './omnibox.js';
 import { initBookmarksBar } from './bookmarks-bar.js';
 import { initTabGroups } from './tab-groups.js';
 import { initSidePanel } from './side-panel.js';
+import { initPermissionChip } from './permission-chip.js';
+import { initCaptureBar, captureWords } from './capture-bar.js';
 import './keys.js';
 import '/assets/ui-prefs.js';
 import { initA11y, textScale } from './a11y.js';
@@ -106,7 +107,7 @@ function createTabEl(id) {
   el._id = id;
   el.dataset.id = id;
   el.setAttribute('role', 'tab');
-  el.innerHTML = '<span class="fav"></span><i class="agent-dot" hidden></i><span class="title"></span><button class="audio" hidden></button><button class="x" aria-label="Close tab"></button>';
+  el.innerHTML = '<span class="fav"></span><i class="agent-dot" hidden></i><span class="title"></span><i class="rec-dot" role="img" hidden></i><button class="audio" hidden></button><button class="x" aria-label="Close tab"></button>';
   el.querySelector('.x').innerHTML = icons.close;
   el.querySelector('.x').addEventListener('click', (e) => { e.stopPropagation(); closeTabByMouse(id); });
   el.querySelector('.audio').addEventListener('click', (e) => { e.stopPropagation(); api.send('tab:mute', id); });
@@ -125,7 +126,12 @@ function updateTabEl(el, t) {
   el.classList.toggle('sleeping', !!t.sleeping);
   el.setAttribute('aria-selected', String(t.id === state.activeId));
   // The hover card shows these; screen readers hear them here.
-  el.setAttribute('aria-description', [t.url, t.sleeping && 'Sleeping to save memory', t.agent && `${t.agent.name} is working here`].filter(Boolean).join(' · '));
+  const capture = captureWords(t.capture);
+  el.setAttribute('aria-description', [t.shown || t.url, t.sleeping && 'Sleeping to save memory', t.agent && `${t.agent.name} is working here`, capture].filter(Boolean).join(' · '));
+  // Camera, microphone or screen in use (renderer/ui/capture-bar.js).
+  const rec = el.querySelector('.rec-dot');
+  rec.hidden = !capture;
+  if (capture) rec.setAttribute('aria-label', capture);
   // A helper AI is working in this tab: its color, the same as its row in the chat.
   const dot = el.querySelector('.agent-dot');
   dot.hidden = !t.agent;
@@ -544,13 +550,14 @@ function renderToolbar() {
   $('#forward').disabled = !t?.canGoForward;
   $('#reload').innerHTML = t?.loading ? icons.stop : icons.reload;
   $('#reload').title = t?.loading ? 'Stop loading' : 'Reload (⌘R)';
+  // t.shown: the address with international names in their own letters when they're safe to show (main/lookalike.js).
   if (!omniFocused) {
-    address.value = prettyUrl(t?.url || '');
+    address.value = prettyUrl(t?.shown || t?.url || '');
     address.classList.toggle('url-view', !!t?.url);
-  } else if (!omniEdited && address.value !== (t?.url || '')) {
+  } else if (!omniEdited && address.value !== (t?.shown || t?.url || '')) {
     // The page changed under a focused, untouched address bar (a bookmark,
     // a link, or Lumio navigating): show the new address.
-    address.value = t?.url || '';
+    address.value = t?.shown || t?.url || '';
   }
   const star = $('#star');
   star.hidden = !t?.url || !/^https?:/.test(t.url);
@@ -577,7 +584,7 @@ address.addEventListener('focus', () => {
   omniEdited = false;
   omnibox.classList.add('focused');
   const t = activeTab();
-  address.value = t?.url || '';
+  address.value = t?.shown || t?.url || '';
   address.classList.remove('url-view');
   swapSiteIcon(() => siteIcon(t));
   // (select() would take focus back if it moved on within the frame: F6 twice.)
@@ -818,12 +825,17 @@ function renderDownloads(started) {
   dlBtn.style.setProperty('--p', total ? (got / total).toFixed(3) : active.length ? 0.1 : 0);
   // A new download nudges the button (its first one also opens its slot, shell.css).
   if (started) animate(dlBtn, [{ translate: '0 -4px' }, { translate: '0 0' }], { duration: 4, easing: 'spring' });
-  if (overlayKind === 'downloads') showDownloads();
+  // A risky file waits for Keep or Discard: open the bubble once so the person sees why.
+  const risky = items.filter((d) => d.danger && !warned.has(d.id));
+  risky.forEach((d) => warned.add(d.id));
+  if (risky.length && (!overlayKind || overlayKind === 'downloads')) showDownloads();
+  else if (overlayKind === 'downloads') showDownloads();
 }
+const warned = new Set(); // risky downloads whose bubble already opened by itself
 function showDownloads() {
   const r = dlBtn.getBoundingClientRect();
   const width = 360;
-  const height = Math.min(420, Math.ceil((state.downloads.length * 54 + 56) * textScale())) + 26 + 38;
+  const height = Math.min(420, Math.ceil((state.downloads.reduce((h, d) => h + (d.danger ? 118 : 54), 0) + 56) * textScale())) + 26 + 38;
   overlayKind = 'downloads';
   api.send('overlay:show', {
     rect: { x: r.right - width + 12, y: r.bottom + 2, width: width + 24, height },
@@ -994,8 +1006,22 @@ $('#ext-btn').addEventListener('click', () => api.send('extensions:manage'));
 // ------------------------------------------------------------------ bars over the page
 initInfobars({ api }); // Restore pages?, the default browser
 
-// ------------------------------------------------------------------ permission bar
-initPermBar($('#permbar'), api);
+// ------------------------------------------------------------------ permission chip
+// Site permission questions and blocked notices (renderer/ui/permission-chip.js).
+const permChip = initPermissionChip({
+  api,
+  getActiveTab: activeTab,
+  overlay: {
+    show: (kind, rect, payload) => { overlayKind = kind; api.send('overlay:show', { rect, payload }); },
+    hide: (kind) => { if (overlayKind === kind) hideOverlay(); },
+    picked: () => { overlayKind = null; },
+    kind: () => overlayKind,
+  },
+});
+
+// ------------------------------------------------------------------ capture bar
+// "Sharing this tab" / "Sharing your screen" with Stop sharing (renderer/ui/capture-bar.js).
+initCaptureBar({ api });
 
 // ------------------------------------------------------------------ find bar
 // Each tab keeps its own: switching tabs hides the bar (the page keeps its
@@ -1093,6 +1119,7 @@ api.on('tabs', (s) => {
   if (cardTab != null) showCard(cardTab);
   panel.onTabChange(t, switched);
   restoreFind();
+  permChip.update(switched, s.tabs.map((x) => x.wcId).filter((id) => id != null));
 });
 
 // Bookmarking a page pops its star.

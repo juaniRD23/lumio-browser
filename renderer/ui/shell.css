@@ -201,6 +201,7 @@ body.no-anim .tab::after { transition: none; }
 #site-icon.insecure { color: var(--warn); }
 #site-icon.danger { display: flex; align-items: center; gap: 4px; width: auto; padding: 0 7px 0 5px; color: var(--danger-text); font-size: 12px; font-weight: 600; white-space: nowrap; }
 #site-icon.danger:hover { color: var(--danger-text); }
+#site-icon.dangerous { color: var(--danger); }
 #address {
   anchor-name: --address;
   flex: 1; min-width: 0; height: 100%;

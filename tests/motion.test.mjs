@@ -261,7 +261,7 @@ test('page load progress: a line under the address that follows main’s steps, 
   await page.close();
 });
 
-test('bars slide instead of jumping: bookmarks, the permission bar (the page follows), downloads; find floats over the address', { skip }, async () => {
+test('bars slide instead of jumping: bookmarks, downloads; find floats over the address', { skip }, async () => {
   const { page, errors } = await openPage(browser, base, { init: withTabs([tab(1), tab(2, { url: '' , title: 'New Tab' })]) });
   // The bookmarks bar, turned on: slides open.
   await slowMotion(page, 0.5);
@@ -277,17 +277,7 @@ test('bars slide instead of jumping: bookmarks, the permission bar (the page fol
   assert.equal(await page.evaluate(() => document.getElementById('bookmarks-bar').getBoundingClientRect().height), 32, 'the new tab page shows it at once');
   await emitTabs(page, [tab(1), tab(2, { url: '', title: 'New Tab' })], 1);
 
-  // A site asks for a permission: the bar slides in and the page follows it, frame by frame.
-  await page.evaluate(() => { window.__sent.length = 0; });
-  const perm = sample(page, () => document.getElementById('permbar').getBoundingClientRect().height, 300);
-  await page.evaluate(() => window.__emit('permission', { id: 1, host: 'maps.example', label: 'know your location' }));
-  const ph = await perm;
-  assert.ok(ph.some((h) => h > 1 && h < 37), `slides: ${ph.map(Math.round).join(',')}`);
-  const slots = new Set((await sent(page, 'layout:slot')).map((r) => Math.round(r.y)));
-  assert.ok(slots.size >= 3, `the page moved smoothly: ${[...slots].join(',')}`);
-  await page.click('#permbar [data-act="allow"]');
-  assert.deepEqual((await sent(page, 'permission:respond')).at(-1), { id: 1, allow: true, remember: true });
-  await page.waitForFunction(() => getComputedStyle(document.getElementById('permbar')).display === 'none');
+  // (A site asking for a permission is a chip in the address bar now: tests/site-settings-ui.test.mjs.)
 
   // Find in page: over the end of the address bar, which keeps its size.
   const omni = await page.$eval('#omnibox', (el) => el.getBoundingClientRect().toJSON());

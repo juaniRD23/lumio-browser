@@ -124,6 +124,9 @@ class BrowserWin {
         onViewCreated: (tab) => { this.indicator.raise(); app.onViewCreated(this, tab); },
         onAdopted: (tab) => app.onViewCreated(this, tab),
         onViewDestroyed: (wc) => profile.permissions.dropFor(wc.id),
+        allowInsecure: (url) => !!profile.siteControls?.insecureAllowed(url),
+        loadFailed: (wc, code, url) => !!app.loadFailed?.(this, wc, code, url),
+        captureOf: (tab) => app.captureOf?.(tab),
         openInNewWindow: (url, inc) => app.createWindow({ incognito: inc, urls: [url] }),
         openPopup: (tab, opts) => app.openPopup(this, tab, opts),
         openExternal: (tab, req) => app.openExternal(this, tab, req),
@@ -268,7 +271,9 @@ class BrowserWin {
       return;
     }
     const attached = this.win.contentView.children.includes(this.overlay);
-    if (this.overlayKind && this.overlayKind !== kind) this.overlayClosed(); // it takes the place of another
+    // It takes the place of another: a chooser's or the screen sharing
+    // picker's question is cancelled (overlayClosed), so the page isn't left waiting.
+    if (this.overlayKind && this.overlayKind !== kind) this.overlayClosed();
     clearTimeout(this.overlayLeaving);
     this.overlayLeaving = null;
     this.overlayKind = kind;
@@ -330,6 +335,7 @@ class BrowserWin {
     this.overlayKind = null;
     if (kind === 'passkey') this.app.onPasskeyPromptClosed?.(this);
     if (kind === 'screenshare') this.app.onScreenSharePickerClosed?.(this);
+    if (kind) this.app.onOverlayClosed?.(this, kind);
     if (kind === 'menu') this.menuClosed();
     if (kind && !quiet) this.emit('overlay-state', { kind, closed: true });
   }

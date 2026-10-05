@@ -44,7 +44,7 @@ body[data-kind="suggest"] #card { position: relative; }
 .row .tag { display: grid; place-items: center; flex: none; color: var(--label); }
 .row .tag svg { width: 13px; height: 13px; }
 .row .hint { color: var(--accent); font-size: 11.5px; flex: none; }
-.row.search .hint { color: var(--label); }
+.row.search .hint { color: var(--muted); }
 .row.ai .t { color: var(--text-strong); }
 /* Address bar rows: switch to a tab, actions, answers, shortcuts (main/omnibox.js) */
 .row .hint.pill { color: var(--text-soft); background: var(--active); padding: 3px 9px; border-radius: 999px; font-size: 11.5px; }
@@ -61,7 +61,7 @@ body[data-kind="suggest"] #card { position: relative; }
 .dl:hover { background: var(--overlay-3); }
 .dl .meta { flex: 1; min-width: 0; }
 .dl .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dl .sub { color: var(--label); font-size: 11.5px; }
+.dl .sub { color: var(--muted); font-size: 11.5px; }
 .dl .bar { height: 3px; border-radius: 3px; background: var(--overlay-4); margin-top: 5px; overflow: hidden; }
 .dl .bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
 .dl button { font: inherit; font-size: 12px; color: var(--text-soft); background: var(--active); border: 0; border-radius: 7px; height: 26px; padding: 0 9px; }
@@ -135,7 +135,7 @@ svg { display: block; }
 .af-user { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .af-dots { color: var(--label); font-size: 12px; letter-spacing: 1px; }
 .af-pw { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; color: var(--accent); margin-top: 2px; }
-.af-note { color: var(--label); font-size: 11.5px; margin-top: 2px; }
+.af-note { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
 .af-gen { border-bottom: 1px solid var(--line); border-radius: 8px 8px 0 0; margin-bottom: 2px; }
 .af-manage { display: block; width: 100%; height: 34px; margin-top: 2px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--accent); font: inherit; font-size: 12.5px; text-align: left; padding: 0 10px; }
 .af-manage:hover { background: var(--overlay-3); }
@@ -192,21 +192,21 @@ svg { display: block; }
 .acc-btn:disabled { opacity: .45; }
 
 /* Blocked pop-ups */
-.pb-title { font-weight: 650; font-size: 14px; padding: 8px 8px 6px; }
-.pb-list { display: flex; flex-direction: column; gap: 2px; padding: 0 2px 8px; max-height: 210px; overflow-y: auto; }
-.pb-item {
+.pop-title { font-weight: 650; font-size: 14px; padding: 8px 8px 6px; }
+.pop-list { display: flex; flex-direction: column; gap: 2px; padding: 0 2px 8px; max-height: 210px; overflow-y: auto; }
+.pop-item {
   display: block; width: 100%; height: 32px; padding: 0 8px; border: 0; border-radius: 8px;
   background: none; color: var(--text); font: inherit; font-size: 12.5px; text-align: left;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--overlay-7);
 }
-.pb-item:hover { background: var(--overlay-3); text-decoration-color: currentColor; }
-.pb-choices { display: flex; flex-direction: column; gap: 2px; padding: 8px 2px 2px; border-top: 1px solid var(--line); }
-.pb-choice { display: flex; align-items: flex-start; gap: 8px; padding: 6px; border-radius: 8px; font-size: 12.5px; color: var(--text); }
-.pb-choice:hover { background: var(--overlay-2); }
-.pb-choice input { margin: 2px 0 0; flex: none; accent-color: var(--accent); }
-.pb-choice b { font-weight: 600; overflow-wrap: anywhere; }
-.pb-choice input:focus-visible, .acc-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.pb-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; } /* inside the list, which scrolls */
+.pop-item:hover { background: var(--overlay-3); text-decoration-color: currentColor; }
+.pop-choices { display: flex; flex-direction: column; gap: 2px; padding: 8px 2px 2px; border-top: 1px solid var(--line); }
+.pop-choice { display: flex; align-items: flex-start; gap: 8px; padding: 6px; border-radius: 8px; font-size: 12.5px; color: var(--text); }
+.pop-choice:hover { background: var(--overlay-2); }
+.pop-choice input { margin: 2px 0 0; flex: none; accent-color: var(--accent); }
+.pop-choice b { font-weight: 600; overflow-wrap: anywhere; }
+.pop-choice input:focus-visible, .acc-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pop-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; } /* inside the list, which scrolls */
 
 /* A tab's hover card (overlay.js renderHoverCard): under its tab, in a view
    as wide as the tab strip; --x places it, and changing it glides it to the

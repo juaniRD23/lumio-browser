@@ -20,6 +20,13 @@
 .dl .bar { height: 4px; border-radius: 4px; background: var(--overlay-4); margin-top: 7px; overflow: hidden; }
 .dl .bar i { display: block; height: 100%; background: var(--accent); border-radius: 4px; transform: scaleX(var(--p, 0)); transform-origin: left; transition: transform var(--dur-4) var(--ease-out); }
 .dl .acts { display: flex; gap: 6px; flex: none; }
+/* A risky file waiting for Keep or Discard */
+.dl.danger { border-color: color-mix(in srgb, var(--danger-fill) 35%, transparent); background: color-mix(in srgb, var(--danger-fill) 5%, var(--card)); }
+.dl.danger .file { color: var(--danger); background: color-mix(in srgb, var(--danger-fill) 12%, transparent); font-size: 16px; }
+.dl.danger .sub { color: var(--danger-text); }
+.dl .why { color: var(--dim); font-size: 12px; margin-top: 2px; }
+.btn.danger-fill { background: var(--danger-fill); color: var(--on-danger); border-color: transparent; font-weight: 600; }
+.btn.danger-fill:hover { background: color-mix(in srgb, var(--danger-fill) 88%, var(--text-strong)); }
 
 /* bookmarks */
 .bm-row { display: flex; align-items: center; gap: 12px; height: 46px; padding: 0 8px 0 12px; border-radius: 10px; }

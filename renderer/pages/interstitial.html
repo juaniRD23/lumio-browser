@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Warning</title>
+  <link rel="stylesheet" href="pages.css" />
+  <link rel="stylesheet" href="interstitial.css" />
+</head>
+<body>
+  <!-- Lumio's warning pages (main/navigation-guard.js): a dangerous site, an
+       insecure connection, a lookalike site, or a form that isn't secure. -->
+  <main class="warn" id="warn" aria-labelledby="title" aria-busy="true">
+    <div class="ico" id="ico" aria-hidden="true"></div>
+    <h1 id="title"></h1>
+    <p class="lead" id="lead"></p>
+    <p class="more" id="more" hidden></p>
+    <div class="acts" id="acts"></div>
+    <div class="details" id="details" hidden></div>
+  </main>
+  <script type="module" src="interstitial.js"></script>
+</body>
+</html>

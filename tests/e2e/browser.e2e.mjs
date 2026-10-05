@@ -225,19 +225,24 @@ test('history page: search, delete selected, clear a time range', async () => {
   assert.equal(await L.page(`document.getElementById('selcount').textContent`), '1 selected');
   await L.page(`document.getElementById('sel-delete').click(); true`);
   await until(async () => !(await L.main(() => global.lumio.store.history().some((h) => h.url.endsWith('/beta-page')))));
-  // Clear the last 24 hours of history: the old visit survives.
+  // Delete the last 24 hours of history (its own page, opened from History): the old visit survives.
   await L.page(`(() => { const s = document.getElementById('search'); s.value = ''; s.dispatchEvent(new Event('input')); return true })()`);
+  await L.page(`document.getElementById('clear-open').click(); true`);
+  assert.ok(await until(async () => (await L.main(() => global.lumio.tabs.wc().getURL())) === 'lumio://settings/clearBrowserData'));
+  await until(() => L.page(`!!document.querySelector('#cd-list input')`));
   await L.page(`(() => {
-    const d = document.getElementById('clear-dialog');
-    d.showModal();
-    document.getElementById('range').value = '86400000';
-    d.querySelectorAll('input[type=checkbox]').forEach((c) => { c.checked = c.value === 'history'; });
-    d.close('clear');
+    const r = document.getElementById('range'); r.value = '86400000'; r.dispatchEvent(new Event('change'));
+    document.querySelectorAll('#cd-list input[type=checkbox]').forEach((c) => { if (c.checked !== (c.value === 'history')) c.click(); });
+    document.getElementById('go').click();
     return true;
   })()`);
   await until(async () => (await L.main(() => global.lumio.store.history().length)) === 1);
   const left = await L.main(() => global.lumio.store.history().map((h) => h.url));
   assert.ok(left[0].endsWith('/old-page'));
+  // Back on the History page, the list follows.
+  await until(async () => (await L.main(() => global.lumio.tabs.wc().getURL())) === 'lumio://settings/#privacy');
+  await L.main(() => global.lumio.cmd.closeTab());
+  await L.main(() => { const w = global.lumio.current; const t = w.tabs.tabs.find((x) => (x.url || '').startsWith('lumio://history')); w.tabs.activate(t.id); });
   // Filter by site.
   await until(() => L.page(`document.querySelectorAll('.item').length === 1`));
   await L.page(`document.querySelector('.item button.host').click(); true`);

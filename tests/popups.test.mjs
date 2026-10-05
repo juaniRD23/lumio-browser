@@ -240,7 +240,7 @@ function fakeSession() {
   return s;
 }
 
-test('window management asks first; links to other apps go to Lumio; pop-ups are blocked unless allowed', () => {
+test('window management asks first; links to other apps go to Lumio; pop-ups are blocked unless allowed', async () => {
   const ses = fakeSession();
   const shown = [];
   const external = [];
@@ -251,8 +251,9 @@ test('window management asks first; links to other apps go to Lumio; pop-ups are
   ses.request(wc, 'window-management', (ok) => { answer = ok; }, { requestingUrl: 'https://maps.example/' });
   assert.equal(answer, null, 'it waits for the person');
   assert.equal(shown[0][0], 'permission');
-  assert.equal(shown[0][1].label, 'manage windows on all your displays');
-  p.respond(shown[0][1].id, true);
+  assert.deepEqual(shown[0][1].cats.map((c) => c.id), ['windowManagement']);
+  p.respond(shown[0][1].id, 'allow');
+  await new Promise((r) => setImmediate(r)); // the answer comes back through a promise
   assert.equal(answer, true);
   assert.equal(ses.check(wc, 'window-management', 'https://maps.example'), true, 'remembered');
 
@@ -264,9 +265,10 @@ test('window management asks first; links to other apps go to Lumio; pop-ups are
 
   // Site information: pop-ups (blocked by default), and window management once set.
   const rows = p.forOrigin('https://maps.example');
-  assert.deepEqual(rows.find((r) => r.permission === 'popups'), { permission: 'popups', label: 'Pop-ups and redirects', value: undefined, choices: ['block', 'allow'] });
-  assert.equal(rows.find((r) => r.permission === 'window-management')?.label, 'Window management');
-  assert.equal(p.forOrigin('https://other.example').some((r) => r.permission === 'window-management'), false);
+  const popups = rows.find((r) => r.permission === 'popups');
+  assert.deepEqual([popups.label, popups.value, popups.default], ['Pop-ups and redirects', undefined, 'block']);
+  assert.equal(rows.find((r) => r.permission === 'windowManagement')?.label, 'Window management');
+  assert.equal(p.forOrigin('https://other.example').some((r) => r.permission === 'windowManagement'), false);
   assert.equal(p.allowsPopups('https://maps.example/a'), false);
   p.set('https://maps.example', 'popups', true);
   assert.equal(p.allowsPopups('https://maps.example/b?x=1'), true);

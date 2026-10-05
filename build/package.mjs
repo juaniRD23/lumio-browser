@@ -90,6 +90,8 @@ function macOptions(arch, helper) {
       NSCameraUsageDescription: 'Websites you allow can use your camera.',
       NSMicrophoneUsageDescription: 'Lumio’s voice mode and websites you allow can use your microphone.',
       NSLocationWhenInUseUsageDescription: 'Websites you allow can see your location.',
+      // Web Bluetooth: macOS ends an app that uses Bluetooth without this.
+      NSBluetoothAlwaysUsageDescription: 'Websites can connect to the Bluetooth devices you choose.',
       CFBundleDocumentTypes: MAC_DOCUMENT_TYPES,
     },
   };

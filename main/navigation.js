@@ -357,16 +357,9 @@ class Navigation {
     return text;
   }
 
-  // Delete Browsing Data…: the dialog on the History page (in a normal window).
+  // Delete Browsing Data…: its own page, under Settings (renderer/pages/clear-data.*).
   clearBrowsingData() {
-    const url = 'lumio://history/#clear';
-    const w = this.deps.normalWin();
-    const tab = w?.tabs.tabs.find((t) => (t.pendingUrl || t.url || '').startsWith('lumio://history/'));
-    if (!tab) { this.deps.openInternal(url); return; }
-    w.tabs.activate(tab.id);
-    const wc = tab.view?.webContents;
-    if (wc?.getURL() === url) wc.reload(); else w.tabs.navigate(url, tab.id);
-    w.focus();
+    this.deps.openInternal('lumio://settings/clearBrowserData');
   }
 
   openWeb(url) {

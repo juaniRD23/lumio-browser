@@ -120,11 +120,11 @@ test('a pop-up’s bar: blocked pop-ups, the permission bar, and saving a passwo
   assert.equal(shown.payload.focus, true, 'the list takes the keyboard');
   assert.deepEqual(shown.payload.items, info.items);
   // A site asking for a permission: a bar over the page, which moves down.
-  await emit(page, 'permission', { id: 8, host: 'maps.example', label: 'use your camera' });
+  await emit(page, 'permission', { id: 8, host: 'maps.example', cats: [{ id: 'camera', prompt: 'Use your camera' }] });
   assert.equal(await page.textContent('#permbar .infobar-text'), 'maps.example wants to use your camera');
   await page.waitForFunction(() => window.__sent.filter(([c]) => c === 'layout:slot').at(-1)[1].y > 40);
   await page.click('#permbar [data-act=allow]');
-  assert.deepEqual((await sent(page)).find(([c]) => c === 'permission:respond'), ['permission:respond', { id: 8, allow: true, remember: true }]);
+  assert.deepEqual((await sent(page)).find(([c]) => c === 'permission:respond'), ['permission:respond', { id: 8, decision: 'allow' }]);
   assert.equal(await page.isVisible('#permbar'), false);
   // "Save password?" after signing in here: the key, and the prompt under it.
   await emit(page, 'passwords-prompt', { id: 4, tabId: 1, host: 'accounts.example', username: 'ada', action: 'save', length: 9 });
@@ -165,16 +165,16 @@ test('blocked pop-ups: the list (as text), open one with the keyboard, always al
     };
     const said = async () => (await sent(page)).filter(([c]) => !/^overlay:(size|ready|gone)$/.test(c)); // it also measures itself
     await show({ items: [{ id: 1, url: 'https://ads.example/<b>win</b>' }, { id: 2, url: 'about:blank' }] });
-    assert.equal(await page.textContent('.pb-title'), 'Pop-ups blocked:');
-    assert.deepEqual(await page.$$eval('.pb-item', (els) => els.map((e) => e.textContent)), ['ads.example/<b>win</b>', 'about:blank'], 'addresses as text, never HTML');
-    assert.equal(await page.$$eval('.pb-item b', (els) => els.length), 0);
-    assert.deepEqual(await page.$$eval('.pb-choice', (els) => els.map((e) => [e.textContent.trim(), e.querySelector('input').checked])), [['Always allow pop-ups and redirects from news.example', false], ['Continue blocking', true]]);
+    assert.equal(await page.textContent('.pop-title'), 'Pop-ups blocked:');
+    assert.deepEqual(await page.$$eval('.pop-item', (els) => els.map((e) => e.textContent)), ['ads.example/<b>win</b>', 'about:blank'], 'addresses as text, never HTML');
+    assert.equal(await page.$$eval('.pop-item b', (els) => els.length), 0);
+    assert.deepEqual(await page.$$eval('.pop-choice', (els) => els.map((e) => [e.textContent.trim(), e.querySelector('input').checked])), [['Always allow pop-ups and redirects from news.example', false], ['Continue blocking', true]]);
     assert.equal(await page.evaluate(() => document.activeElement.dataset.pb), '1', 'the first one has focus');
     await page.keyboard.press('Enter');
     assert.deepEqual((await said()).slice(-2), [['site:popup-open', 1], ['overlay:pick', { kind: 'popups' }]]);
     // Always allow, then Done.
     await show({ items: [{ id: 2, url: 'about:blank' }] });
-    await page.check('.pb-choice input[value=allow]');
+    await page.check('.pop-choice input[value=allow]');
     await page.click('[data-pb-act=done]');
     assert.deepEqual((await said()).slice(-2), [['site:popups-allow', true], ['overlay:pick', { kind: 'popups' }]]);
     await show({ items: [{ id: 2, url: 'about:blank' }] });
@@ -182,7 +182,7 @@ test('blocked pop-ups: the list (as text), open one with the keyboard, always al
     assert.deepEqual((await said()).at(-1), ['overlay:pick', { kind: 'popups' }]);
     // A file on this computer can't be always allowed.
     await show({ host: null, items: [{ id: 5, url: 'https://x.example/' }] });
-    assert.equal(await page.$$eval('.pb-choice, [data-pb-act=manage]', (els) => els.length), 0);
+    assert.equal(await page.$$eval('.pop-choice, [data-pb-act=manage]', (els) => els.length), 0);
     // Readable: the addresses and choices on the dropdown.
     const c = await readColors(page, { tokens: ['--text', '--popover'] });
     assert.ok(contrast(c.tokens['--text'], c.tokens['--popover']) >= 4.5, `${scheme}: text on the dropdown`);
@@ -197,22 +197,22 @@ test('site information: pop-ups are blocked by default, and can be allowed', { s
     op: 'show', seq: 1,
     kind: 'siteinfo',
     info: { host: 'news.example', origin: 'https://news.example', secure: true, permissions: [
-      { permission: 'geolocation', label: 'Location', value: undefined },
-      { permission: 'popups', label: 'Pop-ups and redirects', value: undefined, choices: ['block', 'allow'] },
-      { permission: 'window-management', label: 'Window management', value: false },
+      { permission: 'geolocation', label: 'Location', value: undefined, default: 'ask', options: ['allow', 'block'] },
+      { permission: 'popups', label: 'Pop-ups and redirects', value: undefined, default: 'block', options: ['allow', 'block'] },
+      { permission: 'windowManagement', label: 'Window management', value: 'block', default: 'ask', options: ['allow', 'block'] },
     ] },
   });
   await emit(page, 'overlay-data', { op: 'in', seq: 1 });
   const said = async () => (await sent(page)).filter(([c]) => !/^overlay:(size|ready|gone)$/.test(c)); // it also measures itself
   const options = (perm) => page.$$eval(`select[data-perm="${perm}"] option`, (els) => els.map((o) => `${o.textContent}${o.selected ? ' *' : ''}`));
   assert.deepEqual(await options('geolocation'), ['Ask (default) *', 'Allow', 'Block']);
-  assert.deepEqual(await options('popups'), ['Block (default) *', 'Allow']);
-  assert.deepEqual(await options('window-management'), ['Ask (default)', 'Allow', 'Block *']);
+  assert.deepEqual(await options('popups'), ['Block (default) *', 'Allow', 'Block']);
+  assert.deepEqual(await options('windowManagement'), ['Ask (default)', 'Allow', 'Block *']);
   await page.selectOption('select[data-perm=popups]', 'allow');
   assert.deepEqual((await said()).at(-1), ['site:set-permission', { permission: 'popups', value: 'allow' }]);
   // Back to the default: the site's setting is cleared (blocked, like any site).
-  await page.selectOption('select[data-perm=popups]', 'block');
-  assert.deepEqual((await said()).at(-1), ['site:set-permission', { permission: 'popups', value: 'ask' }]);
+  await page.selectOption('select[data-perm=popups]', 'default');
+  assert.deepEqual((await said()).at(-1), ['site:set-permission', { permission: 'popups', value: 'default' }]);
   assert.deepEqual(errors, []);
   await page.close();
 });

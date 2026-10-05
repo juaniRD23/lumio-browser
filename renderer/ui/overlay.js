@@ -9,9 +9,14 @@ import { renderZoom, initZoom } from './overlay-zoom.js';
 import { renderTabSearch, initTabSearch } from './overlay-tabsearch.js';
 import './overlay-bookmarks.js'; // the bookmarks bar's folder menus and the star's bubble
 import './overlay-groups.js'; // the tab group editor
+import { siteIcon } from '/assets/site-icons.js';
+import { permissionBubble } from './overlay-site.js';
+import { securityChoosers } from './overlay-security.js';
 
 const api = window.lumio;
 const card = document.getElementById('card');
+const bubble = permissionBubble({ api, card });
+const choosers = securityChoosers({ api, card, onResize: () => fit() });
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const pretty = (u) => String(u || '').replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '');
@@ -114,6 +119,11 @@ card.addEventListener('pointermove', (e) => {
 
 function renderDownloads({ items }) {
   const rows = items.map((d) => {
+    // A risky file waits for Keep or Discard (main/security.js says why).
+    if (d.danger) {
+      return `<div class="dl danger" role="group" aria-label="${esc(d.danger.title)}: ${esc(d.name)}"><span class="dl-warn">${icons.warn}</span><div class="meta"><div class="name">${esc(d.name)}</div><div class="dl-why"><b>${esc(d.danger.title)}</b> ${esc(d.danger.detail)}</div>
+        <div class="dl-acts"><button class="dl-discard" data-act="discard" data-id="${d.id}">Discard</button><button data-act="keep" data-id="${d.id}">Keep</button></div></div></div>`;
+    }
     const pct = d.total ? Math.round((d.received / d.total) * 100) : 0;
     let sub;
     let actions;
@@ -133,11 +143,8 @@ function renderDownloads({ items }) {
   card.innerHTML = `<div class="head"><span>Downloads</span><button data-act="clear">Clear</button></div>${rows || '<div class="dl"><div class="sub">No downloads</div></div>'}<button class="all" data-act="all">See all downloads</button>`;
 }
 
-// A permission's choices; the first is what it does unless set (most ask,
-// pop-ups are blocked).
-const CHOICE_LABELS = { ask: 'Ask', allow: 'Allow', block: 'Block' };
-const permChoices = (p) => p.choices || ['ask', 'allow', 'block'];
-const permValue = (p) => (p.value === true ? 'allow' : p.value === false ? 'block' : permChoices(p)[0]);
+// Each setting: its default, or what this site is set to.
+const VALUE_WORDS = { ask: 'Ask', quiet: 'Ask quietly', allow: 'Allow', block: 'Block', session: 'Clear on exit', 'block-incognito': 'Block in Incognito' };
 function renderSiteInfo({ info }) {
   const secure = info.certError || info.certBypass
     ? `<div class="si-status danger">${icons.warn}<div><b>Your connection to this site isn't private</b><span>${info.certBypass ? "You chose to visit it although its security certificate isn't valid. Don't enter passwords or payment info here." : "Its security certificate isn't valid."}</span>${info.certBypass ? '<button data-si="cert-revoke">Turn on warnings</button>' : ''}</div></div>`
@@ -145,18 +152,24 @@ function renderSiteInfo({ info }) {
       ? `<div class="si-status ok">${icons.lock}<div><b>Connection is secure</b><span>Info you send to this site stays private.</span></div></div>`
       : `<div class="si-status bad">${icons.warn}<div><b>Not secure</b><span>Don't enter passwords or payment info on this site.</span></div></div>`;
   const perms = info.permissions.map((p) => `
-    <label class="si-perm"><span>${esc(p.label)}</span>
-      <select data-perm="${esc(p.permission)}">
-        ${permChoices(p).map((v, i) => `<option value="${v}" ${permValue(p) === v ? 'selected' : ''}>${CHOICE_LABELS[v]}${i ? '' : ' (default)'}</option>`).join('')}
+    <label class="si-perm">${siteIcon(p.permission, { size: 16 })}<span>${esc(p.label)}</span>
+      <select data-perm="${esc(p.permission)}" ${p.reload ? 'data-reload' : ''} aria-label="${esc(p.label)}">
+        <option value="default" ${p.value ? '' : 'selected'}>${VALUE_WORDS[p.default] || 'Default'} (default)</option>
+        ${p.options.map((v) => `<option value="${v}" ${p.value === v ? 'selected' : ''}>${VALUE_WORDS[v]}</option>`).join('')}
       </select>
     </label>`).join('');
+  const custom = info.permissions.some((p) => p.value);
   card.innerHTML = `
     <div class="si-host">${esc(info.host)}${info.incognito ? ' <em>Incognito</em>' : ''}</div>
     ${secure}
     <div class="si-sec">Permissions</div>
     ${perms}
+    <div class="si-reload" ${info.reload ? '' : 'hidden'}><span>Reload this page to use your new settings.</span><button data-si="reload">Reload</button></div>
+    <div class="si-data">${siteIcon('thirdPartyCookies', { size: 16 })}<span>Cookies and site data</span><small>${info.cookies === 1 ? '1 cookie' : `${info.cookies || 0} cookies`}</small></div>
+    ${info.trackers ? `<div class="si-data si-trackers">${siteIcon('trackers', { size: 16 })}<span>Ads and trackers blocked on this page</span><small>${info.trackers}</small></div>` : ''}
     <div class="si-actions">
       <button data-si="clear">Clear cookies and site data</button>
+      ${custom ? '<button data-si="reset">Reset permissions</button>' : ''}
       ${info.incognito ? '' : '<button data-si="settings">Site settings</button>'}
     </div>`;
 }
@@ -245,42 +258,69 @@ function renderPasskey({ prompt }) {
   card.dataset.prompt = String(p.id);
 }
 
-// A site asked to share your screen: pick a whole screen or one window.
+// A site asked to share your screen: pick another tab (with its sound), a
+// whole screen or one window.
 function renderScreenShare({ share: s }) {
   const tile = (x) => `<button class="ss-tile" data-src="${esc(x.id)}" title="${esc(x.name)}">
       <span class="ss-thumb">${x.thumb ? `<img src="${esc(x.thumb)}" alt="">` : ''}</span>
       <span class="ss-name">${esc(x.screen ? (x.name || 'Entire screen') : x.name)}</span></button>`;
+  const tabRow = (t) => `<button class="ss-tab" data-src="${esc(t.id)}" data-tab>
+      ${t.favicon ? `<img src="${esc(t.favicon)}" alt="">` : `<span class="ss-fav">${icons.globe}</span>`}
+      <span class="ss-txt"><b>${esc(t.name)}</b>${t.url ? `<small>${esc(pretty(t.url))}</small>` : ''}</span></button>`;
   const screens = s.sources.filter((x) => x.screen);
   const windows = s.sources.filter((x) => !x.screen);
+  const tabs = s.tabs || [];
   card.innerHTML = `<div class="pk-head">${icons.eye || ''}<span>${esc(s.host)} wants to see your screen</span></div>
     <div class="pk-title">Choose what to share</div>
+    ${tabs.length ? `<div class="ss-label">Tab</div><div class="ss-tabs">${tabs.map(tabRow).join('')}</div>` : ''}
     ${screens.length ? `<div class="ss-label">Entire screen</div><div class="ss-grid">${screens.map(tile).join('')}</div>` : ''}
     ${windows.length ? `<div class="ss-label">Window</div><div class="ss-grid">${windows.map(tile).join('')}</div>` : ''}
-    <div class="pws-actions"><span style="flex:1"></span><button class="acc-btn ghost" data-ss="cancel">Cancel</button><button class="acc-btn primary" data-ss="share" disabled>Share</button></div>`;
+    ${s.screensOff ? '<p class="ss-note">To share your whole screen or another app’s window, turn on Lumio Browser in System Settings › Privacy &amp; Security › Screen Recording.</p>' : ''}
+    <div class="pws-actions">${s.audio ? '<label class="ss-audio" hidden><input type="checkbox" id="ss-audio" checked> Also share tab audio</label>' : ''}<span style="flex:1"></span><button class="acc-btn ghost" data-ss="cancel">Cancel</button><button class="acc-btn primary" data-ss="share" disabled>Share</button></div>`;
   card.dataset.prompt = String(s.id);
+}
+// Choosing in the screen sharing picker, with the mouse or the keyboard.
+function pickShare(e) {
+  const tile = e.target.closest('[data-src]');
+  const send = (source) => api.send('overlay:pick', { kind: 'screenshare', id: Number(card.dataset.prompt), source, audio: card.querySelector('#ss-audio')?.checked !== false });
+  if (tile) {
+    card.querySelectorAll('[data-src].on').forEach((t) => t.classList.remove('on'));
+    tile.classList.add('on');
+    card.querySelector('[data-ss=share]').disabled = false;
+    const audio = card.querySelector('.ss-audio');
+    if (audio) audio.hidden = !('tab' in tile.dataset); // only a tab's sound can be shared
+    if (e.detail >= 2) send(tile.dataset.src); // double-click shares
+    return;
+  }
+  const act = e.target.closest('[data-ss]')?.dataset.ss;
+  if (!act) return;
+  e.preventDefault();
+  const chosen = card.querySelector('[data-src].on')?.dataset.src || null;
+  if (act === 'share' && !chosen) return;
+  send(act === 'share' ? chosen : null);
 }
 
 // Pop-ups the page tried to open by itself: open one (it opens as if the
 // page had, after a click), or always allow the site. Keyboard: the first
 // one has focus, Tab moves, Enter picks, Esc closes.
 function renderPopups({ host, allowed, items }) {
-  const list = items.map((p) => `<button class="pb-item" data-pb="${p.id}" title="${esc(p.url)}">${esc(pretty(p.url) || p.url)}</button>`).join('');
+  const list = items.map((p) => `<button class="pop-item" data-pb="${p.id}" title="${esc(p.url)}">${esc(pretty(p.url) || p.url)}</button>`).join('');
   // Only a website can be always allowed (not a file on this computer).
   const choices = host ? `
-    <div class="pb-choices" role="radiogroup" aria-label="Pop-ups on this site">
-      <label class="pb-choice"><input type="radio" name="pb" value="allow" ${allowed ? 'checked' : ''}><span>Always allow pop-ups and redirects from <b>${esc(host)}</b></span></label>
-      <label class="pb-choice"><input type="radio" name="pb" value="block" ${allowed ? '' : 'checked'}><span>Continue blocking</span></label>
+    <div class="pop-choices" role="radiogroup" aria-label="Pop-ups on this site">
+      <label class="pop-choice"><input type="radio" name="pb" value="allow" ${allowed ? 'checked' : ''}><span>Always allow pop-ups and redirects from <b>${esc(host)}</b></span></label>
+      <label class="pop-choice"><input type="radio" name="pb" value="block" ${allowed ? '' : 'checked'}><span>Continue blocking</span></label>
     </div>` : '';
   card.innerHTML = `
-    <div class="pb-title" id="pb-title">Pop-ups blocked:</div>
-    <div class="pb-list" role="group" aria-labelledby="pb-title">${list}</div>
+    <div class="pop-title" id="pop-title">Pop-ups blocked:</div>
+    <div class="pop-list" role="group" aria-labelledby="pop-title">${list}</div>
     ${choices}
     <div class="pws-actions">
       ${host ? '<button class="acc-btn ghost" data-pb-act="manage">Manage</button>' : ''}
       <span style="flex:1"></span>
       <button class="acc-btn primary" data-pb-act="done">Done</button>
     </div>`;
-  card.querySelector('.pb-item')?.focus();
+  card.querySelector('.pop-item')?.focus();
 }
 
 // What's new in an update, from the release notes (a little Markdown).
@@ -637,6 +677,8 @@ const RENDER = {
   suggest: renderSuggest, downloads: renderDownloads, siteinfo: renderSiteInfo, account: renderAccount, autofill: renderAutofill,
   pwsave: renderPwSave, passkey: renderPasskey, update: renderUpdateCard, screenshare: renderScreenShare, popups: renderPopups, hovercard: renderHoverCard, menu: renderMenu,
   zoom: (p) => renderZoom(card, p), tabsearch: (p) => renderTabSearch(card, p),
+  permission: (p) => bubble.show(p), // overlay-site.js
+  device: (p) => choosers.show(p), clientcert: (p) => choosers.show(p), // overlay-security.js
 };
 // These keep the size main gives them; the rest are as tall as what's in them.
 const FIXED = new Set(['suggest', 'downloads', 'screenshare', 'menu', 'bm-menu', 'bm-edit', 'tab-group']);
@@ -672,6 +714,8 @@ function show(p) {
   kind = p.kind;
   document.body.dataset.kind = kind;
   if (kind !== 'hovercard') cardTab = null;
+  if (kind !== 'permission') bubble.hide();
+  if (!choosers.owns(kind)) choosers.show(p); // (forgets the last one)
   fitBody(p);
   RENDER[kind]?.(p, true);
   aim(p.origin);
@@ -786,28 +830,30 @@ initTabSearch(card, api, () => kind);
 
 card.addEventListener('change', (e) => {
   const sel = e.target.closest('select[data-perm]');
-  // The first choice is the default: picking it clears the site's setting.
-  if (kind === 'siteinfo' && sel) api.send('site:set-permission', { permission: sel.dataset.perm, value: sel.selectedIndex === 0 ? 'ask' : sel.value });
+  if (kind !== 'siteinfo' || !sel) return;
+  api.send('site:set-permission', { permission: sel.dataset.perm, value: sel.value });
+  // JavaScript, images and insecure content apply when the page loads again.
+  if ('reload' in sel.dataset) { card.querySelector('.si-reload').hidden = false; fit(); }
+});
+
+// The screen sharing picker with the keyboard: Enter or Space on a choice, Esc to cancel.
+card.addEventListener('click', (e) => {
+  if (kind === 'screenshare' && e.detail === 0) pickShare(e);
+  // Keep or Discard a risky download with the keyboard too (the mouse acts on mousedown below).
+  if (kind === 'downloads' && e.detail === 0) downloadAct(e);
+});
+card.addEventListener('keydown', (e) => {
+  if (kind !== 'screenshare' || e.key !== 'Escape') return;
+  e.preventDefault();
+  api.send('overlay:pick', { kind, id: Number(card.dataset.prompt), source: null });
 });
 
 card.addEventListener('mousedown', async (e) => {
   if (kind === 'popups') return; // its buttons and choices work like normal ones (see above)
   if (kind === 'tabsearch') return; // overlay-tabsearch.js has its own
+  if (kind === 'permission' || choosers.owns(kind)) return; // overlay-site.js and overlay-security.js handle their own clicks
   if (kind === 'screenshare') {
-    const tile = e.target.closest('[data-src]');
-    if (tile) {
-      card.querySelectorAll('.ss-tile.on').forEach((t) => t.classList.remove('on'));
-      tile.classList.add('on');
-      card.querySelector('[data-ss=share]').disabled = false;
-      if (e.detail >= 2) api.send('overlay:pick', { kind, id: Number(card.dataset.prompt), source: tile.dataset.src }); // double-click shares
-      return;
-    }
-    const act = e.target.closest('[data-ss]')?.dataset.ss;
-    if (!act) return;
-    e.preventDefault();
-    const chosen = card.querySelector('.ss-tile.on')?.dataset.src || null;
-    if (act === 'share' && !chosen) return;
-    api.send('overlay:pick', { kind, id: Number(card.dataset.prompt), source: act === 'share' ? chosen : null });
+    if (!e.target.closest('#ss-audio, .ss-audio')) pickShare(e);
     return;
   }
   if (kind === 'update') {
@@ -873,6 +919,8 @@ card.addEventListener('mousedown', async (e) => {
     const act = e.target.closest('[data-si]')?.dataset.si;
     if (act === 'clear') api.send('site:clear-data');
     if (act === 'cert-revoke') api.send('site:cert-revoke');
+    if (act === 'reset') api.send('site:reset-permissions');
+    if (act === 'reload') { api.send('tab:reload'); api.send('overlay:pick', { kind }); }
     if (act === 'settings') { api.send('site:settings'); api.send('overlay:pick', { kind }); }
     return; // let <select> menus open normally
   }
@@ -885,10 +933,12 @@ card.addEventListener('mousedown', async (e) => {
     // ⌘/Ctrl-click: a new tab; middle click: a background tab; ⇧-click: a new window.
     const disposition = e.button === 1 ? 'background' : e.metaKey || e.ctrlKey ? 'tab' : e.shiftKey ? 'window' : 'current';
     if (row) api.send('overlay:pick', { kind, index: Number(row.dataset.i), disposition });
-  } else if (kind === 'downloads') {
-    const btn = e.target.closest('button[data-act]');
-    if (!btn) return;
-    api.send('download:action', { id: btn.dataset.id, action: btn.dataset.act });
-    if (['open', 'show', 'all'].includes(btn.dataset.act)) api.send('overlay:pick', { kind });
-  }
+  } else if (kind === 'downloads') downloadAct(e);
 });
+
+function downloadAct(e) {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  api.send('download:action', { id: btn.dataset.id, action: btn.dataset.act });
+  if (['open', 'show', 'all'].includes(btn.dataset.act)) api.send('overlay:pick', { kind });
+}

@@ -19,12 +19,19 @@ function dayLabel(t) {
 }
 
 function row(d) {
-  const ext = (d.name.split('.').pop() || '').slice(0, 4);
+  const ext = d.danger ? '!' : (d.name.split('.').pop() || '').slice(0, 4);
   let sub;
   let acts = '';
   let cls = '';
   let bar = '';
-  if (d.state === 'progressing') {
+  let why = '';
+  if (d.danger) {
+    // A risky file waits for Keep or Discard (main/security.js says why).
+    cls = 'danger';
+    sub = `${d.danger.title} · ${host(d.url)}`;
+    why = `<div class="why">${esc(d.danger.detail)}</div>`;
+    acts = '<button class="btn small danger-fill" data-act="discard">Discard</button><button class="btn small" data-act="keep">Keep</button>';
+  } else if (d.state === 'progressing') {
     const pct = d.total ? Math.round((d.received / d.total) * 100) : 0;
     sub = `${d.paused ? 'Paused · ' : ''}${size(d.received)}${d.total ? ` of ${size(d.total)}` : ''} · ${host(d.url)}`;
     acts = `${d.paused ? '<button class="btn small" data-act="resume">Resume</button>' : '<button class="btn small" data-act="pause">Pause</button>'}<button class="btn small" data-act="cancel">Cancel</button>`;
@@ -42,7 +49,7 @@ function row(d) {
     acts = '<button class="btn small" data-act="retry">Retry</button>';
   }
   const name = d.state === 'completed' && d.exists !== false ? `<a href="#" data-act="open">${esc(d.name)}</a>` : esc(d.name);
-  return `<div class="dl ${cls}" role="listitem" data-id="${esc(d.id)}"><span class="file">${esc(ext)}</span><div class="meta"><div class="name">${name}</div><div class="sub">${esc(sub)}</div>${bar}</div><div class="acts">${acts}<button class="iconbtn" data-act="remove" title="Remove from list" aria-label="Remove ${esc(d.name)} from list">✕</button></div></div>`;
+  return `<div class="dl ${cls}" role="listitem" data-id="${esc(d.id)}"><span class="file">${esc(ext)}</span><div class="meta"><div class="name">${name}</div><div class="sub">${esc(sub)}</div>${why}${bar}</div><div class="acts">${acts}<button class="iconbtn" data-act="remove" title="Remove from list" aria-label="Remove ${esc(d.name)} from list">✕</button></div></div>`;
 }
 
 // Updated in place every second while something downloads, so buttons keep

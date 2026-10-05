@@ -41,7 +41,7 @@ test('downloads: progress updates in place, keeping focus; new rows rise in; the
   await page.close();
 });
 
-test('history: a removed entry fades and the rows below slide up; the dialog rises in over a scrim and drops away', { skip }, async () => {
+test('history: a removed entry fades and the rows below slide up', { skip }, async () => {
   const hist = Array.from({ length: 6 }, (_, i) => ({ url: `https://site${i}.example/`, title: `Site ${i}`, time: now - i * 60e3 }));
   const { page, errors } = await openInternal(browser, base, 'history', { answers: { 'page:history': hist } });
   await page.waitForSelector('.item');
@@ -52,14 +52,6 @@ test('history: a removed entry fades and the rows below slide up; the dialog ris
   const sliding = await page.$$eval('.item', (els) => els.filter((e) => e.getAnimations().some((a) => /translateY/.test(JSON.stringify(a.effect.getKeyframes())))).length);
   assert.ok(sliding >= 3, `the rows below slide up (${sliding})`);
   assert.ok(before > 0);
-  // Clear browsing data: the dialog and its scrim fade in, and out on close.
-  await page.click('#clear-open');
-  const opening = await page.$eval('#clear-dialog', (d) => d.getAnimations().map((a) => a.transitionProperty));
-  assert.ok(opening.includes('opacity') && opening.includes('transform'), `it rises in (${opening})`);
-  await page.waitForFunction(() => !document.querySelector('#clear-dialog').getAnimations().length);
-  await page.keyboard.press('Escape');
-  const closing = await page.$eval('#clear-dialog', (d) => d.getAnimations().map((a) => a.transitionProperty));
-  assert.ok(closing.includes('opacity'), `it fades out (${closing})`);
   assert.deepEqual(errors, []);
   await page.close();
 });

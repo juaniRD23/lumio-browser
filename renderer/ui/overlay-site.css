@@ -1,0 +1,32 @@
+/* The permission bubble (renderer/ui/overlay-site.js) and the extras in the
+   site info popup: icons, the reload note, cookies. */
+.pb { padding: 6px 6px 4px; }
+.pb-t { display: flex; align-items: center; gap: 8px; font-size: 14px; padding: 4px 4px 10px; color: var(--text); }
+.pb-t b { font-weight: 650; }
+.pb-t svg { color: var(--muted); flex: none; }
+.pb-items { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; }
+.pb-item { display: flex; align-items: center; gap: 12px; min-height: 36px; padding: 6px 8px; border-radius: 10px; background: var(--overlay-2); color: var(--text); }
+.pb-item svg { color: var(--muted); flex: none; }
+.pb-item span { flex: 1; min-width: 0; line-height: 1.35; }
+.pb-note { margin: 0 4px 12px; color: var(--dim); font-size: 12.5px; line-height: 1.5; }
+.pb-note b { color: var(--text); font-weight: 600; }
+.pb-acts { display: flex; flex-direction: column; gap: 6px; }
+.pb-btn { font: inherit; font-size: 13px; font-weight: 550; height: 34px; padding: 0 14px; border: 0; border-radius: 10px; background: var(--active); color: var(--text); text-align: center; }
+.pb-btn:hover { background: var(--active-hover); color: var(--text-strong); }
+.pb-mini { font: inherit; font-size: 12px; font-weight: 550; height: 26px; padding: 0 10px; border: 0; border-radius: 8px; background: var(--active); color: var(--text-soft); flex: none; }
+.pb-mini:hover { background: var(--active-hover); color: var(--text-strong); }
+.pb-link { display: block; margin: 8px 0 2px; padding: 4px; border: 0; border-radius: 6px; background: none; color: var(--accent); font: inherit; font-size: 12.5px; }
+.pb-link:hover { text-decoration: underline; }
+:is(.pb-btn, .pb-mini, .pb-link):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+
+/* site info: each setting's icon, and what's set */
+.si-perm svg { color: var(--muted); flex: none; }
+.si-data { display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 0 10px; color: var(--text); }
+.si-data svg { color: var(--muted); flex: none; }
+.si-data span { flex: 1; }
+.si-data small { color: var(--muted); font-size: 12px; }
+.si-reload { display: flex; align-items: center; gap: 10px; margin: 4px 2px 0; padding: 8px 10px; border-radius: 9px; background: color-mix(in srgb, var(--accent) 10%, transparent); font-size: 12.5px; }
+.si-reload[hidden] { display: none; }
+.si-reload span { flex: 1; }
+.si-reload button { font: inherit; font-size: 12px; font-weight: 600; height: 26px; padding: 0 10px; border: 0; border-radius: 7px; background: var(--primary-bg); color: var(--primary-fg); }
+.si-actions { flex-wrap: wrap; }

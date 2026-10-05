@@ -1,6 +1,8 @@
 // The bar over the page when a site asks for a permission ("example.com wants
-// to use your camera" · Block · Allow), in the window and in a pop-up. Asks
-// wait in line; main cancels one whose page went away.
+// to use your camera" · Block · Allow) in a pop-up window, which has no
+// address bar chip (the browser window uses renderer/ui/permission-chip.js).
+// Asks wait in line; main cancels one whose page went away. Requests come
+// from main/features.js Permissions: { id, host, cats: [{ prompt }] }.
 export function initPermBar(bar, api) {
   const queue = [];
   function render() {
@@ -11,17 +13,19 @@ export function initPermBar(bar, api) {
     text.textContent = '';
     const b = document.createElement('b');
     b.textContent = p.host;
-    text.append(b, ` wants to ${p.label}`);
+    const what = (p.cats || []).map((c) => String(c.prompt || '').toLowerCase()).filter(Boolean).join(' and ');
+    text.append(b, ` wants to ${what}`);
   }
   bar.addEventListener('click', (e) => {
     const act = e.target.closest('[data-act]')?.dataset.act;
     const p = queue[0];
     if (!act || !p) return;
-    api.send('permission:respond', { id: p.id, allow: act === 'allow', remember: true });
+    api.send('permission:respond', { id: p.id, decision: act === 'allow' ? 'allow' : 'block' });
     queue.shift();
     render();
   });
-  api.on('permission', (p) => { queue.push(p); render(); });
+  // Quiet requests (a site that keeps asking) wait for the person to look, like the chip.
+  api.on('permission', (p) => { if (!p.quiet) { queue.push(p); render(); } });
   api.on('permission-cancel', ({ id }) => {
     const i = queue.findIndex((p) => p.id === id);
     if (i >= 0) { queue.splice(i, 1); render(); }
