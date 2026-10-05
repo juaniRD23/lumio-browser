@@ -25,6 +25,7 @@
 }
 .ss-tab[aria-selected="true"] .ss-badge { position: static; }
 .ss-close { margin-left: auto; }
+body:not(.side-other) .ss-close { visibility: hidden; } /* the chat's header has its own */
 /* Full-size chat is only the chat. */
 body.chat-full #side-switch { display: none; }
 

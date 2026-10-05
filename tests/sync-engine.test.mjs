@@ -278,3 +278,44 @@ test('with a server from before folders, bookmarks still sync as a list; folders
   assert.deepEqual(shape(a.store.marks.root('bar')), [['Work', ['Jira']]]);
   assert.equal(treeRecords(b.store), treeRecords(a.store));
 });
+
+test('the reading list and saved tab groups sync between computers, encrypted', async () => {
+  const { ReadingList } = require('../main/reading-list.js');
+  const { SavedGroups } = require('../main/saved-groups.js');
+  const { JsonFile } = require('../main/store.js');
+  const token = 'tok_' + 'd'.repeat(40);
+  sql.prepare("INSERT INTO users (id, google_sub, email, name, plan, created_at) VALUES ('u4', 'g-u4', 'ana@example.com', 'Ana', 'free', 0)").run();
+  sql.prepare('INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, 0, ?)').run(crypto.createHash('sha256').update(token).digest('hex'), 'u4', Date.now() + 864e5);
+  const acct = makeAccount(token, 'ana@example.com');
+  const make = (name) => {
+    const c = computer(name, [], { acct });
+    const dir = path.dirname(c.store.settingsFile.file);
+    c.reading = new ReadingList(new JsonFile(dir, 'reading-list.json', { items: [] }));
+    c.saved = new SavedGroups(new JsonFile(dir, 'saved-groups.json', { groups: [] }));
+    c.sync.addAdapters([adapters.readingList(c.reading), adapters.savedGroups(c.saved)]);
+    return c;
+  };
+  const a = make('MacBook');
+  const post = a.reading.add('https://essays.example/long-read', 'A long read');
+  const groupId = a.saved.save({ title: 'Kitchen remodel', color: 'orange', tabs: [{ url: 'https://tiles.example/', title: 'Tiles' }] });
+  await a.sync.tick();
+  assert.equal(a.sync.status, 'ready', a.sync.error);
+  const b = make('Studio');
+  await b.sync.tick();
+  await b.sync.useRecoveryKey(a.sync.recoveryKey());
+  await b.sync.tick();
+  assert.equal(b.sync.status, 'ready', b.sync.error);
+  assert.deepEqual(b.reading.list().map((x) => [x.url, x.read]), [['https://essays.example/long-read', false]]);
+  assert.deepEqual(b.saved.list().map((g) => [g.id, g.title, g.color, g.tabs[0].url]), [[groupId, 'Kitchen remodel', 'orange', 'https://tiles.example/']]);
+  // Read on one, it's read on the other; a group deleted on one goes on the other.
+  b.reading.setRead(post.id, true);
+  b.saved.remove(groupId);
+  await b.sync.tick();
+  await a.sync.tick();
+  assert.equal(a.reading.get(post.id).read, true);
+  assert.deepEqual(a.saved.list(), []);
+  const kinds = sql.prepare("SELECT DISTINCT collection FROM sync_items WHERE owner = 'u4'").all().map((r) => r.collection);
+  assert.ok(kinds.includes('readingList') && kinds.includes('savedGroups'));
+  const stored = sql.prepare("SELECT data FROM sync_items WHERE owner = 'u4' AND data IS NOT NULL").all().map((r) => Buffer.from(r.data, 'base64').toString('latin1')).join('\n');
+  for (const secret of ['essays', 'Kitchen', 'tiles']) assert.ok(!stored.includes(secret), `${secret} is encrypted`);
+});
