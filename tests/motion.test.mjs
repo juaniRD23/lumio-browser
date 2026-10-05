@@ -338,7 +338,7 @@ test('the address bar: icons open their own slot, the URL doesn’t move, and th
   const left = await page.$eval('#address', (el) => el.getBoundingClientRect().left);
   await slowMotion(page, 0.5);
   const zoom = sample(page, () => document.getElementById('zoom-badge').getBoundingClientRect().width, 300);
-  await page.evaluate(() => window.__emit('zoom', { level: 110 }));
+  await page.evaluate(() => window.__emit('zoom', { level: 110, zoomed: true }));
   const zw = await zoom;
   assert.ok(zw.some((w) => w > 1 && w < 40), `opens: ${zw.map(Math.round).join(',')}`);
   await slowMotion(page, 1);

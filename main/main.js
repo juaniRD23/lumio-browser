@@ -48,6 +48,17 @@ const pageDialogs = require('./page-dialogs');
 const { SyncEngine } = require('./sync/engine');
 const syncAdapters = require('./sync/adapters');
 const { CompanionBridge } = require('./sync/companion');
+const { Navigation, SAVE_FILTERS, saveType } = require('./navigation');
+const { startupPlan, STARTUP } = require('./startup');
+const { Sessions } = require('./sessions');
+const { Infobars } = require('./infobars');
+const defaultBrowser = require('./default-browser');
+const { TabStrip } = require('./tab-strip');
+const { TabSearch } = require('./tab-search');
+const { TabDrag } = require('./tab-drag');
+const { SiteMute } = require('./site-mute');
+const { OsIntegration } = require('./os-integration');
+const sadTab = require('./sad-tab');
 
 const IS_DEV = !app.isPackaged;
 
@@ -77,6 +88,7 @@ let siteTips = null; // how to get things done on sites (main/site-tips.js)
 let projects = null; // chat projects (main/projects.js)
 let sync = null; // Lumio Sync (main/sync)
 let companion = null; // the phone companion's link to this computer
+let siteMute = null; // Mute site (main/site-mute.js)
 let quitting = false;
 let launched = false; // the first windows are open: links and files from other apps open right away
 const windows = new Set();
@@ -126,6 +138,7 @@ function endIncognito() {
   const p = incog;
   incog = null;
   if (!p) return;
+  siteMute?.forgetIncognito();
   p.downloads.cancelAll(); // closing the last Incognito window asked first (confirmDownloads)
   p.session.clearStorageData().catch(() => {});
   p.session.clearCache().catch(() => {});
@@ -172,16 +185,16 @@ const services = {
     if (recentlyClosed.length > 25) recentlyClosed.shift();
     menuChanged();
   },
-  onSessionChanged: () => saveSession(),
+  onSessionChanged: () => saveSessionSoon(),
   // Closing a window may cancel downloads: what, and asking first.
   downloadsAtRisk: (holder) => downloadsAtRisk(holder),
   // A window stopped a quit to ask "Leave site?": the app keeps running.
   quitCancelled: () => { quitting = false; },
   confirmDownloads: (holder) => confirmDownloads(downloadsAtRisk(holder), holder.win),
-  onViewCreated: (w, tab) => { if (!w.incognito && tab.view) extensions?.addTab(tab.view.webContents, w.win); },
+  onViewCreated: (w, tab) => { navigation.onViewCreated(w, tab); tabStrip.onViewCreated(w, tab); if (!w.incognito && tab.view) extensions?.addTab(tab.view.webContents, w.win); },
   onPasskeyPromptClosed: (w) => passwords?.passkeyClosed(w),
   onScreenSharePickerClosed: (w) => shareCancel(w),
-  onTabActivated: (w, tab) => { if (!w.incognito && tab.view) extensions?.selectTab(tab.view.webContents); },
+  onTabActivated: (w, tab) => { navigation.onTabActivated(w); osIntegration.onTabActivated(tab); if (!w.incognito && tab.view) extensions?.selectTab(tab.view.webContents); },
   savePage: (w, tab) => savePage(w, tab),
   contextMenuExtras: (w, tab, params) => (w.incognito || !tab.view ? [] : extensions?.contextMenuItems(tab.view.webContents, params) || []),
   broadcastAIState: () => alive().forEach((w) => w.ai.emitState()),
@@ -240,6 +253,7 @@ function createWindow(opts = {}) {
   const incognito = !!opts.incognito;
   const w = new BrowserWin(services, incognito ? incognitoProfile() : normal, { ...opts, near: cur()?.win });
   windows.add(w);
+  navigation.onWindowCreated(w);
   lastFocused = w;
   if (opts.focus !== false) w.win.once('ready-to-show', () => w.focus());
   return w;
@@ -281,7 +295,15 @@ function runDueSchedules() {
 function saveSession() {
   if (quitting || !store) return;
   const list = alive().filter((w) => !w.incognito).map((w) => w.session()).filter((s) => s.tabs.length);
-  if (list.length) store.saveSession(list);
+  if (list.length) store.saveSession(list, sessions.pending());
+}
+// Tabs change all the time (loading, titles), and each save reads every tab's
+// back/forward history, so those changes are gathered into one save every
+// quarter second at most.
+let sessionTimer = null;
+function saveSessionSoon() {
+  if (sessionTimer) return;
+  sessionTimer = setTimeout(() => { sessionTimer = null; saveSession(); }, 250);
 }
 
 let menuTimer = null;
@@ -298,33 +320,44 @@ function menuState() {
       index: recentlyClosed.length - 1 - i,
       favicon: e.kind === 'tab' ? e.favicon || null : null,
       window: e.kind === 'window',
+      tabs: e.kind === 'window' ? e.tabs.map((t) => t.title || t.url) : null, // a closed window's tabs, each reopenable
     })),
   };
 }
 
-function reopenClosed(index = recentlyClosed.length - 1) {
-  const w = cur();
-  if (w?.incognito && index === recentlyClosed.length - 1) {
-    const e = w.closedTabs.pop();
-    if (e) w.tabs.create(e.url, { index: e.index, title: e.title, pinned: e.pinned });
+// Tabs and windows come back with their back/forward history (main/sessions.js).
+// index: an entry picked from a list (always that one); none: the last one
+// closed in window w (⇧⌘T; incognito windows keep their own).
+// tabIndex: just that tab of a closed window (History › Recently Closed).
+function reopenClosed(index = null, tabIndex = null, w = cur()) {
+  if (index == null) {
+    if (w?.incognito) {
+      const e = w.closedTabs.pop();
+      if (e) w.tabs.create(e.url, { index: e.index, title: e.title, pinned: e.pinned, history: e.history });
+      return;
+    }
+    index = recentlyClosed.length - 1;
+  }
+  const entry = recentlyClosed[index];
+  if (entry?.kind === 'window' && Number.isInteger(tabIndex) && entry.tabs.length > 1) {
+    const [t] = entry.tabs.splice(tabIndex, 1);
+    if (!t) return;
+    entry.active = Math.min(entry.active || 0, entry.tabs.length - 1);
+    menuChanged();
+    const target = normalWin();
+    if (!target) { createWindow({ tabs: [t], active: 0 }); return; }
+    target.tabs.create(t.url, { title: t.title, history: t.history });
+    target.focus();
     return;
   }
   const [e] = recentlyClosed.splice(index, 1);
   if (!e) return;
   menuChanged();
-  if (e.kind === 'window') { createWindow({ tabs: e.tabs, active: e.active, bounds: e.bounds }); return; }
-  const target = alive().find((x) => x.id === e.windowId) || normalWin();
-  if (!target) { createWindow({ urls: [e.url] }); return; }
-  target.tabs.create(e.url, { index: e.index, title: e.title, pinned: e.pinned });
+  if (e.kind === 'window') { createWindow({ tabs: e.tabs, active: e.active, bounds: e.bounds, maximized: !!e.maximized }); return; }
+  const target = alive().find((x) => x.id === e.windowId) || (w && !w.incognito && !w.closed ? w : normalWin());
+  if (!target) { createWindow({ tabs: [{ url: e.url, title: e.title, history: e.history }], active: 0 }); return; }
+  target.tabs.create(e.url, { index: e.index, title: e.title, pinned: e.pinned, history: e.history });
   target.focus();
-}
-
-function moveTabToNewWindow(w, id) {
-  if (w.tabs.tabs.length < 2) return;
-  const tab = w.tabs.detach(id);
-  if (!tab) return;
-  if (tab.view && !w.incognito) extensions?.removeTab(tab.view.webContents);
-  createWindow({ incognito: w.incognito, adopt: tab });
 }
 
 async function savePage(w, tab) {
@@ -333,11 +366,11 @@ async function savePage(w, tab) {
   const name = (tab.title || 'page').replace(/[/\\:*?"<>|]/g, '_').slice(0, 120);
   const { canceled, filePath } = await dialog.showSaveDialog(w.win, {
     defaultPath: path.join(app.getPath('downloads'), `${name}.html`),
-    filters: [{ name: 'Web Page, Complete', extensions: ['html'] }],
+    filters: SAVE_FILTERS,
   });
   if (canceled || !filePath) return;
   try {
-    await wc.savePage(filePath, 'HTMLComplete');
+    await wc.savePage(filePath, saveType(filePath));
     w.emit('toast', { text: 'Page saved' });
   } catch {
     w.emit('toast', { text: "Couldn't save this page" });
@@ -354,10 +387,11 @@ const cmd = {
   newTab: () => { const w = ensureWin(); w.tabs.create(NEWTAB); w.focus(); setTimeout(() => w.focusOmnibox(), 30); },
   newWindow: () => createWindow(),
   newIncognito: () => createWindow({ incognito: true }),
-  closeTab: () => { const p = focusedPopup(); const w = cur(); if (p) p.close(); else if (w) w.tabs.close(w.tabs.activeId); },
+  // In a focused pop-up window, that window; otherwise every selected tab, like Chrome.
+  closeTab: () => { const p = focusedPopup(); if (p) p.close(); else tabStrip.closeSelected(cur()); },
   closeWindow: () => pageWin()?.close(),
   reopenTab: () => reopenClosed(),
-  reopenClosed: (index) => reopenClosed(index),
+  reopenClosed: (index, tabIndex) => reopenClosed(index, tabIndex),
   focusOmnibox: () => cur()?.focusOmnibox(),
   // F6 / Shift+F6: the next or previous part of the window (renderer/ui/a11y.js).
   focusPane: (dir) => {
@@ -394,7 +428,8 @@ const cmd = {
   toggleBookmarksBar: () => setBookmarksBar(!store.settings.showBookmarksBar),
   setAppearance: (value) => store.setSetting('appearance', value),
   pinTab: () => { const w = cur(); const t = w?.tabs.active; if (t) w.tabs.setPinned(t.id, !t.pinned); },
-  moveTabToNewWindow: () => { const w = cur(); if (w?.tabs.active) moveTabToNewWindow(w, w.tabs.activeId); },
+  moveTabToNewWindow: () => { const w = cur(); if (w?.tabs.active) tabStrip.moveToNewWindow(w, [w.tabs.activeId]); },
+  tabSearch: () => cur()?.emit('tab-search'),
   cycle: (dir) => cur()?.tabs.cycle(dir),
   tabIndex: (n) => cur()?.tabs.activateIndex(n),
   makeDefault: () => makeDefaultBrowser(),
@@ -403,6 +438,34 @@ const cmd = {
   clearBrowsingData: () => openInternal('lumio://history/?clear=1'),
   quit: () => app.quit(),
 };
+
+// Back/forward menus, swipes, the link status bubble, zoom, Home, start pages… (main/navigation.js)
+const navigation = new Navigation({
+  get store() { return store; },
+  alive, cur, ensureWin, normalWin, tabOfWc,
+  createWindow: (opts) => createWindow(opts),
+  openInternal: (url) => openInternal(url),
+  bookmarksChanged: () => bookmarksChanged(),
+});
+Object.assign(cmd, navigation.commands());
+
+// The tab strip: its menus, several tabs at once, moving and dragging tabs
+// between windows, drops, tab search (main/tab-strip.js, tab-drag.js,
+// tab-search.js); bars over the page; sessions with each tab's history
+// (main/sessions.js); the Dock and taskbar (main/os-integration.js).
+const infobars = new Infobars();
+const sessions = new Sessions({ infobars, recentlyClosed, createWindow: (opts) => createWindow(opts), recentChanged: () => menuChanged() });
+const tabStrip = new TabStrip({
+  alive, recentlyClosed,
+  createWindow: (opts) => createWindow(opts),
+  reopenClosed: (w) => reopenClosed(null, null, w),
+  bookmarkAllTabs: (w) => navigation.bookmarkAllTabs(w),
+  removeExtensionTab: (wc) => extensions?.removeTab(wc),
+  get siteMute() { return siteMute; },
+});
+const tabSearch = new TabSearch({ alive, recentlyClosed, reopenClosed: (index) => reopenClosed(index) });
+const tabDrag = new TabDrag({ alive, cur, strip: tabStrip });
+const osIntegration = new OsIntegration({ cmd, alive });
 
 function openInternal(url) {
   // Browser pages open in a normal window, even from incognito.
@@ -699,7 +762,7 @@ async function clearData({ range = 0, what = [] } = {}) {
     normal.chats.clear();
   }
   if (what.includes('permissions')) normal.permissions.clear();
-  if (what.includes('closed')) { recentlyClosed.length = 0; menuChanged(); }
+  if (what.includes('closed')) { recentlyClosed.length = 0; sessions.forget(alive()); menuChanged(); saveSessionSoon(); }
   return true;
 }
 
@@ -816,7 +879,6 @@ function registerIpc() {
   on('tab:navigate', (w, input) => { w.hideOverlay(); w.tabs.navigate(input); });
   on('tab:bookmark', (w) => toggleBookmark(w));
   on('tab:focus-page', (w) => w.tabs.wc()?.focus());
-  on('tab:context', (w, id) => tabContextMenu(w, id));
   on('tab:hovercard', (w, msg) => (msg?.hide ? w.hideHoverCard({ now: !!msg.now }) : w.showHoverCard(msg)));
   on('window:new', () => createWindow());
   // The ⋮ menu, drawn by the overlay (main/window.js showMenu). edit: the
@@ -1080,7 +1142,7 @@ function registerIpc() {
     time: e.time,
     tabs: e.kind === 'window' ? e.tabs.map((t) => ({ title: t.title, url: t.url })) : undefined,
   })).reverse());
-  internalHandle('page:reopen-closed', ['history'], (_ctx, index) => reopenClosed(index));
+  internalHandle('page:reopen-closed', ['history'], (_ctx, index) => { if (Number.isInteger(index)) reopenClosed(index); });
   internalHandle('page:clear-data', ['history', 'settings', 'downloads'], (_ctx, opts) => clearData(opts));
 
   internalHandle('page:downloads', ['downloads'], ({ w }) => w.profile.downloads.all());
@@ -1200,7 +1262,7 @@ function registerIpc() {
     if (key === 'reasoning') w.ai.setReasoning(value);
     if (key === 'showBookmarksBar') setBookmarksBar(!!value);
     if (key === 'appearance' && theme.APPEARANCES.includes(value)) store.setSetting('appearance', value);
-    if (key === 'startup' && ['restore', 'newtab'].includes(value)) store.setSetting('startup', value);
+    if (key === 'startup' && STARTUP.includes(value)) store.setSetting('startup', value);
     if (key === 'askDownload') store.setSetting('askDownload', !!value);
     if (key === 'offerPasswords') store.setSetting('offerPasswords', !!value);
     if (key === 'autofillPasswords') store.setSetting('autofillPasswords', !!value);
@@ -1297,6 +1359,15 @@ function registerIpc() {
     w.emit('panel-open');
     return true;
   });
+
+  navigation.register({ handle, on, internalHandle });
+  infobars.register({ handle, on });
+  tabStrip.register({ on, internalHandle });
+  tabSearch.register({ handle, on });
+  tabDrag.register({ on });
+  osIntegration.register({ on });
+  defaultBrowser.register({ internalHandle, store, infobars, alive });
+  sadTab.register({ internalHandle });
 }
 
 function siteInfo(w) {
@@ -1329,29 +1400,6 @@ async function exportBookmarks(w) {
   const rows = store.bookmarks().map((b) => `    <DT><A HREF="${esc(b.url)}" ADD_DATE="${Math.round((b.time || Date.now()) / 1000)}">${esc(b.title)}</A>`).join('\n');
   fs.writeFileSync(filePath, `<!DOCTYPE NETSCAPE-Bookmark-file-1>\n<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">\n<TITLE>Bookmarks</TITLE>\n<H1>Bookmarks</H1>\n<DL><p>\n${rows}\n</DL><p>\n`);
   return true;
-}
-
-function tabContextMenu(w, id) {
-  const tab = w.tabs.get(id);
-  if (!tab) return;
-  const tabs = w.tabs;
-  const i = tabs.tabs.indexOf(tab);
-  const closedCount = w.incognito ? w.closedTabs.length : recentlyClosed.length;
-  Menu.buildFromTemplate([
-    { label: 'New Tab to the Right', click: () => tabs.create(NEWTAB, { index: i + 1 }) },
-    { type: 'separator' },
-    { label: 'Reload', click: () => { tabs.activate(id); tabs.reload(); } },
-    { label: 'Duplicate', click: () => tabs.create(tabs.displayUrl(tab) || NEWTAB, { index: i + 1 }) },
-    { label: tab.pinned ? 'Unpin Tab' : 'Pin Tab', click: () => tabs.setPinned(id, !tab.pinned) },
-    { label: tab.muted ? 'Unmute Site' : 'Mute Site', click: () => tabs.toggleMute(id) },
-    { label: 'Move Tab to New Window', enabled: tabs.tabs.length > 1, click: () => moveTabToNewWindow(w, id) },
-    { type: 'separator' },
-    { label: 'Close Tab', click: () => tabs.close(id) },
-    { label: 'Close Other Tabs', enabled: tabs.tabs.length > 1, click: () => tabs.tabs.filter((t) => t.id !== id && !t.pinned).forEach((t) => tabs.close(t.id)) },
-    { label: 'Close Tabs to the Right', enabled: i < tabs.tabs.length - 1, click: () => tabs.tabs.slice(i + 1).forEach((t) => tabs.close(t.id)) },
-    { type: 'separator' },
-    { label: 'Reopen Closed Tab', enabled: closedCount > 0, click: () => reopenClosed() },
-  ]).popup({ window: w.win });
 }
 
 function bookmarkContextMenu(w, url) {
@@ -1529,6 +1577,7 @@ app.whenReady().then(async () => {
   require('electron').powerMonitor.on('shutdown', () => { quitAsked = true; });
   store = new Store(app.getPath('userData'), safeStorage);
   store.onBookmarkIcons = () => bookmarksChanged();
+  siteMute = new SiteMute(store);
   // Light or dark, before any window opens; changes then apply live.
   theme.init({ store, nativeTheme });
   theme.onChange(appearanceChanged);
@@ -1705,15 +1754,27 @@ app.whenReady().then(async () => {
   registerIpc();
   Menu.setApplicationMenu(buildMenu(cmd, menuState()));
 
-  const saved = store.settings.startup === 'newtab' ? [] : store.sessionWindows();
+  // Settings › On startup; after a crash, nothing reopens by itself (main/sessions.js).
+  const lastSession = store.sessionWindows();
+  const plan = sessions.begin(startupPlan(store.settings, () => lastSession), lastSession, app.getPath('userData'), store.earlierWindows());
+  const saved = plan.windows;
+  if (plan.recent.length) menuChanged(); // the last session, under History › Recently Closed
   // First launch: the welcome screens (people updating from an older version
   // already have history, bookmarks or tabs, and skip them).
-  if (store.settings.onboarded !== true && (saved.length || store.history().length || store.bookmarks().length)) store.setSetting('onboarded', true);
-  if (store.settings.onboarded !== true && (!process.env.LUMIO_TEST || process.env.LUMIO_TEST_WELCOME)) {
+  if (store.settings.onboarded !== true && (lastSession.length || store.history().length || store.bookmarks().length)) store.setSetting('onboarded', true);
+  const firstRun = store.settings.onboarded !== true;
+  if (firstRun && (!process.env.LUMIO_TEST || process.env.LUMIO_TEST_WELCOME)) {
     store.setSetting('panelOpen', false);
     createWindow({ tabs: [{ url: 'lumio://welcome/', title: 'Welcome to Lumio Browser' }], active: 0 });
-  } else if (saved.length) saved.forEach((s) => createWindow({ tabs: s.tabs, active: s.active, bounds: s.bounds }));
-  else createWindow();
+  } else if (saved.length) saved.forEach((s) => createWindow({ tabs: s.tabs, active: s.active, bounds: s.bounds, maximized: !!s.maximized }));
+  else createWindow({ urls: plan.urls });
+  // "Restore pages?" after a crash, and "Lumio isn't your default browser".
+  sessions.offerRestore(cur());
+  const offerDefault = defaultBrowser.shouldOffer(store.settings, {
+    isDefault: app.isDefaultProtocolClient('https'), packaged: app.isPackaged, test: !!process.env.LUMIO_TEST, firstRun,
+  });
+  if (offerDefault && cur()) defaultBrowser.offerDefaultBrowser(cur(), { store, infobars, makeDefault: () => makeDefaultBrowser() });
+  osIntegration.start();
   // Windows passes links to open on the command line.
   if (process.platform !== 'darwin' && !process.env.LUMIO_TEST) pendingUrls.push(...launchTargets(process.argv.slice(1)));
   if (process.platform === 'win32' && app.isPackaged && !process.windowsStore) startMenuShortcut();
@@ -1810,6 +1871,9 @@ app.on('before-quit', (e) => {
   store?.flushAll();
 });
 
+// Quitting for real (nothing stopped it): next launch reopens normally.
+app.on('will-quit', () => sessions.end());
+
 // Composite screenshot of a window (browser UI + active page) for tests.
 async function snapshot(w = cur()) {
   if (!w) return null;
@@ -1840,6 +1904,7 @@ async function snapshot(w = cur()) {
   if (tabs.active?.view) await paste(tabs.active.view);
   const bar = w.indicator?.bar;
   if (bar && win.contentView.children.includes(bar)) await paste(bar);
+  for (const v of Object.values(w.hud?.views || {})) if (win.contentView.children.includes(v) && v.getVisible()) await paste(v);
   if (win.contentView.children.includes(overlay)) await paste(overlay);
   return nativeImage.createFromBitmap(out, { width: W, height: H }).toPNG().toString('base64');
 }
@@ -1864,6 +1929,14 @@ global.lumio = {
   get profiles() { return { normal, incognito: incog }; },
   get recentlyClosed() { return recentlyClosed; },
   certErrors,
+  get nav() { return navigation; },
+  get tabStrip() { return tabStrip; },
+  get tabSearch() { return tabSearch; },
+  get tabDrag() { return tabDrag; },
+  get sessions() { return sessions; },
+  get infobars() { return infobars; },
+  get siteMute() { return siteMute; },
+  get osIntegration() { return osIntegration; },
   screenAura,
   set answerDownloads(fn) { answerDownloads = fn; },
   get updater() { return updater; },

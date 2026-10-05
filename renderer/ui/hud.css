@@ -1,0 +1,44 @@
+@import url('/assets/fonts/fonts.css');
+@import url('/assets/theme.css'); /* colors and type */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+body { font: 12px/1 var(--font); color: var(--text); -webkit-font-smoothing: antialiased; user-select: none; cursor: default; }
+body:not(.status) #bubble, body:not(.swipe) #arrow { display: none; }
+
+/* ---------------------------------------------------------------- status bubble */
+/* It sits in the page's bottom corner, so that corner follows the page's
+   rounding; the room above and beside it is for the shadow. */
+body.status { display: flex; align-items: flex-end; justify-content: flex-start; padding: 6px 6px 0 0; }
+body.status[data-side="right"] { justify-content: flex-end; padding: 6px 0 0 6px; }
+#bubble {
+  flex: none; display: flex; align-items: center; height: 24px; padding: 0 9px;
+  background: var(--field); color: var(--text);
+  border: 1px solid var(--line-strong); border-width: 1px 1px 0 0; border-radius: 0 8px 0 10px;
+  box-shadow: var(--shadow-sm);
+  opacity: 0; transition: opacity .2s ease;
+}
+body[data-side="right"] #bubble { border-width: 1px 0 0 1px; border-radius: 8px 0 10px 0; }
+body.on #bubble { opacity: 1; transition-duration: .12s; }
+#bubble .t { white-space: pre; overflow: hidden; text-overflow: ellipsis; max-width: var(--max, none); }
+
+/* ---------------------------------------------------------------- swipe arrow */
+/* --p is how far the swipe has gone (0 to 1): the arrow slides in from the
+   page's edge, and fills with the accent once letting go would go there. */
+body.swipe { --p: 0; }
+#arrow {
+  position: absolute; top: 14px; left: 0; width: 44px; height: 44px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--popover); color: var(--text); border: 1px solid var(--line-strong); box-shadow: var(--shadow-sm);
+  transform: translateX(calc(-46px + var(--p) * 60px)) scale(calc(.8 + var(--p) * .2));
+  opacity: 0; transition: opacity .15s ease, transform .18s var(--ease), background .12s ease, color .12s ease;
+}
+body[data-dir="forward"] #arrow { left: auto; right: 0; transform: translateX(calc(46px - var(--p) * 60px)) scale(calc(.8 + var(--p) * .2)) rotate(180deg); }
+body.on #arrow { opacity: calc(.35 + var(--p) * .65); transition: opacity .05s linear, transform .05s linear, background .12s ease, color .12s ease; }
+body.ready #arrow { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+body.done #arrow { opacity: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  #bubble, body.on #bubble, #arrow, body.on #arrow { transition: none; }
+  #arrow, body[data-dir="forward"] #arrow { transform: none; left: 14px; }
+  body[data-dir="forward"] #arrow { left: auto; right: 14px; transform: rotate(180deg); }
+}

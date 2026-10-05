@@ -31,6 +31,7 @@ function fakePage(url) {
   Object.assign(wc, {
     url, destroyed: false, scripts: [],
     getURL: () => wc.url,
+    getZoomFactor: () => 1,
     getTitle: () => 'Page',
     isDestroyed: () => wc.destroyed,
     isCrashed: () => false,

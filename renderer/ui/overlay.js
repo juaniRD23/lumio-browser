@@ -5,6 +5,8 @@ import { icons, markSvg, avatarHtml } from './icons.js';
 import { setAccent } from '/assets/theme-colors.js';
 import { animate } from './motion.js';
 import '/assets/ui-prefs.js';
+import { renderZoom, initZoom } from './overlay-zoom.js';
+import { renderTabSearch, initTabSearch } from './overlay-tabsearch.js';
 
 const api = window.lumio;
 const card = document.getElementById('card');
@@ -612,6 +614,7 @@ document.addEventListener('keydown', (e) => {
 const RENDER = {
   suggest: renderSuggest, downloads: renderDownloads, siteinfo: renderSiteInfo, account: renderAccount, autofill: renderAutofill,
   pwsave: renderPwSave, passkey: renderPasskey, update: renderUpdateCard, screenshare: renderScreenShare, popups: renderPopups, hovercard: renderHoverCard, menu: renderMenu,
+  zoom: (p) => renderZoom(card, p), tabsearch: (p) => renderTabSearch(card, p),
 };
 // These keep the size main gives them; the rest are as tall as what's in them.
 const FIXED = new Set(['suggest', 'downloads', 'screenshare', 'menu']);
@@ -751,6 +754,8 @@ card.addEventListener('click', (e) => {
 document.addEventListener('keydown', (e) => {
   if (kind === 'popups' && e.key === 'Escape') { e.preventDefault(); api.send('overlay:pick', { kind }); }
 });
+initZoom(card, api, () => kind);
+initTabSearch(card, api, () => kind);
 
 card.addEventListener('change', (e) => {
   const sel = e.target.closest('select[data-perm]');
@@ -760,6 +765,7 @@ card.addEventListener('change', (e) => {
 
 card.addEventListener('mousedown', async (e) => {
   if (kind === 'popups') return; // its buttons and choices work like normal ones (see above)
+  if (kind === 'tabsearch') return; // overlay-tabsearch.js has its own
   if (kind === 'screenshare') {
     const tile = e.target.closest('[data-src]');
     if (tile) {

@@ -20,6 +20,16 @@ document.getElementById('title').textContent = TITLES[code] || "This page couldn
 document.title = TITLES[code] || "Can't open this page";
 document.getElementById('url').textContent = url;
 document.getElementById('code').textContent = code === 'crashed' ? `(${desc})` : desc;
-document.getElementById('retry').addEventListener('click', () => {
+// A crashed tab (Chrome's sad tab): a sad face, and Reload goes back to the
+// page that crashed, in its place in the tab's history (main/sad-tab.js).
+const crashed = code === 'crashed';
+if (crashed) {
+  document.getElementById('sad').hidden = false;
+  document.getElementById('plain').hidden = true;
+  document.getElementById('why').hidden = false;
+  document.getElementById('retry').textContent = 'Reload';
+}
+document.getElementById('retry').addEventListener('click', async () => {
+  if (crashed && await window.lumioPage.invoke('page:reload-crashed').catch(() => false)) return;
   if (url) window.lumioPage.invoke('page:navigate', url);
 });

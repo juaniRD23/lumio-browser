@@ -1,0 +1,41 @@
+/* Search tabs (overlay-tabsearch.js): a search box over the open tabs and the
+   recently closed ones. The list scrolls; the box stays put. */
+.ts { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.ts-search {
+  flex: none; display: flex; align-items: center; gap: 8px;
+  height: 40px; margin-bottom: 6px; padding: 0 12px; border-radius: 10px;
+  background: var(--field);
+}
+.ts-search:focus-within { box-shadow: inset 0 0 0 1.5px var(--focus-ring); }
+.ts-ic { display: grid; color: var(--muted); }
+#ts-input {
+  flex: 1; min-width: 0; height: 100%; padding: 0;
+  border: 0; outline: none; background: none;
+  font: inherit; font-size: 13.5px; color: var(--text); user-select: text;
+}
+#ts-input::placeholder { color: var(--label); }
+.ts-list { flex: 1; min-height: 0; overflow-y: auto; }
+.ts-head {
+  display: flex; align-items: center; gap: 6px; padding: 8px 10px 4px;
+  color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px;
+}
+.ts-head span { font-weight: 500; }
+.ts-row { display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 8px 0 10px; border-radius: 10px; }
+.ts-row.sel { background: var(--overlay-3); }
+.ts-fav { width: 18px; height: 18px; flex: none; display: grid; place-items: center; border-radius: 4px; overflow: hidden; color: var(--muted); }
+.ts-fav img { width: 16px; height: 16px; }
+.ts-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ts-title, .ts-host { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ts-title { color: var(--text); }
+.ts-host { color: var(--muted); font-size: 11.5px; } /* --label is too faint on the dark list */
+/* The letters you typed, in bold (like Chrome's). */
+.ts-text mark { background: none; color: inherit; font-weight: 650; }
+.ts-audio { flex: none; display: grid; color: var(--muted); }
+.ts-x {
+  flex: none; display: grid; place-items: center; width: 26px; height: 26px;
+  border: 0; border-radius: 7px; background: none; color: var(--muted); opacity: 0;
+}
+.ts-row.sel .ts-x, .ts-row:hover .ts-x, .ts-x:focus-visible { opacity: 1; }
+.ts-x:hover { background: var(--active); color: var(--text-strong); }
+.ts-x:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.ts-empty { padding: 18px 10px; color: var(--muted); text-align: center; }

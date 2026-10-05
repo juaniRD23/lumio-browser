@@ -11,6 +11,9 @@ const { SEARCH_ENGINES } = require('./store');
 const theme = require('./theme');
 const certErrors = require('./cert-errors');
 const { classify, originOf } = require('./external-protocols');
+const zoomPrefs = require('./zoom');
+const sessions = require('./sessions');
+const sadTab = require('./sad-tab');
 
 const NEWTAB = 'lumio://newtab/';
 const INTERNAL_PRELOAD = path.join(__dirname, '..', 'preload', 'internal.js');
@@ -80,7 +83,9 @@ class TabManager {
   // webContents: a page Chromium already made (a pop-up's), shown as it is.
   // Its address shows once it gets there: until then it's the blank page the
   // page that opened it may still be writing into, so it says about:blank.
-  create(url = NEWTAB, { active = true, index, title, lazy = false, pinned = false, webContents = null } = {}) {
+  // history: back/forward pages to bring back (main/sessions.js), from a
+  // saved session, a closed tab or the tab it duplicates.
+  create(url = NEWTAB, { active = true, index, title, lazy = false, pinned = false, webContents = null, history = null } = {}) {
     if (webContents) url = 'about:blank';
     const tab = {
       id: nextId++,
@@ -97,12 +102,14 @@ class TabManager {
       crashed: false,
       pinned: !!pinned,
       pendingUrl: lazy ? url : null,
+      savedHistory: history ? sessions.trimHistory(history.entries, history.index) : null,
       lastActive: Date.now(),
       madeContents: webContents,
     };
     if (!lazy) this.ensureView(tab);
     this.insert(tab, index);
-    if (active || !this.activeId) this.activate(tab.id);
+    // A restored tab that waits (lazy) isn't shown just for being first: restore() picks the one to show.
+    if (active || (!this.activeId && !lazy)) this.activate(tab.id);
     this.changed();
     return tab;
   }
@@ -136,7 +143,13 @@ class TabManager {
     tab.savedHistory = null;
     tab.discarded = false;
     if (saved?.entries?.length) {
-      view.webContents.navigationHistory.restore(saved).catch(() => view.webContents.loadURL(url).catch(() => {}));
+      // If the history didn't take, the address alone. (A page that just
+      // failed to load keeps its history: its error page shows.)
+      const fallback = () => {
+        const wc = view.webContents;
+        if (!wc.isDestroyed() && !wc.navigationHistory.length()) wc.loadURL(url).catch(() => {});
+      };
+      try { view.webContents.navigationHistory.restore(saved).catch(fallback); } catch { fallback(); }
     } else {
       view.webContents.loadURL(url).catch(() => {});
     }
@@ -229,7 +242,7 @@ class TabManager {
     wc.on('input-event', used);
     wc.on('before-input-event', used);
 
-    wc.on('did-start-loading', () => update({ loading: true, crashed: false }));
+    wc.on('did-start-loading', () => update({ loading: true }));
     wc.on('did-stop-loading', () => update({ loading: false, ...M().navState(wc) }));
     // PDFs open in Chromium's viewer: the panel offers "Summarize this PDF"
     // and reads the file itself (page text tools see only the viewer).
@@ -240,6 +253,7 @@ class TabManager {
         .catch(() => {});
     });
     wc.on('page-title-updated', (_e, title) => {
+      if (tab.crashed) return; // a crashed tab keeps the title of the page that crashed
       update({ title });
       remember((s) => s.updateTitle(wc.getURL(), title));
     });
@@ -256,7 +270,7 @@ class TabManager {
       tab.dialogStreak = null;
       tab.dialogsBlocked = null;
       tab.view.setBackgroundColor(M().pageBackground(url));
-      update({ url, favicon: null, ...M().navState(wc) });
+      update({ url, favicon: null, crashed: sessions.isCrashPage(url), ...M().navState(wc) });
       remember((s) => s.addVisit(url, wc.getTitle()));
     });
     wc.on('did-navigate-in-page', (_e, url, isMainFrame) => {
@@ -280,8 +294,8 @@ class TabManager {
       const leave = tab.dialogs?.some((d) => d.spec.kind === 'leave' && d.spec.about !== 'close');
       M().dismiss(tab, leave ? ['js', 'unresponsive', 'leave'] : ['js', 'unresponsive']);
       if (details.reason === 'clean-exit') return;
-      const failed = M().displayUrl(tab);
-      update({ loading: false });
+      const failed = M().displayUrl(tab) || tab.url || ''; // the New Tab page shows no address, but Reload needs one
+      update({ loading: false, crashed: true });
       // "Exit page" in "Page unresponsive" stopped it on purpose.
       const q = new URLSearchParams(tab.exited ? { code: 'hung', desc: '', url: failed } : { code: 'crashed', desc: details.reason, url: failed });
       tab.exited = false;
@@ -644,7 +658,8 @@ class TabManager {
     const wc = tab.view?.webContents;
     const live = !!wc && !wc.isDestroyed();
     const url = tab.pendingUrl || (live ? wc.getURL() : tab.url);
-    if (url && url !== NEWTAB) this.hooks.onTabClosed?.(this, { url, title: tab.title, favicon: tab.favicon, index: i, pinned: tab.pinned });
+    const history = sessions.historyOf(tab);
+    if (url && url !== NEWTAB) this.hooks.onTabClosed?.(this, { url: sessions.realUrl(url) || url, title: tab.title, favicon: tab.favicon, index: i, pinned: tab.pinned, ...(history ? { history } : {}) });
     if (tab.view) {
       this.win.contentView.removeChildView(tab.view);
       if (live) wc.close();
@@ -870,6 +885,9 @@ class TabManager {
   }
   reload(hard = false, id = this.activeId) {
     const wc = this.wc(id);
+    // A crashed tab reloads the page that crashed, like Chrome, not the sad-tab page.
+    const tab = this.get(id);
+    if (tab?.crashed && sadTab.reloadCrashed({ tabs: this }, tab)) return;
     if (wc) this.leaveBy(this.get(id), 'reload', () => (hard ? wc.reloadIgnoringCache() : wc.reload()));
   }
 
@@ -892,18 +910,33 @@ class TabManager {
   safeFallback(tab) { tab.view.webContents.loadURL(NEWTAB).catch(() => {}); }
   stop() { this.wc()?.stop(); }
 
+  // Chrome's zoom steps; 0 goes back to the default (Settings › Appearance).
+  // Chromium gives every tab of the site the new level; outside incognito
+  // it's also kept for next time (main/zoom.js).
   zoom(step, id = this.activeId) {
     const wc = this.wc(id);
     if (!wc) return;
-    const level = step === 0 ? 0 : Math.max(-4, Math.min(5, wc.getZoomLevel() + step * 0.5));
-    wc.setZoomLevel(level);
-    this.emit('zoom', { level: Math.round(Math.pow(1.2, level) * 100) });
+    const def = zoomPrefs.defaultZoom(this.store.settings);
+    const percent = zoomPrefs.stepZoom(zoomPrefs.percentOf(wc.getZoomFactor()), step, def);
+    wc.setZoomFactor(zoomPrefs.factorOf(percent));
+    if (!this.incognito) zoomPrefs.rememberZoom(this.store, wc.getURL(), percent);
+    this.emit('zoom', { level: percent, zoomed: percent !== def });
+    this.changed();
+  }
+
+  // The zoom the address bar shows for a tab: only when it isn't the default.
+  zoomShown(t) {
+    const wc = t.view?.webContents;
+    if (!wc || wc.isDestroyed()) return null;
+    const percent = zoomPrefs.percentOf(wc.getZoomFactor());
+    return percent === zoomPrefs.defaultZoom(this.store.settings) ? null : percent;
   }
 
   toggleMute(id) {
     const tab = this.get(id);
     if (!tab?.view) return;
     tab.muted = !tab.muted;
+    tab.muteReason = tab.muted ? 'tab' : null; // the speaker mutes this tab, not its site (main/site-mute.js)
     tab.view.webContents.setAudioMuted(tab.muted);
     this.changed();
   }
@@ -1005,6 +1038,7 @@ class TabManager {
         agent: t.agent || null,
         crashed: t.crashed,
         pinned: t.pinned,
+        zoom: this.zoomShown(t),
         bookmarked: this.store.isBookmarked(this.displayUrl(t)),
         popupsBlocked: t.blockedPopups?.length || 0,
         // A certificate warning, or a site you went past one for: "Not secure" in red.
@@ -1013,11 +1047,15 @@ class TabManager {
     };
   }
 
-  // What the session file keeps for this window.
-  sessionTabs() {
+  // What the session file keeps for this window. A tab on an error page is
+  // kept as the page that failed. history: with each tab's back/forward pages.
+  sessionTabs({ history = false } = {}) {
     return this.tabs
-      .map((t) => ({ url: t.pendingUrl || t.url, title: t.title, ...(t.pinned ? { pinned: true } : {}) }))
-      .filter((t) => t.url && !t.url.startsWith('lumio://error'));
+      .map((t) => {
+        const h = history ? sessions.historyOf(t) : null;
+        return { url: sessions.realUrl(t.pendingUrl || t.url), title: t.title, ...(t.pinned ? { pinned: true } : {}), ...(h ? { history: h } : {}) };
+      })
+      .filter((t) => t.url);
   }
 
   changed() {
@@ -1031,8 +1069,9 @@ class TabManager {
 
   restore(list = [], active = 0) {
     if (!list.length) return false;
-    list.forEach((t, i) => this.create(t.url, { active: false, lazy: i !== active, title: t.title, pinned: !!t.pinned }));
-    const target = this.tabs[Math.min(active, this.tabs.length - 1)];
+    // The tab to show is one of these (the window may already have others).
+    const made = list.map((t, i) => this.create(t.url, { active: false, lazy: i !== active, title: t.title, pinned: !!t.pinned, history: t.history }));
+    const target = made[Math.min(active, made.length - 1)];
     if (target) this.activate(target.id);
     return true;
   }

@@ -42,7 +42,7 @@ let nextTab = 100; // tab ids are unique across windows, as in the app
 // A tab's page: where the keyboard is, and where it's drawn.
 function pageView(url) {
   const wc = new EventEmitter();
-  Object.assign(wc, { url, focused: false, getURL: () => url, isDestroyed: () => false, focus: () => { wc.focused = true; } });
+  Object.assign(wc, { url, focused: false, getURL: () => url, getZoomFactor: () => 1, isDestroyed: () => false, focus: () => { wc.focused = true; } });
   return { webContents: wc, bounds: null, setVisible() {}, setBounds(b) { this.bounds = b; }, getBounds() { return this.bounds; }, setBorderRadius() {}, setBackgroundColor() {} };
 }
 

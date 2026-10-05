@@ -297,7 +297,7 @@ test('closing the last tab closes the window instead when that needs asking, so 
 test('Help, in the menu bar and the ⋮ menu: Terms of Service, Privacy Policy, open-source licenses', () => {
   const cmd = new Proxy({}, { get: (_t, name) => (name === 'isDev' ? false : name) }); // each command is its own name
   const help = buildMenu(cmd).find((m) => m.role === 'help');
-  assert.deepEqual(help.submenu.map((i) => [i.label, i.click]), [['Terms of Service', 'terms'], ['Privacy Policy', 'privacy'], ['Open-Source Licenses', 'credits']]);
+  assert.deepEqual(help.submenu.filter((i) => i.label).map((i) => [i.label, i.click]), [['Lumio Browser Help', 'help'], ['Terms of Service', 'terms'], ['Privacy Policy', 'privacy'], ['Open-Source Licenses', 'credits']]);
   const dots = buildBrowserMenu(cmd);
   const sub = dots.find((i) => i.label === 'Help').submenu.filter((i) => i.label && typeof i.run === 'string');
   assert.deepEqual(sub.map((i) => [i.label, i.run]), [['About Lumio Browser', 'about'], ['Terms of Service', 'terms'], ['Privacy Policy', 'privacy'], ['Open-source licenses', 'credits']]);

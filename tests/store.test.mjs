@@ -140,3 +140,19 @@ test('Chrome timestamps and chrome:// addresses', () => {
   assert.equal(parseInput('chrome-extension://abcdefghijklmnopabcdefghijklmnop/options.html').url, 'chrome-extension://abcdefghijklmnopabcdefghijklmnop/options.html');
   assert.equal(parseInput('chrome://flags').isSearch, true);
 });
+
+test('a file that keeps changing is still written, at least every 2 s', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lumio-store-wait-'));
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const store = new Store(dir);
+  const file = path.join(dir, 'session.json');
+  const written = () => (fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')).windows?.length : 0);
+  // A change every 250 ms (a ticking title) would otherwise push the write back forever.
+  for (let i = 1; i <= 12; i++) {
+    store.saveSession(Array.from({ length: i }, () => ({ tabs: [{ url: 'https://a.example/' }] })));
+    t.mock.timers.tick(250);
+  }
+  assert.ok(written() >= 8, `written while changes kept coming (${written()})`);
+  t.mock.timers.reset();
+  fs.rmSync(dir, { recursive: true, force: true });
+});

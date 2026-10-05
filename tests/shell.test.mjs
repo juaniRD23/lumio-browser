@@ -507,3 +507,107 @@ test('the address bar shows "Pop-up blocked" when the page’s pop-ups were bloc
   await page.close();
   assert.deepEqual(errors, []);
 });
+
+test('toolbar: history menus, new-tab clicks, Home, the mouse’s buttons, the zoom badge and a find bar per tab', { skip: !CHROME && 'Google Chrome not installed' }, async () => {
+  const { page, errors } = await openShell(browser);
+  const sent = (channel) => page.evaluate((c) => window.__sent.filter(([x]) => x === c).map(([, p]) => p), channel);
+  const POLL = { polling: 50 };
+  const tabs = (activeId, extra = {}) => page.evaluate(([id, more]) => window.__emit('tabs', { activeId: id, tabs: [
+    { id: 1, title: 'YouTube', url: 'https://www.youtube.com/watch?v=abc', canGoBack: true, canGoForward: true, ...more[1] },
+    { id: 2, title: 'News', url: 'https://news.example/', canGoBack: true, canGoForward: false, ...more[2] },
+  ] }), [activeId, extra]);
+  await tabs(1);
+
+  // Right-click Back: this tab's history, just under the button.
+  await page.click('#back', { button: 'right' });
+  const back = await page.evaluate(() => document.getElementById('back').getBoundingClientRect().toJSON());
+  const [menu] = await sent('tab:history-menu');
+  assert.equal(menu.dir, 'back');
+  assert.ok(menu.x === back.left && menu.y >= back.bottom, JSON.stringify(menu));
+  // Holding Forward down opens its menu; letting go doesn't also go forward.
+  const f = await page.$eval('#forward', (el) => el.getBoundingClientRect().toJSON());
+  await page.mouse.move(f.left + 8, f.top + 8);
+  await page.mouse.down();
+  await page.waitForFunction(() => window.__sent.some(([c, p]) => c === 'tab:history-menu' && p.dir === 'forward'), null, { ...POLL, timeout: 15_000 });
+  await page.mouse.up();
+  assert.deepEqual(await sent('tab:forward'), []);
+  // Middle-click and ⌘/Ctrl-click open in a new tab; Shift-click in a new window; a plain click goes back.
+  const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
+  await page.click('#back', { button: 'middle' });
+  await page.click('#reload', { modifiers: [mod] });
+  await page.click('#forward', { modifiers: [mod, 'Shift'] });
+  await page.click('#back', { modifiers: ['Shift'] });
+  assert.deepEqual(await sent('tab:nav-new'), [
+    { which: 'back', disposition: 'background' },
+    { which: 'reload', disposition: 'background' },
+    { which: 'forward', disposition: 'foreground' },
+    { which: 'back', disposition: 'window' },
+  ]);
+  assert.deepEqual([await sent('tab:back'), await sent('tab:reload')], [[], []], 'not also in this tab');
+  await page.click('#back');
+  assert.equal((await sent('tab:back')).length, 1);
+  // The mouse's own back and forward buttons, over the browser's UI (on Linux Electron does it).
+  if (process.platform !== 'linux') {
+    await page.evaluate(() => {
+      document.getElementById('toolbar').dispatchEvent(new MouseEvent('mouseup', { button: 3, bubbles: true }));
+      document.getElementById('tabs').dispatchEvent(new MouseEvent('mouseup', { button: 4, bubbles: true }));
+    });
+    assert.equal((await sent('tab:back')).length, 2);
+    assert.equal((await sent('tab:forward')).length, 1);
+  }
+
+  // Home: off by default; Settings turns it on, next to Reload.
+  assert.equal(await page.isVisible('#home'), false);
+  await page.evaluate(() => window.__emit('nav-prefs', { showHome: true, homeUrl: 'lumio://newtab/' }));
+  assert.equal(await page.evaluate(() => document.getElementById('reload').nextElementSibling.id), 'home');
+  await page.click('#home');
+  await page.click('#home', { button: 'middle' });
+  assert.deepEqual(await sent('tab:home'), [{ disposition: 'current' }, { disposition: 'background' }]);
+
+  // The zoom badge follows the tab you're on.
+  await tabs(1, { 1: { zoom: 125 } });
+  assert.equal(await page.textContent('#zoom-badge'), '125%');
+  await tabs(2, { 1: { zoom: 125 } });
+  assert.equal(await page.isVisible('#zoom-badge'), false);
+  // Zooming shows the bubble for a moment; clicking the badge keeps it open.
+  await page.evaluate(() => window.__emit('zoom', { level: 110, zoomed: true }));
+  assert.equal(await page.textContent('#zoom-badge'), '110%');
+  let shown = (await sent('overlay:show')).at(-1);
+  assert.deepEqual([shown.payload.kind, shown.payload.percent, shown.payload.auto], ['zoom', 110, true]);
+  const badge = await page.$eval('#zoom-badge', (el) => el.getBoundingClientRect().toJSON());
+  assert.ok(shown.rect.y > badge.bottom && shown.rect.x + shown.rect.width > badge.right, 'under the badge');
+  await page.evaluate(() => window.__emit('overlay-picked', { kind: 'zoom' })); // it closed itself
+  await tabs(2, { 2: { zoom: 110 } });
+  await page.click('#zoom-badge');
+  shown = (await sent('overlay:show')).at(-1);
+  assert.deepEqual([shown.payload.kind, shown.payload.auto], ['zoom', false]);
+  await page.click('#zoom-badge');
+  assert.equal((await sent('overlay:hide')).at(-1), 'zoom', 'a second click closes it');
+
+  // Find: each tab keeps its own bar and words.
+  await tabs(1);
+  await page.evaluate(() => window.__emit('find-open'));
+  await page.fill('#find-input', 'needle');
+  await page.evaluate(() => window.__emit('find-result', { matches: 3, activeMatchOrdinal: 1 }));
+  const searches = (await sent('find:start')).length;
+  await page.evaluate(() => window.__emit('find-close')); // main: another tab is about to show
+  await tabs(2);
+  assert.equal(await page.isVisible('#findbar'), false);
+  await page.evaluate(() => window.__emit('find-close'));
+  await tabs(1);
+  await page.waitForFunction(() => !document.getElementById('findbar').hidden, null, POLL);
+  assert.deepEqual([await page.inputValue('#find-input'), await page.textContent('#find-count')], ['needle', '1/3']);
+  assert.equal((await sent('find:start')).length, searches, 'no new search: the highlights are still there');
+  // ⌘E: the selection becomes the search.
+  await page.evaluate(() => window.__emit('find-text', { text: 'thread' }));
+  assert.equal(await page.inputValue('#find-input'), 'thread');
+  assert.deepEqual((await sent('find:start')).at(-1), { text: 'thread' });
+  // Closed in this tab: it stays closed when you come back.
+  await page.click('#find-close');
+  await page.evaluate(() => window.__emit('find-close'));
+  await tabs(2);
+  await page.evaluate(() => window.__emit('find-close'));
+  await tabs(1);
+  assert.equal(await page.isVisible('#findbar'), false);
+  assert.deepEqual(errors, []);
+});

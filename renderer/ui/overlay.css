@@ -280,3 +280,11 @@ body[data-kind="menu"] #card {
 body:not([data-kind="menu"], [data-kind="hovercard"]) #card > * { zoom: var(--text-scale); }
 body[data-kind="menu"] .mpanel { font-size: calc(13px * var(--text-scale)); }
 :is(.si-perm select, .pws-field input):focus-visible { border-color: var(--focus-ring); }
+
+/* Zoom bubble (overlay-zoom.js) */
+.zoom-row { display: flex; align-items: center; gap: 6px; padding: 6px 6px 6px 10px; }
+.zoom-pct { flex: 1; min-width: 52px; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.zoom-btn { width: 32px; height: 30px; border: 0; border-radius: 8px; background: var(--active); color: var(--text-soft); font: 500 17px/1 var(--font); display: grid; place-items: center; }
+.zoom-btn:hover, .zoom-reset:hover { background: var(--active-hover); color: var(--text-strong); }
+.zoom-reset { height: 30px; margin-left: 4px; }
+.zoom-row button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }

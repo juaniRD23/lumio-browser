@@ -255,7 +255,7 @@ test('the ⋮ menu’s entries: Chrome’s sections, real shortcuts, and only co
   later.actions.get(help[1].id).run();
   assert.equal(notes, 1);
   // No Browser UI developer tools outside development builds.
-  assert.deepEqual(items.find((i) => i.label === 'More tools').submenu.map((i) => i.label || i.type), ['Clear browsing data…', 'separator', 'Developer tools']);
+  assert.deepEqual(items.find((i) => i.label === 'More tools').submenu.map((i) => i.label || i.type), ['Delete browsing data…', 'separator', 'Developer tools']);
   const zoom = items.find((i) => i.type === 'zoom');
   assert.equal(zoom.level, 125);
   assert.equal(actions.get(zoom.in).keepOpen, true);

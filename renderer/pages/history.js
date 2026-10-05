@@ -199,6 +199,10 @@ document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('cli
 // ---- clear browsing data ----
 const dlg = $('#clear-dialog');
 $('#clear-open').addEventListener('click', () => dlg.showModal());
+// ⌘⇧⌫ / Ctrl+Shift+Delete opens lumio://history/#clear (main/navigation.js).
+const clearAsked = () => { if (location.hash === '#clear' && !dlg.open) dlg.showModal(); };
+clearAsked();
+window.addEventListener('hashchange', clearAsked);
 dlg.addEventListener('close', async () => {
   if (dlg.returnValue !== 'clear') return;
   const what = [...dlg.querySelectorAll('input[type=checkbox]:checked')].map((c) => c.value);

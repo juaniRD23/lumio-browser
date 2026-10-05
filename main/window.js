@@ -43,7 +43,9 @@ function visibleBounds(b) {
 
 class BrowserWin {
   // app: services from main.js. profile: { session, downloads, permissions, chats }.
-  constructor(app, profile, { incognito = false, tabs = null, active = 0, bounds = null, urls = [], adopt = null, near = null } = {}) {
+  // maximized: as it was when the session was saved. inactive: shown without
+  // taking focus (a tab being dragged out, main/tab-drag.js).
+  constructor(app, profile, { incognito = false, tabs = null, active = 0, bounds = null, urls = [], adopt = null, near = null, maximized = false, inactive = false } = {}) {
     this.app = app;
     this.profile = profile;
     this.id = nextWindowId++;
@@ -70,7 +72,12 @@ class BrowserWin {
     // Incognito is always dark: its UI is served already dark (main/protocol.js).
     const query = incognito ? '?appearance=dark' : '';
     this.win.loadURL('lumio://shell/' + query);
-    this.win.once('ready-to-show', () => { if (!process.env.LUMIO_HIDDEN) this.win.show(); });
+    this.win.once('ready-to-show', () => {
+      if (process.env.LUMIO_HIDDEN) return;
+      if (maximized) this.win.maximize(); // shows it too
+      else if (inactive) this.win.showInactive();
+      else this.win.show();
+    });
 
     this.overlay = new WebContentsView({
       webPreferences: { preload: SHELL_PRELOAD, contextIsolation: true, sandbox: true, nodeIntegration: false },
@@ -411,8 +418,14 @@ class BrowserWin {
     return true;
   }
 
+  // Each tab with its back/forward pages (main/sessions.js).
   session() {
-    return { tabs: this.tabs.sessionTabs(), active: Math.max(0, this.tabs.tabs.findIndex((t) => t.id === this.tabs.activeId)), bounds: this.win.getBounds() };
+    return {
+      tabs: this.tabs.sessionTabs({ history: true }),
+      active: Math.max(0, this.tabs.tabs.findIndex((t) => t.id === this.tabs.activeId)),
+      bounds: this.win.isMaximized() ? this.win.getNormalBounds() : this.win.getBounds(),
+      ...(this.win.isMaximized() ? { maximized: true } : {}),
+    };
   }
 }
 

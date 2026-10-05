@@ -18,7 +18,7 @@ const { resolveFile, CSP, PAGE_HOSTS } = require('../main/protocol.js');
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/usr/bin/google-chrome', 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'].find((p) => fs.existsSync(p));
 const skip = !CHROME && 'Google Chrome not installed';
-const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2' };
+const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2' };
 
 let server, browser, base;
 before(async () => {

@@ -13,7 +13,7 @@ const require = createRequire(import.meta.url);
 const { resolveFile, CSP, PAGE_HOSTS } = require('../main/protocol.js');
 
 const CHROME = ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/usr/bin/google-chrome', 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'].find((p) => fs.existsSync(p));
-const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.png': 'image/png' };
+const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.png': 'image/png' };
 
 // What the browser answers the pages (see main.js page:…).
 const now = Date.now();
@@ -140,6 +140,61 @@ test('Settings › Theme shows the setting, follows changes from elsewhere, and 
   // Choosing Light asks the browser to save it.
   await page.click('input[name=appearance][value=light]');
   assert.deepEqual(await page.evaluate(() => window.__calls.filter(([c, key]) => c === 'page:set-setting' && key === 'appearance').at(-1)), ['page:set-setting', 'appearance', 'light']);
+  await page.close();
+  assert.deepEqual(errors, []);
+});
+
+test('Settings: Home button, page zoom, zoom levels and the start pages', { skip: !CHROME && 'Google Chrome not installed' }, async () => {
+  const NAV = { showHome: false, homePage: '', defaultZoom: 100, presets: [50, 90, 100, 110, 125], zoomLevels: [{ host: 'news.example', percent: 125 }], startup: 'pages', startupPages: [{ url: 'https://a.example/', title: 'Alpha' }] };
+  const { page, errors } = await openPage('settings', {
+    colorScheme: 'light',
+    answers: {
+      'page:settings': { ...ANSWERS['page:settings'], startup: 'pages' },
+      'page:nav-settings': NAV,
+      'page:nav-set': { ...NAV, ok: true, showHome: true, homePage: 'https://portal.example/' },
+      'page:zoom-remove': { ...NAV, zoomLevels: [] },
+    },
+  });
+  const calls = (channel) => page.evaluate((c) => window.__calls.filter(([x]) => x === c).map((x) => x.slice(1)), channel);
+  // Home button: off, and its choices hidden until it's on.
+  assert.equal(await page.isChecked('#home-show'), false);
+  assert.equal(await page.isVisible('#home-choice'), false);
+  await page.click('#appearance .row:has(#home-show) .switch i');
+  assert.deepEqual((await calls('page:nav-set')).at(-1), ['showHome', true]);
+  assert.equal(await page.isVisible('#home-choice'), true);
+  assert.match(await page.textContent('#home-desc'), /portal\.example/);
+  await page.fill('#home-url', 'portal.example');
+  await page.press('#home-url', 'Enter');
+  assert.deepEqual((await calls('page:nav-set')).filter(([k]) => k === 'homePage'), [['homePage', 'portal.example']], 'saved once');
+  // Page zoom: Chrome's levels.
+  assert.deepEqual(await page.$$eval('#zoom-default option', (els) => els.map((o) => o.textContent)), ['50%', '90%', '100%', '110%', '125%']);
+  await page.selectOption('#zoom-default', '110');
+  assert.deepEqual((await calls('page:nav-set')).at(-1), ['defaultZoom', 110]);
+  // Zoom levels: each zoomed site, with Remove.
+  assert.match(await page.textContent('#zoom-list'), /news\.example\s*125%/);
+  await page.click('[data-zoom-remove="news.example"]');
+  assert.deepEqual((await calls('page:zoom-remove')).at(-1), ['news.example']);
+  assert.match(await page.textContent('#zoom-list'), /keeps that level here/);
+  // On startup › Open a specific page or set of pages: the list, Add, Edit, Remove, Use current pages.
+  assert.equal(await page.isVisible('#startup-pages'), true);
+  assert.match(await page.textContent('#startup-pages'), /Alpha[\s\S]*https:\/\/a\.example\//);
+  await page.click('[data-sp-add]');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'sp-url', 'the new address box takes the keyboard');
+  await page.fill('#sp-url', 'b.example');
+  await page.press('#sp-url', 'Enter');
+  assert.deepEqual((await calls('page:nav-set')).at(-1), ['startupPages', [{ url: 'https://a.example/', title: 'Alpha' }, { url: 'b.example', title: '' }]]);
+  // Esc closes the address box and the keyboard goes back to "Add a new page".
+  await page.click('[data-sp-add]');
+  await page.press('#sp-url', 'Escape');
+  assert.equal(await page.evaluate(() => document.activeElement.hasAttribute('data-sp-add')), true);
+  await page.click('[data-sp-remove="0"]');
+  assert.deepEqual((await calls('page:nav-set')).at(-1), ['startupPages', []]);
+  await page.click('[data-sp-current]');
+  assert.equal((await calls('page:startup-current')).length, 1);
+  // Choosing another startup hides the list.
+  await page.click('input[name=startup][value=restore]');
+  assert.equal(await page.isVisible('#startup-pages'), false);
+  if (process.env.LUMIO_SHOTS) await page.screenshot({ path: path.join(process.env.LUMIO_SHOTS, 'settings-nav.png'), fullPage: true });
   await page.close();
   assert.deepEqual(errors, []);
 });
