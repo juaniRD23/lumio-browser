@@ -7,6 +7,7 @@ const path = require('path');
 const { TabManager, NEWTAB } = require('./tabs');
 const { AIController } = require('./ai/controller');
 const { PageIndicator } = require('./ai/indicators');
+const { menuModel } = require('./menu');
 const theme = require('./theme');
 
 // Bundled by scripts/build-preload.mjs (it includes the extension toolbar code).
@@ -74,6 +75,21 @@ class BrowserWin {
     });
     this.overlay.setBackgroundColor('#00000000');
     this.overlay.webContents.loadURL('lumio://overlay/' + query);
+    // The overlay's side of showing and hiding (showOverlay), and the ⋮ menu.
+    this.overlaySeq = 0;
+    this.overlayIn = -1;
+    const fromOverlay = this.overlay.webContents.ipc;
+    fromOverlay.on('overlay:ready', (_e, msg) => this.overlayReady(msg || {}));
+    fromOverlay.on('overlay:gone', (_e, msg) => this.overlayGone(msg || {}));
+    fromOverlay.on('overlay:hover', (_e, index) => { if (this.overlayKind === 'suggest') this.emit('overlay-state', { kind: 'suggest', hover: index }); });
+    fromOverlay.on('overlay:menu', (_e, msg) => this.menuPicked(msg || {}));
+    // While the menu is open, the keys typed in the window (which keeps the
+    // keyboard, and so the text you were editing) go to it.
+    this.win.webContents.ipc.on('overlay:key', (_e, key) => {
+      if (this.overlayKind === 'menu' && typeof key === 'string') this.overlay.webContents.send('overlay-data', { op: 'key', key });
+    });
+    // Like a native menu, it closes when the window loses focus.
+    this.win.on('blur', () => { if (this.overlayKind === 'menu') this.hideOverlay(); });
 
     const emit = (c, p) => this.emit(c, p);
     this.tabs = new TabManager({
@@ -150,6 +166,8 @@ class BrowserWin {
 
   emit(channel, payload) {
     if (!this.win.isDestroyed()) this.win.webContents.send(channel, payload);
+    // The ⋮ menu's zoom row follows the page's zoom, from its buttons or the keyboard.
+    if (channel === 'zoom' && this.overlayKind === 'menu') this.overlay.webContents.send('overlay-data', { op: 'zoom', level: payload.level });
     this.app.onEmit?.(this, channel, payload); // the phone companion follows Lumio's work
   }
 
@@ -168,24 +186,163 @@ class BrowserWin {
     this.emit('focus-omnibox');
   }
 
+  // Dropdowns, prompts and menus over the page (renderer/ui/overlay.js). A
+  // new one comes in steps, so it never shows what was there before: the
+  // overlay draws it unseen and says how tall it is (op 'show', then
+  // overlay:ready), the view goes on top, and it plays its entrance (op
+  // 'in'). The same one again (new suggestions, a download's progress) just
+  // updates. payload.anchor, in window coordinates, is where it grows from;
+  // payload.focus gives it the keyboard once it's on screen.
   showOverlay(rect, payload) {
     const [w, h] = this.win.getContentSize();
     const x = Math.max(0, Math.min(Math.round(rect.x), w - 40));
     const y = Math.max(0, Math.round(rect.y));
-    this.overlay.setBounds({ x, y, width: Math.min(Math.round(rect.width), w - x), height: Math.min(Math.round(rect.height), h - y) });
-    this.win.contentView.addChildView(this.overlay);
-    this.overlayKind = payload?.kind || null;
-    this.overlay.webContents.send('overlay-data', payload);
+    const bounds = { x, y, width: Math.min(Math.round(rect.width), w - x), height: Math.min(Math.round(rect.height), h - y) };
+    const kind = payload?.kind || null;
+    const entered = this.overlayIn === this.overlaySeq;
+    if (kind && kind === this.overlayKind && !this.overlayLeaving) {
+      if (entered && this.overlayFits) bounds.height = this.overlay.getBounds().height; // it sizes itself (overlay:size)
+      this.overlayBounds = bounds;
+      if (entered) this.overlay.setBounds(bounds);
+      // Back on top if another view went over it meanwhile (the AI's working bar).
+      const views = this.win.contentView.children;
+      if (entered && views[views.length - 1] !== this.overlay) this.win.contentView.addChildView(this.overlay);
+      this.overlay.webContents.send('overlay-data', { ...payload, width: bounds.width, height: bounds.height });
+      return;
+    }
+    const attached = this.win.contentView.children.includes(this.overlay);
+    if (this.overlayKind && this.overlayKind !== kind) this.overlayClosed(); // it takes the place of another
+    clearTimeout(this.overlayLeaving);
+    this.overlayLeaving = null;
+    this.overlayKind = kind;
+    this.overlayBounds = bounds;
+    this.overlayFits = false;
+    this.overlayFocus = !!payload?.focus;
+    const seq = ++this.overlaySeq;
+    const a = payload?.anchor;
+    const origin = a && Number.isFinite(a.x) && Number.isFinite(a.y) ? { x: Math.round(a.x - x), y: Math.round(a.y - y) } : null;
+    // wait: something may still be on screen, which the overlay clears first.
+    this.overlay.webContents.send('overlay-data', { ...payload, op: 'show', seq, wait: attached, origin, width: bounds.width, height: bounds.height });
+    clearTimeout(this.overlayWait);
+    this.overlayWait = setTimeout(() => this.overlayReady({ seq }), 150); // in case it can't draw (its window is hidden)
   }
 
-  hideOverlay() {
+  // The overlay drew it: size it (height, for those that fit what's in
+  // them), put it on top and play its entrance.
+  overlayReady({ seq, height } = {}) {
+    if (seq !== this.overlaySeq || !this.overlayKind || this.win.isDestroyed()) return;
+    clearTimeout(this.overlayWait);
+    const b = this.overlayBounds;
+    if (Number.isFinite(height)) {
+      b.height = Math.max(60, Math.min(Math.round(height), this.win.getContentSize()[1] - b.y - 8));
+      this.overlayFits = true;
+    }
+    this.overlay.setBounds(b);
+    if (this.overlayIn === seq) return; // already in: only its height changed
+    this.overlayIn = seq;
+    const views = this.win.contentView.children;
+    if (views[views.length - 1] !== this.overlay) this.win.contentView.addChildView(this.overlay);
+    if (this.overlayFocus) this.overlay.webContents.focus();
+    this.overlay.webContents.send('overlay-data', { op: 'in', seq });
+  }
+
+  // It plays its exit, then the view comes off once the overlay has drawn
+  // an empty frame (overlay:gone), so the next one can't flash this one.
+  // now: no exit (the pointer is on it, and it mustn't take a click meant
+  // for what's under it). quiet: see overlayClosed.
+  hideOverlay({ now = false, quiet = false } = {}) {
+    this.overlayClosed(quiet);
+    if (this.win.isDestroyed()) return;
+    clearTimeout(this.overlayWait);
+    if (this.overlayLeaving && !now) return; // on its way out already
+    const seq = ++this.overlaySeq; // one still being drawn won't come in
+    if (!this.win.contentView.children.includes(this.overlay)) return;
+    this.overlay.webContents.send('overlay-data', { op: 'out', seq, now });
+    if (now) this.detachOverlay();
+    else this.overlayLeaving = setTimeout(() => this.detachOverlay(), 400); // if it never says it's done
+  }
+
+  // What was showing is closed (hidden, or another took its place), so
+  // whoever waits on it hears. quiet: the shell asked, so it knows;
+  // otherwise it hears (overlay-state) that what it opened has closed.
+  overlayClosed(quiet = false) {
     const kind = this.overlayKind;
     this.overlayKind = null;
     if (kind === 'passkey') this.app.onPasskeyPromptClosed?.(this);
     if (kind === 'screenshare') this.app.onScreenSharePickerClosed?.(this);
-    if (!this.win.isDestroyed() && this.win.contentView.children.includes(this.overlay)) {
-      this.win.contentView.removeChildView(this.overlay);
+    if (kind === 'menu') this.menuClosed();
+    if (kind && !quiet) this.emit('overlay-state', { kind, closed: true });
+  }
+
+  overlayGone({ seq } = {}) {
+    if (seq === this.overlaySeq && this.overlayLeaving) this.detachOverlay();
+  }
+
+  detachOverlay() {
+    clearTimeout(this.overlayLeaving);
+    this.overlayLeaving = null;
+    if (!this.win.isDestroyed() && this.win.contentView.children.includes(this.overlay)) this.win.contentView.removeChildView(this.overlay);
+  }
+
+  // The ⋮ menu (main/menu.js buildBrowserMenu), over the whole window like a
+  // native menu: a click anywhere outside it only closes it. from: where the
+  // keyboard was ('page' or the window's own UI), which gets it back after.
+  // Opened from the keyboard (⋮ focused, so no text is being edited), the
+  // menu takes the keyboard itself, so screen readers follow its rows.
+  showMenu({ anchor, at, keyboard = false, from } = {}, entries) {
+    const { items, actions } = menuModel(entries);
+    this.menuActions = actions;
+    this.menuFrom = from === 'page' ? 'page' : 'shell';
+    const [width, height] = this.win.getContentSize();
+    this.showOverlay({ x: 0, y: 0, width, height }, { kind: 'menu', items, anchor, at, keyboard: !!keyboard, focus: !!keyboard });
+  }
+
+  // A choice in the menu: it closes first, so whatever the command opens
+  // gets the keyboard. Zoom's − and + leave it open.
+  menuPicked({ id, close } = {}) {
+    if (this.overlayKind !== 'menu') return;
+    if (close) { this.hideOverlay(); return; }
+    const action = this.menuActions?.get(id);
+    if (!action) return;
+    if (!action.keepOpen) this.hideOverlay();
+    action.run();
+  }
+
+  // A click in the menu gave it the keyboard (and one on ⋮ took it from the
+  // page): hand it back.
+  menuClosed() {
+    this.menuActions = null;
+    if (this.win.isDestroyed()) return;
+    const ui = this.win.webContents;
+    const back = this.menuFrom === 'page' ? this.tabs.wc() : ui;
+    if (back && (this.overlay.webContents.isFocused() || (back !== ui && ui.isFocused()))) back.focus();
+  }
+
+  // A tab's hover card (shell.js showCard). The overlay, as wide as the tab
+  // strip, draws it under the tab: at once with the picture this window kept
+  // of the page, then again with a fresh one when there's reason to take it
+  // (the tab you're on, or a page not pictured yet). Menus and prompts keep
+  // the overlay: no card over them.
+  async showHoverCard({ rect, card } = {}) {
+    const tab = this.tabs.get(card?.id);
+    if (!tab || !rect || (this.overlayKind && this.overlayKind !== 'hovercard')) return;
+    this.cardTab = tab.id;
+    const url = tab.view && !tab.view.webContents.isDestroyed() ? tab.view.webContents.getURL() : '';
+    const payload = { ...card, kind: 'hovercard', shot: this.tabs.canPreview(tab), preview: tab.preview?.src || null };
+    this.showOverlay(rect, payload);
+    if (!payload.shot || (tab.id !== this.tabs.activeId && tab.preview && tab.preview.url === url)) return;
+    const shot = await this.tabs.capturePreview(tab);
+    if (shot && shot.src !== payload.preview && !this.win.isDestroyed() && this.overlayKind === 'hovercard' && this.cardTab === tab.id) {
+      this.overlay.webContents.send('overlay-data', { ...payload, preview: shot.src });
     }
+  }
+
+  // The shell's card is done: it fades out (hideOverlay). now: the pointer
+  // came onto the card, which goes at once.
+  hideHoverCard({ now = false } = {}) {
+    if (this.overlayKind !== 'hovercard') return;
+    this.cardTab = null;
+    this.hideOverlay({ now, quiet: true });
   }
 
   // full: open the chat full size, over the page (asked from the new tab page).

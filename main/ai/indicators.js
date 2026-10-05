@@ -79,7 +79,8 @@ class PageIndicator {
   raise() {
     if (this.active && this.bar && !this.w.closed && this.w.win.contentView.children.includes(this.bar)) {
       this.w.win.contentView.addChildView(this.bar);
-      if (this.w.overlayKind) this.w.win.contentView.addChildView(this.w.overlay); // dropdowns stay on top
+      // Dropdowns stay on top (one still being drawn goes on when it's ready).
+      if (this.w.win.contentView.children.includes(this.w.overlay)) this.w.win.contentView.addChildView(this.w.overlay);
     }
   }
 

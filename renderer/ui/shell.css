@@ -4,9 +4,11 @@
 :root {
   --slide: .38s cubic-bezier(.32, .72, 0, 1);      /* AI panel opening */
   --slide-out: .28s cubic-bezier(.32, .72, 0, 1);  /* ...and closing */
-  --fast: 140ms;
+  --fast: var(--dur-2);
   --panel-w: 380px;
 }
+/* A change made at once (motion.js instantly), like the toolbar on a tab switch. */
+.instant, .instant *, .instant::before, .instant::after, .instant *::before, .instant *::after { transition: none !important; }
 
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
@@ -60,7 +62,7 @@ body.incognito {
   --panel: #121019;
   --line: #d8c8ff14;
 }
-body.incognito #omnibox.focused { box-shadow: inset 0 0 0 1.5px #b58cffaa; }
+body.incognito #omnibox::before { box-shadow: inset 0 0 0 1.5px #b58cffaa; }
 #incognito-badge {
   display: flex; align-items: center; gap: 6px; align-self: center; flex: none;
   height: 26px; padding: 0 11px 0 9px; border-radius: 999px;
@@ -75,6 +77,7 @@ body.incognito #omnibox.focused { box-shadow: inset 0 0 0 1.5px #b58cffaa; }
 body.windows .traffic-space { width: 10px; }
 body.windows #tabstrip { padding-right: 146px; }
 #menu-btn { margin-left: 2px; }
+#menu-btn.open { background: var(--active); color: var(--text); } /* its menu is open */
 #toolbar { grid-row: 2; }
 #bookmarks-bar { grid-row: 3; }
 #workspace { grid-row: 4; }
@@ -91,16 +94,26 @@ body.windows #tabstrip { padding-right: 146px; }
 
 .tab {
   -webkit-app-region: no-drag;
-  position: relative;
+  position: relative; isolation: isolate;
   display: flex; align-items: center; gap: 7px;
   height: 30px; padding: 0 6px 0 10px;
   width: 220px; min-width: 44px; flex: 0 1 220px;
   border-radius: 9px;
   color: var(--dim);
-  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+  transition: background var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out);
 }
 .tab:hover { background: var(--tab-hover); color: var(--text); }
-.tab.active { background: var(--tab-active); color: var(--text); box-shadow: inset 0 0 0 1px var(--line); }
+.tab.active { color: var(--text); }
+/* The tab you're on sits on a raised plate. Switching tabs fades the old
+   plate out and springs the new one in. */
+.tab::after {
+  content: ''; position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none;
+  background: var(--tab-active); box-shadow: inset 0 0 0 1px var(--line);
+  opacity: 0; transform: scale(.94);
+  transition: opacity var(--dur-2) var(--ease-out), transform var(--dur-4) var(--ease-spring);
+}
+.tab.active::after { opacity: 1; transform: none; }
+body.no-anim .tab::after { transition: none; }
 /* Memory Saver: a sleeping tab's icon and title fade until you open it. */
 .tab.sleeping:not(.active) .fav, .tab.sleeping:not(.active) .title { opacity: .55; }
 .tab + .tab:not(.active):not(:hover)::before {
@@ -123,7 +136,22 @@ body.windows #tabstrip { padding-right: 146px; }
 .tab.pinned .title, .tab.pinned .x { display: none; }
 .tab.pinned .audio { position: absolute; right: -2px; top: -2px; width: 14px; height: 14px; background: var(--field); }
 .tab.dragging { z-index: 2; background: var(--tab-active); color: var(--text); box-shadow: var(--shadow-lift), inset 0 0 0 1px var(--line-strong); transition: none; }
-.tab.shifting { transition: transform 160ms var(--ease); }
+/* Dropped: it glides into its place (shell.js) while its lift fades. */
+.tab.settling { z-index: 2; transition: box-shadow var(--dur-4) var(--ease-out), background var(--dur-4) var(--ease-out); }
+.tab.shifting { transition: transform var(--dur-2) var(--ease-out); }
+/* Opening, closing, pinning and moving tabs (shell.js layoutStrip): each tab's
+   width runs from where it was to where the strip's layout puts it, so the
+   neighbors and the + button make room together, like Chrome. Only the tab
+   strip lays out; the page doesn't move. */
+#tabs.sizing > .tab {
+  transition: flex-basis var(--strip-dur) var(--ease-out), min-width var(--strip-dur) var(--ease-out),
+    padding var(--strip-dur) var(--ease-out), margin var(--strip-dur) var(--ease-out), opacity var(--strip-dur) var(--ease-out),
+    background var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out);
+}
+#tabs.measuring > .tab { transition: none !important; }
+#tabs.measuring > .tab.closing { display: none; }
+.tab.entering, .tab.closing { overflow: hidden; }
+.tab.closing { pointer-events: none; }
 .spinner {
   width: 14px; height: 14px; border-radius: 50%;
   border: 1.8px solid var(--overlay-6); border-top-color: var(--text);
@@ -133,19 +161,38 @@ body.windows #tabstrip { padding-right: 146px; }
 
 /* ---------------------------------------------------------------- toolbar */
 #toolbar {
+  position: relative; /* holds the find bar */
   display: flex; align-items: center; gap: 4px;
   padding: 0 10px 0 8px;
 }
 #omnibox {
+  position: relative; anchor-name: --omnibox;
   flex: 1; min-width: 120px; height: 34px;
   display: flex; align-items: center; gap: 8px;
   padding: 0 6px 0 12px; margin: 0 6px;
   background: var(--field); border-radius: 11px;
-  box-shadow: inset 0 0 0 1px transparent;
-  transition: box-shadow var(--fast) var(--ease), background var(--fast) var(--ease);
+  transition: background var(--dur-2) var(--ease-out);
 }
 #omnibox:hover { background: var(--field-hover); }
-#omnibox.focused { background: var(--field-focus); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 67%, transparent); }
+#omnibox.focused { background: var(--field-focus); }
+/* The focus ring fades on a layer of its own instead of repainting the field. */
+#omnibox::before {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 67%, transparent);
+  opacity: 0; transition: opacity var(--dur-2) var(--ease-out);
+}
+#omnibox.focused::before { opacity: 1; }
+/* Page load progress (shell.js renderLoad): a thin accent line along the
+   field's bottom edge, drawn by scaling (cheap to move). It fills, then fades. */
+#omnibox::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: var(--accent);
+  -webkit-mask: linear-gradient(to top, #000 2px, transparent 2px);
+  transform-origin: left center; transform: scaleX(var(--load, 0));
+  opacity: 0;
+  transition: transform var(--load-dur, 0ms) var(--load-ease, linear), opacity var(--dur-3) var(--ease-out);
+}
+#omnibox.loading::after { opacity: 1; }
 #site-icon {
   display: grid; place-items: center; color: var(--label); flex: none;
   width: 24px; height: 24px; margin-left: -6px; border-radius: 7px;
@@ -153,21 +200,59 @@ body.windows #tabstrip { padding-right: 146px; }
 #site-icon.clickable:hover { background: var(--active); color: var(--text); }
 #site-icon.insecure { color: var(--warn); }
 #address {
+  anchor-name: --address;
   flex: 1; min-width: 0; height: 100%;
   background: none; border: 0; outline: none;
   font-size: 13.5px; letter-spacing: -.1px; color: var(--text);
   user-select: text;
+  transition: color var(--dur-2) var(--ease-out);
 }
 #address::placeholder { color: var(--label); }
 #address.url-view { color: var(--dim); }
 #star { color: var(--label); }
 #star.on { color: var(--star); }
 #zoom-badge { height: 22px; padding: 0 8px; border-radius: 6px; background: var(--active); color: var(--dim); font-size: 11.5px; }
-/* Accent words on an accent tint, inside the gray address bar: deeper on light, so they keep 4.5:1. */
+/* The icons at the address bar's end (zoom, the key, the star…) each open
+   and close their own slot, so the end of the URL eases over instead of
+   jumping. A tab switch shows them at once (shell.js). */
+#address ~ button {
+  interpolate-size: allow-keywords;
+  transition: width var(--dur-3) var(--ease-out), padding var(--dur-3) var(--ease-out), margin var(--dur-3) var(--ease-out),
+    opacity var(--dur-2) var(--ease-out), scale var(--dur-4) var(--ease-spring), display var(--dur-3) allow-discrete,
+    background var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out);
+}
+#address ~ button[hidden] {
+  width: 0; padding-inline: 0; margin-left: -8px; opacity: 0; scale: .6; /* -8px: the field's gap */
+  transition-duration: var(--dur-2); transition-timing-function: var(--ease-in);
+}
+@starting-style { #address ~ button { width: 0; padding-inline: 0; margin-left: -8px; opacity: 0; scale: .6; } }
+/* Toasts ("Bookmarked", "Link copied"…, shell.js toast) float over the end of
+   the URL, just left of those icons. The newest is in front; older ones wait
+   in a stack just behind it and come forward in turn. */
 #toast {
-  height: 22px; padding: 0 10px; border-radius: 999px; display: inline-flex; align-items: center;
-  background: color-mix(in srgb, var(--accent) 13%, transparent); color: light-dark(color-mix(in srgb, var(--accent) 70%, var(--text-strong)), var(--accent)); font-size: 11.5px; white-space: nowrap;
-  animation: pop .25s var(--ease);
+  position: absolute; z-index: 3; top: 0; bottom: 0; right: max(anchor(--address right, 40px), var(--find-room, 0px));
+  pointer-events: none;
+}
+#omnibox.focused #toast { visibility: hidden; } /* not over what you type */
+/* Accent words on an accent tint, inside the gray address bar: deeper on light, so they keep 4.5:1. */
+.toast {
+  --depth: 0;
+  position: absolute; right: 0; top: 50%; z-index: calc(3 - var(--depth));
+  width: max-content; max-width: 420px; padding: 4px 10px; border-radius: 11px;
+  background: color-mix(in srgb, var(--accent) 13%, var(--field)); color: light-dark(color-mix(in srgb, var(--accent) 70%, var(--text-strong)), var(--accent));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent);
+  font-size: 11.5px; line-height: 14px; /* one line is 22px; a long note takes two */
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+  pointer-events: auto;
+  transform-origin: right center;
+  transform: translateY(calc(-50% - var(--depth) * 4px)) scale(calc(1 - var(--depth) * .06));
+  transition: transform var(--dur-3) var(--ease-out), opacity var(--dur-3) var(--ease-out), color var(--dur-2) var(--ease-out);
+}
+.toast.behind { color: transparent; }
+@starting-style { .toast { opacity: 0; transform: translateY(calc(-50% + 6px)) scale(.96); } }
+.toast.out {
+  opacity: 0; transform: translateY(calc(-50% - 6px)) scale(.96); pointer-events: none;
+  transition-duration: var(--dur-2); transition-timing-function: var(--ease-in);
 }
 @keyframes pop { from { opacity: 0; transform: translateY(3px) scale(.96); } }
 
@@ -223,7 +308,19 @@ body.windows #tabstrip { padding-right: 146px; }
 }
 #ext-actions::part(badge) { font-size: 9px; border-radius: 4px; box-shadow: none; }
 
-#downloads { position: relative; }
+/* The first download opens the button's slot and pops it in; the toolbar
+   eases over instead of jumping. */
+#downloads {
+  position: relative;
+  transition: width var(--dur-3) var(--ease-out), margin var(--dur-3) var(--ease-out), opacity var(--dur-2) var(--ease-out),
+    scale var(--dur-4) var(--ease-spring), display var(--dur-3) allow-discrete,
+    background var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out);
+}
+#downloads[hidden] {
+  width: 0; margin-left: -4px; opacity: 0; scale: .6; /* -4px: the toolbar's gap */
+  transition-duration: var(--dur-2); transition-timing-function: var(--ease-in);
+}
+@starting-style { #downloads { width: 0; margin-left: -4px; opacity: 0; scale: .6; } }
 #downloads .ring {
   position: absolute; inset: 3px; border-radius: 50%;
   background: conic-gradient(var(--accent) calc(var(--p, 0) * 1turn), transparent 0);
@@ -248,7 +345,18 @@ body.windows #tabstrip { padding-right: 146px; }
 #bookmarks-bar {
   display: flex; align-items: center; gap: 2px;
   height: 32px; padding: 0 10px 3px 10px; min-width: 0; overflow: hidden;
+  /* Showing or hiding it (the setting, or the new tab page) slides it open
+     and shut, and the page follows frame by frame through the slot's
+     ResizeObserver, like the AI panel. A tab switch shows it at once. */
+  transition: height var(--dur-3) var(--ease-out), padding var(--dur-3) var(--ease-out),
+    opacity var(--dur-2) var(--ease-out), display var(--dur-3) allow-discrete;
 }
+#bookmarks-bar[hidden] {
+  height: 0; padding-block: 0; opacity: 0;
+  transition-duration: var(--dur-2); transition-timing-function: var(--ease-in);
+}
+@starting-style { #bookmarks-bar { height: 0; padding-block: 0; opacity: 0; } }
+body.no-anim :is(#bookmarks-bar, #permbar, #toolbar, #toolbar *) { transition: none; }
 .bm-item {
   position: relative;
   display: inline-flex; align-items: center; gap: 7px; flex: none;
@@ -285,6 +393,8 @@ body.windows #tabstrip { padding-right: 146px; }
   transition: box-shadow .4s var(--ease);
 }
 body.agent-running #slot {
+  /* Still shown, without the breathing, when Reduce Motion is on. */
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent) 80%, transparent), 0 0 14px 2px color-mix(in srgb, var(--accent) 33%, transparent);
   animation: glow 2.4s ease-in-out infinite;
 }
 @keyframes glow {
@@ -292,22 +402,50 @@ body.agent-running #slot {
   50% { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent2) 80%, transparent), 0 0 22px 5px color-mix(in srgb, var(--accent2) 33%, transparent); }
 }
 
+/* An info bar over the page (a site asking for a permission) slides open
+   and shut instead of popping, and the page follows it frame by frame
+   through the slot's ResizeObserver, like the AI panel and Chrome's info bars.
+   (A bubble over the page would share the one overlay view with menus and
+   hover cards, which could hide a question that must stay until answered.) */
 .infobar {
   display: flex; align-items: center; gap: 8px;
   min-height: 38px; padding: 5px 6px 5px 14px;
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
-  animation: pop .2s var(--ease);
+  overflow: hidden; interpolate-size: allow-keywords;
+  transition: height var(--dur-3) var(--ease-out), min-height var(--dur-3) var(--ease-out), padding var(--dur-3) var(--ease-out),
+    border-width var(--dur-3) var(--ease-out), margin var(--dur-3) var(--ease-out), opacity var(--dur-2) var(--ease-out),
+    display var(--dur-3) allow-discrete;
 }
+.infobar[hidden] {
+  height: 0; min-height: 0; padding-block: 0; border-block-width: 0; margin-bottom: -6px; opacity: 0; /* -6px: the column's gap */
+  transition-duration: var(--dur-2); transition-timing-function: var(--ease-in);
+}
+@starting-style { .infobar { height: 0; min-height: 0; padding-block: 0; border-block-width: 0; margin-bottom: -6px; opacity: 0; } }
 .infobar-text { color: var(--text); }
 .infobar-text b { font-weight: 600; }
+/* Find in page floats over the end of the address bar (anchored to it), so
+   neither the toolbar nor the page moves. It steps aside while you type an
+   address. */
 #findbar {
-  display: flex; align-items: center; gap: 2px; flex: none;
-  height: 34px; padding: 0 4px 0 4px; margin-right: 4px;
-  background: var(--field); border-radius: 11px; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 40%, transparent);
-  animation: pop .2s var(--ease);
+  position: absolute; z-index: 2; position-anchor: --omnibox;
+  top: anchor(top); bottom: anchor(bottom); right: anchor(right);
+  max-width: calc(anchor-size(width) - 72px);
+  display: flex; align-items: center; gap: 2px;
+  padding: 0 4px; border-radius: 11px;
+  background: var(--field-focus);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 40%, transparent), var(--shadow-sm);
+  transform-origin: right center;
+  transition: opacity var(--dur-3) var(--ease-out), transform var(--dur-3) var(--ease-out),
+    display var(--dur-3) allow-discrete, visibility var(--dur-3) allow-discrete;
 }
+#findbar[hidden] {
+  opacity: 0; transform: translateX(6px) scale(.97);
+  transition-duration: var(--dur-2); transition-timing-function: var(--ease-in);
+}
+@starting-style { #findbar { opacity: 0; transform: translateX(10px) scale(.96); } }
+#omnibox.focused ~ #findbar { opacity: 0; transform: scale(.97); visibility: hidden; }
 #find-input {
-  width: 170px; height: 28px; padding: 0 8px; border: 0; outline: none; background: none; user-select: text;
+  flex: 0 1 170px; min-width: 60px; height: 28px; padding: 0 8px; border: 0; outline: none; background: none; user-select: text;
 }
 #find-count { color: var(--label); font-size: 12px; min-width: 44px; text-align: right; padding-right: 4px; font-variant-numeric: tabular-nums; }
 

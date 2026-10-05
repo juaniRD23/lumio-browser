@@ -251,6 +251,8 @@ function menuState() {
     recentlyClosed: recentlyClosed.slice(-10).reverse().map((e, i) => ({
       label: e.kind === 'window' ? `${e.tabs.length} Tab${e.tabs.length === 1 ? '' : 's'} (${e.title})` : e.title || e.url,
       index: recentlyClosed.length - 1 - i,
+      favicon: e.kind === 'tab' ? e.favicon || null : null,
+      window: e.kind === 'window',
     })),
   };
 }
@@ -341,6 +343,9 @@ const cmd = {
   tabIndex: (n) => cur()?.tabs.activateIndex(n),
   makeDefault: () => makeDefaultBrowser(),
   webStore: () => { const w = normalWin() || createWindow(); w.tabs.create('https://chromewebstore.google.com/'); w.focus(); },
+  fullscreen: () => { const w = cur(); if (w) w.win.setFullScreen(!w.win.isFullScreen()); },
+  clearBrowsingData: () => openInternal('lumio://history/?clear=1'),
+  quit: () => app.quit(),
 };
 
 function openInternal(url) {
@@ -743,9 +748,28 @@ function registerIpc() {
   on('tab:bookmark', (w) => toggleBookmark(w));
   on('tab:focus-page', (w) => w.tabs.wc()?.focus());
   on('tab:context', (w, id) => tabContextMenu(w, id));
+  on('tab:hovercard', (w, msg) => (msg?.hide ? w.hideHoverCard({ now: !!msg.now }) : w.showHoverCard(msg)));
   on('window:new', () => createWindow());
-  on('app:menu', (w, { x, y }) => {
-    buildBrowserMenu(cmd, menuState()).popup({ window: w.win, x: Math.max(0, Math.round(x) - 290), y: Math.round(y) });
+  // The ⋮ menu, drawn by the overlay (main/window.js showMenu). edit: the
+  // shell had a text field focused, so Cut, Copy and Paste act there, not on the page.
+  on('app:menu', (w, opts = {}) => {
+    const wc = w.tabs.wc();
+    const url = w.tabs.active ? w.tabs.displayUrl(w.tabs.active) : '';
+    const { items: bookmarks } = bookmarksPayload();
+    w.showMenu(opts, buildBrowserMenu(cmd, {
+      ...menuState(),
+      zoom: wc ? Math.round(Math.pow(1.2, wc.getZoomLevel()) * 100) : 100,
+      bookmarked: bookmarks.some((b) => b.url === url),
+      bookmarks,
+      open: (u) => openUrl(u, 'current', w),
+      whatsNew: updater?.state?.notesUrl ? () => openUrl(updater.state.notesUrl, 'tab', w) : null,
+      edit: (op) => {
+        const target = opts.edit ? w.win.webContents : w.tabs.wc();
+        if (!target) return;
+        target.focus();
+        target[op]();
+      },
+    }));
   });
   on('window:incognito', () => createWindow({ incognito: true }));
 
@@ -757,7 +781,7 @@ function registerIpc() {
 
   on('overlay:show', (w, { rect, payload }) => w.showOverlay(rect, payload));
   // The shell names the dropdown it means, so it can't close one it didn't open.
-  on('overlay:hide', (w, kind) => { if (!kind || !w.overlayKind || w.overlayKind === kind) w.hideOverlay(); });
+  on('overlay:hide', (w, kind) => { if (!kind || !w.overlayKind || w.overlayKind === kind) w.hideOverlay({ quiet: true }); });
   // Dropdowns that size themselves (account menu, site info).
   on('overlay:size', (w, { height }) => {
     if (!w.win.contentView.children.includes(w.overlay) || !Number.isFinite(height)) return;

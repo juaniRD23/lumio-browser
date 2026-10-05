@@ -99,7 +99,22 @@
   --font: 'Geist', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --serif: 'Instrument Serif', 'Iowan Old Style', Georgia, serif;
   --mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --ease: cubic-bezier(.22, 1, .36, 1);
+
+  /* Motion: the same few durations and curves everywhere (renderer/ui/motion.js
+     reads them too). Most UI moves in --dur-2…3; an exit takes a step less
+     than its entrance. */
+  --dur-1: 90ms;  /* a press, a hover */
+  --dur-2: 140ms; /* a state change, most exits */
+  --dur-3: 200ms; /* tabs, menus, bars, toasts */
+  --dur-4: 280ms; /* a tab settling after a drag, a spring pop */
+  --dur-5: 380ms; /* drawers and other big surfaces */
+  --ease-out: cubic-bezier(.22, 1, .36, 1);    /* arriving: fast, then gently in place */
+  --ease-in: cubic-bezier(.55, 0, 1, .45);     /* leaving */
+  --ease-in-out: cubic-bezier(.65, 0, .35, 1); /* moving from one place to another */
+  /* A damped spring (about 4% overshoot, settled by two thirds of the time):
+     things that land, like a dropped tab or a popping icon. */
+  --ease-spring: linear(0, .091 4.2%, .284 8.3%, .498 12.5%, .687 16.7%, .832 20.8%, .933 25%, .994 29.2%, 1.026 33.3%, 1.037 37.5%, 1.037 41.7%, 1.031 45.8%, 1.023 50%, 1.015 54.2%, 1.009 58.3%, 1.004 62.5%, 1.001 66.7%, 1);
+  --ease: var(--ease-out);
 
   /* Older names, still used by the pages. */
   --line2: var(--line-strong);
@@ -116,3 +131,20 @@
   :root:not([data-appearance="dark"]) { --accent: var(--accent-light, #2563eb); }
 }
 :root[data-appearance="light"] { --accent: var(--accent-light, #2563eb); }
+
+/* Reduce Motion (the system's accessibility setting): one rule set for all of
+   Lumio's UI and pages. Transitions and animations finish at once (their end
+   events still fire, so nothing waits on them); spinners keep turning, since
+   they say something is loading. Script animations check the same setting
+   (renderer/ui/motion.js). */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
+  .spinner { animation-duration: 1.6s !important; animation-iteration-count: infinite !important; }
+}

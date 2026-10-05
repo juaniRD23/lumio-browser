@@ -3,6 +3,7 @@ import { icons, markSvg, avatarHtml } from './icons.js';
 import { THEME_COLORS, accentFor, setAccent } from '/assets/theme-colors.js';
 import { initPanel } from './ai-panel.js';
 import { initSidebar } from './sidebar.js';
+import { reduced, dur, animate, cancel, slide, instantly } from './motion.js';
 import './keys.js';
 
 const IS_MAC = /Mac/.test(navigator.platform);
@@ -47,6 +48,18 @@ window.addEventListener('resize', reportSlot);
 // ------------------------------------------------------------------ tabs
 const tabsEl = $('#tabs');
 const tabEls = new Map();
+// Closed tabs stay in the strip, folding away, until their animation ends.
+const liveTabs = () => [...tabsEl.children].filter((el) => !el.classList.contains('closing'));
+// Tabs animate on what you do, not when the window first draws them.
+const stripMoves = () => !document.body.classList.contains('no-anim') && !reduced() && !document.hidden;
+let tabDrag = null; // a tab being dragged: other changes to the strip wait for the drop
+let localMove = null; // a drop main hasn't confirmed yet: { id, index, until }
+
+// Narrow tabs show just the icon (and the × on the tab you're on). Watched per
+// tab, so it holds while tabs animate and when the window resizes.
+const narrowWatch = new ResizeObserver((entries) => {
+  for (const e of entries) e.target.classList.toggle('narrow', e.borderBoxSize[0].inlineSize < 76);
+});
 
 function faviconHtml(t) {
   if (t.loading) return '<span class="spinner"></span>';
@@ -55,17 +68,29 @@ function faviconHtml(t) {
   return icons.globe;
 }
 
+// Closing with the mouse (× or middle click) keeps the other tabs' widths,
+// so the next × lands under the pointer (see freezeTabs).
+function closeTabByMouse(id) {
+  hideCard(true);
+  freezeTabs();
+  api.send('tab:close', id);
+}
+
 function createTabEl(id) {
   const el = document.createElement('div');
   el.className = 'tab';
+  el._id = id;
   el.setAttribute('role', 'tab');
   el.innerHTML = '<span class="fav"></span><i class="agent-dot" hidden></i><span class="title"></span><button class="audio" hidden></button><button class="x" aria-label="Close tab"></button>';
   el.querySelector('.x').innerHTML = icons.close;
-  el.querySelector('.x').addEventListener('click', (e) => { e.stopPropagation(); api.send('tab:close', id); });
+  el.querySelector('.x').addEventListener('click', (e) => { e.stopPropagation(); closeTabByMouse(id); });
   el.querySelector('.audio').addEventListener('click', (e) => { e.stopPropagation(); api.send('tab:mute', id); });
-  el.addEventListener('auxclick', (e) => { if (e.button === 1) api.send('tab:close', id); });
-  el.addEventListener('contextmenu', (e) => { e.preventDefault(); api.send('tab:context', id); });
+  el.addEventListener('auxclick', (e) => { if (e.button === 1) closeTabByMouse(id); });
+  el.addEventListener('contextmenu', (e) => { e.preventDefault(); hideCard(true); api.send('tab:context', id); });
   el.addEventListener('pointerdown', (e) => startTabDrag(e, el, id));
+  el.addEventListener('pointerenter', () => cardEnter(id));
+  el.addEventListener('pointerleave', cardLeave);
+  narrowWatch.observe(el);
   return el;
 }
 
@@ -74,15 +99,21 @@ function updateTabEl(el, t) {
   el.classList.toggle('pinned', !!t.pinned);
   el.classList.toggle('sleeping', !!t.sleeping);
   el.setAttribute('aria-selected', String(t.id === state.activeId));
-  el.title = t.title + (t.url ? '\n' + t.url : '') + (t.sleeping ? '\nSleeping to save memory (Memory Saver)' : '')
-    + (t.agent ? `\n${t.agent.name} is working here: ${t.agent.title}` : '');
+  // The hover card shows these; screen readers hear them here.
+  el.setAttribute('aria-description', [t.url, t.sleeping && 'Sleeping to save memory', t.agent && `${t.agent.name} is working here`].filter(Boolean).join(' · '));
   // A helper AI is working in this tab: its color, the same as its row in the chat.
   const dot = el.querySelector('.agent-dot');
   dot.hidden = !t.agent;
   if (t.agent) dot.style.setProperty('--c', t.agent.color);
   el.classList.toggle('helped', !!t.agent);
   const fav = faviconHtml(t);
-  if (el._fav !== fav) { el.querySelector('.fav').innerHTML = fav; el._fav = fav; }
+  if (el._fav !== fav) {
+    const loaded = el._fav?.includes('spinner') && !t.loading;
+    el.querySelector('.fav').innerHTML = fav;
+    el._fav = fav;
+    // The spinner gives way to the page's icon with a small pop.
+    if (loaded && stripMoves()) animate(el.querySelector('.fav'), [{ opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1 }], { duration: 4, easing: 'spring' });
+  }
   const img = el.querySelector('.fav img');
   if (img) img.onerror = () => { el.querySelector('.fav').innerHTML = icons.globe; };
   el.querySelector('.title').textContent = t.title || 'Untitled';
@@ -91,46 +122,218 @@ function updateTabEl(el, t) {
   audio.innerHTML = t.muted ? icons.muted : icons.volume;
 }
 
+// The tabs in the order to show: main's, with a drop it hasn't confirmed yet.
+function stripOrder() {
+  const tabs = state.tabs;
+  if (!localMove) return tabs;
+  const i = tabs.findIndex((t) => t.id === localMove.id);
+  if (i < 0 || i === localMove.index || Date.now() > localMove.until) { localMove = null; return tabs; }
+  const order = tabs.slice();
+  order.splice(localMove.index, 0, ...order.splice(i, 1));
+  return order;
+}
+
 function renderTabs() {
-  const ids = new Set(state.tabs.map((t) => t.id));
-  for (const [id, el] of tabEls) if (!ids.has(id)) { el.remove(); tabEls.delete(id); }
-  state.tabs.forEach((t, i) => {
-    let el = tabEls.get(t.id);
-    if (!el) { el = createTabEl(t.id); tabEls.set(t.id, el); }
-    if (tabsEl.children[i] !== el) tabsEl.insertBefore(el, tabsEl.children[i] || null);
-    updateTabEl(el, t);
+  const order = stripOrder();
+  const live = liveTabs();
+  const same = live.length === order.length && order.every((t, i) => live[i]._id === t.id && live[i].classList.contains('pinned') === !!t.pinned);
+  if (same || tabDrag) {
+    if (tabDrag) tabDrag.pending = true; // tabs opened or closed meanwhile show after the drop
+    for (const t of order) { const el = tabEls.get(t.id); if (el) updateTabEl(el, t); }
+    return;
+  }
+  hideCard(true);
+  layoutStrip(() => {
+    const ids = new Set(order.map((t) => t.id));
+    for (const [id, el] of tabEls) {
+      if (ids.has(id)) continue;
+      tabEls.delete(id);
+      el.classList.add('closing');
+      el.setAttribute('aria-hidden', 'true');
+    }
+    let prev = null;
+    for (const t of order) {
+      let el = tabEls.get(t.id);
+      if (!el) { el = createTabEl(t.id); tabEls.set(t.id, el); }
+      // Right after the previous tab, passing over tabs that are folding away.
+      let at = prev ? prev.nextElementSibling : tabsEl.firstElementChild;
+      while (at && at !== el && at.classList.contains('closing')) at = at.nextElementSibling;
+      if (at !== el) tabsEl.insertBefore(el, at);
+      prev = el;
+      updateTabEl(el, t);
+    }
   });
-  requestAnimationFrame(() => {
-    for (const el of tabEls.values()) el.classList.toggle('narrow', el.offsetWidth < 76);
-  });
+}
+
+// A tab held at a width while it animates, or while the strip is frozen.
+function holdWidth(el, width) {
+  el.style.flex = `0 0 ${width}px`;
+  el.style.minWidth = '0px';
+}
+// No width, padding or gap: where a new tab starts and a closed one ends.
+function fold(el) {
+  holdWidth(el, 0);
+  el.style.paddingInline = '0px';
+  el.style.marginRight = '-2px'; // the strip's gap
+  el.style.opacity = '0';
+}
+function release(el) {
+  for (const p of ['flex', 'minWidth', 'paddingInline', 'marginRight', 'opacity']) el.style[p] = '';
+}
+
+// Chrome's trick for closing tabs in a row: while the pointer stays on the
+// strip, the other tabs keep their widths, so the next tab's × slides under
+// it. Leaving the strip lets them spread out again.
+let frozen = false;
+function freezeTabs() {
+  frozen = true;
+  for (const el of liveTabs()) {
+    if (el.classList.contains('pinned')) continue;
+    el._frozen = el.getBoundingClientRect().width;
+    holdWidth(el, el._frozen);
+  }
+}
+function thaw() {
+  frozen = false;
+  for (const el of liveTabs()) el._frozen = null;
+}
+// After a moment: the gaps between tabs belong to the window's drag area,
+// which the pointer can brush past without really leaving.
+let thawTimer = 0;
+$('#tabstrip').addEventListener('pointerleave', () => {
+  clearTimeout(thawTimer);
+  thawTimer = setTimeout(() => {
+    if (!frozen || tabDrag) return;
+    thaw();
+    layoutStrip(() => {});
+  }, 250);
+});
+$('#tabstrip').addEventListener('pointerover', () => clearTimeout(thawTimer));
+// A new window width lays the tabs out again at once.
+let stripWidth = 0;
+new ResizeObserver(([e]) => {
+  if (e.contentRect.width === stripWidth) return;
+  stripWidth = e.contentRect.width;
+  if (!frozen) return;
+  thaw();
+  for (const el of liveTabs()) release(el);
+}).observe($('#tabstrip'));
+
+// Tabs open, close, get pinned or change places in `change`. Each tab then
+// animates from where it was to where the strip's layout puts it: widths
+// grow and shrink together (so neighbors and the + button make room as one),
+// a new tab grows in from nothing while its icon and title fade in, a closed
+// one folds away, and tabs that changed places glide there (FLIP).
+let stripRun = 0;
+function layoutStrip(change) {
+  const animate = stripMoves();
+  const before = new Map();
+  if (animate) for (const el of tabsEl.children) before.set(el, el.getBoundingClientRect());
+  const had = new Set(liveTabs());
+  change();
+  const run = ++stripRun;
+  const live = liveTabs();
+  const added = live.filter((el) => !had.has(el));
+  if (added.length) thaw(); // a new tab: the strip spreads out again
+  // Where everything goes: the natural layout (or the frozen widths), measured
+  // with transitions off and closed tabs out of the way.
+  tabsEl.classList.remove('sizing');
+  tabsEl.classList.add('measuring');
+  for (const el of live) {
+    cancel(el, 'slide');
+    if (frozen && el._frozen != null && !el.classList.contains('pinned')) holdWidth(el, el._frozen);
+    else { el._frozen = null; release(el); }
+  }
+  const target = new Map(live.map((el) => [el, el.getBoundingClientRect().width]));
+  tabsEl.classList.remove('measuring');
+  const closing = [...tabsEl.children].filter((el) => el.classList.contains('closing'));
+  if (!animate) {
+    for (const el of closing) dropTabEl(el);
+    return;
+  }
+  // Where everything was: the old widths, new tabs folded.
+  for (const el of live) { const b = before.get(el); if (b) holdWidth(el, b.width); else fold(el); }
+  for (const el of closing) holdWidth(el, before.get(el)?.width ?? 0);
+  const start = new Map(live.map((el) => [el, el.getBoundingClientRect().left]));
+  for (const el of live) {
+    const b = before.get(el);
+    if (b && Math.abs(b.left - start.get(el)) > 3) slide(el, b.left - start.get(el));
+  }
+  // Closing alone is an exit, a step quicker than opening.
+  const step = added.length || !closing.length ? 3 : 2;
+  tabsEl.style.setProperty('--strip-dur', `${dur(step)}ms`);
+  tabsEl.classList.add('sizing');
+  for (const el of live) {
+    holdWidth(el, target.get(el));
+    if (added.includes(el)) { el.style.paddingInline = el.style.marginRight = el.style.opacity = ''; enterTab(el); }
+  }
+  for (const el of closing) fold(el);
+  setTimeout(() => settleStrip(run), dur(step) + 60);
+}
+
+// A new tab's icon pops and its title fades in as it grows.
+function enterTab(el) {
+  el.classList.add('entering');
+  animate(el.querySelector('.fav'), [{ opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1 }], { duration: 4, easing: 'spring', delay: 40, fill: 'backwards' });
+  animate(el.querySelector('.title'), [{ opacity: 0 }, { opacity: 1 }], { duration: 3, delay: 80, fill: 'backwards' });
+}
+
+// The animation is over: tabs go back to the strip's own layout (or stay
+// frozen), and closed ones leave.
+function settleStrip(run) {
+  if (run !== stripRun) return; // a newer change took over
+  tabsEl.classList.remove('sizing');
+  for (const el of [...tabsEl.children]) {
+    if (el.classList.contains('closing')) { dropTabEl(el); continue; }
+    el.classList.remove('entering');
+    if (!(frozen && el._frozen != null && !el.classList.contains('pinned'))) release(el);
+  }
+}
+
+function dropTabEl(el) {
+  narrowWatch.unobserve(el);
+  el.remove();
 }
 
 function startTabDrag(e, el, id) {
   if (e.button !== 0 || e.target.closest('.x, .audio')) return;
+  hideCard(true);
   api.send('tab:activate', id);
-  const els = [...tabsEl.children];
+  const els = liveTabs();
   const from = els.indexOf(el);
-  const rects = els.map((x) => x.getBoundingClientRect());
+  // Pinned tabs stay first (main/tabs.js insert), so a tab moves within its group.
+  const pins = els.filter((x) => x.classList.contains('pinned')).length;
+  const [lo, hi] = el.classList.contains('pinned') ? [0, pins - 1] : [pins, els.length - 1];
   const startX = e.clientX;
-  let dragging = false;
+  const drag = { pending: false };
+  let rects = null; // where the tabs are when the drag starts
   let target = from;
   el.setPointerCapture(e.pointerId);
   const move = (ev) => {
     const dx = ev.clientX - startX;
-    if (!dragging && Math.abs(dx) < 5) return;
-    dragging = true;
-    el.classList.add('dragging');
-    const min = rects[0].left - rects[from].left;
-    const max = rects[rects.length - 1].left - rects[from].left;
+    if (!rects && Math.abs(dx) < 5) return;
+    if (!rects) {
+      // Lifted: anything still animating jumps to its end, then the tabs are measured.
+      tabDrag = drag;
+      settleStrip(stripRun);
+      for (const x of els) cancel(x, 'slide');
+      el.classList.remove('settling');
+      el.classList.add('dragging');
+      rects = els.map((x) => x.getBoundingClientRect());
+    }
+    const min = rects[lo].left - rects[from].left;
+    const max = rects[hi].left - rects[from].left;
     const clamped = Math.max(min, Math.min(max, dx));
     el.style.transform = `translateX(${clamped}px)`;
     const center = rects[from].left + rects[from].width / 2 + clamped;
     target = from;
     rects.forEach((r, i) => {
       const mid = r.left + r.width / 2;
-      if (i < from && center < mid) target = Math.min(target, i);
-      if (i > from && center > mid) target = Math.max(target, i);
+      // At the very end of its range the tab is centered on the last one: that counts.
+      if (i < from && center <= mid + 0.5) target = Math.min(target, i);
+      if (i > from && center >= mid - 0.5) target = Math.max(target, i);
     });
+    target = Math.max(lo, Math.min(hi, target));
     const w = rects[from].width + 2;
     els.forEach((x, i) => {
       if (x === el) return;
@@ -143,16 +346,114 @@ function startTabDrag(e, el, id) {
     el.removeEventListener('pointermove', move);
     el.removeEventListener('pointerup', up);
     el.removeEventListener('pointercancel', up);
-    els.forEach((x) => { x.style.transform = ''; x.classList.remove('shifting', 'dragging'); });
-    if (dragging && target !== from) api.send('tab:move', { id, index: target });
+    el.removeEventListener('lostpointercapture', up);
+    if (!rects) return; // a click, not a drag
+    tabDrag = null;
+    // Dropped: the tab takes its new place in the strip right away (main
+    // confirms a moment later), and every tab glides there from where it is
+    // on screen; the dragged one lands with a spring.
+    const seen = new Map(els.map((x) => [x, x.getBoundingClientRect().left]));
+    for (const x of els) { x.style.transform = ''; x.classList.remove('shifting'); }
+    el.classList.remove('dragging');
+    if (target !== from) {
+      tabsEl.insertBefore(el, target > from ? els[target].nextElementSibling : els[target]);
+      localMove = { id, index: target, until: Date.now() + 800 };
+      api.send('tab:move', { id, index: target });
+    }
+    for (const x of els) {
+      const dx = seen.get(x) - x.getBoundingClientRect().left;
+      if (Math.abs(dx) >= 1) slide(x, dx, x === el ? { duration: 4, easing: 'spring' } : {});
+    }
+    el.classList.add('settling');
+    setTimeout(() => el.classList.remove('settling'), dur(4));
+    if (drag.pending) renderTabs();
   };
   el.addEventListener('pointermove', move);
   el.addEventListener('pointerup', up);
   el.addEventListener('pointercancel', up);
+  el.addEventListener('lostpointercapture', up); // e.g. the window lost focus mid-drag: drop it there
 }
 
 $('#newtab').addEventListener('click', () => api.send('tab:new'));
 $('#tabstrip').addEventListener('dblclick', (e) => { if (e.target.classList.contains('strip-drag')) { /* system zoom handles it */ } });
+
+// ------------------------------------------------------------------ tab hover cards
+// Resting on a tab shows a card under it: the page's title, its site and a
+// small picture of the page (main/window.js showHoverCard). The overlay view
+// draws it, so it can sit over the page. Once a card is up, moving along the
+// tabs moves it there at once, like Chrome.
+const CARD_DELAY = 500; // ms on a tab before its card shows
+const CARD_WIDTH = 240; // overlay.css
+let cardTab = null; // the tab whose card is up
+let cardKey = '';
+let cardTimer = 0;
+let cardLeaveTimer = 0;
+let cardWarmUntil = 0; // a card closed just now: the next one shows without waiting
+
+function siteName(url) {
+  if (!url) return '';
+  try {
+    const u = new URL(url);
+    if (u.protocol === 'lumio:') return 'Lumio';
+    if (u.protocol === 'file:') return 'File on this computer';
+    return u.hostname.replace(/^www\./, '') || url;
+  } catch { return url; }
+}
+
+function cardEnter(id) {
+  clearTimeout(cardLeaveTimer);
+  clearTimeout(cardTimer);
+  if (tabDrag) return;
+  if (cardTab != null || Date.now() < cardWarmUntil) showCard(id);
+  else cardTimer = setTimeout(() => showCard(id), CARD_DELAY);
+}
+
+function cardLeave() {
+  clearTimeout(cardTimer);
+  clearTimeout(cardLeaveTimer);
+  cardLeaveTimer = setTimeout(() => hideCard(), 80); // time to cross the gap to the next tab
+}
+
+function showCard(id) {
+  const t = state.tabs.find((x) => x.id === id);
+  const el = tabEls.get(id);
+  // Menus and prompts keep the overlay; a dragged tab has no card.
+  if (!t || !el || tabDrag || (overlayKind && overlayKind !== 'hovercard')) return;
+  const r = el.getBoundingClientRect();
+  // The view spans the strip, so the card can slide from tab to tab inside it.
+  const left = Math.max(0, Math.round(tabsEl.getBoundingClientRect().left) - 12);
+  const width = Math.round(window.innerWidth - left);
+  const card = {
+    id,
+    x: Math.round(Math.max(0, Math.min(r.left - left - 12, width - 24 - CARD_WIDTH))),
+    title: t.title || 'Untitled',
+    site: siteName(t.url),
+    sleeping: !!t.sleeping,
+    agent: t.agent ? { name: t.agent.name, title: t.agent.title, color: t.agent.color } : null,
+  };
+  const key = JSON.stringify(card);
+  if (cardTab === id && key === cardKey && overlayKind === 'hovercard') return;
+  cardTab = id;
+  cardKey = key;
+  overlayKind = 'hovercard';
+  api.send('tab:hovercard', { rect: { x: left, y: Math.round(r.bottom) + 2, width, height: 300 }, card });
+}
+
+// instant: you clicked or dragged, so the next card waits again.
+function hideCard(instant = false) {
+  clearTimeout(cardTimer);
+  clearTimeout(cardLeaveTimer);
+  if (cardTab == null) return;
+  cardTab = null;
+  cardKey = '';
+  cardWarmUntil = instant ? 0 : Date.now() + 300;
+  if (overlayKind !== 'hovercard') return; // a menu took the overlay meanwhile
+  overlayKind = null;
+  api.send('tab:hovercard', { hide: true });
+}
+tabsEl.addEventListener('wheel', () => hideCard(true), { passive: true });
+window.addEventListener('blur', () => hideCard(true));
+document.addEventListener('visibilitychange', () => { if (document.hidden) hideCard(true); });
 
 // ------------------------------------------------------------------ toolbar
 const address = $('#address');
@@ -216,7 +517,7 @@ address.addEventListener('focus', () => {
   const t = activeTab();
   address.value = t?.url || '';
   address.classList.remove('url-view');
-  siteIcon(t);
+  swapSiteIcon(() => siteIcon(t));
   requestAnimationFrame(() => address.select());
 });
 address.addEventListener('mousedown', () => { if (!omniFocused) address.dataset.justFocused = '1'; });
@@ -230,8 +531,15 @@ address.addEventListener('blur', () => {
   omniFocused = false;
   omnibox.classList.remove('focused');
   setTimeout(() => { if (!omniFocused && overlayKind === 'suggest') hideOverlay(); }, 160);
-  renderToolbar();
+  swapSiteIcon(renderToolbar);
 });
+// Focusing the field turns the lock into a search icon (and back): a quick crossfade.
+function swapSiteIcon(change) {
+  const el = $('#site-icon');
+  const was = el.innerHTML;
+  change();
+  if (el.innerHTML !== was) animate(el, [{ opacity: 0, scale: 0.8 }, { opacity: 1, scale: 1 }], { duration: 2 });
+}
 address.addEventListener('input', () => { omniEdited = true; refreshSuggestions(); });
 address.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -272,17 +580,24 @@ function showSuggest() {
   overlayKind = 'suggest';
   api.send('overlay:show', {
     rect: { x: r.left - 12, y: r.bottom + 2, width: r.width + 24, height: suggestions.length * 38 + 12 + 26 },
-    payload: { kind: 'suggest', items: suggestions, selected: selIndex },
+    payload: { kind: 'suggest', items: suggestions, selected: selIndex, query: address.value },
   });
 }
 
 function hideOverlay() {
   if (!overlayKind) return;
   const kind = overlayKind;
-  overlayKind = null;
-  accountBtn.classList.remove('open');
+  overlayClosed();
   api.send('overlay:hide', kind);
 }
+function overlayClosed() {
+  overlayKind = null;
+  accountBtn.classList.remove('open');
+  menuBtn.classList.remove('open');
+  menuBtn.setAttribute('aria-expanded', 'false');
+}
+// Where a dropdown grows from: the middle of its button.
+const anchorOf = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
 
 function pick(item) {
   hideOverlay();
@@ -294,6 +609,14 @@ function pick(item) {
   }
   address.blur();
 }
+
+// Main closed what this window opened (a tab switch, a choice in it, a
+// click outside the ⋮ menu), or the pointer moved to a suggestion, which
+// Enter now opens.
+api.on('overlay-state', ({ kind, closed, hover } = {}) => {
+  if (kind === 'suggest' && overlayKind === 'suggest' && suggestions[hover]) selIndex = hover;
+  if (closed && kind === overlayKind) overlayClosed();
+});
 
 api.on('overlay-picked', (msg) => {
   if (msg.kind === 'suggest' && suggestions[msg.index]) pick(suggestions[msg.index]);
@@ -314,7 +637,7 @@ function showPwSave(prompt) {
   overlayKind = 'pwsave';
   api.send('overlay:show', {
     rect: { x: r.right - width - 12 + 8, y: r.bottom + 8, width: width + 24, height: 260 },
-    payload: { kind: 'pwsave', prompt, accent: accent() },
+    payload: { kind: 'pwsave', prompt, accent: accent(), anchor: anchorOf(pwKey) },
   });
 }
 api.on('passwords-prompt', (p) => {
@@ -340,7 +663,7 @@ async function showSiteInfo(info) {
   overlayKind = 'siteinfo';
   api.send('overlay:show', {
     rect: { x: r.left - 14, y: r.bottom + 6, width: 370, height: 210 + info.permissions.length * 42 + 26 },
-    payload: { kind: 'siteinfo', info },
+    payload: { kind: 'siteinfo', info, anchor: anchorOf(siteBtn) },
   });
 }
 siteBtn.addEventListener('mousedown', (e) => { if (!omniFocused) e.preventDefault(); });
@@ -352,13 +675,61 @@ api.on('site-info', (info) => { if (overlayKind === 'siteinfo' && info) showSite
 window.addEventListener('mousedown', (e) => { if (overlayKind === 'siteinfo' && !e.target.closest('#site-icon')) hideOverlay(); });
 
 // ------------------------------------------------------------------ toast + zoom
-let toastTimer;
+// Short notes ("Bookmarked", "Link copied"…) over the end of the address. A
+// new one goes in front and older ones wait in a stack just behind it, each
+// getting its full time once it's in front: longer notes stay longer, and the
+// pointer on one pauses it. Screen readers hear each (a polite live region).
+const toastStack = $('#toast');
+toastStack.hidden = false;
+toastStack.setAttribute('role', 'status');
+toastStack.setAttribute('aria-live', 'polite');
+const toasts = []; // newest first: { el, text, left (ms still to show), since, timer }
+let toastHeld = false;
+const readTime = (text) => Math.min(6000, Math.max(2000, text.length * 55));
 function toast(text) {
-  const el = $('#toast');
+  const front = toasts[0];
+  if (front?.text === text) { pauseToast(); front.left = readTime(text); runToast(); return; }
+  pauseToast();
+  const el = document.createElement('div');
+  el.className = 'toast';
   el.textContent = text;
-  el.hidden = false;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.hidden = true; }, 2200);
+  el.title = text;
+  el.addEventListener('pointerenter', () => { toastHeld = true; pauseToast(); });
+  el.addEventListener('pointerleave', () => { toastHeld = false; runToast(); });
+  toastStack.prepend(el);
+  toasts.unshift({ el, text, left: readTime(text), since: 0, timer: 0 });
+  while (toasts.length > 3) dropToast(toasts.pop());
+  stackToasts();
+  runToast();
+}
+// Those behind the front one show as blank cards of its width, just peeking out.
+function stackToasts() {
+  const width = toasts[0]?.el.offsetWidth || 0;
+  toasts.forEach((t, i) => {
+    t.el.style.setProperty('--depth', i);
+    t.el.classList.toggle('behind', i > 0);
+    t.el.style.width = i ? `${width}px` : '';
+  });
+}
+// Only the front note's time runs.
+function runToast() {
+  const t = toasts[0];
+  if (!t || toastHeld || t.since) return;
+  t.since = Date.now();
+  t.timer = setTimeout(() => { toasts.shift(); dropToast(t); stackToasts(); runToast(); }, t.left);
+}
+function pauseToast() {
+  const t = toasts[0];
+  if (!t?.since) return;
+  clearTimeout(t.timer);
+  t.left = Math.max(1000, t.left - (Date.now() - t.since));
+  t.since = 0;
+}
+function dropToast(t) {
+  clearTimeout(t.timer);
+  if (t.el.matches(':hover')) toastHeld = false;
+  t.el.classList.add('out');
+  setTimeout(() => t.el.remove(), dur(2) + 50);
 }
 api.on('toast', ({ text }) => toast(text));
 api.on('zoom', ({ level }) => {
@@ -379,7 +750,8 @@ function renderDownloads(started) {
   dlBtn.classList.toggle('busy', active.length > 0);
   dlBtn.classList.toggle('done', !active.length && items.some((d) => d.state === 'completed'));
   dlBtn.style.setProperty('--p', total ? (got / total).toFixed(3) : active.length ? 0.1 : 0);
-  if (started) dlBtn.animate([{ transform: 'translateY(-4px)' }, { transform: 'none' }], { duration: 350, easing: 'cubic-bezier(.22,1,.36,1)' });
+  // A new download nudges the button (its first one also opens its slot, shell.css).
+  if (started) animate(dlBtn, [{ translate: '0 -4px' }, { translate: '0 0' }], { duration: 4, easing: 'spring' });
   if (overlayKind === 'downloads') showDownloads();
 }
 function showDownloads() {
@@ -389,7 +761,7 @@ function showDownloads() {
   overlayKind = 'downloads';
   api.send('overlay:show', {
     rect: { x: r.right - width + 12, y: r.bottom + 2, width: width + 24, height },
-    payload: { kind: 'downloads', items: state.downloads },
+    payload: { kind: 'downloads', items: state.downloads, anchor: anchorOf(dlBtn) },
   });
 }
 dlBtn.addEventListener('click', () => (overlayKind === 'downloads' ? hideOverlay() : showDownloads()));
@@ -441,7 +813,9 @@ function fitBookmarks() {
   const room = limit - 30;
   els.forEach((el) => { if (el.getBoundingClientRect().right > room) el.hidden = true; });
 }
-new ResizeObserver(() => fitBookmarks()).observe(bar);
+// Only a new width changes what fits (not the bar sliding open or shut).
+let barWidth = 0;
+new ResizeObserver(([e]) => { if (e.contentRect.width !== barWidth) { barWidth = e.contentRect.width; fitBookmarks(); } }).observe(bar);
 bar.addEventListener('click', (e) => {
   if (e.target.closest('#bm-import')) { api.send('bookmarks:open', { url: 'lumio://settings/#import', disposition: 'tab' }); return; }
   if (e.target.closest('#bm-more')) {
@@ -551,7 +925,7 @@ function showAccountMenu() {
   api.send('overlay:show', {
     // The overlay page measures itself and asks for the right height.
     rect: { x: r.right - width - 12 + 6, y: r.bottom + 4, width: width + 24, height: 420 },
-    payload: { kind: 'account', account: state.account, profile: state.profile, incognito: state.incognito, accent: accent() },
+    payload: { kind: 'account', account: state.account, profile: state.profile, incognito: state.incognito, accent: accent(), anchor: anchorOf(accountBtn) },
   });
 }
 accountBtn.addEventListener('mousedown', (e) => e.preventDefault());
@@ -586,12 +960,13 @@ function renderUpdate(u) {
 // version comes out).
 function showUpdateCard(u = updateState) {
   if (!u || !u.latest || !['available', 'ready'].includes(u.status)) return;
-  const r = updateBtn.hidden ? $('#account-btn').getBoundingClientRect() : updateBtn.getBoundingClientRect();
+  const btn = updateBtn.hidden ? $('#account-btn') : updateBtn;
+  const r = btn.getBoundingClientRect();
   const width = 360;
   overlayKind = 'update';
   api.send('overlay:show', {
     rect: { x: r.right - width - 12 + 8, y: r.bottom + 8, width: width + 24, height: 320 },
-    payload: { kind: 'update', update: u, accent: accent() },
+    payload: { kind: 'update', update: u, accent: accent(), anchor: anchorOf(btn) },
   });
 }
 updateBtn.addEventListener('mousedown', (e) => e.preventDefault());
@@ -603,7 +978,50 @@ updateBtn.addEventListener('click', () => {
 });
 window.addEventListener('mousedown', (e) => { if (overlayKind === 'update' && !e.target.closest('#update-btn')) hideOverlay(); });
 api.on('update', renderUpdate);
-api.on('update-announce', (u) => { if (!overlayKind) { renderUpdate(u); showUpdateCard(u); } });
+api.on('update-announce', (u) => { if (!overlayKind || overlayKind === 'hovercard') { renderUpdate(u); showUpdateCard(u); } });
+
+// ------------------------------------------------------------------ ⋮ menu
+// Chrome's main menu, on every platform (the Mac keeps its menu bar too).
+// Main builds it and the overlay draws it over the whole window
+// (main/window.js showMenu). This window keeps the keyboard meanwhile, so
+// text you were editing stays as it was, and sends the menu its keys.
+const menuBtn = $('#menu-btn');
+let shellFocusAt = 0; // when this window's UI last took the keyboard (from the page, or another app)
+let menuFrom = 'shell';
+window.addEventListener('focus', () => { shellFocusAt = performance.now(); });
+// A click that brought the keyboard here took it from the page, which gets it back after.
+menuBtn.addEventListener('pointerdown', () => { menuFrom = performance.now() - shellFocusAt < 150 ? 'page' : 'shell'; });
+menuBtn.addEventListener('mousedown', (e) => e.preventDefault()); // the field you're in keeps its caret
+menuBtn.addEventListener('click', (e) => {
+  if (overlayKind === 'menu') { hideOverlay(); return; }
+  const r = menuBtn.getBoundingClientRect();
+  const from = e.detail ? menuFrom : 'shell'; // detail 0: Enter or Space
+  overlayKind = 'menu';
+  menuBtn.classList.add('open');
+  menuBtn.setAttribute('aria-expanded', 'true');
+  api.send('app:menu', {
+    anchor: anchorOf(menuBtn),
+    at: { right: Math.round(r.right), top: Math.round(r.bottom + 4) },
+    keyboard: !e.detail, // opened from the keyboard: its first row is selected
+    from,
+    // Cut, Copy and Paste act on the text field you're in, or else the page.
+    edit: from === 'shell' && !!document.activeElement?.matches('input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, [contenteditable]:not([contenteditable=false])'),
+  });
+});
+const MENU_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', ' ', 'Escape', 'Home', 'End']);
+const MODIFIERS = new Set(['Meta', 'Control', 'Alt', 'Shift', 'AltGraph']);
+window.addEventListener('keydown', (e) => {
+  if (overlayKind !== 'menu' || e.isComposing) return;
+  // Tab, or a shortcut (which still does what it does), closes it.
+  if (e.key === 'Tab' || ((e.metaKey || e.ctrlKey || e.altKey) && !MODIFIERS.has(e.key))) { hideOverlay(); return; }
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (!MENU_KEYS.has(e.key) && e.key.length !== 1) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  api.send('overlay:key', e.key);
+}, true);
+// It was placed for this window's size.
+window.addEventListener('resize', () => { if (overlayKind === 'menu') hideOverlay(); });
 
 // ------------------------------------------------------------------ extensions
 $('#ext-btn').addEventListener('click', () => api.send('extensions:manage'));
@@ -641,6 +1059,8 @@ const findbar = $('#findbar');
 const findInput = $('#find-input');
 function openFind() {
   findbar.hidden = false;
+  // Toasts make way for it (shell.css #toast).
+  omnibox.style.setProperty('--find-room', `${findbar.offsetWidth + 6}px`);
   findInput.focus();
   findInput.select();
   if (findInput.value) api.send('find:start', { text: findInput.value });
@@ -648,6 +1068,7 @@ function openFind() {
 function closeFind(focusPage = true) {
   if (findbar.hidden) return;
   findbar.hidden = true;
+  omnibox.style.removeProperty('--find-room');
   $('#find-count').textContent = '';
   api.send('find:stop');
   if (focusPage) api.send('tab:focus-page');
@@ -688,14 +1109,72 @@ api.on('fullscreen', (on) => document.body.classList.toggle('fullscreen', on));
 // ------------------------------------------------------------------ state
 api.on('tabs', (s) => {
   const switched = s.activeId !== state.activeId;
+  const was = activeTab();
   state.tabs = s.tabs;
   state.activeId = s.activeId;
   renderTabs();
-  renderToolbar();
-  if (barWanted() !== barVisible) renderBookmarksBar(); // the new tab page shows it even when it's off
-  panel.onTabChange(activeTab(), switched);
-  if (switched) $('#zoom-badge').hidden = true;
+  const toolbar = () => {
+    renderToolbar();
+    if (barWanted() !== barVisible) renderBookmarksBar(); // the new tab page shows it even when it's off
+    if (switched) $('#zoom-badge').hidden = true;
+  };
+  // A tab switch swaps the toolbar and bookmarks bar at once, like the page;
+  // changes on the same tab (a bookmark, an icon appearing) animate.
+  if (switched) instantly([$('#toolbar'), bar], toolbar); else toolbar();
+  const t = activeTab();
+  if (!switched && t?.bookmarked && was?.id === t.id && !was.bookmarked) popStar();
+  renderLoad(t, switched);
+  if (cardTab != null) showCard(cardTab);
+  panel.onTabChange(t, switched);
 });
+
+// Bookmarking a page pops its star.
+function popStar() {
+  animate($('#star'), [{ scale: 0.5, rotate: '-25deg' }, { scale: 1, rotate: '0deg' }], { duration: 5, easing: 'spring' });
+}
+
+// ------------------------------------------------------------------ load progress
+// A thin accent line along the address bar's bottom edge while the page you're
+// on loads. Main reports real steps (tab.progress: started .1, the page
+// answered .35, its document is ready .7); between them the line creeps on
+// toward the next, slowing down, like nprogress. Done, it fills and fades.
+const load = { id: null, p: 0, on: false, timer: 0 };
+function setLoad(p, ms = 0, easing = 'out') {
+  omnibox.style.setProperty('--load', p.toFixed(3));
+  omnibox.style.setProperty('--load-dur', `${ms}ms`);
+  omnibox.style.setProperty('--load-ease', `var(--ease-${easing})`);
+}
+function creep(p) {
+  if (reduced()) { setLoad(p); return; }
+  const next = p < 0.35 ? 0.35 : p < 0.7 ? 0.7 : 0.95;
+  setLoad(p + (next - p) * 0.8, 3000);
+}
+function renderLoad(t, switched) {
+  const loading = !!t?.loading;
+  const p = loading ? Math.max(0.1, t.progress || 0) : 0;
+  if (switched || (t?.id ?? null) !== load.id || (loading && !load.on)) {
+    // Another tab, or a new load: start from where it is, at once.
+    clearTimeout(load.timer);
+    load.id = t?.id ?? null;
+    load.on = loading;
+    load.p = p;
+    instantly([omnibox], () => { omnibox.classList.toggle('loading', loading); setLoad(loading && !switched ? 0 : p); });
+    if (loading) creep(p);
+    return;
+  }
+  if (loading) {
+    if (p > load.p) { load.p = p; creep(p); }
+    return;
+  }
+  if (!load.on) return;
+  // Done: fill, fade, then reset unseen.
+  load.on = false;
+  setLoad(1, dur(3));
+  load.timer = setTimeout(() => {
+    omnibox.classList.remove('loading');
+    load.timer = setTimeout(() => setLoad(0), dur(3));
+  }, dur(3));
+}
 
 const init = await api.invoke('shell:init');
 state.tabs = init.tabs.tabs;
@@ -707,17 +1186,12 @@ state.account = init.account || {};
 state.profile = init.profile || {};
 document.body.classList.toggle('incognito', init.incognito);
 document.body.classList.toggle('windows', init.platform === 'win32');
-// Windows has no menu bar, so the ⋮ button opens the browser menu.
-$('#menu-btn').hidden = init.platform === 'darwin';
-$('#menu-btn').addEventListener('click', () => {
-  const r = $('#menu-btn').getBoundingClientRect();
-  api.send('app:menu', { x: r.right, y: r.bottom + 4 });
-});
 $('#incognito-badge').hidden = !init.incognito;
 $('#beta-badge').hidden = !init.beta; // Lumio Beta (main/flavor.js)
 $('#ext-area').hidden = !init.extensions;
 renderTabs();
 renderToolbar();
+renderLoad(activeTab(), true);
 renderDownloads(false);
 renderBookmarksBar();
 renderAccount();

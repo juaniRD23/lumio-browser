@@ -12,15 +12,37 @@ body {
   background: var(--popover); border: 1px solid var(--line-strong); border-radius: 16px;
   /* Small enough to fit inside the view's transparent margin, so it's never clipped. */
   box-shadow: var(--shadow-sm);
-  animation: in .16s cubic-bezier(.22,1,.36,1);
+  /* Unseen until it comes in (overlay.js "Showing and hiding"), so the last
+     frame drawn before the view comes off is always empty. It grows from
+     its button (set from overlay.js), or from its top. */
+  opacity: 0; transform-origin: 50% 0;
 }
-@keyframes in { from { opacity: 0; transform: translateY(-4px); } }
-.row { display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 10px; border-radius: 10px; }
-.row.sel, .row:hover { background: var(--overlay-3); }
+#card.shown { opacity: 1; }
+body[data-kind="autofill"] #card { transform-origin: 0 0; } /* under the field's left edge */
+body[data-kind="passkey"] #card { transform-origin: 100% 0; } /* the page's top right corner */
+
+/* omnibox suggestions */
+body[data-kind="suggest"] #card { position: relative; }
+.row { position: relative; display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 10px; border-radius: 10px; }
+/* One highlight for the selected row, from the keyboard or the pointer, gliding between rows. */
+.sel-pill {
+  position: absolute; top: 0; left: 6px; right: 6px; height: 38px; border-radius: 10px;
+  background: var(--overlay-3); opacity: 0; pointer-events: none;
+  transition: transform var(--dur-1) var(--ease-out), opacity var(--dur-1) var(--ease-out);
+}
+.sel-pill.on { opacity: 1; }
+.sel-pill.still { transition: opacity var(--dur-1) var(--ease-out); }
 .row .ic { width: 18px; display: grid; place-items: center; color: var(--muted); flex: none; }
+.row .ic img { width: 16px; height: 16px; border-radius: 3px; object-fit: contain; }
 .row .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
 .row .u { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--label); flex: 1 1 0; min-width: 0; }
 .row .u::before { content: '— '; }
+/* What you typed, where a suggestion has it. */
+.row b { font-weight: 600; color: var(--text-strong); }
+.row .u b { color: var(--text); }
+.row .spacer { flex: 1; }
+.row .tag { display: grid; place-items: center; flex: none; color: var(--label); }
+.row .tag svg { width: 13px; height: 13px; }
 .row .hint { color: var(--accent); font-size: 11.5px; flex: none; }
 .row.search .hint { color: var(--label); }
 .row.ai .t { color: var(--text-strong); }
@@ -154,3 +176,79 @@ svg { display: block; }
 .ss-thumb img { width: 100%; height: 100%; object-fit: contain; }
 .ss-name { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .acc-btn:disabled { opacity: .45; }
+
+/* A tab's hover card (overlay.js renderHoverCard): under its tab, in a view
+   as wide as the tab strip; --x places it, and changing it glides it to the
+   next tab. */
+body[data-kind="hovercard"] #card {
+  width: 240px; height: auto; padding: 0; overflow: hidden; border-radius: 12px;
+  transform-origin: top left;
+  translate: var(--x, 0) 0;
+  transition: translate var(--dur-3) var(--ease-in-out);
+}
+body[data-kind="hovercard"] #card.still { transition: none; }
+.hc-text { padding: 10px 12px 10px; }
+.hc-title {
+  font-weight: 600; font-size: 12.5px; line-height: 1.35; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+}
+.hc-site { margin-top: 2px; color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hc-note { display: flex; align-items: center; gap: 6px; margin-top: 7px; color: var(--dim); font-size: 11.5px; }
+.hc-note svg { flex: none; color: var(--muted); }
+.hc-note span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A helper AI's color; pastels are deepened on light, like its tab's dot. */
+.hc-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: light-dark(color-mix(in srgb, var(--c) 70%, var(--text-strong)), var(--c)); }
+.hc-shot { aspect-ratio: 16 / 9; display: grid; place-items: center; background: var(--overlay-2); border-top: 1px solid var(--line); color: var(--label); }
+.hc-shot svg { opacity: .6; } /* until the picture comes */
+.hc-shot img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top; }
+
+/* The ⋮ menu (overlay.js renderMenu). Its view covers the window, so the
+   card is just the room the menu and its submenus are drawn in. */
+body[data-kind="menu"] { padding: 0; }
+body[data-kind="menu"] #card {
+  position: absolute; inset: 0; height: auto; padding: 0; overflow: visible;
+  background: none; border: 0; border-radius: 0; box-shadow: none;
+}
+.mpanel {
+  position: absolute; min-width: 272px; max-width: 360px; overflow-y: auto; padding: 6px;
+  background: var(--popover); border: 1px solid var(--line-strong); border-radius: 14px;
+  box-shadow: var(--shadow-lg);
+}
+.mpanel:focus { outline: none; } /* it holds the keyboard; the highlight shows where it is */
+.mpanel::-webkit-scrollbar { width: 8px; }
+.mpanel::-webkit-scrollbar-thumb { background: var(--overlay-5); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+/* The selected row's highlight, gliding from row to row. */
+.mpanel .hl {
+  position: absolute; top: 0; left: 6px; right: 6px; border-radius: 8px;
+  background: var(--overlay-3); opacity: 0; pointer-events: none;
+  transition: transform var(--dur-1) var(--ease-out), opacity var(--dur-1) var(--ease-out);
+}
+.mpanel .hl.on { opacity: 1; }
+.mpanel .hl.still { transition: opacity var(--dur-1) var(--ease-out); }
+.mi { position: relative; display: flex; align-items: center; gap: 12px; height: 32px; padding: 0 10px; border-radius: 8px; white-space: nowrap; }
+.mi.open { background: var(--overlay-2); } /* its submenu is open */
+.mi .ic { width: 18px; display: grid; place-items: center; flex: none; color: var(--muted); }
+.mi .ic svg { width: 16px; height: 16px; }
+.mi .ic img { width: 16px; height: 16px; border-radius: 3px; object-fit: contain; }
+.mi[aria-checked="true"] .ic { color: var(--accent); }
+.mi .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mi .k { margin-left: 18px; color: var(--muted); font-size: 12px; letter-spacing: .02em; font-variant-numeric: tabular-nums; }
+.mi .chev { display: grid; place-items: center; margin-right: -4px; color: var(--muted); }
+.mi .chev svg { width: 14px; height: 14px; }
+.msep { height: 1px; margin: 5px 6px; background: var(--line); }
+.mhead { padding: 6px 10px 3px; color: var(--muted); font-size: 11.5px; font-weight: 600; }
+/* Zoom and Edit: a name and a few buttons on one row. */
+.mrow { position: relative; display: flex; align-items: center; gap: 4px; height: 36px; padding: 0 4px 0 40px; }
+.mrow .t { flex: 1; }
+.mrow button {
+  display: grid; place-items: center; min-width: 32px; height: 28px; padding: 0 6px;
+  font: inherit; font-size: 12.5px; color: var(--text); background: var(--overlay-2); border: 0; border-radius: 8px;
+  transition: background-color var(--dur-1) var(--ease-out);
+}
+.mrow button.word { padding: 0 10px; }
+.mrow button svg { width: 15px; height: 15px; }
+.mrow button:hover, .mrow button.sel { background: var(--overlay-5); }
+.mrow button.sel { box-shadow: 0 0 0 2px var(--focus-ring); }
+.mrow button:active { background: var(--overlay-6); }
+.zoom-val { min-width: 46px; text-align: center; font-variant-numeric: tabular-nums; }
+.mdiv { width: 1px; height: 18px; margin: 0 4px; background: var(--line); }

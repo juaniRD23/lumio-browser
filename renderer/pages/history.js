@@ -201,3 +201,4 @@ dlg.addEventListener('close', async () => {
 const params = new URLSearchParams(location.search);
 if (params.get('q')) $('#search').value = params.get('q');
 if (params.get('view') === 'closed') switchView('closed'); else render();
+if (params.has('clear')) dlg.showModal(); // the ⋮ menu's Clear browsing data…
