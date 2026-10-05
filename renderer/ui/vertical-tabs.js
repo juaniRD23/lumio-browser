@@ -88,6 +88,10 @@ export function initVerticalTabs({ api, init, splitDrop, onLayout }) {
     toggle.setAttribute('aria-label', toggle.title);
     toggle.setAttribute('aria-expanded', String(!layout.collapsed));
     if (!layout.vertical || !layout.collapsed) hideFlyout();
+    // Just collapsed under the pointer: wait until it really moves before
+    // opening the flyout (the column shrinking makes the browser re-send
+    // pointer events without the person doing anything).
+    if (layout.collapsed && !was.collapsed) parkedAt = lastPointer;
     if (was.vertical !== layout.vertical || was.collapsed !== layout.collapsed) onLayout();
     if (layout.vertical) requestAnimationFrame(() => rows.get(state.activeId)?.scrollIntoView({ block: 'nearest' }));
   }
@@ -102,6 +106,7 @@ export function initVerticalTabs({ api, init, splitDrop, onLayout }) {
     if (!el) return;
     hideFlyout();
     clearTimeout(hoverTimer);
+    hoverTimer = 0;
     startReorder(e, el, {
       list,
       tabs,
@@ -175,12 +180,18 @@ export function initVerticalTabs({ api, init, splitDrop, onLayout }) {
     flyoutOpen = false;
     api.send('overlay:hide', 'vtabs');
   }
-  col.addEventListener('pointerenter', (e) => {
-    if (!layout.collapsed || e.buttons || Date.now() < quietUntil) return;
-    clearTimeout(hoverTimer);
-    hoverTimer = setTimeout(showFlyout, HOVER_DELAY);
-  });
-  col.addEventListener('pointerleave', () => clearTimeout(hoverTimer));
+  let lastPointer = null;
+  let parkedAt = null;
+  window.addEventListener('pointermove', (e) => { lastPointer = `${e.clientX},${e.clientY}`; }, true);
+  const hover = (e) => {
+    if (!layout.collapsed || e.buttons || Date.now() < quietUntil || flyoutOpen || hoverTimer) return;
+    if (parkedAt && parkedAt === `${e.clientX},${e.clientY}`) return;
+    parkedAt = null;
+    hoverTimer = setTimeout(() => { hoverTimer = 0; showFlyout(); }, HOVER_DELAY);
+  };
+  col.addEventListener('pointerenter', hover);
+  col.addEventListener('pointermove', hover);
+  col.addEventListener('pointerleave', () => { clearTimeout(hoverTimer); hoverTimer = 0; });
   api.on('overlay-picked', (m) => {
     if (m?.kind !== 'vtabs') return;
     flyoutOpen = false;
