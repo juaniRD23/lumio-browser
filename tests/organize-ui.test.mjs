@@ -335,3 +335,17 @@ test('side panel: the last view comes back, and another module can add Reading m
   assert.deepEqual(errors, []);
   await page.close();
 });
+
+test('the star’s bubble offers Add to reading list (not when editing from the bar)', { skip }, async () => {
+  const { page, errors } = await open(`${base}/overlay.html`);
+  await page.waitForFunction(() => typeof window.__emit === 'function');
+  const bubble = (reading) => ({ kind: 'bm-edit', node: { id: 'j1', title: 'Jira', url: 'https://jira.example/', folder: false }, parentId: 'bar', heading: 'Bookmark added', editUrl: false, folders: [{ id: 'bar', title: 'Bookmarks bar', depth: 0 }], recent: [], anchor: { left: 900, right: 930, align: 'right' }, reading });
+  await page.evaluate((b) => window.__emit('overlay-data', b), bubble(false));
+  assert.equal(await page.$('[data-act="reading"]'), null);
+  await page.evaluate((b) => window.__emit('overlay-data', b), bubble(true));
+  await page.click('[data-act="reading"]');
+  assert.deepEqual(await lastSent(page, 'side:reading'), { action: 'add-current' });
+  assert.equal((await lastSent(page, 'overlay:pick')).kind, 'bm-edit', 'and the bubble closes');
+  assert.deepEqual(errors, []);
+  await page.close();
+});
