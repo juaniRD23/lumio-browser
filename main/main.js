@@ -134,8 +134,8 @@ function incognitoProfile(base) {
   const partition = `lumio-incognito-${++incogSeq}`; // in memory only
   const ses = session.fromPartition(partition);
   setupTabSession(ses, { incognito: true });
-  languages.attach(ses, base.store, app);
-  const profile = { ...base, incognito: true, base, incog: null, partition, session: ses, chats: new ChatStore(null) };
+  const detachLanguages = languages.attach(ses, base.store, app);
+  const profile = { ...base, incognito: true, base, incog: null, partition, session: ses, chats: new ChatStore(null), detachLanguages };
   profile.downloads = new Downloads(ses, { settings: base.store, emit: (c, p) => alive().filter((w) => w.profile === profile).forEach((w) => w.emit(c, p)) });
   profile.permissions = new Permissions(ses, { store: base.store, emitFor, persist: false });
   setupScreenShare(ses);
@@ -147,6 +147,7 @@ function endIncognito(base) {
   const p = base.incog;
   base.incog = null;
   if (!p) return;
+  p.detachLanguages();
   p.session.clearStorageData().catch(() => {});
   p.session.clearCache().catch(() => {});
   p.session.clearAuthCache?.().catch?.(() => {});
@@ -1569,6 +1570,7 @@ function endGuest() {
   const p = guest;
   guest = null;
   if (!p) return;
+  p.detachLanguages();
   p.session.clearStorageData().catch(() => {});
   p.session.clearCache().catch(() => {});
   const wipe = () => setTimeout(() => profiles.rm(p.dir), 1000); // after any pending writes

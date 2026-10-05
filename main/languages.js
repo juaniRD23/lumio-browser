@@ -67,18 +67,19 @@ function spellcheckLanguages(ses, store) {
 
 function apply(ses, store, app) {
   try { ses.setUserAgent(ses.getUserAgent(), acceptLanguages(preferred(store, app))); } catch { /* keep the default */ }
-  ses.setSpellCheckerEnabled(store.settings.spellcheck !== false);
+  try { ses.setSpellCheckerEnabled(store.settings.spellcheck !== false); } catch { /* keep the current one */ }
   const langs = spellcheckLanguages(ses, store);
   if (langs?.length) { try { ses.setSpellCheckerLanguages(langs); } catch { /* keep the current ones */ } }
 }
 
 // A profile's session (or its incognito one): apply now, and again whenever
-// these settings change.
+// these settings change. Returns a function that stops (an incognito
+// session ends while its profile's settings live on).
 function attach(ses, store, app) {
   const key = () => JSON.stringify([store.settings.languages, store.settings.spellcheck, store.settings.spellcheckLanguages]);
   let last = key();
   apply(ses, store, app);
-  store.settingsFile.onSave(() => {
+  return store.settingsFile.onSave(() => {
     const now = key();
     if (now === last) return;
     last = now;
