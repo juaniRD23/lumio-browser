@@ -75,7 +75,7 @@ async function fullPage() {
   pick.classList.remove('busy');
   if (!res?.png) { hint.textContent = res?.error || 'Couldn’t capture the whole page.'; return; }
   const img = await createImageBitmap(new Blob([res.png], { type: 'image/png' }));
-  edit(img, res.clipped ? 'This page is very long, so the picture stops partway down.' : '');
+  edit(img, res.clipped ? 'This page is very long, so the picture stops partway down.' : '', { fit: false });
 }
 
 // ---------------------------------------------------------------- the editor
@@ -159,15 +159,18 @@ function redraw() {
   undoBtn.disabled = !ops.length;
 }
 
-function edit(img, note = '') {
+function edit(img, note = '', { fit = true } = {}) {
   base = img;
   canvas.width = img.width;
   canvas.height = img.height;
-  // Shown at its real size on this screen, or smaller to fit.
-  canvas.style.width = `${Math.max(1, Math.round(img.width / devicePixelRatio))}px`;
   ops = [];
   pick.hidden = true;
   editEl.hidden = false;
+  // Shown at its real size on this screen, or smaller to fit: an area or the
+  // visible part fits the window's height too; a whole page scrolls.
+  let width = img.width / devicePixelRatio;
+  if (fit) width = Math.min(width, Math.max(80, $('#stage').clientHeight - 24) * (img.width / img.height));
+  canvas.style.width = `${Math.max(1, Math.round(width))}px`;
   setTool('pen');
   setColor(COLORS[0][1]);
   redraw();
@@ -223,8 +226,12 @@ function placeText(e) {
     if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); commitText(); }
     else if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); textBox.remove(); textBox = null; }
   });
-  textBox.addEventListener('blur', () => setTimeout(commitText, 0));
-  setTimeout(() => textBox?.focus(), 0);
+  // Focused at once so quick typing isn't lost; a blur that the click itself
+  // caused is undone, and only a real one puts the text in.
+  const box = textBox;
+  box.addEventListener('blur', () => setTimeout(() => { if (textBox === box && document.activeElement !== box) commitText(); }, 0));
+  box.focus();
+  setTimeout(() => { if (textBox === box) box.focus(); }, 0);
 }
 function commitText() {
   const box = textBox;

@@ -131,6 +131,7 @@ export function createReaderView({ api, onClose = () => {} }) {
     </div>`;
   const $ = (sel) => el.querySelector(sel);
   const scroller = $('.rd-scroll');
+  scroller.addEventListener('pointerdown', () => scroller.classList.remove('kb-focus'));
   const article = $('.rd-article');
   const stateEl = $('.rd-state');
   const settings = $('.rd-settings');
@@ -388,8 +389,9 @@ export function createReaderView({ api, onClose = () => {} }) {
     loading,
     show,
     stop,
-    // The article takes the keyboard (arrows and Page Down scroll it); the ring shows only for keyboard use.
-    focus: (keyboard = false) => scroller.focus({ preventScroll: true, focusVisible: keyboard }),
+    // The article takes the keyboard (arrows and Page Down scroll it); the ring shows only
+    // when it was opened from the keyboard (Chromium's focus() ignores focusVisible).
+    focus: (keyboard = false) => { scroller.classList.toggle('kb-focus', keyboard); scroller.focus({ preventScroll: true }); },
     get page() { return page; },
     get sentences() { return sentences; },
     setPrefs(p) { prefs = { ...DEFAULTS, ...p }; applyPrefs(); },

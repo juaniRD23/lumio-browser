@@ -133,7 +133,7 @@ function devicesView(p) {
       <span class="ic">${d.platform === 'mac' ? I.mac : I.pc}</span><span class="t"><b>${esc(d.name)}</b><small>${esc(ago(d.lastSeen))}</small></span></button>`).join('');
   return `<div class="sh" role="dialog" aria-labelledby="dev-title">${subHead('Send to your devices', 'dev-title')}
     <div class="sh-list" role="menu" aria-label="Your devices">${list}</div>
-    <div class="qr-note">They get a notification and can open the page there.</div>
+    <div class="qr-note dev-note">They get a notification and can open the page there.</div>
   </div>`;
 }
 
