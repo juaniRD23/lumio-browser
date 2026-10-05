@@ -21,6 +21,7 @@ export function initBookmarksBar({ api, bar, isMac, modKey, activeTab, reportSlo
   let visible = null;
   let menu = null; // the open folder menu: { id, keyboard, drag }
   let bubble = null; // the open bubble: { id, heading, rect, editUrl }
+  let savedGroups = []; // saved tab groups, at the bar's left end (main/groups-service.js)
 
   // ---- the tree, as the main process sent it
   const all = () => [{ id: 'bar', title: 'Bookmarks bar', children: data.items }, data.other, data.mobile].filter(Boolean);
@@ -53,7 +54,7 @@ export function initBookmarksBar({ api, bar, isMac, modKey, activeTab, reportSlo
     const { items } = data;
     const other = data.other?.children.length ? `<button class="bm-item bm-folder" data-id="other" tabindex="-1" aria-haspopup="menu" aria-expanded="false" title="Other bookmarks">${icons.folder}<span>Other bookmarks</span></button>` : '';
     const end = items.length || other ? `<span class="bm-end">${other}<button id="bm-all" class="bm-item" tabindex="-1" title="All bookmarks" aria-label="All bookmarks">${icons.list}<span>All bookmarks</span></button></span>` : '';
-    bar.innerHTML = (items.length
+    bar.innerHTML = savedGroupsHtml() + (items.length
       ? `<span class="bm-items">${items.map(itemHtml).join('')}<button id="bm-more" class="icon-btn small" tabindex="-1" title="More bookmarks" aria-label="More bookmarks" aria-haspopup="menu" aria-expanded="false" hidden>${icons.more}</button></span>`
       : `<span class="bm-items"><span class="bm-empty">For quick access, bookmark pages with ${isMac ? '⌘D' : 'Ctrl+D'} or the ☆ in the address bar.</span><button id="bm-import" class="bm-link" tabindex="-1">Import bookmarks…</button></span>`) + end;
     bar.querySelectorAll('.bm-item img').forEach((img) => {
@@ -67,6 +68,13 @@ export function initBookmarksBar({ api, bar, isMac, modKey, activeTab, reportSlo
     reportSlot();
     // An open menu follows the change (or closes if its folder is gone).
     if (menu && overlay.kind() === 'bm-menu') { if (menuButton(menu.id)) openMenu(menu.id, { keep: true }); else closeMenu(); }
+  }
+  function savedGroupsHtml() {
+    if (!savedGroups.length) return '';
+    return `<span class="bm-groups" role="group" aria-label="Saved tab groups">${savedGroups.map((g) => {
+      const name = g.title || `${g.count} tab${g.count === 1 ? '' : 's'}`;
+      return `<button class="bm-item bm-sg${g.open ? ' open' : ''}" data-sg="${esc(g.id)}" tabindex="-1" style="--gc: var(--group-${esc(g.color)})" title="${esc(name)} · ${g.open ? 'open' : 'saved'} tab group" aria-label="${esc(name)}, saved tab group${g.open ? ', open' : ''}"><i class="sg-dot"></i><span>${esc(name)}</span></button>`;
+    }).join('')}</span>`;
   }
   // Hide what doesn't fit and list it under the » button.
   function fit() {
@@ -152,6 +160,8 @@ export function initBookmarksBar({ api, bar, isMac, modKey, activeTab, reportSlo
 
   // ---- clicks
   bar.addEventListener('click', (e) => {
+    const sg = e.target.closest('.bm-sg');
+    if (sg) { api.send('groups:open-saved', sg.dataset.sg); return; }
     if (e.target.closest('#bm-import')) { api.send('bookmarks:open', { url: 'lumio://settings/#import', disposition: 'tab' }); return; }
     if (e.target.closest('#bm-all')) { api.send('bookmarks:all'); return; }
     const opener = e.target.closest('.bm-folder, #bm-more');
@@ -177,6 +187,8 @@ export function initBookmarksBar({ api, bar, isMac, modKey, activeTab, reportSlo
   // On a bookmark or folder: open, edit, delete…; on the bar itself: bookmark this tab, add a folder, the manager.
   bar.addEventListener('contextmenu', (e) => {
     e.preventDefault();
+    const sg = e.target.closest('.bm-sg');
+    if (sg) { api.send('groups:saved-context', sg.dataset.sg); return; }
     const el = e.target.closest('.bm-item[data-id]');
     api.send('bookmarks:context', el ? el.dataset.id : null);
   });
@@ -267,13 +279,13 @@ export function initBookmarksBar({ api, bar, isMac, modKey, activeTab, reportSlo
     const r = (el && !el.hidden ? el : document.getElementById('omnibox')).getBoundingClientRect();
     return { left: r.left, right: r.right, bottom: r.bottom, align: el === onBar ? 'left' : 'right' };
   }
-  function openBubble({ id, heading, anchor, refresh }) {
+  function openBubble({ id, heading, anchor, refresh, reading }) {
     const found = find(id);
     if (!found) return;
     if (refresh && (!bubble || bubble.id !== id || overlay.kind() !== 'bm-edit')) return;
     const { node, parent } = found;
     const rect = refresh ? bubble.rect : anchorRect(anchor);
-    bubble = { id, heading: heading ?? bubble?.heading, rect, editUrl: refresh ? bubble.editUrl : !!anchor };
+    bubble = { id, heading: heading ?? bubble?.heading, rect, editUrl: refresh ? bubble.editUrl : !!anchor, reading: refresh ? bubble.reading : !!reading };
     // A folder can't go inside itself.
     const inside = new Set();
     if (isFolder(node)) (function walk(n) { inside.add(n.id); n.children.forEach((c) => isFolder(c) && walk(c)); })(node);
@@ -284,6 +296,7 @@ export function initBookmarksBar({ api, bar, isMac, modKey, activeTab, reportSlo
       parentId: parent?.id || 'bar',
       heading: bubble.heading,
       editUrl: bubble.editUrl && !isFolder(node),
+      reading: bubble.reading && !isFolder(node), // the star's bubble also offers the reading list
       folders: data.folders.filter((f) => !inside.has(f.id)),
       recent: data.recent.filter((f) => !inside.has(f)),
       anchor: { left: rect.left, right: rect.right, align: rect.align },
@@ -322,6 +335,7 @@ export function initBookmarksBar({ api, bar, isMac, modKey, activeTab, reportSlo
     bubble = null;
   });
 
+  api.on('saved-groups', (list) => { savedGroups = Array.isArray(list) ? list : []; if (visible != null) render(); });
   api.on('bookmarks', (b) => {
     data = b;
     render();
@@ -329,7 +343,7 @@ export function initBookmarksBar({ api, bar, isMac, modKey, activeTab, reportSlo
   });
 
   return {
-    set(b) { data = b; },
+    set(b, groups = []) { data = b; savedGroups = groups; },
     render,
     // The active tab changed: the new tab page shows the bar even when it's off.
     onTabs() { if (wanted() !== visible) render(); },

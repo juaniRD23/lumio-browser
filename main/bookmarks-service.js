@@ -70,9 +70,10 @@ class BookmarksService {
   // The star's bubble (and Edit… on a bookmark or folder). anchor: the id of
   // something on the bar to point at, else the star. refresh: redraw the
   // open bubble (a folder was just made) without moving it.
-  bubble(w, id, heading, { anchor = null, refresh = false } = {}) {
+  // reading: the star's bubble also offers "Add to reading list".
+  bubble(w, id, heading, { anchor = null, refresh = false, reading = false } = {}) {
     if (!this.marks.get(id)) return;
-    w.emit('bookmarks', this.payload({ bubble: { id, heading, anchor, refresh } }));
+    w.emit('bookmarks', this.payload({ bubble: { id, heading, anchor, refresh, reading: reading && !w.incognito } }));
   }
 
   // ⌘D or the star: bookmarks the page (in the folder used last) and opens the
@@ -83,11 +84,11 @@ class BookmarksService {
     const url = w.tabs.displayUrl(tab);
     if (!/^https?:/.test(url)) return;
     const [have] = this.marks.byUrl(url);
-    if (have) { this.bubble(w, have.id, 'Edit bookmark'); return; }
+    if (have) { this.bubble(w, have.id, 'Edit bookmark', { reading: true }); return; }
     const node = this.marks.add(this.marks.lastFolder(), null, { url, title: tab.view?.webContents.getTitle() || tab.title, favicon: tab.favicon }); // the page's title now
     if (!node) return;
     this.changed();
-    this.bubble(w, node.id, 'Bookmark added');
+    this.bubble(w, node.id, 'Bookmark added', { reading: true });
   }
 
   // ⇧⌘D: the window's web pages, in a new folder, then the bubble to name it.

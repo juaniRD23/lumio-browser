@@ -84,6 +84,21 @@
   --bubble: light-dark(#eeeef1, #202024); /* your messages in the AI chat */
   --star: light-dark(#a87200, #ffd479); /* a bookmarked page's star */
   --amber: light-dark(#a16207, #f5c542); /* a plan step in progress, a usage ring that's nearly full */
+  /* Tab groups: Chrome's nine colors, for a group's chip, the line under
+     its tabs and saved groups on the bookmarks bar. --group-ink is the
+     chip's text (4.5:1 on each fill); yellow and orange are light even in
+     the light theme, so they take --group-ink-dark. */
+  --group-grey: light-dark(#5f6368, #bdc1c6);
+  --group-blue: light-dark(#1a73e8, #8ab4f8);
+  --group-red: light-dark(#d93025, #f28b82);
+  --group-yellow: light-dark(#f9ab00, #fdd663);
+  --group-green: light-dark(#188038, #81c995);
+  --group-pink: light-dark(#d01884, #ff8bcb);
+  --group-purple: light-dark(#9334e6, #d7aefb);
+  --group-cyan: light-dark(#007b83, #78d9ec);
+  --group-orange: light-dark(#fa903e, #fcad70);
+  --group-ink: light-dark(#ffffff, #202124);
+  --group-ink-dark: light-dark(#202124, #202124);
 
   /* depth */
   --shadow-xs: 0 2px 10px light-dark(#00000026, #000a); /* a knob on a slider */

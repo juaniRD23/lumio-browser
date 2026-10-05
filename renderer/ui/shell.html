@@ -6,6 +6,8 @@
   <link rel="stylesheet" href="shell.css" />
   <link rel="stylesheet" href="omnibox.css" />
   <link rel="stylesheet" href="bookmarks-bar.css" />
+  <link rel="stylesheet" href="tab-groups.css" />
+  <link rel="stylesheet" href="side-panel.css" />
 </head>
 <body class="no-anim">
   <aside id="sidebar" aria-label="Sidebar"></aside>
@@ -42,6 +44,7 @@
       <button id="ext-btn" class="icon-btn" title="Extensions" aria-label="Extensions"></button>
     </div>
     <button id="downloads" class="icon-btn" title="Downloads" aria-label="Downloads" hidden><span class="ring"></span></button>
+    <button id="side-btn" class="icon-btn" title="Side panel: reading list, bookmarks, history" aria-label="Side panel" aria-pressed="false"></button>
     <button id="ai-toggle" class="ai-toggle" title="Lumio AI (⌘⇧L)" aria-label="Toggle Lumio AI">
       <span class="mark"></span><span>Lumio</span>
     <span id="beta-badge" title="Lumio Beta: new versions arrive here first, for testing" hidden>Beta</span>
@@ -65,6 +68,8 @@
     </section>
     <div id="resizer" title="Drag to resize"></div>
     <aside id="panel" aria-label="Lumio AI">
+      <div id="side-switch" role="tablist" aria-label="Side panel"></div>
+      <section id="side-view" hidden></section>
       <div id="panel-head">
         <span class="mark big" id="panel-mark"></span>
         <span class="panel-title">Lumio</span>

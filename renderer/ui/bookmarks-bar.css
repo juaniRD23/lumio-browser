@@ -10,3 +10,9 @@
 .bm-item:focus-visible, #bm-more:focus-visible, #bm-import:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 /* A drag held over a folder: it goes inside. */
 .bm-item.drop-into { background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 55%, transparent); }
+/* Saved tab groups at the left end (main/groups-service.js): a dot in the group's color. */
+#bookmarks-bar .bm-groups { display: flex; align-items: center; gap: 2px; flex: none; max-width: 40%; overflow: hidden; margin-right: 6px; padding-right: 6px; border-right: 1px solid var(--line); height: 18px; }
+.bm-sg { height: 26px; max-width: 160px; }
+.bm-sg .sg-dot { width: 10px; height: 10px; flex: none; border-radius: 50%; background: var(--gc); }
+/* Open somewhere: a ring around the dot. */
+.bm-sg.open .sg-dot { box-shadow: 0 0 0 2px var(--chrome), 0 0 0 3.5px var(--gc); }

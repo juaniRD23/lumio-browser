@@ -3,6 +3,7 @@
 import { icons, markSvg, avatarHtml } from './icons.js';
 import { setAccent } from '/assets/theme-colors.js';
 import './overlay-bookmarks.js'; // the bookmarks bar's folder menus and the star's bubble
+import './overlay-groups.js'; // the tab group editor
 
 const api = window.lumio;
 const card = document.getElementById('card');

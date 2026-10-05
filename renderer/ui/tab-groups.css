@@ -1,0 +1,51 @@
+/* Tab groups in the tab strip (renderer/ui/tab-groups.js): the chip before a
+   group's tabs, the line in its color under them, and collapsing. --gc is
+   the group's color token (--group-<color> in theme.css). */
+.tab-group-chip {
+  -webkit-app-region: no-drag;
+  position: relative;
+  flex: none; align-self: flex-end;
+  display: inline-flex; align-items: center;
+  height: 22px; max-width: 150px; margin: 0 2px 4px 4px; padding: 0 9px;
+  border: 0; border-radius: 7px;
+  background: var(--gc); color: var(--group-ink);
+  font-size: 12px; font-weight: 600; line-height: 1; letter-spacing: .01em;
+  cursor: default;
+  transition: transform 160ms var(--ease), box-shadow 120ms var(--ease);
+}
+.tab-group-chip.ink-dark { color: var(--group-ink-dark); }
+.tab-group-chip .tg-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* No name: a dot in the group's color, like Chrome. */
+.tab-group-chip.untitled { width: 14px; height: 14px; padding: 0; margin-bottom: 8px; border-radius: 50%; }
+.tab-group-chip:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(--gc) 28%, transparent); }
+.tab-group-chip:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+/* Collapsed: a ring says its tabs are tucked away. */
+.tab-group-chip.collapsed { box-shadow: 0 0 0 2px var(--chrome), 0 0 0 3.5px var(--gc); }
+
+/* The line under a group's tabs, from the chip to its last tab. */
+.tab.grouped::after {
+  content: ''; position: absolute; left: -2px; right: 0; bottom: -4px; height: 2px;
+  background: var(--gc); pointer-events: none;
+}
+.tab.grouped.group-end::after { right: 8px; border-radius: 0 2px 2px 0; }
+.tab-group-chip:not(.untitled):not(.collapsed)::after {
+  content: ''; position: absolute; left: 50%; right: -4px; bottom: -4px; height: 2px; background: var(--gc);
+}
+
+/* Collapsed groups' tabs fold away. */
+/* Only grouped tabs animate: other tabs' widths are measured as they change. */
+.tab.grouped { transition: flex-basis 180ms var(--ease), width 180ms var(--ease), opacity 140ms ease, padding 180ms var(--ease), transform 160ms var(--ease); }
+.tab.grouped.dragging { transition: none; }
+.tab.collapsed-away {
+  flex-basis: 0; width: 0; min-width: 0; padding: 0; margin-left: -2px;
+  opacity: 0; overflow: hidden; pointer-events: none;
+}
+.tab.collapsed-away::before, .tab.collapsed-away::after { display: none; }
+
+/* A group being dragged by its chip. */
+.dragging-group { z-index: 2; transition: none !important; }
+.tab.dragging-group { background: var(--tab-active); box-shadow: var(--shadow-lift), inset 0 0 0 1px var(--line-strong); }
+
+@media (prefers-reduced-motion: reduce) {
+  .tab.grouped, .tab-group-chip { transition: none; }
+}

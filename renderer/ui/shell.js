@@ -5,6 +5,8 @@ import { initPanel } from './ai-panel.js';
 import { initSidebar } from './sidebar.js';
 import { initOmnibox } from './omnibox.js';
 import { initBookmarksBar } from './bookmarks-bar.js';
+import { initTabGroups } from './tab-groups.js';
+import { initSidePanel } from './side-panel.js';
 import './keys.js';
 
 const IS_MAC = /Mac/.test(navigator.platform);
@@ -14,7 +16,7 @@ const modKey = (e) => (IS_MAC ? e.metaKey : e.ctrlKey);
 const api = window.lumio;
 const $ = (sel) => document.querySelector(sel);
 
-const state = { tabs: [], activeId: null, downloads: [], incognito: false, account: {}, profile: {} };
+const state = { tabs: [], groups: [], activeId: null, downloads: [], incognito: false, account: {}, profile: {} };
 const activeTab = () => state.tabs.find((t) => t.id === state.activeId) || null;
 
 // ------------------------------------------------------------------ icons
@@ -60,6 +62,7 @@ function faviconHtml(t) {
 function createTabEl(id) {
   const el = document.createElement('div');
   el.className = 'tab';
+  el.dataset.id = id;
   el.setAttribute('role', 'tab');
   el.innerHTML = '<span class="fav"></span><i class="agent-dot" hidden></i><span class="title"></span><button class="audio" hidden></button><button class="x" aria-label="Close tab"></button>';
   el.querySelector('.x').innerHTML = icons.close;
@@ -93,14 +96,30 @@ function updateTabEl(el, t) {
   audio.innerHTML = t.muted ? icons.muted : icons.volume;
 }
 
+// Tab groups: their chips go before their tabs (renderer/ui/tab-groups.js).
+const tabGroups = initTabGroups({
+  api,
+  tabsEl,
+  getState: () => state,
+  accent: () => accent(),
+  overlay: {
+    kind: () => overlayKind,
+    show: (kind, rect, payload) => { overlayKind = kind; api.send('overlay:show', { rect, payload }); },
+    hide: (kind) => { if (overlayKind === kind) hideOverlay(); },
+    closed: (kind) => { if (overlayKind === kind) overlayKind = null; },
+  },
+});
+
 function renderTabs() {
   const ids = new Set(state.tabs.map((t) => t.id));
   for (const [id, el] of tabEls) if (!ids.has(id)) { el.remove(); tabEls.delete(id); }
-  state.tabs.forEach((t, i) => {
+  state.tabs.forEach((t) => {
     let el = tabEls.get(t.id);
     if (!el) { el = createTabEl(t.id); tabEls.set(t.id, el); }
-    if (tabsEl.children[i] !== el) tabsEl.insertBefore(el, tabsEl.children[i] || null);
     updateTabEl(el, t);
+  });
+  tabGroups.layout(state.tabs, tabEls, state.groups).forEach((el, i) => {
+    if (tabsEl.children[i] !== el) tabsEl.insertBefore(el, tabsEl.children[i] || null);
   });
   requestAnimationFrame(() => {
     for (const el of tabEls.values()) el.classList.toggle('narrow', el.offsetWidth < 76);
@@ -110,7 +129,7 @@ function renderTabs() {
 function startTabDrag(e, el, id) {
   if (e.button !== 0 || e.target.closest('.x, .audio')) return;
   api.send('tab:activate', id);
-  const els = [...tabsEl.children];
+  const els = [...tabsEl.querySelectorAll('.tab:not(.collapsed-away)')]; // group chips stay put
   const from = els.indexOf(el);
   const rects = els.map((x) => x.getBoundingClientRect());
   const startX = e.clientX;
@@ -146,7 +165,7 @@ function startTabDrag(e, el, id) {
     el.removeEventListener('pointerup', up);
     el.removeEventListener('pointercancel', up);
     els.forEach((x) => { x.style.transform = ''; x.classList.remove('shifting', 'dragging'); });
-    if (dragging && target !== from) api.send('tab:move', { id, index: target });
+    if (dragging && target !== from) api.send('tab:move', { id, index: state.tabs.findIndex((t) => t.id === Number(els[target].dataset.id)) });
   };
   el.addEventListener('pointermove', move);
   el.addEventListener('pointerup', up);
@@ -551,6 +570,7 @@ api.on('fullscreen', (on) => document.body.classList.toggle('fullscreen', on));
 api.on('tabs', (s) => {
   const switched = s.activeId !== state.activeId;
   state.tabs = s.tabs;
+  state.groups = s.groups || [];
   state.activeId = s.activeId;
   renderTabs();
   renderToolbar();
@@ -561,9 +581,10 @@ api.on('tabs', (s) => {
 
 const init = await api.invoke('shell:init');
 state.tabs = init.tabs.tabs;
+state.groups = init.tabs.groups || [];
 state.activeId = init.tabs.activeId;
 state.downloads = init.downloads;
-bookmarksBar.set(init.bookmarks);
+bookmarksBar.set(init.bookmarks, init.savedGroups);
 state.incognito = init.incognito;
 state.account = init.account || {};
 state.profile = init.profile || {};
@@ -585,6 +606,9 @@ bookmarksBar.render();
 renderAccount();
 renderUpdate(init.update);
 panel.init(init);
+// The side panel's views share the panel's column (renderer/ui/side-panel.js).
+const sidePanel = initSidePanel({ api, panel, modKey, activeTab });
+sidePanel.init(init);
 const sidebar = initSidebar({
   api,
   panel,

@@ -335,7 +335,7 @@ function showBubble(p) {
       <label class="bmb-field"><span>Name</span><input id="bmb-name" type="text" spellcheck="false" autocomplete="off" value="${esc(p.node.title)}"></label>
       ${p.editUrl ? `<label class="bmb-field"><span>URL</span><input id="bmb-url" type="text" spellcheck="false" autocomplete="off" value="${esc(p.node.url)}"></label>` : ''}
       <label class="bmb-field"><span>Folder</span><select id="bmb-folder">${folderOptions(p)}</select></label>
-      <div class="bmb-actions"><button class="acc-btn ghost" data-act="remove">${p.node.folder ? 'Delete' : 'Remove'}</button><span class="sp"></span><button class="acc-btn primary" data-act="done">Done</button></div>
+      <div class="bmb-actions"><button class="acc-btn ghost" data-act="remove">${p.node.folder ? 'Delete' : 'Remove'}</button>${p.reading ? '<button class="acc-btn ghost" data-act="reading" title="Save this page to read later">Add to reading list</button>' : ''}<span class="sp"></span><button class="acc-btn primary" data-act="done">Done</button></div>
     </div>
     <div class="bmb-pick" hidden>
       <div class="bmb-tree" role="tree" tabindex="0" aria-label="Folders"></div>
@@ -431,6 +431,7 @@ root.addEventListener('click', (e) => {
   if (folderRow) { pick(folderRow.dataset.id); return; }
   const act = e.target.closest('[data-act]')?.dataset.act;
   if (act === 'done') done();
+  else if (act === 'reading') { api.send('side:reading', { action: 'add-current' }); done(); }
   else if (act === 'remove') { clearTimeout(edit.timer); api.send('bookmarks:remove', edit.id); close({ refocus: 'page' }); } else if (act === 'cancel') closePicker();
   else if (act === 'save') savePicker();
   else if (act === 'new') { const f = root.querySelector('.bmb-new'); f.hidden = false; const i = document.getElementById('bmb-new'); i.focus(); i.select(); }

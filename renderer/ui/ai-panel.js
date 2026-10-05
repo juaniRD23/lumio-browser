@@ -1125,6 +1125,8 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
       requestAnimationFrame(() => requestAnimationFrame(() => body.classList.remove('no-anim')));
     },
     open() { if (!panelOpen) setOpen(true); },
+    close() { if (panelOpen) setOpen(false); },
+    isOpen: () => panelOpen,
     sendText(text) { submit(text); },
     // For the sidebar.
     newTask({ projectId = null, full: wantFull = false } = {}) {

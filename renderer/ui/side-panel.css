@@ -1,0 +1,90 @@
+/* The side panel's switcher and views (renderer/ui/side-panel.js), in the
+   AI panel's column. The views keep the panel's full width while it slides,
+   like the chat does. */
+#side-switch, #side-view { width: calc(var(--panel-w) - 2px); flex-shrink: 0; transition: transform var(--slide), opacity .3s ease; }
+#side-switch {
+  display: flex; align-items: center; gap: 2px;
+  height: 38px; padding: 0 6px; border-bottom: 1px solid var(--line);
+}
+.ss-tab {
+  position: relative; display: inline-flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 8px; border-radius: 8px; color: var(--dim);
+  font-size: 12.5px; font-weight: 550; white-space: nowrap;
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.ss-tab svg { width: 15px; height: 15px; flex: none; }
+/* Compact: only the view you're on shows its name. */
+.ss-tab span { display: none; }
+.ss-tab[aria-selected="true"] { background: var(--active); color: var(--text); }
+.ss-tab[aria-selected="true"] span { display: inline; }
+.ss-tab:hover { background: var(--hover); color: var(--text); }
+.ss-tab:focus-visible, .ss-close:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.ss-badge {
+  position: absolute; top: 1px; right: 0; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px;
+  background: var(--accent); color: var(--on-accent); font-size: 9.5px; font-weight: 700; line-height: 15px; text-align: center;
+}
+.ss-tab[aria-selected="true"] .ss-badge { position: static; }
+.ss-close { margin-left: auto; }
+/* Full-size chat is only the chat. */
+body.chat-full #side-switch { display: none; }
+
+#side-view { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 4px 8px 16px; outline: none; }
+#side-view[hidden] { display: none; }
+/* Another view showing: the chat's parts step aside (they keep their state). */
+body.side-other :is(#panel-head, #chat-menu, #messages, #plan, #composer, #project-btn) { display: none !important; }
+body.panel-closed :is(#side-switch, #side-view) { transform: translateX(28px); opacity: 0; }
+body:is(.resizing, .no-anim) :is(#side-switch, #side-view) { transition: none !important; }
+
+.sv-head { display: flex; align-items: center; gap: 8px; padding: 10px 6px 8px; }
+.sv-head h2 { flex: 1; margin: 0; font-size: 14px; font-weight: 650; letter-spacing: -.1px; }
+.sv-add { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; font-size: 12.5px; }
+.sv-add svg { width: 14px; height: 14px; }
+.sv-link { color: var(--accent); font-size: 12.5px; font-weight: 550; padding: 4px 6px; border-radius: 6px; }
+.sv-link:hover { background: var(--hover); }
+.sv-link:focus-visible, .sv-add:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.sv-search {
+  display: block; width: calc(100% - 8px); margin: 0 4px 8px; height: 32px; padding: 0 10px;
+  font: inherit; font-size: 13px; color: var(--text); background: var(--field);
+  border: 1px solid transparent; border-radius: 9px; outline: none;
+}
+.sv-search:focus { background: var(--field-focus); border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
+.sv-sec { margin: 12px 6px 4px; font-size: 11.5px; font-weight: 600; color: var(--label); text-transform: none; }
+.sv-list { display: flex; flex-direction: column; }
+.sv-row {
+  position: relative; display: flex; align-items: center; gap: 10px;
+  min-height: 40px; padding: 4px 6px 4px calc(6px + var(--depth, 0) * 14px); border-radius: 8px;
+  color: var(--text); cursor: default; outline: none; list-style: none;
+}
+.sv-row::-webkit-details-marker { display: none; }
+.sv-row:hover { background: var(--hover); }
+.sv-row:focus-visible { box-shadow: inset 0 0 0 2px var(--focus-ring); }
+.sv-ic { width: 16px; height: 16px; flex: none; display: grid; place-items: center; color: var(--dim); }
+.sv-ic img, .sv-ic svg { width: 16px; height: 16px; border-radius: 3px; }
+.sv-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.sv-t, .sv-s { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sv-t { font-size: 13px; }
+.sv-s { font-size: 11.5px; color: var(--label); }
+.sv-row[data-read] .sv-t { color: var(--dim); }
+.sv-count { font-size: 11.5px; color: var(--label); }
+.sv-tree .sv-row { min-height: 32px; }
+.sv-tree .sv-row .sv-s { display: none; }
+.sv-folder[open] > summary .sv-ic { color: var(--text); }
+.sv-none { padding: 6px 6px 6px calc(36px + var(--depth, 0) * 14px); font-size: 12px; color: var(--label); }
+/* A reading list row's buttons show on hover or focus. */
+.sv-acts { display: none; gap: 2px; flex: none; }
+.sv-row:is(:hover, :focus-within) .sv-acts { display: flex; }
+.sv-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 36px 20px; text-align: center; color: var(--dim); font-size: 12.5px; }
+.sv-empty b { color: var(--text); font-size: 13px; }
+.sv-empty svg { width: 22px; height: 22px; color: var(--label); }
+.sv-undo {
+  position: sticky; bottom: 0; display: flex; align-items: center; gap: 10px; margin: 12px 4px 0; padding: 8px 12px;
+  background: var(--popover); border: 1px solid var(--line-strong); border-radius: 10px; box-shadow: var(--shadow-sm); font-size: 12.5px;
+}
+.sv-undo span { flex: 1; }
+
+/* The toolbar's side panel button, on while a view other than the chat shows. */
+#side-btn.on { background: var(--active); color: var(--text); }
+
+@media (prefers-reduced-motion: reduce) {
+  #side-switch, #side-view, .ss-tab { transition: none !important; }
+}
