@@ -70,14 +70,21 @@ function resolveFile(url, hosts) {
   return inside(base, f) ? f : null;
 }
 
-function makeHandler(hosts) {
+// dark: every page is served dark (incognito tabs). Otherwise a page asks for
+// it with ?appearance=dark (an incognito window's shell and overlay).
+function makeHandler(hosts, { dark = false } = {}) {
   return async (request) => {
     let url;
     try { url = new URL(request.url); } catch { return new Response('Bad request', { status: 400 }); }
     const file = resolveFile(url, hosts);
     if (!file) return new Response('Not found', { status: 404 });
     try {
-      const body = await fs.promises.readFile(file);
+      let body = await fs.promises.readFile(file);
+      // Marked in the HTML itself, so the page is dark from its first paint
+      // (the CSP allows no inline script to do it).
+      if (path.extname(file) === '.html' && (dark || url.searchParams.get('appearance') === 'dark')) {
+        body = String(body).replace(/<html\b/i, '<html data-appearance="dark"');
+      }
       return new Response(body, {
         headers: {
           'content-type': MIME[path.extname(file)] || 'application/octet-stream',
@@ -93,12 +100,12 @@ function makeHandler(hosts) {
 }
 
 // The browser UI lives in the default session; tabs (normal and incognito)
-// each get the page hosts only.
+// each get the page hosts only. Incognito tabs' pages are always dark.
 function registerUiProtocol(uiSession) {
   uiSession.protocol.handle('lumio', makeHandler(new Set([...UI_HOSTS, ...PAGE_HOSTS])));
 }
-function registerPagesProtocol(tabSession) {
-  tabSession.protocol.handle('lumio', makeHandler(PAGE_HOSTS));
+function registerPagesProtocol(tabSession, { dark = false } = {}) {
+  tabSession.protocol.handle('lumio', makeHandler(PAGE_HOSTS, { dark }));
 }
 
 module.exports = { registerUiProtocol, registerPagesProtocol, PAGE_HOSTS, resolveFile, CSP };

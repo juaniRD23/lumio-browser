@@ -5,7 +5,8 @@ const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const n = (x) => Number(x || 0).toLocaleString();
 
-$('#mark').innerHTML = '<svg viewBox="0 0 64 64"><path d="M35 12a21 21 0 1 0 17 19" fill="none" stroke="#ededee" stroke-width="7" stroke-linecap="round"/><circle cx="48" cy="17" r="5" fill="#86b7ff"/></svg>';
+// The Lumio mark in the text color, with an accent dot.
+$('#mark').innerHTML = '<svg viewBox="0 0 64 64"><path d="M35 12a21 21 0 1 0 17 19" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><circle cx="48" cy="17" r="5" style="fill:var(--accent)"/></svg>';
 
 const state = await page.invoke('page:welcome-state');
 const mac = state.platform === 'darwin';

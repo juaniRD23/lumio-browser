@@ -7,6 +7,7 @@ const path = require('path');
 const { TabManager, NEWTAB } = require('./tabs');
 const { AIController } = require('./ai/controller');
 const { PageIndicator } = require('./ai/indicators');
+const theme = require('./theme');
 
 // Bundled by scripts/build-preload.mjs (it includes the extension toolbar code).
 const SHELL_PRELOAD = path.join(__dirname, '..', 'preload', 'dist', 'shell.js');
@@ -47,6 +48,7 @@ class BrowserWin {
     this.closedTabs = []; // incognito only; normal windows use the app-wide list
     this.closing = false;
 
+    const colors = theme.colors(theme.isDark(incognito), incognito);
     this.win = new BrowserWindow({
       ...(visibleBounds(bounds) || defaultBounds(near)),
       minWidth: 760,
@@ -56,20 +58,22 @@ class BrowserWin {
         ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 15 } }
         // Windows: our tab strip is the title bar; Windows draws its own
         // minimize / maximize / close buttons at its right end.
-        : { titleBarStyle: 'hidden', titleBarOverlay: { color: incognito ? '#0d0b12' : '#080808', symbolColor: '#a8a8a8', height: 40 }, autoHideMenuBar: true }),
-      backgroundColor: incognito ? '#0d0b12' : '#080808',
+        : { titleBarStyle: 'hidden', titleBarOverlay: { color: colors.frame, symbolColor: colors.symbol, height: 40 }, autoHideMenuBar: true }),
+      backgroundColor: colors.frame,
       show: false,
       webPreferences: { preload: SHELL_PRELOAD, contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: true },
     });
     if (process.platform !== 'darwin') this.win.setMenuBarVisibility(false);
-    this.win.loadURL('lumio://shell/');
+    // Incognito is always dark: its UI is served already dark (main/protocol.js).
+    const query = incognito ? '?appearance=dark' : '';
+    this.win.loadURL('lumio://shell/' + query);
     this.win.once('ready-to-show', () => { if (!process.env.LUMIO_HIDDEN) this.win.show(); });
 
     this.overlay = new WebContentsView({
       webPreferences: { preload: SHELL_PRELOAD, contextIsolation: true, sandbox: true, nodeIntegration: false },
     });
     this.overlay.setBackgroundColor('#00000000');
-    this.overlay.webContents.loadURL('lumio://overlay/');
+    this.overlay.webContents.loadURL('lumio://overlay/' + query);
 
     const emit = (c, p) => this.emit(c, p);
     this.tabs = new TabManager({
@@ -133,6 +137,16 @@ class BrowserWin {
   }
 
   get closed() { return this.win.isDestroyed(); }
+
+  // Light or dark changed (main/theme.js): the native colors behind the UI
+  // follow; the pages' CSS follows by itself.
+  applyAppearance() {
+    if (this.win.isDestroyed()) return;
+    const c = theme.colors(theme.isDark(this.incognito), this.incognito);
+    this.win.setBackgroundColor(c.frame);
+    if (process.platform !== 'darwin') this.win.setTitleBarOverlay({ color: c.frame, symbolColor: c.symbol });
+    this.tabs.applyAppearance();
+  }
 
   emit(channel, payload) {
     if (!this.win.isDestroyed()) this.win.webContents.send(channel, payload);

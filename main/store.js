@@ -54,6 +54,7 @@ const DEFAULT_SETTINGS = {
   autofillPasswords: true,
   memorySaver: true, // tabs you haven't looked at for a while give back their memory
   memorySaverMinutes: 60,
+  appearance: 'system', // 'system', 'light' or 'dark' (main/theme.js; profile.theme is the accent)
 };
 
 const HISTORY_DAYS = 90;

@@ -63,14 +63,11 @@ export const icons = {
   update: s('<path d="M12 4v11"/><path d="M7.5 10.5L12 15l4.5-4.5"/><path d="M5 19.5h14"/>', 'width="14" height="14" stroke-width="2"'),
   spinner: s('<path d="M20 12a8 8 0 1 1-8-8"/>', 'width="14" height="14" stroke-width="2"'),
   list: s('<path d="M10 6h10M10 12h10M10 18h10"/><path d="M3.5 6l1.2 1.2L7 5M3.5 12l1.2 1.2L7 11"/><circle cx="5" cy="18" r="1.3"/>', 'width="16" height="16"'),
-  stepDone: '<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="10" cy="10" r="8" fill="currentColor"/><path d="M6.3 10.3l2.4 2.4 5-5.2" fill="none" stroke="var(--panel, #161618)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  stepDone: '<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="10" cy="10" r="8" fill="currentColor"/><path d="M6.3 10.3l2.4 2.4 5-5.2" fill="none" stroke="var(--panel)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   stepNow: '<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="10" cy="10" r="7.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path class="pie" d="M10 5.2A4.8 4.8 0 0 1 14.8 10H10z" fill="currentColor"/></svg>',
   stepTodo: '<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="10" cy="10" r="7.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.6 2.4"/></svg>',
   dots: '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="5.5" r="1.7" fill="currentColor"/><circle cx="12" cy="12" r="1.7" fill="currentColor"/><circle cx="12" cy="18.5" r="1.7" fill="currentColor"/></svg>',
 };
-
-// Theme colors for the profile's accent (Settings → Customize profile).
-export const THEME_COLORS = { blue: '#86b7ff', purple: '#b58cff', green: '#7ee2a8', orange: '#ffb86b', pink: '#ff8fc7', mono: '#e4e4e7' };
 
 const escapeHtml = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -83,15 +80,16 @@ export function avatarHtml({ profile = {}, account = {}, incognito = false, size
   }
   const name = (profile.name || account.name || account.email || '').trim();
   const letter = name ? escapeHtml([...name][0].toUpperCase()) : icons.person;
+  // The avatar colors are pastels in both modes (the letter stays dark); blue is the default.
   const color = /^#[0-9a-f]{6}$/i.test(profile.color || '') ? profile.color : '#86b7ff';
   return `<span class="avatar" style="${box};background:${color};font-size:${Math.round(size * 0.46)}px">${letter}</span>`;
 }
 
-// Lumio mark (from lumio-usa.online favicon.svg) — works on dark backgrounds.
 // Signal-style bars for the reasoning level (1 = low, 2 = medium, 3 = high).
 export const levelBars = (n, size = 14) => `<svg viewBox="0 0 16 16" width="${size}" height="${size}" aria-hidden="true">${[0, 1, 2].map((i) => `<rect x="${1.5 + i * 5}" y="${10 - i * 4}" width="3.2" height="${4.5 + i * 4}" rx="1" fill="currentColor" opacity="${i < n ? 1 : 0.28}"/>`).join('')}</svg>`;
 
-// The Lumio mark; `blue` gives it the website's blue dot.
+// The Lumio mark (lumio-usa.online's favicon), drawn in the text color so it
+// shows on light and dark backgrounds; `blue` gives its dot the accent color.
 export const markSvg = (size = 18, blue = false) => `<svg viewBox="0 0 64 64" width="${size}" height="${size}" aria-hidden="true"><path d="M35 12a21 21 0 1 0 17 19" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><circle cx="48" cy="17" r="5" fill="currentColor"${blue ? ' style="fill:var(--accent)"' : ''}/></svg>`;
 
 // Model maker logos (Simple Icons, CC0), keyed by the "maker" in main/ai/models.js.

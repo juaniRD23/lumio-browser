@@ -1,5 +1,6 @@
 // Browser chrome: tab strip, toolbar, omnibox, info bars and page-slot layout.
-import { icons, markSvg, avatarHtml, THEME_COLORS } from './icons.js';
+import { icons, markSvg, avatarHtml } from './icons.js';
+import { THEME_COLORS, accentFor, setAccent } from '/assets/theme-colors.js';
 import { initPanel } from './ai-panel.js';
 import { initSidebar } from './sidebar.js';
 import './keys.js';
@@ -313,7 +314,7 @@ function showPwSave(prompt) {
   overlayKind = 'pwsave';
   api.send('overlay:show', {
     rect: { x: r.right - width - 12 + 8, y: r.bottom + 8, width: width + 24, height: 260 },
-    payload: { kind: 'pwsave', prompt, accent: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() },
+    payload: { kind: 'pwsave', prompt, accent: accent() },
   });
 }
 api.on('passwords-prompt', (p) => {
@@ -527,9 +528,10 @@ api.on('bookmarks', (b) => { state.bookmarks = b; renderBookmarksBar(); });
 
 // ------------------------------------------------------------------ account button
 const accountBtn = $('#account-btn');
+// The profile's theme color, in both shades (incognito is always purple).
+const accent = () => (state.incognito ? THEME_COLORS.purple : accentFor(state.profile.theme));
 function applyTheme() {
-  const color = state.incognito ? '#b58cff' : THEME_COLORS[state.profile.theme] || THEME_COLORS.blue;
-  document.documentElement.style.setProperty('--accent', color);
+  setAccent(document.documentElement, accent());
 }
 function renderAccount() {
   accountBtn.innerHTML = avatarHtml({ profile: state.profile, account: state.account, incognito: state.incognito, size: 26 });
@@ -549,7 +551,7 @@ function showAccountMenu() {
   api.send('overlay:show', {
     // The overlay page measures itself and asks for the right height.
     rect: { x: r.right - width - 12 + 6, y: r.bottom + 4, width: width + 24, height: 420 },
-    payload: { kind: 'account', account: state.account, profile: state.profile, incognito: state.incognito, accent: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() },
+    payload: { kind: 'account', account: state.account, profile: state.profile, incognito: state.incognito, accent: accent() },
   });
 }
 accountBtn.addEventListener('mousedown', (e) => e.preventDefault());
@@ -589,7 +591,7 @@ function showUpdateCard(u = updateState) {
   overlayKind = 'update';
   api.send('overlay:show', {
     rect: { x: r.right - width - 12 + 8, y: r.bottom + 8, width: width + 24, height: 320 },
-    payload: { kind: 'update', update: u, accent: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() },
+    payload: { kind: 'update', update: u, accent: accent() },
   });
 }
 updateBtn.addEventListener('mousedown', (e) => e.preventDefault());

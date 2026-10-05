@@ -2,7 +2,8 @@
 // loads it in headless Chrome with a stand-in for the main process and fails
 // on any error while it starts. A startup error breaks the whole window (and
 // nearly every e2e test), so this catches it in seconds instead of a full
-// e2e run. Skipped when Google Chrome isn't installed.
+// e2e run. It also checks the window in light and dark. Skipped when Google
+// Chrome isn't installed.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -10,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createRequire } from 'node:module';
+import { luminance, contrast, readColors } from './colors.mjs';
 const require = createRequire(import.meta.url);
 const { resolveFile, CSP } = require('../main/protocol.js');
 
@@ -28,11 +30,15 @@ let server, browser, base;
 before(async () => {
   if (!CHROME) return;
   server = http.createServer((req, res) => {
-    const file = resolveFile(new URL(`lumio://shell${req.url.split('?')[0]}`), new Set(['shell']));
+    const url = new URL(`lumio://shell${req.url}`);
+    const file = resolveFile(url, new Set(['shell']));
     if (!file || !fs.existsSync(file)) { res.writeHead(404); res.end(); return; }
+    let body = fs.readFileSync(file);
+    // An incognito window's UI asks to be served already dark (see main/protocol.js).
+    if (file.endsWith('.html') && url.searchParams.get('appearance') === 'dark') body = String(body).replace(/<html\b/i, '<html data-appearance="dark"');
     // The window's real Content-Security-Policy, so the tests hit what the app enforces.
     res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', 'content-security-policy': CSP });
-    res.end(fs.readFileSync(file));
+    res.end(body);
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
@@ -43,8 +49,10 @@ after(async () => { await browser?.close(); server?.close(); });
 
 // Opens the window UI with a stand-in main process. `answers` adds or replaces
 // what ai:… calls return; every call is recorded in window.__calls.
-async function openShell(b, answers = {}) {
-  const page = await b.newPage({ viewport: { width: 1280, height: 800 } });
+// colorScheme is the computer's light or dark; query is added to the address
+// (?appearance=dark, as an incognito window asks for).
+async function openShell(b, answers = {}, { colorScheme, query = '' } = {}) {
+  const page = await b.newPage({ viewport: { width: 1280, height: 800 }, colorScheme });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errors.push(m.text()); });
@@ -61,7 +69,7 @@ async function openShell(b, answers = {}) {
       on: (channel, fn) => { (handlers[channel] ||= []).push(fn); return () => {}; },
     };
   }, { init: INIT, ai: AI, extra: answers });
-  await page.goto(`${base}/`);
+  await page.goto(`${base}/${query}`);
   await page.waitForFunction(() => document.getElementById('mode-name')?.textContent === 'Ask', null, { timeout: 10_000 }).catch(() => {});
   return { page, errors };
 }
@@ -390,4 +398,58 @@ test('the sidebar: templates, recents, projects, the chat menu, search, hide and
   await page.click('#sb-open');
   assert.equal(await page.isVisible('#sidebar'), true);
   assert.deepEqual(errors, []);
+});
+
+// Light and dark: what the window's colors are checked on.
+const TOKENS = ['--bg', '--panel', '--card', '--text', '--dim', '--label'];
+const PARTS = ['body', '#tabstrip', '#toolbar', '#omnibox', '#sidebar', '#panel', '#composer'];
+const rgbOf = (hex) => hex.slice(1).match(/../g).map((h) => parseInt(h, 16));
+// --accent as JS reads it, and what it reads for each profile theme color.
+const readAccents = (page) => page.evaluate(async () => {
+  const root = document.documentElement;
+  const read = () => getComputedStyle(root).getPropertyValue('--accent').trim();
+  const accent = read();
+  const { THEME_COLORS, setAccent } = await import('/assets/theme-colors.js');
+  const each = {};
+  for (const [id, c] of Object.entries(THEME_COLORS)) { setAccent(root, c); each[id] = read(); }
+  return { accent, each };
+});
+
+test('light and dark: the window follows the computer, text stays readable, incognito stays dark', { skip: !CHROME && 'Google Chrome not installed' }, async (t) => {
+  for (const scheme of ['light', 'dark']) {
+    const { page, errors } = await openShell(browser, {}, { colorScheme: scheme });
+    const c = await readColors(page, { tokens: TOKENS, parts: PARTS });
+    const { accent, each } = await readAccents(page);
+    if (process.env.LUMIO_SHOTS) await page.screenshot({ path: path.join(process.env.LUMIO_SHOTS, `shell-${scheme}.png`) });
+    await page.close();
+    assert.deepEqual(errors, [], `no errors in ${scheme}`);
+    for (const [part, rgb] of Object.entries(c.parts)) {
+      assert.ok(scheme === 'light' ? luminance(rgb) > 0.7 : luminance(rgb) < 0.05, `${part} is ${scheme} (rgb ${rgb})`);
+    }
+    // Normal text needs 4.5:1 (WCAG AA). All pairs are listed at once when some fail.
+    const low = [];
+    for (const text of ['--text', '--dim', '--label']) {
+      for (const surface of ['--bg', '--panel', '--card']) {
+        const ratio = contrast(c.tokens[text], c.tokens[surface]);
+        if (ratio < 4.5) low.push(`${text} on ${surface}: ${ratio.toFixed(2)}:1`);
+      }
+    }
+    assert.deepEqual(low, [], `${scheme}: text below 4.5:1`);
+    // JS and the e2e tests read --accent back, so it must stay a plain color, whatever the theme color.
+    for (const hex of [accent, ...Object.values(each)]) assert.match(hex, /^#[0-9a-f]{6}$/i);
+    if (scheme === 'light') {
+      // Accents are links, icons and focus rings: at least 3:1 on the background.
+      for (const [id, hex] of Object.entries(each)) assert.ok(contrast(rgbOf(hex), c.tokens['--bg']) >= 3, `${id} accent on light: ${contrast(rgbOf(hex), c.tokens['--bg']).toFixed(2)}:1`);
+    }
+  }
+
+  // An incognito window on a light computer: served dark, so it's dark from the first paint, with the purple accent.
+  const { page, errors } = await openShell(browser, { 'shell:init': { value: { ...INIT, incognito: true } } }, { colorScheme: 'light', query: '?appearance=dark' });
+  const c = await readColors(page, { tokens: TOKENS, parts: PARTS });
+  const { accent } = await readAccents(page);
+  await page.close();
+  assert.deepEqual(errors, []);
+  for (const [part, rgb] of Object.entries(c.parts)) assert.ok(luminance(rgb) < 0.05, `incognito ${part} is dark (rgb ${rgb})`);
+  assert.equal(accent, '#b58cff');
+  assert.ok(contrast(c.tokens['--text'], c.tokens['--bg']) >= 4.5);
 });

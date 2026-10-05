@@ -1,6 +1,7 @@
 // Floating dropdowns drawn above the page: omnibox suggestions, downloads
 // and the site-information popup (lock icon).
 import { icons, markSvg, avatarHtml } from './icons.js';
+import { setAccent } from '/assets/theme-colors.js';
 
 const api = window.lumio;
 const card = document.getElementById('card');
@@ -14,7 +15,7 @@ function renderSuggest({ items, selected }) {
     const icon = it.type === 'ai' ? markSvg(15) : it.type === 'search' ? icons.search : it.type === 'bookmark' ? icons.star : it.type === 'history' ? icons.clock : icons.globe;
     let body;
     if (it.type === 'ai') body = `<span class="t">${esc(it.title)}</span><span class="spacer" style="flex:1"></span><span class="hint">Ask Lumio</span>`;
-    else if (it.type === 'search') body = `<span class="t">${esc(it.title)}</span><span class="spacer" style="flex:1"></span><span class="hint" style="color:#7c7c80">Search</span>`;
+    else if (it.type === 'search') body = `<span class="t">${esc(it.title)}</span><span class="spacer" style="flex:1"></span><span class="hint">Search</span>`;
     else if (it.type === 'url') body = `<span class="t">${esc(it.title)}</span>`;
     else body = `<span class="t">${esc(it.title)}</span><span class="u">${esc(pretty(it.url))}</span>`;
     return `<div class="row ${it.type} ${i === selected ? 'sel' : ''}" data-i="${i}"><span class="ic">${icon}</span>${body}</div>`;
@@ -215,7 +216,7 @@ function reportSize() {
 let kind = null;
 api.on('overlay-data', (payload) => {
   kind = payload.kind;
-  if (payload.accent) document.documentElement.style.setProperty('--accent', payload.accent);
+  if (payload.accent) setAccent(document.documentElement, payload.accent); // { dark, light } from the shell
   if (kind === 'suggest') renderSuggest(payload);
   else if (kind === 'downloads') renderDownloads(payload);
   else if (kind === 'siteinfo') { renderSiteInfo(payload); reportSize(); }

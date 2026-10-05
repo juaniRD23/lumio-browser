@@ -1,6 +1,6 @@
 // Lumio Browser — main process entry.
 const {
-  app, BrowserWindow, ipcMain, session, protocol, Menu, safeStorage, nativeImage, dialog, net, shell, desktopCapturer, webContents, Notification,
+  app, BrowserWindow, ipcMain, session, protocol, Menu, safeStorage, nativeImage, dialog, net, shell, desktopCapturer, webContents, Notification, nativeTheme,
 } = require('electron');
 const fs = require('fs');
 const path = require('path');
@@ -21,6 +21,7 @@ const { Store, SEARCH_ENGINES } = require('./store');
 const { NEWTAB } = require('./tabs');
 const { BrowserWin } = require('./window');
 const { registerUiProtocol, registerPagesProtocol } = require('./protocol');
+const theme = require('./theme');
 const { chromeUserAgent, Downloads, Permissions } = require('./features');
 const { buildMenu, buildBrowserMenu } = require('./menu');
 const { suggest, topSites } = require('./omnibox');
@@ -102,15 +103,15 @@ const tabOfWc = (wc) => {
   return null;
 };
 
-function setupTabSession(ses) {
+function setupTabSession(ses, { incognito = false } = {}) {
   ses.setUserAgent(app.userAgentFallback);
-  registerPagesProtocol(ses);
+  registerPagesProtocol(ses, { dark: incognito });
 }
 
 function incognitoProfile() {
   if (incog) return incog;
   const ses = session.fromPartition(`lumio-incognito-${++incogSeq}`); // in memory only
-  setupTabSession(ses);
+  setupTabSession(ses, { incognito: true });
   const profile = { incognito: true, session: ses, chats: new ChatStore(null) };
   profile.downloads = new Downloads(ses, { settings: store, emit: (c, p) => alive().filter((w) => w.profile === profile).forEach((w) => w.emit(c, p)) });
   profile.permissions = new Permissions(ses, { store, emitFor, persist: false });
@@ -246,6 +247,7 @@ function menuChanged() {
 function menuState() {
   return {
     bookmarksBar: !!store.settings.showBookmarksBar,
+    appearance: theme.appearance(),
     recentlyClosed: recentlyClosed.slice(-10).reverse().map((e, i) => ({
       label: e.kind === 'window' ? `${e.tabs.length} Tab${e.tabs.length === 1 ? '' : 's'} (${e.title})` : e.title || e.url,
       index: recentlyClosed.length - 1 - i,
@@ -332,6 +334,7 @@ const cmd = {
   settings: () => openInternal('lumio://settings/'),
   bookmark: () => toggleBookmark(cur()),
   toggleBookmarksBar: () => setBookmarksBar(!store.settings.showBookmarksBar),
+  setAppearance: (value) => store.setSetting('appearance', value),
   pinTab: () => { const w = cur(); const t = w?.tabs.active; if (t) w.tabs.setPinned(t.id, !t.pinned); },
   moveTabToNewWindow: () => { const w = cur(); if (w?.tabs.active) moveTabToNewWindow(w, w.tabs.activeId); },
   cycle: (dir) => cur()?.tabs.cycle(dir),
@@ -364,6 +367,14 @@ function bookmarksChanged() {
 function setBookmarksBar(show) {
   store.setSetting('showBookmarksBar', !!show);
   bookmarksChanged();
+  menuChanged();
+}
+
+// Light or dark changed (main/theme.js): native colors follow in every window
+// and the payment window, and the View menu shows the choice.
+function appearanceChanged() {
+  for (const w of alive()) w.applyAppearance();
+  if (checkoutWin && !checkoutWin.isDestroyed()) checkoutWin.setBackgroundColor(theme.colors(theme.isDark()).frame);
   menuChanged();
 }
 
@@ -481,7 +492,7 @@ async function openCheckout(w, plan) {
   const [pw, ph] = w.win.getContentSize();
   const win = new BrowserWindow({
     parent: w.win, modal: true, show: false, width: Math.max(420, Math.min(980, pw - 40)), height: Math.max(520, Math.min(780, ph - 30)),
-    minWidth: 400, minHeight: 480, title: 'Subscribe to Lumio', backgroundColor: '#070708', autoHideMenuBar: true,
+    minWidth: 400, minHeight: 480, title: 'Subscribe to Lumio', backgroundColor: theme.colors(theme.isDark()).frame, autoHideMenuBar: true,
     webPreferences: { session: normal.session, contextIsolation: true, sandbox: true, nodeIntegration: false },
   });
   checkoutWin = win;
@@ -964,6 +975,7 @@ function registerIpc() {
     engines: Object.entries(SEARCH_ENGINES).map(([id, e]) => ({ id, name: e.name })),
     approvalMode: store.settings.approvalMode,
     showBookmarksBar: !!store.settings.showBookmarksBar,
+    appearance: theme.appearance(),
     ai: w.ai.state(),
     version: app.getVersion(),
     update: updater?.state || null,
@@ -1023,6 +1035,7 @@ function registerIpc() {
     if (key === 'approvalMode') w.ai.setMode(value);
     if (key === 'reasoning') w.ai.setReasoning(value);
     if (key === 'showBookmarksBar') setBookmarksBar(!!value);
+    if (key === 'appearance' && theme.APPEARANCES.includes(value)) store.setSetting('appearance', value);
     if (key === 'startup' && ['restore', 'newtab'].includes(value)) store.setSetting('startup', value);
     if (key === 'askDownload') store.setSetting('askDownload', !!value);
     if (key === 'offerPasswords') store.setSetting('offerPasswords', !!value);
@@ -1225,6 +1238,9 @@ app.on('second-instance', (_e, argv) => {
 app.whenReady().then(async () => {
   store = new Store(app.getPath('userData'), safeStorage);
   store.onBookmarkIcons = () => bookmarksChanged();
+  // Light or dark, before any window opens; changes then apply live.
+  theme.init({ store, nativeTheme });
+  theme.onChange(appearanceChanged);
   helper = new MacHelper();
   app.userAgentFallback = chromeUserAgent();
   registerUiProtocol(session.defaultSession);

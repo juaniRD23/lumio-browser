@@ -1,10 +1,10 @@
 import './keys.js';
+import { THEME_COLORS, accentFor, setAccent } from '/assets/theme-colors.js';
 const page = window.lumioPage;
 const $ = (sel) => document.querySelector(sel);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const AVATAR_COLORS = ['#86b7ff', '#b58cff', '#7ee2a8', '#ffb86b', '#ff8fc7', '#ff7a7a', '#ffd479', '#e4e4e7'];
-const THEMES = { blue: '#86b7ff', purple: '#b58cff', green: '#7ee2a8', orange: '#ffb86b', pink: '#ff8fc7', mono: '#e4e4e7' };
 
 let s = await page.invoke('page:settings');
 $('#version').textContent = 'v' + s.version;
@@ -104,8 +104,9 @@ function renderProfile() {
   $('#p-preview').innerHTML = avatar(p, s.account, 34);
   $('#p-photo-remove').hidden = !p.photo;
   $('#p-colors').innerHTML = AVATAR_COLORS.map((c) => `<button class="swatch ${p.color === c && !p.photo ? 'on' : ''}" style="background:${c}" data-color="${c}" title="${c}" aria-label="Avatar color ${c}"></button>`).join('');
-  $('#p-themes').innerHTML = Object.entries(THEMES).map(([id, c]) => `<button class="swatch ${p.theme === id ? 'on' : ''}" style="background:${c}" data-theme="${id}" title="${id}" aria-label="Theme ${id}"></button>`).join('');
-  document.documentElement.style.setProperty('--accent', THEMES[p.theme] || THEMES.blue);
+  // Each swatch shows the shade the current appearance uses.
+  $('#p-themes').innerHTML = Object.entries(THEME_COLORS).map(([id, c]) => `<button class="swatch ${p.theme === id ? 'on' : ''}" style="background:light-dark(${c.light},${c.dark})" data-theme="${id}" title="${id}" aria-label="Theme ${id}"></button>`).join('');
+  setAccent(document.documentElement, accentFor(p.theme));
   renderAccount();
 }
 async function saveProfile(patch) {
@@ -390,6 +391,13 @@ $('#site-list').addEventListener('click', async (e) => {
 });
 
 // ------------------------------------------------------------ appearance, search, downloads, startup, default
+// Theme: System, Light or Dark. It can also change from the View menu or another device.
+const appearanceRadios = document.querySelectorAll('input[name=appearance]');
+const showAppearance = (value) => appearanceRadios.forEach((r) => { r.checked = r.value === value; });
+showAppearance(s.appearance);
+appearanceRadios.forEach((r) => r.addEventListener('change', () => page.invoke('page:set-setting', 'appearance', r.value)));
+page.on('appearance', showAppearance);
+
 $('#bm-bar').checked = s.showBookmarksBar;
 $('#bm-bar').addEventListener('change', (e) => page.invoke('page:set-setting', 'showBookmarksBar', e.target.checked));
 

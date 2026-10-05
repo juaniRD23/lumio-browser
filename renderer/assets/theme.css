@@ -1,0 +1,118 @@
+/* Lumio's colors and type: one set of tokens for the browser UI (shell,
+   overlay, aura) and its pages, served to every lumio:// host as
+   /assets/theme.css. Dark is the palette of lumio-usa.online.
+
+   Each color is light-dark(light, dark), so it follows the page's color
+   scheme: the system appearance, which Lumio sets from Settings › Appearance
+   (main/theme.js), unless <html data-appearance="light" | "dark"> forces one
+   (incognito pages are always dark). Light text colors reach at least 4.5:1
+   on every light surface. */
+:root {
+  color-scheme: light dark;
+
+  /* surfaces */
+  --bg: light-dark(#f3f3f5, #070708); /* the window behind the tabs, and the pages */
+  --chrome: light-dark(#f3f3f5, #0c0c0e);
+  --sidebar: light-dark(#ebebee, #0a0a0b);
+  --panel: light-dark(#ffffff, #0c0c0e); /* the AI panel */
+  --card: light-dark(#ffffff, #111114);
+  --card2: light-dark(#fafafa, #0e0e11);
+  --field: light-dark(#e8e8eb, #18181b);
+  --field-hover: light-dark(#e1e1e5, #1f1f23);
+  --hover: light-dark(#0000000d, #18181b);
+  --active: light-dark(#00000017, #26262a);
+  --slot-bg: light-dark(#ffffff, #0c0c0d); /* the page area behind web pages */
+  --popover: light-dark(#ffffff, #161619); /* menus and dropdowns */
+  --popover-glass: light-dark(#fffffffa, #161619f5); /* the same over a backdrop blur; nearly opaque on white, where text behind shows through as smudges */
+
+  /* lines */
+  --line: light-dark(#00000014, #ffffff14);
+  --line-strong: light-dark(#00000024, #ffffff24);
+
+  /* text */
+  --text: light-dark(#18181b, #ededee);
+  --dim: light-dark(#52525b, #a3a3aa);
+  --label: light-dark(#64646c, #7c7c84); /* dark was #76767e: a hair lighter so small labels reach 4.5:1 */
+
+  /* Translucent steps that work on any surface: black in light, white in dark. */
+  --overlay-1: light-dark(#00000005, #ffffff06);
+  --overlay-2: light-dark(#00000008, #ffffff0a);
+  --overlay-3: light-dark(#0000000d, #ffffff10);
+  --overlay-4: light-dark(#00000012, #ffffff14);
+  --overlay-5: light-dark(#0000001a, #ffffff1f);
+  --overlay-6: light-dark(#00000021, #ffffff24);
+  --overlay-7: light-dark(#0000002e, #ffffff33);
+
+  /* buttons */
+  --primary-bg: light-dark(#18181b, #ededee);
+  --primary-fg: light-dark(#fafafa, #0b0b0c);
+  --primary-hover: light-dark(#000000, #ffffff);
+  --on-accent: light-dark(#ffffff, #0b0b0c); /* text on an accent fill */
+  --accent2: light-dark(#7c3aed, #c9a8ff);
+  --focus-ring: color-mix(in srgb, var(--accent) 53%, transparent);
+
+  /* Status: the plain color is for icons, dots and fills; -text is for words. */
+  --danger: light-dark(#c5221f, #ff8a7a);
+  --danger-text: light-dark(#b3261e, #ffb4a8);
+  --danger-strong-text: light-dark(#b3261e, #ff9b9b); /* short red words that must stand out: a "Reused" flag, a menu's error */
+  --ok: light-dark(#137333, #7ee2a8);
+  --ok-text: light-dark(#137333, #bff1d3);
+  --warn: light-dark(#b06000, #f0b36b);
+  --warn-text: light-dark(#9a5300, #ffcf99);
+  --danger-fill: light-dark(#c5221f, #ff7a7a); /* solid red buttons; red tints are mixed from it */
+  --on-danger: light-dark(#ffffff, #1a0a0a); /* text on --danger-fill */
+
+  /* Lumio's pages (renderer/pages) */
+  --card-hover: light-dark(#f0f0f3, #1c1c1f); /* a card or chip under the pointer */
+  --box: light-dark(#ffffff, #18181b); /* the new tab's search box, the AI chat box */
+  --box-line: light-dark(#00000024, #36363b);
+  --box-line-focus: light-dark(#0000003d, #4a4a52);
+  --box-shadow: 0 18px 50px light-dark(#00000024, #0007);
+  --switch-off: light-dark(#c4c4ca, #3a3a3e); /* a toggle's track when off */
+  --highlight: light-dark(#ffd54f80, #ffd47933); /* text that matches a search */
+
+  /* Menus and popups (renderer/ui/overlay.css) */
+  --text-strong: light-dark(#000000, #ffffff); /* emphasis, and a label under the pointer */
+  --text-soft: light-dark(#3f3f46, #d6d6d8); /* labels on filled buttons, notes */
+  --muted: light-dark(#5c5c64, #8a8a8a); /* icons and secondary lines, between --dim and --label */
+  --active-hover: light-dark(#00000021, #303033); /* a button filled with --active, under the pointer */
+
+  /* The browser window (renderer/ui/shell.css) */
+  --tab-hover: light-dark(#ededf0, #151516); /* a background tab under the pointer */
+  --tab-active: light-dark(#ffffff, #18181b); /* the tab you're on: raised white on light, like the page under it */
+  --field-focus: light-dark(#ffffff, #151517); /* the address bar while you type in it */
+  --bubble: light-dark(#eeeef1, #202024); /* your messages in the AI chat */
+  --star: light-dark(#a87200, #ffd479); /* a bookmarked page's star */
+  --amber: light-dark(#a16207, #f5c542); /* a plan step in progress, a usage ring that's nearly full */
+
+  /* depth */
+  --shadow-xs: 0 2px 10px light-dark(#00000026, #000a); /* a knob on a slider */
+  --shadow-inset: inset 0 1px 2px light-dark(#0000001a, #0008); /* a sunken track */
+  --shadow-sm: 0 6px 16px -4px light-dark(#0000002e, #000a), 0 1px 3px light-dark(#0000001a, #0006);
+  --shadow-md: 0 14px 40px light-dark(#00000026, #000c);
+  --shadow-lg: 0 18px 50px light-dark(#0000002e, #000c), 0 0 0 1px light-dark(#0000000f, #0006);
+  --shadow-lift: 0 6px 20px light-dark(#00000029, #0008); /* a tab you're dragging */
+  --shadow-dialog: 0 30px 80px light-dark(#0000002e, #000c); /* a dialog over the dimmed page */
+  --scrim: light-dark(#00000040, #0008);
+
+  /* type and motion */
+  --font: 'Geist', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --serif: 'Instrument Serif', 'Iowan Old Style', Georgia, serif;
+  --mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --ease: cubic-bezier(.22, 1, .36, 1);
+
+  /* Older names, still used by the pages. */
+  --line2: var(--line-strong);
+  --sans: var(--font);
+}
+:root[data-appearance="dark"] { color-scheme: dark; }
+:root[data-appearance="light"] { color-scheme: light; }
+
+/* The accent is the profile's theme color, set on <html> as --accent-dark and
+   --accent-light (renderer/assets/theme-colors.js). It's chosen here instead
+   of with light-dark() so --accent reads back in JS as a plain color. */
+:root { --accent: var(--accent-dark, #86b7ff); }
+@media (prefers-color-scheme: light) {
+  :root:not([data-appearance="dark"]) { --accent: var(--accent-light, #2563eb); }
+}
+:root[data-appearance="light"] { --accent: var(--accent-light, #2563eb); }

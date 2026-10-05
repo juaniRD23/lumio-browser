@@ -9,11 +9,12 @@
 .tabs button:hover { color: var(--text); }
 .tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
 
-.filter { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 6px 0 12px; margin: 10px 0 0; border-radius: 999px; background: #86b7ff1a; color: var(--accent); font-size: 12.5px; }
+.filter { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 6px 0 12px; margin: 10px 0 0; border-radius: 999px; background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); font-size: 12.5px; }
 .filter button { width: 22px; height: 22px; border-radius: 50%; border: 0; background: none; color: inherit; cursor: pointer; font-size: 15px; }
-.filter button:hover { background: #86b7ff26; }
+.filter button:hover { background: color-mix(in srgb, var(--accent) 15%, transparent); }
 
-.selbar { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 8px; height: 50px; padding: 0 8px 0 16px; margin: 10px 0 0; border-radius: 12px; background: #1b2433; border: 1px solid #86b7ff33; animation: rise .2s var(--ease); }
+/* Opaque, since it sticks over the list: a pale accent on light, a deep one on dark. */
+.selbar { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 8px; height: 50px; padding: 0 8px 0 16px; margin: 10px 0 0; border-radius: 12px; background: light-dark(color-mix(in srgb, var(--accent) 8%, var(--card)), color-mix(in srgb, var(--accent) 17%, var(--bg))); border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent); animation: rise .2s var(--ease); }
 .selbar #selcount { font-weight: 600; }
 .btn.ghost { background: transparent; }
 
@@ -21,12 +22,12 @@
 .selbar:not([hidden]) ~ #list .day { top: 50px; }
 .item { display: flex; align-items: center; gap: 12px; height: 42px; padding: 0 8px 0 12px; border-radius: 10px; }
 .item:hover { background: var(--card); }
-.item.sel { background: #86b7ff14; }
+.item.sel { background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .item input[type=checkbox] { width: 15px; height: 15px; margin: 0; flex: none; accent-color: var(--accent); opacity: 0; cursor: pointer; }
 .item:hover input, .item.sel input, body.selecting .item input { opacity: 1; }
 .item .time { color: var(--label); font-size: 12px; width: 62px; flex: none; font-variant-numeric: tabular-nums; }
 .item img, .item .dot { width: 16px; height: 16px; flex: none; border-radius: 4px; }
-.item .dot { background: #ffffff14; }
+.item .dot { background: var(--overlay-4); }
 .item a.title { color: var(--text); flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item a.title:hover { text-decoration: underline; }
 .item .host { color: var(--label); font-size: 12.5px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; background: none; text-align: left; padding: 0; cursor: pointer; font: inherit; font-size: 12.5px; }
@@ -34,8 +35,8 @@
 .item .acts { display: flex; gap: 2px; opacity: 0; }
 .item:hover .acts { opacity: 1; }
 .item .acts button { border: 0; background: none; color: var(--label); cursor: pointer; height: 28px; padding: 0 8px; border-radius: 7px; font-size: 12px; white-space: nowrap; }
-.item .acts button:hover { background: #ffffff10; color: var(--text); }
-mark { background: #ffd47933; color: inherit; border-radius: 2px; }
+.item .acts button:hover { background: var(--overlay-3); color: var(--text); }
+mark { background: var(--highlight); color: inherit; border-radius: 2px; }
 .more { color: var(--label); text-align: center; padding: 18px; font-size: 12.5px; }
 .empty { color: var(--label); padding: 50px 0; text-align: center; }
 
@@ -47,8 +48,8 @@ mark { background: #ffd47933; color: inherit; border-radius: 2px; }
 .closed-item .ico { width: 30px; height: 30px; border-radius: 8px; background: var(--card2); display: grid; place-items: center; flex: none; }
 .closed-item .ico img { width: 16px; height: 16px; }
 
-dialog { background: var(--card); color: var(--text); border: 1px solid var(--line2); border-radius: 18px; padding: 22px 24px 18px; width: 460px; box-shadow: 0 30px 80px #000c; }
-dialog::backdrop { background: #0008; backdrop-filter: blur(2px); }
+dialog { background: var(--card); color: var(--text); border: 1px solid var(--line2); border-radius: 18px; padding: 22px 24px 18px; width: 460px; box-shadow: var(--shadow-dialog); }
+dialog::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
 .dlg-title { font-size: 17px; font-weight: 650; letter-spacing: -.3px; text-transform: none; color: var(--text); margin: 0 0 14px; }
 .range { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; color: var(--dim); }
 .range select { width: 180px; }

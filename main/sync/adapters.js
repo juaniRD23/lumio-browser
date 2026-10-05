@@ -8,7 +8,7 @@ const DAY = 24 * 3600 * 1000;
 const HISTORY_DAYS = 30;
 const HISTORY_MAX = 2000;
 const CHAT_MAX = 400 * 1024;
-const SETTINGS = ['searchEngine', 'approvalMode', 'reasoning', 'showBookmarksBar', 'memorySaver', 'memorySaverMinutes', 'startup', 'offerPasswords', 'autofillPasswords', 'profile'];
+const SETTINGS = ['searchEngine', 'approvalMode', 'reasoning', 'showBookmarksBar', 'memorySaver', 'memorySaverMinutes', 'startup', 'offerPasswords', 'autofillPasswords', 'profile', 'appearance'];
 
 function simple(name, { entries, apply, keepAbsent }) {
   return {

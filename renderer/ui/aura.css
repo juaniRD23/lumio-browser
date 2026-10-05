@@ -1,7 +1,8 @@
 @import url('/assets/fonts/fonts.css');
+@import url('/assets/theme.css'); /* colors and type (aura.html is always dark) */
 html, body {
   margin: 0; height: 100%; overflow: hidden; background: transparent;
-  font: 500 13px/1.2 'Geist', system-ui, sans-serif; color: #f1f1f3;
+  font: 500 13px/1.2 'Geist', system-ui, sans-serif; color: var(--text);
   -webkit-font-smoothing: antialiased; user-select: none; cursor: default;
 }
 
@@ -18,13 +19,14 @@ body.glow::before {
 @keyframes in { from { opacity: 0; } }
 @keyframes breathe { 50% { opacity: .68; } }
 
-/* Stop pill (screen) and Stop bar (browser window) */
+/* Stop pill (screen) and Stop bar (browser window). Its blues are Lumio's,
+   the same for every profile, like the glow. */
 #pill[hidden] { display: none; }
 #pill {
   position: fixed; left: 50%; top: 50%; translate: -50% -50%;
   display: flex; align-items: center; gap: 10px;
   height: 40px; padding: 0 5px 0 13px; border-radius: 999px; white-space: nowrap;
-  background: rgba(17, 17, 19, .94);
+  background: var(--popover-glass);
   border: 1px solid rgba(120, 182, 255, .5);
   box-shadow: 0 3px 10px rgba(0, 0, 0, .4), 0 0 10px rgba(58, 146, 255, .35); /* fits the 16px margin around it */
   animation: pop .28s cubic-bezier(.22, 1, .36, 1) both;
@@ -34,15 +36,15 @@ body.glow::before {
 @keyframes spin { to { rotate: 360deg; } }
 .text { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 #title { font-weight: 600; letter-spacing: -.1px; }
-#step { color: #9b9ba3; font-weight: 450; max-width: 230px; overflow: hidden; text-overflow: ellipsis; }
+#step { color: var(--dim); font-weight: 450; max-width: 230px; overflow: hidden; text-overflow: ellipsis; }
 #step:empty { display: none; }
 #stop {
   display: flex; align-items: center; gap: 7px; flex: none;
   height: 30px; padding: 0 13px 0 11px; margin-left: 2px; border: 0; border-radius: 999px;
-  background: #f1f1f3; color: #111; font: 600 12.5px 'Geist', system-ui, sans-serif; cursor: pointer;
+  background: var(--primary-bg); color: var(--primary-fg); font: 600 12.5px 'Geist', system-ui, sans-serif; cursor: pointer;
   transition: background .15s;
 }
-#stop:hover { background: #fff; }
+#stop:hover { background: var(--primary-hover); }
 #stop:active { scale: .97; }
 #stop:focus-visible { outline: 2px solid #86b7ff; outline-offset: 2px; }
 .sq { width: 9px; height: 9px; border-radius: 2px; background: #e5484d; }

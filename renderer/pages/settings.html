@@ -266,6 +266,14 @@
       <section id="appearance">
         <h2>Appearance</h2>
         <div class="card">
+          <div class="row">
+            <div class="grow"><div class="title">Theme</div><div class="desc">System follows your computer’s light or dark setting. Incognito windows are always dark.</div></div>
+            <div class="modes seg" role="radiogroup" aria-label="Theme">
+              <label><input type="radio" name="appearance" value="system" />System</label>
+              <label><input type="radio" name="appearance" value="light" />Light</label>
+              <label><input type="radio" name="appearance" value="dark" />Dark</label>
+            </div>
+          </div>
           <label class="row" style="cursor:pointer">
             <div class="grow"><div class="title">Show bookmarks bar</div><div class="desc">Your bookmarks under the address bar (<span class="kbd-mod">⌘</span>⇧B).</div></div>
             <span class="switch"><input type="checkbox" id="bm-bar"><i></i></span>

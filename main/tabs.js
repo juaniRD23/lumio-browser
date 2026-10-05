@@ -8,6 +8,7 @@ const { isSynthetic } = require('./synthetic-input');
 const path = require('path');
 const { parseInput, displayUrl } = require('./omnibox');
 const { SEARCH_ENGINES } = require('./store');
+const theme = require('./theme');
 
 const NEWTAB = 'lumio://newtab/';
 const INTERNAL_PRELOAD = path.join(__dirname, '..', 'preload', 'internal.js');
@@ -34,6 +35,9 @@ class TabManager {
   byWebContents(wc) { return this.tabs.find((t) => t.view?.webContents === wc) || null; }
   searchTemplate() { return (SEARCH_ENGINES[this.store.settings.searchEngine] || SEARCH_ENGINES.google).url; }
   pinnedCount() { return this.tabs.filter((t) => t.pinned).length; }
+  // What a tab shows before its page paints: Lumio's own pages follow light
+  // or dark; websites get white, like in Chrome.
+  pageBackground(url) { return url.startsWith('lumio:') ? theme.colors(theme.isDark(this.incognito), this.incognito).page : '#ffffff'; }
 
   // ---------- lifecycle ----------
   create(url = NEWTAB, { active = true, index, title, lazy = false, pinned = false } = {}) {
@@ -85,7 +89,7 @@ class TabManager {
     });
     tab.view = view;
     if (typeof view.setBorderRadius === 'function') view.setBorderRadius(10);
-    view.setBackgroundColor(tab.url.startsWith('lumio:') ? '#0c0c0d' : '#ffffff');
+    view.setBackgroundColor(this.pageBackground(tab.url));
     view.setVisible(false);
     this.win.contentView.addChildView(view);
     this.wire(tab);
@@ -162,7 +166,7 @@ class TabManager {
       if (icons[0]) remember((s) => s.updateFavicon(wc.getURL(), icons[0]));
     });
     wc.on('did-navigate', (_e, url) => {
-      tab.view.setBackgroundColor(url.startsWith('lumio:') ? '#0c0c0d' : '#ffffff');
+      tab.view.setBackgroundColor(M().pageBackground(url));
       update({ url, favicon: null, ...M().navState(wc) });
       remember((s) => s.addVisit(url, wc.getTitle()));
     });
@@ -477,6 +481,17 @@ class TabManager {
     if (tab.view.lumioRadius !== radius && typeof tab.view.setBorderRadius === 'function') {
       tab.view.setBorderRadius(radius);
       tab.view.lumioRadius = radius;
+    }
+  }
+
+  // Light or dark changed: Lumio's own pages get the new background (their
+  // CSS follows by itself) and hear the new setting, so Settings shows it.
+  applyAppearance() {
+    for (const t of this.tabs) {
+      const wc = t.view?.webContents;
+      if (!wc || wc.isDestroyed() || !t.url.startsWith('lumio:')) continue;
+      t.view.setBackgroundColor(this.pageBackground(t.url));
+      wc.send('appearance', theme.appearance());
     }
   }
 

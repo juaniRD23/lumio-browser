@@ -1,7 +1,8 @@
 import './keys.js';
 const page = window.lumioPage;
 const $ = (s) => document.querySelector(s);
-const MARK = '<svg viewBox="0 0 64 64" width="40" height="40"><path d="M35 12a21 21 0 1 0 17 19" fill="none" stroke="#ededee" stroke-width="7" stroke-linecap="round"/><circle cx="48" cy="17" r="5" fill="#86b7ff"/></svg>';
+// The Lumio mark in the text color, with an accent dot.
+const MARK = '<svg viewBox="0 0 64 64" width="40" height="40"><path d="M35 12a21 21 0 1 0 17 19" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><circle cx="48" cy="17" r="5" style="fill:var(--accent)"/></svg>';
 $('#mark').innerHTML = MARK;
 const hour = new Date().getHours();
 // "Good morning, Juan" (the name in the accent color), or "Up late, Juan?"

@@ -1,5 +1,6 @@
 // End-to-end tests for the browser features: windows, incognito, history,
-// downloads, bookmarks, site info, extensions and importing from Chrome.
+// downloads, bookmarks, site info, extensions, importing from Chrome, and
+// light and dark.
 // Run: npm run test:e2e   (set LUMIO_SHOTS=/some/dir to save screenshots)
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -408,4 +409,64 @@ test('chrome:// addresses open Lumio pages', async () => {
   await until(async () => (await L.main(() => global.lumio.tabs.wc().getURL())) === 'lumio://extensions/');
   await L.main(() => global.lumio.tabs.navigate('chrome://history'));
   await until(async () => (await L.main(() => global.lumio.tabs.wc().getURL())) === 'lumio://history/');
+});
+
+test('Settings › Theme: Light makes the window and Lumio’s pages light, incognito stays dark, System goes back', async () => {
+  const winBg = () => L.main(() => global.lumio.win.getBackgroundColor().toLowerCase());
+  const tabBg = () => L.main(() => global.lumio.tabs.active.view.lastBackground);
+  const choose = (value) => L.page(`document.querySelector('input[name=appearance][value=${value}]').click(); true`);
+  const checked = () => L.page(`document.querySelector('input[name=appearance]:checked')?.value`);
+  const shellLooks = () => L.shell(`[document.documentElement.dataset.appearance ?? null, matchMedia('(prefers-color-scheme: light)').matches, getComputedStyle(document.body).backgroundColor]`);
+  await go('lumio://settings/#appearance', 'Settings');
+  assert.ok(await until(async () => (await checked()) === 'system'));
+  // Tests run dark under System (main/theme.js), whatever this computer uses.
+  assert.equal(await L.main((e) => e.nativeTheme.shouldUseDarkColors), true);
+  assert.equal(await winBg(), '#070708');
+  // Records what the settings tab is given behind its page (views can't be asked).
+  await L.main(() => {
+    const v = global.lumio.tabs.active.view;
+    const set = v.setBackgroundColor.bind(v);
+    v.setBackgroundColor = (c) => { v.lastBackground = c; set(c); };
+    return true;
+  });
+  try {
+    await choose('light');
+    assert.ok(await until(async () => (await L.main(() => global.lumio.store.settings.appearance)) === 'light'));
+    assert.deepEqual(await L.main((e) => [e.nativeTheme.themeSource, e.nativeTheme.shouldUseDarkColors]), ['light', false]);
+    assert.ok(await until(async () => (await winBg()) === '#f3f3f5'), 'window background');
+    assert.ok(await until(async () => (await tabBg()) === '#f3f3f5'), 'tab background');
+    // The window's UI follows the system scheme (only incognito forces one).
+    assert.ok(await until(async () => JSON.stringify(await shellLooks()) === JSON.stringify([null, true, 'rgb(243, 243, 245)'])), `shell: ${JSON.stringify(await shellLooks())}`);
+    assert.ok(await until(async () => (await L.page(`getComputedStyle(document.body).backgroundColor`)) === 'rgb(243, 243, 245)'), 'settings page');
+    await shot('18b-light');
+
+    // An incognito window opened now is dark anyway.
+    await L.main(() => { global.lumio.createWindow({ incognito: true }); return true; });
+    assert.ok(await until(() => L.main(() => global.lumio.current.incognito && global.lumio.tabs.active?.url === 'lumio://newtab/')));
+    assert.equal(await winBg(), '#0d0b12');
+    assert.ok(await until(async () => (await L.shell(`document.documentElement.dataset.appearance`)) === 'dark'), 'its UI is served dark');
+    assert.ok(await until(async () => (await L.shell(`getComputedStyle(document.body).backgroundColor`)) === 'rgb(13, 11, 18)'), 'incognito background');
+    assert.ok(await until(async () => (await L.page(`document.documentElement.dataset.appearance`)) === 'dark'), 'its new tab page is served dark');
+    assert.equal(await L.page(`getComputedStyle(document.body).color`), 'rgb(237, 237, 238)');
+    await shot('18c-light-incognito');
+    await L.main(() => global.lumio.cmd.closeWindow());
+    assert.ok(await until(async () => (await windows()).every((w) => !w.incognito)));
+
+    // The View menu changes it too, and the open Settings page follows.
+    await L.main(() => global.lumio.cmd.setAppearance('dark'));
+    assert.ok(await until(async () => (await checked()) === 'dark'));
+    await choose('system');
+    assert.ok(await until(async () => (await L.main(() => global.lumio.store.settings.appearance)) === 'system'));
+    assert.equal(await L.main((e) => e.nativeTheme.themeSource), 'dark');
+    assert.ok(await until(async () => (await winBg()) === '#070708'), 'window background');
+    assert.ok(await until(async () => (await tabBg()) === '#0c0c0d'), 'tab background');
+    assert.ok(await until(async () => JSON.stringify(await shellLooks()) === JSON.stringify([null, false, 'rgb(7, 7, 8)'])), `shell: ${JSON.stringify(await shellLooks())}`);
+  } finally {
+    // Leave the app as the tests expect it: System (dark), no incognito window.
+    await L.main(() => {
+      global.lumio.store.setSetting('appearance', 'system');
+      for (const w of global.lumio.windows) if (w.incognito) w.close();
+      return true;
+    });
+  }
 });
