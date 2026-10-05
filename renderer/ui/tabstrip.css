@@ -1,0 +1,47 @@
+/* The tab strip's extras (tabstrip.js) and the bars over the page (infobars.js). */
+
+/* Many tabs: once they're as narrow as they go, the strip scrolls sideways
+   and fades out at the edges that have more tabs. */
+#tabstrip { position: relative; }
+#tabs.scrolls { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; overscroll-behavior-x: contain; }
+#tabs.scrolls::-webkit-scrollbar { display: none; }
+#tabs.fade-start { mask-image: linear-gradient(to right, transparent, #000 28px); }
+#tabs.fade-end { mask-image: linear-gradient(to left, transparent, #000 28px); }
+#tabs.fade-start.fade-end { mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
+
+/* Several tabs selected (Shift- or ⌘/Ctrl-click): raised like the tab you're on, a shade lighter. */
+.tab.selected:not(.active) { background: var(--tab-selected); color: var(--text); box-shadow: inset 0 0 0 1px var(--line); }
+.tab.selected + .tab::before, .tab + .tab.selected::before { display: none; }
+.tab.drag-ghost { opacity: .5; }
+/* Something dropped here opens in this tab. */
+.tab.drop-on { background: var(--tab-hover); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 60%, transparent); }
+
+/* Where a drop or a dragged tab lands: an arrow, and a line between tabs. */
+.strip-marker {
+  position: absolute; left: -5px; top: 3px; z-index: 3; /* centered on its x */
+  width: 10px; height: 33px; pointer-events: none;
+  transition: transform 120ms var(--ease);
+}
+.strip-marker::before {
+  content: ''; position: absolute; left: 4px; top: 7px; bottom: 3px; width: 2px; border-radius: 2px;
+  background: var(--accent);
+}
+.strip-marker::after {
+  content: ''; position: absolute; left: 0; top: 0;
+  border: 5px solid transparent; border-top: 6px solid var(--accent); border-bottom: 0;
+}
+.strip-marker.on-tab::before { display: none; }
+
+/* Search tabs, at the strip's end like Chrome's ⌄ */
+#tab-search-btn { -webkit-app-region: no-drag; margin: 0 0 7px 4px; }
+
+/* Bars over the page ("Restore pages?", the default browser) */
+#infobars { display: flex; flex-direction: column; gap: 6px; flex: none; }
+#infobars:empty { margin-bottom: -6px; } /* no gap above the page when there are none */
+.infobar-ic { display: grid; place-items: center; flex: none; color: var(--dim); }
+.infobar .icon-btn.infobar-x { color: var(--label); }
+
+@media (prefers-reduced-motion: reduce) {
+  .strip-marker { transition: none; }
+  .infobar { animation: none; }
+}

@@ -47,7 +47,15 @@ const DEFAULT_SETTINGS = {
   unpackedExtensions: [],
   // Local profile shown on the account button (the Lumio account adds email + plan).
   profile: { name: '', color: '#86b7ff', photo: null, theme: 'blue' },
-  startup: 'restore', // 'restore' windows and tabs, or 'newtab'
+  startup: 'restore', // 'restore' windows and tabs, 'newtab', or the start 'pages'
+  startupPages: [], // [{ url, title }] for startup: 'pages' (main/startup.js)
+  showHome: false, // the Home button, off like in Chrome
+  homePage: 'newtab', // or a web address
+  defaultZoom: 100, // percent (main/zoom.js)
+  zoomLevels: {}, // host -> percent, the sites zoomed to something else
+  mutedSites: [], // origins muted with the tab menu's Mute site (main/site-mute.js)
+  defaultBrowserPrompt: true, // "Lumio isn't your default browser" at startup (main/default-browser.js)
+  defaultBrowserDismissals: 0, // times that bar was closed; it stops after 3
   downloadDir: null, // null = the Downloads folder
   askDownload: false, // ask where to save each file
   offerPasswords: true,

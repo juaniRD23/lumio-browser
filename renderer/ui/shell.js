@@ -3,6 +3,9 @@ import { icons, markSvg, avatarHtml } from './icons.js';
 import { THEME_COLORS, accentFor, setAccent } from '/assets/theme-colors.js';
 import { initPanel } from './ai-panel.js';
 import { initSidebar } from './sidebar.js';
+import { initNavigation } from './navigation.js';
+import { initTabStrip, SAD_ICON } from './tabstrip.js';
+import { initInfobars } from './infobars.js';
 import './keys.js';
 
 const IS_MAC = /Mac/.test(navigator.platform);
@@ -47,8 +50,18 @@ window.addEventListener('resize', reportSlot);
 // ------------------------------------------------------------------ tabs
 const tabsEl = $('#tabs');
 const tabEls = new Map();
+// Scrolling, several tabs at once, drops, pulling tabs out, tab search (tabstrip.js).
+// Its tab search list is one of the dropdowns this file opens and closes.
+const overlays = {
+  get kind() { return overlayKind; },
+  show(kind, rect, payload) { overlayKind = kind; api.send('overlay:show', { rect, payload: { ...payload, accent: accent() } }); },
+  hide: () => hideOverlay(),
+  clear(kind) { if (overlayKind === kind) overlayKind = null; },
+};
+const strip = initTabStrip({ api, getState: () => state, overlays });
 
 function faviconHtml(t) {
+  if (t.crashed) return SAD_ICON;
   if (t.loading) return '<span class="spinner"></span>';
   if (t.internal) return markSvg(14);
   if (t.favicon) return `<img src="${encodeURI(t.favicon)}" alt="" draggable="false">`;
@@ -89,6 +102,7 @@ function updateTabEl(el, t) {
   const audio = el.querySelector('.audio');
   audio.hidden = !(t.audible || t.muted);
   audio.innerHTML = t.muted ? icons.muted : icons.volume;
+  strip.decorate(el, t); // selected, crashed
 }
 
 function renderTabs() {
@@ -107,6 +121,7 @@ function renderTabs() {
 
 function startTabDrag(e, el, id) {
   if (e.button !== 0 || e.target.closest('.x, .audio')) return;
+  if (strip.pointerDown(e, el, id)) return; // Shift/⌘-clicks, and dragging several tabs
   api.send('tab:activate', id);
   const els = [...tabsEl.children];
   const from = els.indexOf(el);
@@ -116,6 +131,7 @@ function startTabDrag(e, el, id) {
   let target = from;
   el.setPointerCapture(e.pointerId);
   const move = (ev) => {
+    if (strip.tearOff(ev, el, [id])) { dragging = false; up(); return; } // pulled out: a window of its own
     const dx = ev.clientX - startX;
     if (!dragging && Math.abs(dx) < 5) return;
     dragging = true;
@@ -197,6 +213,7 @@ function renderToolbar() {
   star.classList.toggle('on', !!t?.bookmarked);
   star.innerHTML = t?.bookmarked ? icons.starFilled : icons.star;
   siteIcon(t);
+  renderZoomBadge(t?.zoom);
   if (typeof renderPwKey === 'function') renderPwKey();
   document.title = t ? `${t.title} — Lumio Browser${state.incognito ? ' (Incognito)' : ''}` : 'Lumio Browser';
   // Extension buttons show the state for the active tab.
@@ -208,6 +225,7 @@ $('#back').addEventListener('click', () => api.send('tab:back'));
 $('#forward').addEventListener('click', () => api.send('tab:forward'));
 $('#reload').addEventListener('click', () => api.send(activeTab()?.loading ? 'tab:stop' : 'tab:reload'));
 $('#star').addEventListener('click', () => api.send('tab:bookmark'));
+initNavigation({ api }); // history menus, new-tab clicks, mouse buttons, Home
 
 address.addEventListener('focus', () => {
   omniFocused = true;
@@ -297,7 +315,8 @@ function pick(item) {
 
 api.on('overlay-picked', (msg) => {
   if (msg.kind === 'suggest' && suggestions[msg.index]) pick(suggestions[msg.index]);
-  if (['downloads', 'siteinfo', 'account', 'autofill', 'update'].includes(msg.kind)) { overlayKind = null; accountBtn.classList.remove('open'); }
+  if (['downloads', 'siteinfo', 'account', 'autofill', 'update', 'zoom'].includes(msg.kind)) { overlayKind = null; accountBtn.classList.remove('open'); }
+  if (msg.kind === 'zoom' && msg.refocus) zoomBadge.focus();
   if (msg.kind === 'pwsave') { overlayKind = null; const t = activeTab(); if (t) pwPrompts.delete(t.id); renderPwKey(); }
 });
 
@@ -361,12 +380,41 @@ function toast(text) {
   toastTimer = setTimeout(() => { el.hidden = true; }, 2200);
 }
 api.on('toast', ({ text }) => toast(text));
-api.on('zoom', ({ level }) => {
-  const b = $('#zoom-badge');
-  b.hidden = level === 100;
-  b.textContent = level + '%';
+
+// Zoom: the badge shows when a page isn't at the default zoom. Zooming, or
+// clicking the badge, opens the bubble under it (overlay-zoom.js): the level,
+// − and +, and Reset. Opened by zooming, it goes away by itself.
+const zoomBadge = $('#zoom-badge');
+let zoomAuto = false;
+function renderZoomBadge(percent) {
+  zoomBadge.hidden = !percent;
+  if (!percent) return;
+  zoomBadge.textContent = `${percent}%`;
+  zoomBadge.title = `Zoom: ${percent}%`;
+  zoomBadge.setAttribute('aria-label', `Zoom: ${percent}%. Change zoom`);
+}
+function showZoomBubble(percent, { auto = false, focus = false } = {}) {
+  const anchor = [zoomBadge, $('#star'), omnibox].find((el) => !el.hidden);
+  const r = anchor.getBoundingClientRect();
+  const width = 250;
+  overlayKind = 'zoom';
+  zoomAuto = auto;
+  api.send('overlay:show', {
+    rect: { x: r.right - width - 12 + 8, y: r.bottom + 8, width: width + 24, height: 54 + 26 },
+    payload: { kind: 'zoom', percent, auto, focus, accent: accent() },
+  });
+}
+api.on('zoom', ({ level, zoomed }) => {
+  renderZoomBadge(zoomed ? level : null);
+  if (!overlayKind || overlayKind === 'zoom') showZoomBubble(level, { auto: !overlayKind || zoomAuto });
 });
-$('#zoom-badge').addEventListener('click', () => api.send('tab:zoom', 0));
+zoomBadge.addEventListener('mousedown', (e) => e.preventDefault());
+zoomBadge.addEventListener('click', (e) => {
+  if (overlayKind === 'zoom' && !zoomAuto) { hideOverlay(); return; }
+  // From the keyboard (Enter or Space), the bubble takes the keyboard.
+  showZoomBubble(activeTab()?.zoom || 100, { focus: e.detail === 0 });
+});
+window.addEventListener('mousedown', (e) => { if (overlayKind === 'zoom' && !e.target.closest('#zoom-badge')) hideOverlay(); });
 
 // ------------------------------------------------------------------ downloads
 const dlBtn = $('#downloads');
@@ -608,6 +656,9 @@ api.on('update-announce', (u) => { if (!overlayKind) { renderUpdate(u); showUpda
 // ------------------------------------------------------------------ extensions
 $('#ext-btn').addEventListener('click', () => api.send('extensions:manage'));
 
+// ------------------------------------------------------------------ bars over the page
+initInfobars({ api }); // Restore pages?, the default browser
+
 // ------------------------------------------------------------------ permission bar
 const permQueue = [];
 function renderPerm() {
@@ -637,8 +688,11 @@ api.on('permission-cancel', ({ id }) => {
 });
 
 // ------------------------------------------------------------------ find bar
+// Each tab keeps its own: switching tabs hides the bar (the page keeps its
+// highlights) and coming back shows it again with the same words, like Chrome.
 const findbar = $('#findbar');
 const findInput = $('#find-input');
+const findTabs = new Map(); // tab id -> { text, count } while its bar is open
 function openFind() {
   findbar.hidden = false;
   findInput.focus();
@@ -646,6 +700,7 @@ function openFind() {
   if (findInput.value) api.send('find:start', { text: findInput.value });
 }
 function closeFind(focusPage = true) {
+  findTabs.delete(state.activeId);
   if (findbar.hidden) return;
   findbar.hidden = true;
   $('#find-count').textContent = '';
@@ -667,8 +722,27 @@ findInput.addEventListener('keydown', (e) => {
 $('#find-next').addEventListener('click', () => findStep(true));
 $('#find-prev').addEventListener('click', () => findStep(false));
 $('#find-close').addEventListener('click', () => closeFind());
+// Main says this before another tab shows.
+function parkFind() {
+  if (findbar.hidden) return;
+  findTabs.set(state.activeId, { text: findInput.value, count: $('#find-count').textContent });
+  findbar.hidden = true;
+}
+function restoreFind() {
+  for (const id of findTabs.keys()) if (!state.tabs.some((t) => t.id === id)) findTabs.delete(id);
+  const saved = findTabs.get(state.activeId);
+  if (!saved || !findbar.hidden) return;
+  findInput.value = saved.text;
+  $('#find-count').textContent = saved.count;
+  findbar.hidden = false;
+}
 api.on('find-open', openFind);
-api.on('find-close', () => closeFind(false));
+api.on('find-close', parkFind);
+// ⌘E (Use Selection for Find): the page's selection is what Find looks for next.
+api.on('find-text', ({ text }) => {
+  findInput.value = text;
+  if (!findbar.hidden) api.send('find:start', { text });
+});
 api.on('find-step', ({ forward }) => findStep(forward));
 api.on('find-result', (r) => {
   if (r.finalUpdate === false && !r.matches) return;
@@ -694,7 +768,7 @@ api.on('tabs', (s) => {
   renderToolbar();
   if (barWanted() !== barVisible) renderBookmarksBar(); // the new tab page shows it even when it's off
   panel.onTabChange(activeTab(), switched);
-  if (switched) $('#zoom-badge').hidden = true;
+  restoreFind();
 });
 
 const init = await api.invoke('shell:init');

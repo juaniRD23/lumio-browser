@@ -32,6 +32,10 @@ if (/^https?:$/.test(window.location.protocol) && window === window.top) {
   } catch { /* the page keeps its own navigator.credentials */ }
 }
 
+// Back and forward from the mouse's buttons and (on a Mac) two-finger swipes,
+// and Alt/Option-click to download a link: main/navigation.js does them.
+if (/^(https?|file|lumio):$/.test(window.location.protocol) && window === window.top) navigationHelper();
+
 // Runs in the page's own world (before its scripts), so it must be
 // self-contained. Only `bridge` reaches back to Lumio, and Lumio decides the
 // origin itself, so a page can only ever ask for its own site's passkeys.
@@ -232,4 +236,93 @@ function passwordHelper() {
     if (user && username) setValue(user, username);
     if (pws[0]) setValue(pws[0], password);
   });
+}
+
+function navigationHelper() {
+  // The mouse's back (3) and forward (4) buttons. Main goes there unless
+  // Chromium already did, or the page used the click itself. (On Linux
+  // Electron turns them into the window's app-command as they're pressed.)
+  const BUTTONS = { 3: 'back', 4: 'forward' };
+  if (process.platform !== 'linux') {
+    window.addEventListener('mousedown', (e) => {
+      if (e.isTrusted && BUTTONS[e.button]) ipcRenderer.send('nav:mouse', { phase: 'down' });
+    }, true);
+    window.addEventListener('mouseup', (e) => {
+      const dir = BUTTONS[e.button];
+      if (!e.isTrusted || !dir) return;
+      setTimeout(() => { if (!e.defaultPrevented) ipcRenderer.send('nav:mouse', { phase: 'up', dir }); }, 0);
+    }, true);
+  }
+
+  // Alt/Option-click on a link the page didn't handle itself downloads it.
+  // Listening late (on window, bubbling) lets the page's own handlers go first.
+  window.addEventListener('click', (e) => {
+    if (!e.isTrusted || e.defaultPrevented || e.button !== 0 || !e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    const link = e.composedPath()[0]?.closest?.('a[href], area[href]');
+    if (!link || !/^(https?|data|blob):/i.test(link.href)) return;
+    e.preventDefault();
+    ipcRenderer.send('nav:download', link.href);
+  });
+
+  if (process.platform === 'darwin') swipeHelper();
+}
+
+// macOS: two fingers sideways past the page's edge go back or forward, like
+// Chrome. A gesture is a run of wheel events; its first moves decide whether
+// it's a sideways swipe or an ordinary scroll. Main draws the arrow and decides.
+function swipeHelper() {
+  const GAP = 150; // ms without wheel events that ends a gesture
+  let g = null; // { dx, dir, ax, ay, prev, decay, blocked }
+  let frame = 0;
+  let timer = 0;
+
+  const send = (end) => { if (g && !g.blocked && g.dir) ipcRenderer.send('nav:swipe', { dx: g.dx, end }); };
+  const end = () => { cancelAnimationFrame(frame); frame = 0; send(true); };
+
+  // A page can turn swipes off for itself (overscroll-behavior-x on its root).
+  const swipesOff = () => [document.documentElement, document.body].some((el) => el && getComputedStyle(el).overscrollBehaviorX !== 'auto');
+  // Could the element under the pointer, or anything around it, still scroll that way?
+  const scrolls = (el, dir) => {
+    const root = document.scrollingElement;
+    for (let n = el; n; n = n.parentElement || (n.getRootNode() instanceof ShadowRoot ? n.getRootNode().host : null)) {
+      if (n.nodeType !== 1 || n.scrollWidth <= n.clientWidth + 1) continue;
+      const style = getComputedStyle(n);
+      if (n !== root && !/^(auto|scroll|overlay)$/.test(style.overflowX)) continue;
+      if (n === root && /^(hidden|clip)$/.test(style.overflowX)) continue;
+      const max = n.scrollWidth - n.clientWidth;
+      const left = style.direction === 'rtl' ? max - Math.abs(n.scrollLeft) : n.scrollLeft;
+      if (dir < 0 ? left > 1 : left < max - 1) return true;
+    }
+    return false;
+  };
+
+  function onWheel(e, target) {
+    clearTimeout(timer);
+    timer = setTimeout(() => { end(); g = null; }, GAP);
+    if (!g) g = { dx: 0, dir: 0, ax: 0, ay: 0, prev: 0, decay: 0, blocked: false };
+    if (g.blocked) return;
+    if (e.defaultPrevented || e.ctrlKey || e.shiftKey || e.deltaMode !== 0) { g.blocked = true; return; }
+    if (!g.dir) {
+      g.ax += e.deltaX;
+      g.ay += Math.abs(e.deltaY);
+      if (Math.abs(g.ax) + g.ay < 6) return; // too little to tell yet
+      if (Math.abs(g.ax) <= g.ay * 1.5) { g.blocked = true; return; } // an ordinary scroll
+      g.dir = Math.sign(g.ax);
+      if (swipesOff() || scrolls(target, g.dir)) { g.blocked = true; return; }
+    }
+    g.dx = g.dir * Math.max(0, g.dir * (g.dx + e.deltaX)); // swiping back past the start stops at 0
+    // Momentum after the fingers lift shrinks steadily: that's letting go.
+    const size = Math.abs(e.deltaX);
+    g.decay = size && size < g.prev * 0.97 ? g.decay + 1 : 0;
+    g.prev = size;
+    if (g.decay >= 5) { end(); g.blocked = true; return; }
+    if (!frame) frame = requestAnimationFrame(() => { frame = 0; send(false); });
+  }
+  // Passive, and handled a moment later so the page's own handlers go first
+  // (the element under the pointer is noted now: inside a shadow root it's gone later).
+  window.addEventListener('wheel', (e) => {
+    if (!e.isTrusted) return;
+    const target = e.composedPath()[0] || e.target;
+    setTimeout(() => onWheel(e, target), 0);
+  }, { capture: true, passive: true });
 }

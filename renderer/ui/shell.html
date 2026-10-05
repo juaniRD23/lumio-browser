@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <title>Lumio Browser</title>
   <link rel="stylesheet" href="shell.css" />
+  <link rel="stylesheet" href="tabstrip.css" />
 </head>
 <body class="no-anim">
   <aside id="sidebar" aria-label="Sidebar"></aside>
@@ -14,6 +15,7 @@
     <button id="newtab" class="icon-btn" title="New Tab (⌘T)" aria-label="New Tab"></button>
     <div class="strip-drag"></div>
     <div id="incognito-badge" hidden title="Incognito: pages you visit here aren't saved to history"><span class="ic"></span><span>Incognito</span></div>
+    <button id="tab-search-btn" class="icon-btn small" title="Search tabs (⌘⇧A)" aria-label="Search tabs" aria-haspopup="dialog"></button>
   </header>
 
   <nav id="toolbar">
@@ -53,6 +55,7 @@
 
   <main id="workspace">
     <section id="pagecol">
+      <div id="infobars" aria-live="polite"></div>
       <div id="permbar" class="infobar" hidden>
         <span class="infobar-text"></span>
         <span class="spacer"></span>

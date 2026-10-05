@@ -1,0 +1,22 @@
+/* Settings › Appearance (Home button, Page zoom), On startup (start pages)
+   and Zoom levels (settings-nav.js). */
+.home-choice { flex-wrap: wrap; gap: 10px 22px; padding-top: 4px; }
+.nav-radio { display: inline-flex; align-items: center; gap: 8px; color: var(--dim); cursor: pointer; }
+.nav-radio.grow { flex: 1; min-width: 220px; }
+.nav-radio input[type=radio] { accent-color: var(--text); width: 16px; height: 16px; margin: 0; flex: none; }
+.nav-radio .field { flex: 1; min-width: 0; height: 34px; color: var(--text); }
+.home-choice .err:empty, .sp-form .err:empty { display: none; }
+.home-choice .err { flex-basis: 100%; }
+
+#zoom-default { min-width: 96px; }
+.zoom-site .pill { font-variant-numeric: tabular-nums; }
+
+/* The start pages, under "Open a specific page or set of pages" */
+.startup-pages { border-top: 1px solid var(--line); padding-left: 28px; }
+.startup-pages .row { padding-left: 20px; }
+.sp-row .desc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-row .btn, .sp-actions .btn, .sp-form .btn { height: 30px; padding: 0 12px; font-size: 12.5px; }
+.sp-form { flex-wrap: wrap; }
+.sp-form .field { flex: 1; min-width: 200px; height: 34px; }
+.sp-form .err { flex-basis: 100%; }
+.sp-actions { gap: 8px; }

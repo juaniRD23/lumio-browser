@@ -1,17 +1,19 @@
 // Preload for the browser UI (shell + overlay). Exposes a narrow, channel-
 // whitelisted bridge; the main process also checks that calls come from us.
 // Bundled into preload/dist/shell.js by scripts/build-preload.mjs.
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 const { injectBrowserAction } = require('electron-chrome-extensions/browser-action');
 
 const INVOKE = /^(shell|omnibox|ai|site|account|passwords|update):/;
-const SEND = /^(layout|panel|sidebar|tab|overlay|find|download|permission|ai|bookmarks|site|window|extensions|account|passwords|app|aura|update):|^open-url$/;
+const SEND = /^(layout|panel|sidebar|tab|overlay|find|download|permission|ai|bookmarks|site|window|extensions|account|passwords|app|aura|update|hud):|^open-url$/;
 const EVENTS = new Set([
   'tabs', 'downloads', 'permission', 'permission-cancel', 'find-result', 'find-open', 'find-close', 'find-step',
   'focus-omnibox', 'panel-toggle', 'panel-open', 'ai-focus', 'ai-prefill', 'ai-event', 'ai-state', 'overlay-data',
   'overlay-picked', 'toast', 'zoom', 'fullscreen', 'agent-state', 'bookmarks', 'site-info', 'extensions-changed',
   'account', 'profile', 'passwords-prompt', 'passwords-changed', 'aura', 'update', 'update-announce', 'ai-build-doc', 'ai-open-chat',
   'ai-workflow', 'workflows-changed', 'sync-state', 'sync-pair-request', 'sidebar-changed', 'sidebar-toggle',
+  'hud', 'nav-prefs', 'find-text', // main/navigation.js
+  'infobars', 'tab-search', 'tab-drag-hint', // main/infobars.js, tab-search.js, tab-drag.js
 ]);
 
 contextBridge.exposeInMainWorld('lumio', {
@@ -23,6 +25,8 @@ contextBridge.exposeInMainWorld('lumio', {
     ipcRenderer.on(channel, listener);
     return () => ipcRenderer.removeListener(channel, listener);
   },
+  // Where a file dropped on the tab strip is on disk (renderer/ui/tabstrip.js).
+  pathForFile: (file) => { try { return webUtils.getPathForFile(file) || ''; } catch { return ''; } },
 });
 
 // The toolbar's <browser-action-list> (extension buttons and popups).

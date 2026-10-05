@@ -80,6 +80,7 @@
   /* The browser window (renderer/ui/shell.css) */
   --tab-hover: light-dark(#ededf0, #151516); /* a background tab under the pointer */
   --tab-active: light-dark(#ffffff, #18181b); /* the tab you're on: raised white on light, like the page under it */
+  --tab-selected: light-dark(#fafafb, #131315); /* other tabs selected with it (Shift- or ⌘-click) */
   --field-focus: light-dark(#ffffff, #151517); /* the address bar while you type in it */
   --bubble: light-dark(#eeeef1, #202024); /* your messages in the AI chat */
   --star: light-dark(#a87200, #ffd479); /* a bookmarked page's star */

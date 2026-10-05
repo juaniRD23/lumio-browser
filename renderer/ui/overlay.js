@@ -2,6 +2,8 @@
 // and the site-information popup (lock icon).
 import { icons, markSvg, avatarHtml } from './icons.js';
 import { setAccent } from '/assets/theme-colors.js';
+import { renderZoom, initZoom } from './overlay-zoom.js';
+import { renderTabSearch, initTabSearch } from './overlay-tabsearch.js';
 
 const api = window.lumio;
 const card = document.getElementById('card');
@@ -226,7 +228,11 @@ api.on('overlay-data', (payload) => {
   else if (kind === 'passkey') { renderPasskey(payload); reportSize(); }
   else if (kind === 'update') { renderUpdateCard(payload); reportSize(); }
   else if (kind === 'screenshare') renderScreenShare(payload);
+  else if (kind === 'zoom') { renderZoom(card, payload); reportSize(); }
+  else if (kind === 'tabsearch') renderTabSearch(card, payload);
 });
+initZoom(card, api, () => kind);
+initTabSearch(card, api, () => kind);
 
 card.addEventListener('change', (e) => {
   const sel = e.target.closest('select[data-perm]');
@@ -234,6 +240,7 @@ card.addEventListener('change', (e) => {
 });
 
 card.addEventListener('mousedown', async (e) => {
+  if (kind === 'tabsearch') return; // overlay-tabsearch.js has its own
   if (kind === 'screenshare') {
     const tile = e.target.closest('[data-src]');
     if (tile) {
