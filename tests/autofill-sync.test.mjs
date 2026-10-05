@@ -132,3 +132,38 @@ test('addresses and passkeys sync end to end; cards only once turned on; a synce
   await b.sync.tick();
   assert.equal(seq(), last, 'no echo, and filling a form isn’t a change');
 });
+
+test('a server from before addresses, cards and passkeys synced: everything else still syncs', async () => {
+  const TOKEN2 = 'tok_' + 'c'.repeat(40);
+  sql.prepare("INSERT INTO users (id, google_sub, email, name, plan, created_at) VALUES ('u8', 'g8', 'old@example.com', 'Old', 'free', 0)").run();
+  sql.prepare('INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, 0, ?)').run(crypto.createHash('sha256').update(TOKEN2).digest('hex'), 'u8', Date.now() + 864e5);
+  const pushes = [];
+  const oldServer = {
+    ...account,
+    token: () => TOKEN2,
+    state: () => ({ signedIn: true, email: 'old@example.com' }),
+    // The live server before this release: it refuses collections it doesn't know.
+    fetch: async (url, opts = {}) => {
+      if (String(url).endsWith('/api/sync/push')) {
+        const kinds = [...new Set(JSON.parse(opts.body).items.map((it) => it.collection))];
+        pushes.push(kinds);
+        if (kinds.some((k) => ['addresses', 'cards', 'passkeys'].includes(k))) return new Response(JSON.stringify({ error: 'Invalid record.', code: 'invalid_request' }), { status: 400 });
+      }
+      return account.fetch(url, opts);
+    },
+  };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lumio-afsync-old-'));
+  const store = new Store(dir, safe);
+  const autofill = new AutofillStore(dir, safe);
+  store.toggleBookmark('https://example.com/', 'Example');
+  autofill.saveAddress({ name: 'Ana García', street: '9 Calle Ocho', city: 'Miami', zip: '33135' });
+  const sync = new SyncEngine({ dir, store, account: oldServer });
+  sync.addAdapters([adapters.bookmarks(store), adapters.addresses(autofill)]);
+  await sync.tick();
+  assert.equal(sync.status, 'ready', sync.error);
+  assert.deepEqual(pushes, [['bookmarks'], ['addresses']], 'bookmarks first, addresses on their own');
+  assert.deepEqual(sql.prepare("SELECT DISTINCT collection FROM sync_items WHERE owner = 'u8'").all().map((r) => r.collection), ['bookmarks']);
+  await sync.tick();
+  assert.equal(pushes.length, 2, 'not tried again right away');
+  assert.ok(!Object.values(sync.file.data.records).some((r) => r.c === 'addresses'), 'the address is still waiting to sync');
+});

@@ -19,6 +19,11 @@ const C = require('./crypto');
 const TYPES = ['bookmarks', 'passwords', 'passkeys', 'addresses', 'cards', 'history', 'chats', 'workflows', 'projects', 'settings', 'tabs'];
 // Synced only after the person turns them on: card numbers stay on each computer by default.
 const OFF_BY_DEFAULT = new Set(['cards']);
+// Collections added after the first release of Lumio Sync. A server that
+// doesn't know them yet refuses them; the rest still sync, and they're tried
+// again in an hour.
+const NEWER = new Set(['passkeys', 'addresses', 'cards']);
+const RETRY_NEWER = 60 * 60 * 1000;
 const BATCH = 100;
 const EVERY = 60 * 1000;
 const SOON = 4000;
@@ -334,8 +339,9 @@ class SyncEngine {
     const records = this.file.data.records;
     const types = this.prefs.types;
     const out = [];
+    this.refused ||= new Map(); // newer collection -> when to try it again
     for (const [type, adapter] of this.adapters) {
-      if (!types[type]) continue;
+      if (!types[type] || this.refused.get(type) > Date.now()) continue;
       const seen = new Set();
       for (const e of adapter.entries()) {
         const id = await this.idFor(type, e.key);
@@ -351,8 +357,12 @@ class SyncEngine {
         out.push({ id, type, key: r.k, deleted: true });
       }
     }
-    for (let i = 0; i < out.length; i += BATCH) {
-      const batch = out.slice(i, i + BATCH);
+    // Newer collections go in batches of their own, after the rest.
+    const batches = [];
+    for (const group of [out.filter((it) => !NEWER.has(it.type)), ...[...NEWER].map((t) => out.filter((it) => it.type === t))]) {
+      for (let i = 0; i < group.length; i += BATCH) batches.push(group.slice(i, i + BATCH));
+    }
+    for (const batch of batches) {
       const items = [];
       for (const it of batch) {
         if (it.deleted) { items.push({ id: it.id, collection: it.type, deleted: true }); continue; }
@@ -360,7 +370,15 @@ class SyncEngine {
         if (json.length > MAX_RECORD) { records[it.id] = { c: it.type, k: it.key, h: it.hash }; continue; } // too big to sync
         items.push({ id: it.id, collection: it.type, data: await C.seal(this.keys, it.type, it.id, { k: it.key, r: it.record }), updatedAt: Date.now() });
       }
-      if (items.length) await this.api('/api/sync/push', { method: 'POST', body: { device: this.deviceId, items } });
+      if (items.length) {
+        try {
+          await this.api('/api/sync/push', { method: 'POST', body: { device: this.deviceId, items } });
+        } catch (err) {
+          if (!(err.status === 400 && NEWER.has(batch[0].type))) throw err;
+          this.refused.set(batch[0].type, Date.now() + RETRY_NEWER); // an older server
+          continue;
+        }
+      }
       for (const it of batch) {
         if (it.deleted) delete records[it.id];
         else records[it.id] = { c: it.type, k: it.key, h: it.hash };
