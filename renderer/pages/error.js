@@ -13,6 +13,7 @@ const TITLES = {
   '-202': "This site's security certificate isn't trusted",
   '-310': 'This page redirects too many times',
   crashed: 'This tab crashed',
+  hung: 'This page stopped responding', // you chose "Exit page"
 };
 document.getElementById('title').textContent = TITLES[code] || "This page couldn't load";
 document.title = TITLES[code] || "Can't open this page";

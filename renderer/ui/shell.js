@@ -3,6 +3,9 @@ import { icons, markSvg, avatarHtml } from './icons.js';
 import { THEME_COLORS, accentFor, setAccent } from '/assets/theme-colors.js';
 import { initPanel } from './ai-panel.js';
 import { initSidebar } from './sidebar.js';
+import { paintSiteIcon } from './site-icon.js';
+import { initPermBar } from './permbar.js';
+import { popupsButton } from './popups-button.js';
 import './keys.js';
 
 const IS_MAC = /Mac/.test(navigator.platform);
@@ -171,11 +174,8 @@ function prettyUrl(url) {
 
 function siteIcon(t) {
   const el = $('#site-icon');
-  el.classList.remove('insecure', 'clickable');
-  if (omniFocused || !t || !t.url) { el.innerHTML = icons.search; el.title = ''; return; }
-  if (t.url.startsWith('https:')) { el.innerHTML = icons.lock; el.title = 'Connection is secure · View site information'; el.classList.add('clickable'); }
-  else if (t.url.startsWith('http:')) { el.innerHTML = icons.warn; el.classList.add('insecure', 'clickable'); el.title = 'Not secure · View site information'; }
-  else { el.innerHTML = icons.globe; el.title = ''; }
+  paintSiteIcon(el, omniFocused ? null : t);
+  if (omniFocused || !t?.url) el.innerHTML = icons.search; // typing: it's a search box
 }
 
 function renderToolbar() {
@@ -197,6 +197,7 @@ function renderToolbar() {
   star.classList.toggle('on', !!t?.bookmarked);
   star.innerHTML = t?.bookmarked ? icons.starFilled : icons.star;
   siteIcon(t);
+  popups.render(t);
   if (typeof renderPwKey === 'function') renderPwKey();
   document.title = t ? `${t.title} — Lumio Browser${state.incognito ? ' (Incognito)' : ''}` : 'Lumio Browser';
   // Extension buttons show the state for the active tab.
@@ -217,7 +218,9 @@ address.addEventListener('focus', () => {
   address.value = t?.url || '';
   address.classList.remove('url-view');
   siteIcon(t);
-  requestAnimationFrame(() => address.select());
+  // Only while it still has focus: select() focuses it again, which would
+  // pull a quick Tab back to the address bar.
+  requestAnimationFrame(() => { if (document.activeElement === address) address.select(); });
 });
 address.addEventListener('mousedown', () => { if (!omniFocused) address.dataset.justFocused = '1'; });
 address.addEventListener('mouseup', (e) => {
@@ -298,6 +301,7 @@ function pick(item) {
 api.on('overlay-picked', (msg) => {
   if (msg.kind === 'suggest' && suggestions[msg.index]) pick(suggestions[msg.index]);
   if (['downloads', 'siteinfo', 'account', 'autofill', 'update'].includes(msg.kind)) { overlayKind = null; accountBtn.classList.remove('open'); }
+  if (msg.kind === 'popups') { overlayKind = null; if (!$('#popups-btn').hidden) $('#popups-btn').focus(); }
   if (msg.kind === 'pwsave') { overlayKind = null; const t = activeTab(); if (t) pwPrompts.delete(t.id); renderPwKey(); }
 });
 
@@ -350,6 +354,16 @@ siteBtn.addEventListener('click', () => {
 });
 api.on('site-info', (info) => { if (overlayKind === 'siteinfo' && info) showSiteInfo(info); });
 window.addEventListener('mousedown', (e) => { if (overlayKind === 'siteinfo' && !e.target.closest('#site-icon')) hideOverlay(); });
+
+// ------------------------------------------------------------------ blocked pop-ups
+const popupsBtn = $('#popups-btn');
+const popups = popupsButton(popupsBtn, api);
+popupsBtn.addEventListener('mousedown', (e) => { if (!omniFocused) e.preventDefault(); });
+popupsBtn.addEventListener('click', async () => {
+  if (overlayKind === 'popups') { hideOverlay(); return; }
+  if (await popups.show()) overlayKind = 'popups';
+});
+window.addEventListener('mousedown', (e) => { if (overlayKind === 'popups' && !e.target.closest('#popups-btn')) hideOverlay(); });
 
 // ------------------------------------------------------------------ toast + zoom
 let toastTimer;
@@ -609,32 +623,7 @@ api.on('update-announce', (u) => { if (!overlayKind) { renderUpdate(u); showUpda
 $('#ext-btn').addEventListener('click', () => api.send('extensions:manage'));
 
 // ------------------------------------------------------------------ permission bar
-const permQueue = [];
-function renderPerm() {
-  const bar = $('#permbar');
-  const p = permQueue[0];
-  bar.hidden = !p;
-  if (p) {
-    const text = bar.querySelector('.infobar-text');
-    text.textContent = '';
-    const b = document.createElement('b');
-    b.textContent = p.host;
-    text.append(b, ` wants to ${p.label}`);
-  }
-}
-$('#permbar').addEventListener('click', (e) => {
-  const act = e.target.closest('[data-act]')?.dataset.act;
-  const p = permQueue[0];
-  if (!act || !p) return;
-  api.send('permission:respond', { id: p.id, allow: act === 'allow', remember: true });
-  permQueue.shift();
-  renderPerm();
-});
-api.on('permission', (p) => { permQueue.push(p); renderPerm(); });
-api.on('permission-cancel', ({ id }) => {
-  const i = permQueue.findIndex((p) => p.id === id);
-  if (i >= 0) { permQueue.splice(i, 1); renderPerm(); }
-});
+initPermBar($('#permbar'), api);
 
 // ------------------------------------------------------------------ find bar
 const findbar = $('#findbar');

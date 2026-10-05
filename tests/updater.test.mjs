@@ -118,6 +118,22 @@ test("install: if the app's folder isn't writable, the installer is opened for t
   }
 });
 
+test('install: asks before setting up the swap; staying (Cancel on "Leave site?" or downloads) leaves nothing waiting to replace the app', async () => {
+  const target = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'lumio-rw-')), 'Lumio Browser.app');
+  fs.mkdirSync(target);
+  let asked = 0;
+  const { u } = make({
+    fetchImpl: fakeFetch(release()), installTarget: target,
+    confirmQuit: async () => { asked++; return false; },
+    quit: () => { throw new Error('should not quit'); },
+  });
+  await u.check();
+  const s = await u.install();
+  assert.equal(asked, 1);
+  assert.equal(s.status, 'ready', 'ready to try again later');
+  assert.deepEqual(fs.readdirSync(u.workDir).filter((f) => f.startsWith('stage-')), [], 'nothing staged');
+});
+
 test("release notes: What's new without the install section; the urgent marker", () => {
   const body = "## What's new\n\n- Passkeys\n- Faster tabs\n\n<!-- lumio:critical -->\n\n## Install\n\n- **Mac:** dmg";
   assert.deepEqual(releaseNotes(body), { notes: '- Passkeys\n- Faster tabs', critical: true });

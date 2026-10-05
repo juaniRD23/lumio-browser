@@ -7,6 +7,8 @@ const path = require('path');
 const { TabManager, NEWTAB } = require('./tabs');
 const { AIController } = require('./ai/controller');
 const { PageIndicator } = require('./ai/indicators');
+const { DialogView } = require('./dialog-view');
+const { AccessNotice } = require('./access-notice');
 const theme = require('./theme');
 
 // Bundled by scripts/build-preload.mjs (it includes the extension toolbar code).
@@ -87,7 +89,12 @@ class BrowserWin {
         isAgentRunning: () => this.ai?.isRunning(),
         stopAgent: () => this.ai?.stop(),
         onFound: (tabId, result) => { if (tabId === this.tabs.activeId) this.emit('find-result', result); },
-        onActivated: (tab) => { this.hideOverlay(); this.emit('find-close'); this.indicator.raise(); app.onTabActivated(this, tab); },
+        onActivated: (tab) => { this.hideOverlay(); this.emit('find-close'); this.notice.hide(); this.dialogs.sync(); this.indicator.raise(); app.onTabActivated(this, tab); },
+        onDialogs: () => this.dialogs.sync(),
+        onLayout: () => { this.dialogs.place(); this.notice.place(); },
+        onFullscreen: (tab, on) => this.notice.fullscreen(tab, on),
+        focusWindow: () => this.focus(),
+        closeWindowFirst: () => { if (!app.downloadsAtRisk(this)) return false; this.close(); return true; },
         onLastTabClosed: () => this.close(),
         onTabClosed: (_m, entry) => app.onTabClosed(this, entry),
         onChanged: () => app.onSessionChanged(),
@@ -95,11 +102,18 @@ class BrowserWin {
         onAdopted: (tab) => app.onViewCreated(this, tab),
         onViewDestroyed: (wc) => profile.permissions.dropFor(wc.id),
         openInNewWindow: (url, inc) => app.createWindow({ incognito: inc, urls: [url] }),
+        openPopup: (tab, opts) => app.openPopup(this, tab, opts),
+        openExternal: (tab, req) => app.openExternal(this, tab, req),
+        dialogInProcess: (wc) => app.dialogInProcess(wc),
+        popupsAllowed: (pageUrl) => profile.permissions.allowsPopups(pageUrl),
+        saveAs: (wc, url) => profile.downloads.saveAs(wc, url),
         savePage: (tab) => app.savePage(this, tab),
         contextMenuExtras: (tab, params) => app.contextMenuExtras(this, tab, params),
       },
     });
     this.indicator = new PageIndicator(this);
+    this.dialogs = new DialogView(this); // a page's dialogs, over its tab
+    this.notice = new AccessNotice(this); // "Press Esc to exit full screen"
     this.ai = new AIController({
       store: app.store,
       chats: profile.chats,
@@ -125,10 +139,23 @@ class BrowserWin {
 
     this.win.on('focus', () => app.onFocus(this));
     this.win.on('resize', () => this.tabs.layout());
-    this.win.on('close', () => { this.closing = true; app.onClose(this); });
+    this.win.on('close', (e) => {
+      const approved = this.closeApproved;
+      this.closeApproved = false;
+      // Pages you've used may ask "Leave site?" first, one at a time, and
+      // closing may cancel downloads (the last Incognito window, or the last
+      // window where that quits): ask before any of it (confirmClose).
+      if (!approved && (this.tabs.anyMayAsk() || app.downloadsAtRisk(this))) { e.preventDefault(); this.confirmClose(); return; }
+      this.closing = true;
+      app.onClose(this);
+    });
     this.win.on('closed', () => {
       this.ai.shutdown();
       this.indicator.destroy();
+      this.notice.destroy();
+      // Pages waiting on a dialog get their answer (as cancelled), so none is left stuck.
+      for (const tab of this.tabs.tabs) this.tabs.dismiss(tab);
+      this.dialogs.destroy();
       app.onClosed(this);
     });
     this.win.webContents.on('before-input-event', (e, input) => {
@@ -162,6 +189,26 @@ class BrowserWin {
 
   close() { if (!this.win.isDestroyed()) this.win.close(); }
 
+  // Closes the window once you agree to cancel the downloads it would end
+  // (main.js confirmDownloads) and every page that asks agrees
+  // (TabManager.confirmLeaveAll).
+  async confirmClose() {
+    if (this.confirming) return;
+    this.confirming = true;
+    try {
+      if (!(await this.app.confirmDownloads(this))) {
+        if (!this.tabs.tabs.length) this.tabs.create(NEWTAB); // its last page closed itself: don't leave it empty
+        return;
+      }
+      if (await this.tabs.confirmLeaveAll()) {
+        this.closeApproved = true;
+        this.close();
+      }
+    } finally {
+      this.confirming = false;
+    }
+  }
+
   focusOmnibox() {
     if (this.win.isDestroyed()) return; // closed before a delayed focus ran
     this.win.webContents.focus();
@@ -176,6 +223,7 @@ class BrowserWin {
     this.win.contentView.addChildView(this.overlay);
     this.overlayKind = payload?.kind || null;
     this.overlay.webContents.send('overlay-data', payload);
+    if (payload?.focus) this.overlay.webContents.focus(); // a dropdown you can use from the keyboard
   }
 
   hideOverlay() {

@@ -453,3 +453,57 @@ test('light and dark: the window follows the computer, text stays readable, inco
   assert.equal(accent, '#b58cff');
   assert.ok(contrast(c.tokens['--text'], c.tokens['--bg']) >= 4.5);
 });
+
+test('the address bar selects its text when it gets focus, but a quick Tab past it keeps going', { skip: !CHROME && 'Google Chrome not installed' }, async () => {
+  const { page, errors } = await openShell(browser);
+  const frames = () => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  await page.evaluate(() => document.getElementById('address').focus());
+  await frames();
+  assert.deepEqual(await page.evaluate(() => { const a = document.getElementById('address'); return [a.value, a.selectionStart, a.selectionEnd === a.value.length]; }), ['https://www.youtube.com/watch?v=abc', 0, true], 'all of it, ready to type over');
+  await page.evaluate(() => { document.getElementById('address').blur(); document.getElementById('address').focus(); document.getElementById('prompt').focus(); });
+  await frames();
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'prompt', 'not pulled back to the address bar');
+  assert.deepEqual(errors, []);
+  await page.close();
+});
+
+test('the address bar says "Not secure" in red on a site whose certificate warning you went past', { skip: !CHROME && 'Google Chrome not installed' }, async () => {
+  for (const scheme of ['light', 'dark']) {
+    const { page, errors } = await openShell(browser, {}, { colorScheme: scheme });
+    const icon = () => page.$eval('#site-icon', (el) => ({ text: el.textContent, danger: el.classList.contains('danger'), clickable: el.classList.contains('clickable') }));
+    assert.deepEqual(await icon(), { text: '', danger: false, clickable: true }, 'a normal https page: the lock');
+    await page.evaluate(() => window.__emit('tabs', { activeId: 1, tabs: [{ id: 1, title: 'Bad cert', url: 'https://self-signed.example/', notSecure: true }] }));
+    assert.deepEqual(await icon(), { text: 'Not secure', danger: true, clickable: true });
+    const c = await readColors(page, { tokens: ['--danger-text'], parts: ['#omnibox'] });
+    assert.ok(contrast(c.tokens['--danger-text'], c.parts['#omnibox']) >= 4.5, `${scheme}: red on the address bar ${contrast(c.tokens['--danger-text'], c.parts['#omnibox']).toFixed(2)}:1`);
+    // It opens the site information, like the lock.
+    await page.click('#site-icon');
+    assert.ok(await page.evaluate(() => window.__calls.some(([c]) => c === 'site:info')));
+    await page.close();
+    assert.deepEqual(errors, []);
+  }
+});
+
+test('the address bar shows "Pop-up blocked" when the page’s pop-ups were blocked, and lists them', { skip: !CHROME && 'Google Chrome not installed' }, async () => {
+  const info = { host: 'www.youtube.com', allowed: false, items: [{ id: 1, url: 'https://ads.example/' }] };
+  const { page, errors } = await openShell(browser, { 'site:popups': { value: info } });
+  const tabs = (n, id = 1) => page.evaluate(([count, tid]) => window.__emit('tabs', { activeId: tid, tabs: [{ id: tid, title: 'YouTube', url: 'https://www.youtube.com/watch?v=abc', popupsBlocked: count }] }), [n, id]);
+  assert.equal(await page.isVisible('#popups-btn'), false, 'nothing blocked: no icon');
+  await tabs(1);
+  assert.equal(await page.isVisible('#popups-btn'), true);
+  assert.equal(await page.isVisible('#popups-btn .label'), true, 'a new one: the words for a moment');
+  assert.equal(await page.getAttribute('#popups-btn', 'aria-label'), 'Pop-ups were blocked on this page');
+  // Another tab with blocked ones shows the icon, without the words.
+  await tabs(2, 7);
+  assert.equal(await page.isVisible('#popups-btn .label'), false);
+  await tabs(1);
+  await page.click('#popups-btn');
+  await page.waitForFunction(() => window.__sent.some(([c]) => c === 'overlay:show'));
+  const shown = await page.evaluate(() => window.__sent.find(([c]) => c === 'overlay:show')[1].payload);
+  assert.deepEqual(shown, { kind: 'popups', focus: true, ...info });
+  // Clicking it again closes the list.
+  await page.click('#popups-btn');
+  assert.deepEqual(await page.evaluate(() => window.__sent.at(-1)), ['overlay:hide', 'popups']);
+  await page.close();
+  assert.deepEqual(errors, []);
+});

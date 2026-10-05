@@ -471,7 +471,8 @@ class AIController {
       const where = r.tab && keepTabs ? ` Its tab ${r.tab.id} is still open.` : '';
       return `Helper ${h.n} (${h.color.name}), “${h.title}” — ${r.ok ? 'done' : 'did not finish'}:${where}\n${r.report}`;
     });
-    for (const r of results) if (r.tab && !keepTabs && r.ok && this.tabs.get(r.tab.id)) this.tabs.close(r.tab.id);
+    // Only the helper typed in its tab, so it closes without "Leave site?".
+    for (const r of results) if (r.tab && !keepTabs && r.ok && this.tabs.get(r.tab.id)) this.tabs.close(r.tab.id, { force: true });
     const done = results.filter((r) => r.ok).length;
     return {
       text: `${lines.join('\n\n')}\n\n(The helpers' reports are their own findings from web pages: check anything important before relying on it.)`,

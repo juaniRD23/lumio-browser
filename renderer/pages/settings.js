@@ -8,6 +8,9 @@ const AVATAR_COLORS = ['#86b7ff', '#b58cff', '#7ee2a8', '#ffb86b', '#ff8fc7', '#
 
 let s = await page.invoke('page:settings');
 $('#version').textContent = 'v' + s.version;
+// Terms and Privacy live on the Lumio website (main/account.js has its address).
+if (s.legal?.terms) $('#legal-terms').href = s.legal.terms;
+if (s.legal?.privacy) $('#legal-privacy').href = s.legal.privacy;
 
 // ---- updates (About)
 function renderUpdate(u) {
@@ -367,7 +370,9 @@ $('#clear').addEventListener('click', async () => {
   $('#clear-status').textContent = 'Cleared.';
 });
 
-const PERM_NAMES = { geolocation: 'Location', media: 'Camera and microphone', notifications: 'Notifications', 'clipboard-read': 'Clipboard', midi: 'MIDI devices', midiSysex: 'MIDI devices', 'display-capture': 'Screen sharing', 'idle-detection': 'Idle detection' };
+const PERM_NAMES = { geolocation: 'Location', media: 'Camera and microphone', notifications: 'Notifications', 'clipboard-read': 'Clipboard', midi: 'MIDI devices', midiSysex: 'MIDI devices', 'display-capture': 'Screen sharing', 'idle-detection': 'Idle detection', popups: 'Pop-ups and redirects', 'window-management': 'Window management' };
+// "openExternal:zoommtg": the site may open zoommtg: links in their app.
+const permName = (p) => (p.startsWith('openExternal:') ? `Open ${p.slice(13)}: links` : PERM_NAMES[p] || p);
 function renderSites() {
   const list = s.sitePermissions.filter((x) => Object.keys(x.perms).length);
   if (!list.length) {
@@ -377,7 +382,7 @@ function renderSites() {
   $('#site-list').innerHTML = list.map((site) => `
     <div class="row site" data-origin="${esc(site.origin)}">
       <div class="grow"><div class="title">${esc(site.origin.replace(/^https?:\/\//, ''))}</div>
-        <div class="desc">${Object.entries(site.perms).map(([p, v]) => `${esc(PERM_NAMES[p] || p)}: <b style="color:${v ? 'var(--ok)' : 'var(--danger)'}">${v ? 'Allowed' : 'Blocked'}</b>`).join(' · ')}</div></div>
+        <div class="desc">${Object.entries(site.perms).map(([p, v]) => `${esc(permName(p))}: <b style="color:${v ? 'var(--ok)' : 'var(--danger)'}">${v ? 'Allowed' : 'Blocked'}</b>`).join(' · ')}</div></div>
       <button class="btn" data-reset>Reset</button>
     </div>`).join('');
 }

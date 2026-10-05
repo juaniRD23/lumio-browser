@@ -1,0 +1,17 @@
+/* "Your connection is not private" (cert.html). */
+body { display: grid; place-items: center; min-height: 100vh; }
+.box { width: 100%; max-width: 580px; padding: 32px 24px; animation: rise .4s var(--ease); }
+.ico { width: 52px; height: 52px; border-radius: 16px; display: grid; place-items: center; margin-bottom: 18px; color: var(--danger); background: color-mix(in srgb, var(--danger-fill) 12%, transparent); }
+h1 { font-size: 30px; }
+p { color: var(--dim); margin: 0 0 10px; }
+b { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+.code { font-family: var(--mono); font-size: 12px; color: var(--label); margin-top: 14px; }
+.actions { display: flex; justify-content: space-between; gap: 10px; margin-top: 24px; }
+#details { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 14px 0 16px; padding: 14px 16px; font-size: 12.5px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
+dt { color: var(--label); }
+dd { margin: 0; overflow-wrap: anywhere; user-select: text; }
+.mono { font-family: var(--mono); font-size: 11.5px; }
+.link { background: none; border: 0; padding: 0; margin-top: 4px; font: inherit; text-decoration: underline; cursor: pointer; }
+.link.danger { color: var(--danger-text); }
+.btn:focus-visible, .link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
