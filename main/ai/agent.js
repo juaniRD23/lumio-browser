@@ -2,6 +2,7 @@
 // Messages use the OpenAI/OpenRouter chat format. `chat` is injected so tests
 // can drive the loop with a fake model.
 const { needsApproval } = require('./policy');
+const { t } = require('../i18n');
 
 const MAX_STEPS = 100;
 // After these, the next turn weighs what came back (research, other tabs,
@@ -76,7 +77,8 @@ async function runToolCall(call, env) {
     return { text: `Error: the arguments were not valid JSON: ${String(call.arguments).slice(0, 300)}` };
   }
 
-  const label = safe(() => tool.label(args, ctx)) || tool.name;
+  // In Lumio's language: the panel shows it as is (it names things on the page).
+  const label = t(safe(() => tool.label(args, ctx)) || tool.name);
   const risk = typeof tool.risk === 'function' ? tool.risk(args, ctx) : tool.risk;
   chip({ type: 'step', id: call.id, name: tool.name, label, icon: tool.icon, risk });
 

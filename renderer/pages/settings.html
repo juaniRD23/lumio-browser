@@ -5,6 +5,8 @@
   <title>Settings</title>
   <link rel="stylesheet" href="pages.css" />
   <link rel="stylesheet" href="settings.css" />
+  <link rel="stylesheet" href="settings-perf.css" />
+  <link rel="stylesheet" href="settings-extra.css" />
 </head>
 <body>
   <div class="layout">
@@ -55,6 +57,13 @@
           </div>
           <div class="row" id="account-error" hidden><div class="desc err"></div></div>
           <div class="row"><div class="desc">Signing in uses the same account as Lumio Chat on the web. Lumio AI in this browser runs on your Lumio plan.</div></div>
+        </div>
+        <!-- Profiles (settings-profiles.js) -->
+        <div class="card profiles-card">
+          <div class="row">
+            <div class="grow"><div class="title">Profiles</div><div class="desc" id="profiles-desc">Each profile has its own history, bookmarks, passwords, Lumio account and settings.</div></div>
+            <button class="btn" id="profiles-manage">Manage profiles</button>
+          </div>
         </div>
       </section>
 
@@ -285,19 +294,60 @@
         </div>
       </section>
 
-      <!-- Performance -->
+      <!-- Performance (settings-perf.js) -->
       <section id="performance">
         <h2>Performance</h2>
+        <h3>Memory</h3>
         <div class="card">
           <label class="row" style="cursor:pointer">
             <div class="grow"><div class="title">Memory Saver</div><div class="desc">Tabs you haven’t looked at for a while go to sleep and give back their memory. They come back where you left them when you open them. Tabs playing sound never sleep.</div></div>
             <span class="switch"><input type="checkbox" id="mem-saver"><i></i></span>
           </label>
-          <div class="row" id="mem-after-row">
-            <div class="grow"><div class="title">Sleep tabs after</div></div>
-            <select id="mem-after" class="field">
-              <option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option><option value="120">2 hours</option><option value="240">4 hours</option>
-            </select>
+          <div class="perf-sub modes" id="mem-modes" role="radiogroup" aria-label="How much memory to save">
+            <label class="row"><input type="radio" name="mem-mode" value="moderate" /><div class="grow"><div class="title">Moderate</div><div class="desc">Tabs sleep after 4 hours unseen.</div></div></label>
+            <label class="row"><input type="radio" name="mem-mode" value="balanced" /><div class="grow"><div class="title">Balanced <span class="pill">Recommended</span></div><div class="desc">Tabs sleep after an hour unseen.</div></div></label>
+            <label class="row"><input type="radio" name="mem-mode" value="maximum" /><div class="grow"><div class="title">Maximum</div><div class="desc">Tabs sleep after 15 minutes unseen. Saves the most memory.</div></div></label>
+          </div>
+          <div class="row keep-row">
+            <div class="grow">
+              <div class="title">Always keep these sites active</div>
+              <div class="desc">Their tabs never sleep, subdomains included.</div>
+              <ul class="keep-list" id="keep-list" aria-label="Sites kept active"></ul>
+              <form class="keep-form" id="keep-form">
+                <input class="field" id="keep-input" type="text" placeholder="example.com" aria-label="Site to keep active" autocomplete="off" spellcheck="false" />
+                <button class="btn" type="submit">Add</button>
+              </form>
+              <div class="desc err" id="keep-err" aria-live="polite"></div>
+            </div>
+          </div>
+        </div>
+        <h3>Power</h3>
+        <div class="card">
+          <label class="row" style="cursor:pointer">
+            <div class="grow"><div class="title">Energy Saver <span class="pill ok" id="energy-now" hidden>On now</span></div><div class="desc">On battery, Lumio slows down tabs in the background, stops preloading pages and turns off its own animations.</div></div>
+            <span class="switch"><input type="checkbox" id="energy"><i></i></span>
+          </label>
+          <div class="perf-sub modes" id="energy-when" role="radiogroup" aria-label="When Energy Saver turns on">
+            <label class="row"><input type="radio" name="energy-when" value="low" /><div class="grow"><div class="title">When the battery is at 20% or lower</div></div></label>
+            <label class="row"><input type="radio" name="energy-when" value="unplugged" /><div class="grow"><div class="title">Whenever the computer is unplugged</div></div></label>
+          </div>
+        </div>
+        <h3>Speed</h3>
+        <div class="card">
+          <label class="row" style="cursor:pointer">
+            <div class="grow"><div class="title">Performance issue alerts</div><div class="desc">Tells you when a tab in the background uses a lot of memory or power, and offers to put it to sleep.</div></div>
+            <span class="switch"><input type="checkbox" id="perf-alerts"><i></i></span>
+          </label>
+          <div class="row">
+            <div class="grow"><div class="title">Preload pages</div><div class="desc">Connects ahead to the page you’re about to open from the address bar, so it loads faster. Never in incognito or Guest windows.</div></div>
+            <div class="modes seg" role="radiogroup" aria-label="Preload pages">
+              <label><input type="radio" name="preload" value="standard" />Standard</label>
+              <label><input type="radio" name="preload" value="off" />No preloading</label>
+            </div>
+          </div>
+          <div class="row">
+            <div class="grow"><div class="title">Task Manager</div><div class="desc">How much memory and power each tab and process uses. End one that’s stuck.</div></div>
+            <button class="btn" id="open-task-manager">Open</button>
           </div>
         </div>
       </section>
@@ -390,5 +440,7 @@
     </main>
   </div>
   <script type="module" src="settings.js"></script>
+  <script type="module" src="settings-perf.js"></script>
+  <script type="module" src="settings-profiles.js"></script>
 </body>
 </html>

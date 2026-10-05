@@ -70,6 +70,8 @@
   --box-shadow: 0 18px 50px light-dark(#00000024, #0007);
   --switch-off: light-dark(#c4c4ca, #3a3a3e); /* a toggle's track when off */
   --highlight: light-dark(#ffd54f80, #ffd47933); /* text that matches a search */
+  --paper: light-dark(#ffffff, #ffffff); /* a printed sheet in the print preview: white in both */
+  --paper-shadow: 0 1px 3px light-dark(#00000024, #000c), 0 10px 30px light-dark(#0000001a, #0009);
 
   /* Menus and popups (renderer/ui/overlay.css) */
   --text-strong: light-dark(#000000, #ffffff); /* emphasis, and a label under the pointer */
@@ -107,6 +109,13 @@
 }
 :root[data-appearance="dark"] { color-scheme: dark; }
 :root[data-appearance="light"] { color-scheme: light; }
+
+/* Energy Saver is on (main/perf.js puts this class on the window's <html>):
+   the browser's own animations stop, like with reduced motion. */
+:root.energy-saver *, :root.energy-saver *::before, :root.energy-saver *::after {
+  animation-duration: .01ms !important; animation-iteration-count: 1 !important;
+  transition-duration: .01ms !important; scroll-behavior: auto !important;
+}
 
 /* The accent is the profile's theme color, set on <html> as --accent-dark and
    --accent-light (renderer/assets/theme-colors.js). It's chosen here instead

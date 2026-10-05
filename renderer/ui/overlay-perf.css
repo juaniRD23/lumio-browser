@@ -1,0 +1,31 @@
+/* The account menu's profiles (renderer/ui/overlay.js) and the Performance
+   issues popup (renderer/ui/overlay-perf.js). Imported by overlay.css. */
+.acc-profiles { margin-top: 4px; }
+.acc-sec { padding: 8px 10px 4px; color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
+.acc-profile { gap: 10px; }
+/* A dark initial on the profile's pastel color, in both appearances. */
+.acc-profile .avatar { color: #0b0b0c; font-weight: 650; font-size: 11px; flex: none; }
+.acc-email { max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.acc-tools { display: flex; gap: 4px; padding: 4px 2px 2px; }
+.acc-tool {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 8px 4px 7px; border: 0; border-radius: 10px; background: none;
+  color: var(--dim); font: inherit; font-size: 11.5px;
+}
+.acc-tool:hover { background: var(--active); color: var(--text); }
+.acc-tool svg { width: 17px; height: 17px; }
+.avatar.guest { background: var(--field); color: var(--dim); box-shadow: inset 0 0 0 1px var(--line-strong); }
+:is(.acc-item, .acc-tool, .acc-btn):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+
+.pf-head { display: flex; align-items: center; gap: 8px; padding: 8px 8px 2px; font-weight: 650; font-size: 14px; }
+.pf-head svg { color: var(--warn); }
+.pf-sub { margin: 4px 8px 10px; color: var(--dim); font-size: 12.5px; line-height: 1.45; }
+.pf-list { margin: 0 4px 4px; padding: 4px; border-radius: 12px; background: var(--overlay-2); border: 1px solid var(--line); }
+.pf-tab { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 8px; }
+.pf-fav { width: 16px; height: 16px; display: grid; place-items: center; color: var(--muted); flex: none; }
+.pf-fav img { width: 16px; height: 16px; border-radius: 3px; }
+.pf-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pf-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pf-host { color: var(--label); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pf-use { flex: none; color: var(--warn-text); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.pf-more { padding: 4px 8px 6px; color: var(--label); font-size: 12px; }

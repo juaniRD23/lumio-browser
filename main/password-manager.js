@@ -16,6 +16,7 @@ const path = require('path');
 const { PasswordStore, generatePassword, siteKey } = require('./passwords');
 const { PasskeyStore, WebAuthnError, validRpId } = require('./passkeys');
 const { windowsHello } = require('./win/hello');
+const { t } = require('./i18n');
 
 const AUTH_MS = 3 * 60 * 1000;
 const PROMPT_MS = 10 * 60 * 1000;
@@ -47,14 +48,18 @@ class PasswordManager {
     } catch { return null; }
   }
 
-  register() {
-    ipcMain.on('pw:captured', (e, data) => this.captured(e, data));
-    ipcMain.handle('pw:query', (e, data) => this.query(e, data));
-    ipcMain.on('pw:show', (e, rect) => this.show(e, rect));
-    ipcMain.handle('pk:request', (e, req) => this.passkeyRequest(e, req || {}));
-    ipcMain.on('pk:cancel', (e) => this.passkeyCancel(e.sender.id));
-    ipcMain.on('pw:hide', (e) => {
-      const found = this.findTab(e.sender);
+  // Each profile has its own manager: pick(webContents) returns the one for
+  // the tab that sent a message (null: nothing to answer).
+  static register(pick) {
+    const on = (channel, fn) => ipcMain.on(channel, (e, ...args) => { const pm = pick(e.sender); if (pm) fn(pm, e, ...args); });
+    const handle = (channel, fn) => ipcMain.handle(channel, (e, ...args) => { const pm = pick(e.sender); return pm ? fn(pm, e, ...args) : null; });
+    on('pw:captured', (pm, e, data) => pm.captured(e, data));
+    handle('pw:query', (pm, e, data) => pm.query(e, data));
+    on('pw:show', (pm, e, rect) => pm.show(e, rect));
+    handle('pk:request', (pm, e, req) => pm.passkeyRequest(e, req || {}));
+    on('pk:cancel', (pm, e) => pm.passkeyCancel(e.sender.id));
+    on('pw:hide', (pm, e) => {
+      const found = pm.findTab(e.sender);
       if (found && found.w.overlayKind === 'autofill') found.w.hideOverlay();
     });
   }
@@ -165,8 +170,11 @@ class PasswordManager {
   }
 
   // ------------------------------------------------------------ confirming it's you
+  // reason: what Touch ID or Windows Hello says Lumio wants to do ("show a
+  // saved password"), in Lumio's language.
   async authorize(w, reason) {
     if (Date.now() < this.authUntil) return true;
+    reason = t(reason);
     let ok = false;
     const testAuth = process.env.LUMIO_TEST && process.env.LUMIO_TEST_AUTH;
     if (testAuth) ok = testAuth === 'allow';
@@ -290,6 +298,7 @@ class PasswordManager {
 
   // User verification for passkeys: every time (no 3-minute unlock).
   async verifyPerson(w, reason) {
+    reason = t(reason); // in Lumio's language, like authorize()
     const testAuth = process.env.LUMIO_TEST && process.env.LUMIO_TEST_AUTH;
     if (testAuth) return { ok: testAuth === 'allow', verified: testAuth === 'allow' };
     if (process.platform === 'darwin' && this.helper?.available()) {

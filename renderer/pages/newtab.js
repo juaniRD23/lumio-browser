@@ -88,7 +88,7 @@ if (data.aiReady && !data.incognito) {
   $('#ideas').addEventListener('click', (e) => {
     const idea = IDEAS[e.target.closest('.idea')?.dataset.i];
     if (!idea) return;
-    q.value = idea.text;
+    q.value = window.lumioI18n?.t(idea.text) ?? idea.text; // in Lumio's language (renderer/assets/i18n)
     q.focus();
     q.setSelectionRange(q.value.length, q.value.length);
     setAsking(true);

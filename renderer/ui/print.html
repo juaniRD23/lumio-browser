@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Print</title>
+  <link rel="stylesheet" href="print.css" />
+</head>
+<body>
+  <div class="print">
+    <section class="preview" id="preview" aria-label="Preview" aria-busy="true" tabindex="-1">
+      <div class="sheets" id="sheets"></div>
+      <div class="status" id="status" role="status" aria-live="polite"><span class="spinner" aria-hidden="true"></span><span id="status-text">Loading preview…</span></div>
+    </section>
+
+    <form class="side" id="form" aria-labelledby="print-title" novalidate>
+      <header>
+        <h1 id="print-title">Print</h1>
+        <span class="count" id="count" aria-live="polite"></span>
+      </header>
+
+      <div class="rows">
+        <div class="row">
+          <label for="dest">Destination</label>
+          <select id="dest" class="field">
+            <option value="pdf">Save as PDF</option>
+          </select>
+        </div>
+        <div class="row">
+          <label for="pages">Pages</label>
+          <div class="stack">
+            <select id="pages" class="field">
+              <option value="all">All</option>
+              <option value="odd">Odd pages only</option>
+              <option value="even">Even pages only</option>
+              <option value="custom">Custom</option>
+            </select>
+            <input id="ranges" class="field" type="text" placeholder="e.g. 1-5, 8, 11-13" aria-label="Pages to print" autocomplete="off" spellcheck="false" hidden />
+            <div class="hint err" id="ranges-err" aria-live="polite"></div>
+          </div>
+        </div>
+        <div class="row printer-only">
+          <label for="copies">Copies</label>
+          <input id="copies" class="field num" type="number" min="1" max="999" value="1" inputmode="numeric" />
+        </div>
+        <div class="row">
+          <label for="layout">Layout</label>
+          <select id="layout" class="field">
+            <option value="portrait">Portrait</option>
+            <option value="landscape">Landscape</option>
+          </select>
+        </div>
+        <div class="row printer-only">
+          <label for="color">Color</label>
+          <select id="color" class="field">
+            <option value="color">Color</option>
+            <option value="bw">Black and white</option>
+          </select>
+        </div>
+
+        <button type="button" class="more" id="more" aria-expanded="false" aria-controls="more-settings"><span>More settings</span><i class="chev" aria-hidden="true"></i></button>
+        <div id="more-settings" hidden>
+          <div class="row">
+            <label for="paper">Paper size</label>
+            <select id="paper" class="field">
+              <option value="Letter">Letter</option>
+              <option value="Legal">Legal</option>
+              <option value="Tabloid">Tabloid</option>
+              <option value="A3">A3</option>
+              <option value="A4">A4</option>
+              <option value="A5">A5</option>
+            </select>
+          </div>
+          <div class="row printer-only">
+            <label for="per-sheet">Pages per sheet</label>
+            <select id="per-sheet" class="field">
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="4">4</option>
+              <option value="6">6</option>
+              <option value="9">9</option>
+              <option value="16">16</option>
+            </select>
+          </div>
+          <div class="row">
+            <label for="margins">Margins</label>
+            <select id="margins" class="field">
+              <option value="default">Default</option>
+              <option value="none">None</option>
+              <option value="minimum">Minimum</option>
+            </select>
+          </div>
+          <div class="row">
+            <label for="scale-mode">Scale</label>
+            <div class="stack">
+              <select id="scale-mode" class="field">
+                <option value="default">Default</option>
+                <option value="custom">Custom</option>
+              </select>
+              <span class="scale" id="scale-wrap" hidden><input id="scale" class="field num" type="number" min="10" max="200" value="100" aria-label="Scale in percent" inputmode="numeric" /><span aria-hidden="true">%</span></span>
+              <div class="hint err" id="scale-err" aria-live="polite"></div>
+            </div>
+          </div>
+          <div class="row">
+            <span class="label" id="options-label">Options</span>
+            <div class="stack checks" role="group" aria-labelledby="options-label">
+              <label class="check"><input type="checkbox" id="headers" /> Headers and footers</label>
+              <label class="check"><input type="checkbox" id="background" /> Background graphics</label>
+            </div>
+          </div>
+        </div>
+
+        <button type="button" class="link" id="system">Print using system dialog… <span class="keys" id="system-keys">(⌥⌘P)</span></button>
+        <p class="hint" id="mac-range" hidden>Your Mac prints one range at a time: only the first range will print. Use Save as PDF for the rest.</p>
+      </div>
+
+      <footer>
+        <button type="button" class="btn" id="cancel">Cancel</button>
+        <button type="submit" class="btn primary" id="go">Save</button>
+      </footer>
+    </form>
+  </div>
+  <script type="module" src="print.js"></script>
+</body>
+</html>

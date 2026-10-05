@@ -13,6 +13,12 @@ else if (FLAVOR.beta) app.setPath('userData', path.join(app.getPath('appData'), 
 if (process.env.LUMIO_DOWNLOADS) app.setPath('downloads', process.env.LUMIO_DOWNLOADS); // tests
 app.setName(FLAVOR.name);
 
+// Before Electron starts: Lumio's language and graphics acceleration
+// (Settings › Languages and › System), which apply from launch.
+const started = require('./system').readEarly(app.getPath('userData'));
+require('./i18n').init(app, started.uiLanguage);
+if (!started.hardwareAcceleration) app.disableHardwareAcceleration();
+
 protocol.registerSchemesAsPrivileged([
   { scheme: 'lumio', privileges: { standard: true, secure: true, supportFetchAPI: true, codeCache: true } },
 ]);
@@ -41,6 +47,14 @@ const { Projects } = require('./projects');
 const { SyncEngine } = require('./sync/engine');
 const syncAdapters = require('./sync/adapters');
 const { CompanionBridge } = require('./sync/companion');
+const { ProfileRegistry, DEFAULT_PROFILE } = require('./profiles');
+const { PerformanceManager } = require('./perf');
+const { TaskManager } = require('./task-manager');
+const { ProfilePicker } = require('./picker');
+const { PrintPreview } = require('./print');
+const { System } = require('./system');
+const languages = require('./languages');
+const { t } = require('./i18n');
 
 const IS_DEV = !app.isPackaged;
 
@@ -68,21 +82,23 @@ function launchTargets(argv) {
   return out;
 }
 
-let store = null;
+// Each profile (main/profiles.js) opens as { id, session, store, chats,
+// downloads, permissions, account, passwords, sync, companion, extensions,
+// schedules, workflows, siteTips, projects } (openProfile). A window's
+// profile is w.profile; an incognito window's is an in-memory copy of its
+// profile's (with .base pointing back), and Guest is a profile of its own.
+let rootStore = null; // the first profile's settings, which also hold the app-wide ones (appearance, performance, updates)
+let profiles = null; // the list of profiles
+const loaded = new Map(); // profile id -> the open profile
+let guest = null; // the Guest profile, while a Guest window is open
 let helper = null;
-let normal = null; // the normal profile: { session, downloads, permissions, chats }
-let incog = null; // the current incognito profile, while any incognito window is open
 let incogSeq = 0;
-let extensions = null;
 let updater = null;
-let account = null;
-let passwords = null;
-let schedules = null; // scheduled tasks (main/schedules.js)
-let workflows = null; // saved workflows (main/workflows.js)
-let siteTips = null; // how to get things done on sites (main/site-tips.js)
-let projects = null; // chat projects (main/projects.js)
-let sync = null; // Lumio Sync (main/sync)
-let companion = null; // the phone companion's link to this computer
+let perf = null; // Settings › Performance (main/perf.js)
+let taskManager = null;
+let picker = null; // "Who's using Lumio?"
+let printPreview = null; // File › Print… (main/print.js)
+let system = null; // Settings › System (main/system.js)
 let quitting = false;
 const windows = new Set();
 let lastFocused = null;
@@ -92,7 +108,10 @@ const pendingUrls = [];
 // ---------------------------------------------------------------- windows
 const alive = () => [...windows].filter((w) => !w.closed && !w.closing);
 const cur = () => (lastFocused && !lastFocused.closed && !lastFocused.closing ? lastFocused : alive().at(-1)) || null;
-const normalWin = () => { const c = cur(); return c && !c.incognito ? c : alive().reverse().find((w) => !w.incognito) || null; };
+// The profile a command is for: the front window's, else the last one used.
+const curProfile = () => cur()?.profile.base || openProfile(profiles.lastUsed());
+const normalWin = (base = curProfile()) => { const c = cur(); return c && !c.incognito && c.profile === base ? c : alive().reverse().find((w) => !w.incognito && w.profile === base) || null; };
+const profileWindows = (p) => alive().filter((w) => w.profile.base === p.base);
 const ensureWin = () => cur() || createWindow();
 const windowOfWc = (wc) => alive().find((w) => w.win.webContents === wc || w.overlay.webContents === wc || w.indicator?.bar?.webContents === wc) || null;
 const tabOfWc = (wc) => {
@@ -108,21 +127,25 @@ function setupTabSession(ses, { incognito = false } = {}) {
   registerPagesProtocol(ses, { dark: incognito });
 }
 
-function incognitoProfile() {
-  if (incog) return incog;
-  const ses = session.fromPartition(`lumio-incognito-${++incogSeq}`); // in memory only
+// Each profile's incognito windows share one in-memory session, wiped when
+// the last one closes. Bookmarks, passwords and the Lumio account are the profile's.
+function incognitoProfile(base) {
+  if (base.incog) return base.incog;
+  const partition = `lumio-incognito-${++incogSeq}`; // in memory only
+  const ses = session.fromPartition(partition);
   setupTabSession(ses, { incognito: true });
-  const profile = { incognito: true, session: ses, chats: new ChatStore(null) };
-  profile.downloads = new Downloads(ses, { settings: store, emit: (c, p) => alive().filter((w) => w.profile === profile).forEach((w) => w.emit(c, p)) });
-  profile.permissions = new Permissions(ses, { store, emitFor, persist: false });
+  languages.attach(ses, base.store, app);
+  const profile = { ...base, incognito: true, base, incog: null, partition, session: ses, chats: new ChatStore(null) };
+  profile.downloads = new Downloads(ses, { settings: base.store, emit: (c, p) => alive().filter((w) => w.profile === profile).forEach((w) => w.emit(c, p)) });
+  profile.permissions = new Permissions(ses, { store: base.store, emitFor, persist: false });
   setupScreenShare(ses);
-  incog = profile;
+  base.incog = profile;
   return profile;
 }
 
-function endIncognito() {
-  const p = incog;
-  incog = null;
+function endIncognito(base) {
+  const p = base.incog;
+  base.incog = null;
   if (!p) return;
   p.session.clearStorageData().catch(() => {});
   p.session.clearCache().catch(() => {});
@@ -136,46 +159,48 @@ function emitFor(wcId, channel, payload) {
 }
 
 const services = {
-  get store() { return store; },
   get helper() { return helper; },
-  get account() { return account; },
-  get schedules() { return schedules; },
-  get workflows() { return workflows; },
-  get siteTips() { return siteTips; },
-  notify: (w, title, body, chatId) => { notifyChat(w, title, body, chatId); companion?.notice({ title, body, chatId, hint: /needs your OK/.test(title) ? 'approval' : 'scheduled' }); },
-  onEmit: (w, channel, payload) => companion?.onEmit(w, channel, payload),
+  notify: (w, title, body, chatId) => { notifyChat(w, title, body, chatId); w.profile.companion?.notice({ title, body, chatId, hint: /needs your OK/.test(title) ? 'approval' : 'scheduled' }); },
+  onEmit: (w, channel, payload) => w.profile.companion?.onEmit(w, channel, payload),
   createWindow: (opts) => createWindow(opts),
-  onFocus: (w) => { lastFocused = w; },
+  onFocus: (w) => {
+    const switched = lastFocused?.profile.base !== w.profile.base;
+    lastFocused = w;
+    if (!w.profile.guest) profiles.setLastUsed(w.profile.id);
+    if (switched) menuChanged(); // the menu shows this profile's bookmarks bar and closed tabs
+  },
   onClose: (w) => {
-    if (quitting || w.incognito || !w.tabs.tabs.length) return;
-    recentlyClosed.push({ kind: 'window', ...w.session(), title: w.tabs.active?.title || 'Window', time: Date.now() });
+    if (quitting || w.incognito || w.profile.guest || !w.tabs.tabs.length) return;
+    recentlyClosed.push({ kind: 'window', profileId: w.profile.id, ...w.session(), title: w.tabs.active?.title || 'Window', time: Date.now() });
     if (recentlyClosed.length > 25) recentlyClosed.shift();
     menuChanged();
   },
   onClosed: (w) => {
     windows.delete(w);
     if (lastFocused === w) lastFocused = null;
-    if (w.incognito && !alive().some((x) => x.incognito)) endIncognito();
+    if (w.incognito && !alive().some((x) => x.profile === w.profile)) endIncognito(w.profile.base);
+    if (w.profile.guest && !alive().some((x) => x.profile === w.profile)) endGuest();
     saveSession();
   },
   onTabClosed: (w, entry) => {
     if (quitting || w.closing) return;
-    if (w.incognito) {
+    if (w.incognito || w.profile.guest) {
       w.closedTabs.push(entry);
       if (w.closedTabs.length > 25) w.closedTabs.shift();
       return;
     }
-    recentlyClosed.push({ kind: 'tab', ...entry, windowId: w.id, time: Date.now() });
+    recentlyClosed.push({ kind: 'tab', profileId: w.profile.id, ...entry, windowId: w.id, time: Date.now() });
     if (recentlyClosed.length > 25) recentlyClosed.shift();
     menuChanged();
   },
   onSessionChanged: () => saveSession(),
-  onViewCreated: (w, tab) => { if (!w.incognito && tab.view) extensions?.addTab(tab.view.webContents, w.win); },
-  onPasskeyPromptClosed: (w) => passwords?.passkeyClosed(w),
+  onViewCreated: (w, tab) => { if (!w.incognito && tab.view) w.profile.extensions?.addTab(tab.view.webContents, w.win); },
+  onPasskeyPromptClosed: (w) => w.profile.passwords?.passkeyClosed(w),
   onScreenSharePickerClosed: (w) => shareCancel(w),
-  onTabActivated: (w, tab) => { if (!w.incognito && tab.view) extensions?.selectTab(tab.view.webContents); },
+  onTabActivated: (w, tab) => { if (!w.incognito && tab.view) w.profile.extensions?.selectTab(tab.view.webContents); printPreview?.tabActivated(w, tab); },
+  print: (w, tab) => printPreview.open(w, tab),
   savePage: (w, tab) => savePage(w, tab),
-  contextMenuExtras: (w, tab, params) => (w.incognito || !tab.view ? [] : extensions?.contextMenuItems(tab.view.webContents, params) || []),
+  contextMenuExtras: (w, tab, params) => (w.incognito || !tab.view ? [] : w.profile.extensions?.contextMenuItems(tab.view.webContents, params) || []),
   broadcastAIState: () => alive().forEach((w) => w.ai.emitState()),
 };
 
@@ -191,11 +216,15 @@ function startMenuShortcut() {
   }
 }
 
+// opts.profile: the profile it's for (else the front window's). Guest has no incognito.
 function createWindow(opts = {}) {
-  const incognito = !!opts.incognito;
-  const w = new BrowserWin(services, incognito ? incognitoProfile() : normal, { ...opts, near: cur()?.win });
+  const base = opts.profile || curProfile();
+  const incognito = !!opts.incognito && !base.guest;
+  const w = new BrowserWin(services, incognito ? incognitoProfile(base) : base, { ...opts, incognito, near: cur()?.win });
   windows.add(w);
   lastFocused = w;
+  if (!base.guest) profiles.setLastUsed(base.id);
+  perf.watchWindow(w);
   if (opts.focus !== false) w.win.once('ready-to-show', () => w.focus());
   return w;
 }
@@ -204,9 +233,9 @@ function createWindow(opts = {}) {
 // chat in that window, or the front window if that one closed.
 function notifyChat(w, title, body, chatId) {
   if (!Notification.isSupported()) return;
-  const n = new Notification({ title: String(title).slice(0, 80), body: String(body || '').slice(0, 240) });
+  const n = new Notification({ title: t(String(title)).slice(0, 80), body: t(String(body || '')).slice(0, 240) }); // in Lumio's language
   n.on('click', () => {
-    const target = windows.has(w) ? w : alive().find((x) => !x.incognito) || createWindow();
+    const target = windows.has(w) ? w : normalWin(w.profile.base) || createWindow({ profile: w.profile.base });
     target.focus();
     target.openChat(chatId, { full: false });
   });
@@ -214,15 +243,20 @@ function notifyChat(w, title, body, chatId) {
 }
 
 // Scheduled tasks: every 20 s, run what's due in a normal window that isn't
-// busy (opening one in the background if none is open).
+// busy (opening one in the background if none is open), for each open profile.
 const runningSchedules = new Set();
 function runDueSchedules() {
-  if (!schedules || quitting || !account?.state().signedIn) return;
+  if (quitting) return;
+  for (const p of loaded.values()) runDueFor(p);
+}
+function runDueFor(p) {
+  const { schedules, account } = p;
+  if (!schedules || !account.state().signedIn) return;
   for (const task of schedules.due()) {
     if (runningSchedules.has(task.id)) continue;
-    const normalWins = alive().filter((x) => !x.incognito);
+    const normalWins = alive().filter((x) => !x.incognito && x.profile === p);
     const w = normalWins.find((x) => x === lastFocused && !x.ai.isRunning()) || normalWins.find((x) => !x.ai.isRunning())
-      || (normalWins.length ? null : createWindow({ focus: false }));
+      || (normalWins.length ? null : createWindow({ profile: p, focus: false }));
     if (!w) return; // every window is busy; try again on the next check
     runningSchedules.add(task.id);
     w.ai.runScheduled({ ...task, when: describeSchedule(task) })
@@ -231,12 +265,14 @@ function runDueSchedules() {
   }
 }
 
-// Save the open normal windows so they come back next launch. When the last
-// one closes (without quitting) the file keeps it, like Chrome on the Mac.
+// Save each profile's open normal windows so they come back next launch. When
+// the last one closes (without quitting) the file keeps it, like Chrome on the Mac.
 function saveSession() {
-  if (quitting || !store) return;
-  const list = alive().filter((w) => !w.incognito).map((w) => w.session()).filter((s) => s.tabs.length);
-  if (list.length) store.saveSession(list);
+  if (quitting) return;
+  for (const p of loaded.values()) {
+    const list = alive().filter((w) => !w.incognito && w.profile === p).map((w) => w.session()).filter((s) => s.tabs.length);
+    if (list.length) p.store.saveSession(list);
+  }
 }
 
 let menuTimer = null;
@@ -244,30 +280,41 @@ function menuChanged() {
   clearTimeout(menuTimer);
   menuTimer = setTimeout(() => Menu.setApplicationMenu(buildMenu(cmd, menuState())), 50);
 }
+// The menu follows the front window's profile (before any window: the first profile's).
 function menuState() {
+  const id = cur()?.profile.id || DEFAULT_PROFILE;
   return {
-    bookmarksBar: !!store.settings.showBookmarksBar,
+    bookmarksBar: !!(cur()?.profile.store || rootStore).settings.showBookmarksBar,
     appearance: theme.appearance(),
-    recentlyClosed: recentlyClosed.slice(-10).reverse().map((e, i) => ({
-      label: e.kind === 'window' ? `${e.tabs.length} Tab${e.tabs.length === 1 ? '' : 's'} (${e.title})` : e.title || e.url,
-      index: recentlyClosed.length - 1 - i,
+    profiles: profiles ? (cur() ? profilesFor(cur()) : profilesList()) : [],
+    recentlyClosed: recentlyClosed.map((e, index) => ({ e, index })).filter(({ e }) => e.profileId === id).slice(-10).reverse().map(({ e, index }) => ({
+      label: e.kind === 'window' ? t(`${e.tabs.length} Tab${e.tabs.length === 1 ? '' : 's'} (${e.title})`) : e.title || e.url, // a page's title stays as it is
+      index,
     })),
   };
 }
 
-function reopenClosed(index = recentlyClosed.length - 1) {
+// No index: the front window's profile's most recently closed tab or window
+// (an incognito or Guest window's own closed tabs).
+function reopenClosed(index) {
   const w = cur();
-  if (w?.incognito && index === recentlyClosed.length - 1) {
-    const e = w.closedTabs.pop();
-    if (e) w.tabs.create(e.url, { index: e.index, title: e.title, pinned: e.pinned });
-    return;
+  if (index == null) {
+    if (w?.incognito || w?.profile.guest) {
+      const e = w.closedTabs.pop();
+      if (e) w.tabs.create(e.url, { index: e.index, title: e.title, pinned: e.pinned });
+      return;
+    }
+    index = recentlyClosed.findLastIndex((e) => e.profileId === (w?.profile.id || DEFAULT_PROFILE));
+    if (index < 0) return;
   }
   const [e] = recentlyClosed.splice(index, 1);
   if (!e) return;
   menuChanged();
-  if (e.kind === 'window') { createWindow({ tabs: e.tabs, active: e.active, bounds: e.bounds }); return; }
-  const target = alive().find((x) => x.id === e.windowId) || normalWin();
-  if (!target) { createWindow({ urls: [e.url] }); return; }
+  if (!profiles.get(e.profileId)) return; // its profile was deleted
+  const p = openProfile(e.profileId);
+  if (e.kind === 'window') { createWindow({ profile: p, tabs: e.tabs, active: e.active, bounds: e.bounds }); return; }
+  const target = alive().find((x) => x.id === e.windowId) || normalWin(p);
+  if (!target) { createWindow({ profile: p, urls: [e.url] }); return; }
   target.tabs.create(e.url, { index: e.index, title: e.title, pinned: e.pinned });
   target.focus();
 }
@@ -276,8 +323,8 @@ function moveTabToNewWindow(w, id) {
   if (w.tabs.tabs.length < 2) return;
   const tab = w.tabs.detach(id);
   if (!tab) return;
-  if (tab.view && !w.incognito) extensions?.removeTab(tab.view.webContents);
-  createWindow({ incognito: w.incognito, adopt: tab });
+  if (tab.view && !w.incognito) w.profile.extensions?.removeTab(tab.view.webContents);
+  createWindow({ profile: w.profile.base, incognito: w.incognito, adopt: tab });
 }
 
 async function savePage(w, tab) {
@@ -312,7 +359,8 @@ const cmd = {
   reopenTab: () => reopenClosed(),
   reopenClosed: (index) => reopenClosed(index),
   focusOmnibox: () => cur()?.focusOmnibox(),
-  print: () => cur()?.tabs.wc()?.print(),
+  print: () => { const w = cur(); if (w) printPreview.open(w); },
+  printSystemDialog: () => { const w = cur(); if (w) printPreview.systemDialog(w); },
   savePage: () => { const w = cur(); if (w) savePage(w, w.tabs.active); },
   find: () => { const w = cur(); if (!w) return; w.win.webContents.focus(); w.emit('find-open'); },
   findStep: (forward) => cur()?.emit('find-step', { forward }),
@@ -333,14 +381,19 @@ const cmd = {
   about: () => openInternal('lumio://settings/#about'),
   settings: () => openInternal('lumio://settings/'),
   bookmark: () => toggleBookmark(cur()),
-  toggleBookmarksBar: () => setBookmarksBar(!store.settings.showBookmarksBar),
-  setAppearance: (value) => store.setSetting('appearance', value),
+  toggleBookmarksBar: () => { const p = curProfile(); setBookmarksBar(p, !p.store.settings.showBookmarksBar); },
+  setAppearance: (value) => rootStore.setSetting('appearance', value),
   pinTab: () => { const w = cur(); const t = w?.tabs.active; if (t) w.tabs.setPinned(t.id, !t.pinned); },
   moveTabToNewWindow: () => { const w = cur(); if (w?.tabs.active) moveTabToNewWindow(w, w.tabs.activeId); },
   cycle: (dir) => cur()?.tabs.cycle(dir),
   tabIndex: (n) => cur()?.tabs.activateIndex(n),
   makeDefault: () => makeDefaultBrowser(),
   webStore: () => { const w = normalWin() || createWindow(); w.tabs.create('https://chromewebstore.google.com/'); w.focus(); },
+  taskManager: () => taskManager.open(cur()?.win),
+  profilePicker: () => picker.open(),
+  addProfile: () => picker.open({ mode: 'add' }),
+  openProfile: (id) => switchToProfile(id),
+  newGuest: () => openGuest(),
 };
 
 function openInternal(url) {
@@ -352,21 +405,22 @@ function openInternal(url) {
   w.focus();
 }
 
-function bookmarksPayload() {
+function bookmarksPayload(store) {
   return {
     show: !!store.settings.showBookmarksBar,
     items: store.bookmarks().map(({ url, title, favicon }) => ({ url, title, favicon: favicon || store.faviconFor(url) || null })),
   };
 }
 
-function bookmarksChanged() {
-  const payload = bookmarksPayload();
-  for (const w of alive()) { w.tabs.changed(); w.emit('bookmarks', payload); }
+// p: the profile whose bookmarks changed (its incognito windows show them too).
+function bookmarksChanged(p) {
+  const payload = bookmarksPayload(p.store);
+  for (const w of alive()) if (w.profile.store === p.store) { w.tabs.changed(); w.emit('bookmarks', payload); }
 }
 
-function setBookmarksBar(show) {
-  store.setSetting('showBookmarksBar', !!show);
-  bookmarksChanged();
+function setBookmarksBar(p, show) {
+  p.store.setSetting('showBookmarksBar', !!show);
+  bookmarksChanged(p);
   menuChanged();
 }
 
@@ -383,15 +437,16 @@ function toggleBookmark(w) {
   if (!tab) return;
   const url = w.tabs.displayUrl(tab);
   if (!/^https?:/.test(url)) return;
-  const added = store.toggleBookmark(url, tab.view?.webContents.getTitle() || tab.title, tab.favicon); // the page's title now, not a moment ago
-  bookmarksChanged();
+  const added = w.profile.store.toggleBookmark(url, tab.view?.webContents.getTitle() || tab.title, tab.favicon); // the page's title now, not a moment ago
+  bookmarksChanged(w.profile);
   w.emit('toast', { text: added ? 'Bookmarked' : 'Bookmark removed' });
 }
 
 function openUrl(url, disposition = 'tab', from = cur()) {
   if (!/^(https?|file|lumio|chrome-extension):/i.test(url)) return;
-  if (disposition === 'window') createWindow({ urls: [url] });
-  else if (disposition === 'incognito') createWindow({ incognito: true, urls: [url] });
+  const profile = from?.profile.base;
+  if (disposition === 'window') createWindow({ profile, urls: [url] });
+  else if (disposition === 'incognito') createWindow({ profile, incognito: true, urls: [url] });
   else {
     const w = from && !from.closed ? from : ensureWin();
     if (disposition === 'current' && w.tabs.active) w.tabs.navigate(url);
@@ -416,29 +471,31 @@ function makeDefaultBrowser() {
 // ---------------------------------------------------------------- account + profile
 const ACCOUNT_PAGES = { manage: '/account', upgrade: '/account#plans', billing: '/account', home: '/' };
 
-// Signing in happens on lumio-usa.online in a normal tab. When the site's
-// session cookie appears in the normal profile, the account adopts it
-// (watchLumioCookie) and the sign-in tab closes.
-let signInTab = null; // { w, id }
+// Signing in happens on lumio-usa.online in a normal tab of the profile. When
+// the site's session cookie appears in the profile's session, its account
+// adopts it (watchLumioCookie) and the sign-in tab closes.
 async function signIn(from) {
+  const p = from?.profile.base || curProfile();
+  const { account } = p;
   const res = account.startSignIn();
-  // Already logged in to lumio-usa.online in this browser? Use that session.
-  const [existing] = await normal.session.cookies.get({ url: account.base, name: account.cookieName }).catch(() => []);
+  // Already logged in to lumio-usa.online in this profile? Use that session.
+  const [existing] = await p.session.cookies.get({ url: account.base, name: account.cookieName }).catch(() => []);
   if (existing && await account.adopt(existing.value)) return { ok: true };
-  const w = from && !from.incognito ? from : normalWin() || createWindow({ urls: [] });
-  signInTab = { w, id: w.tabs.create(res.url).id };
+  const w = from && !from.incognito ? from : normalWin(p) || createWindow({ profile: p, urls: [] });
+  p.signInTab = { w, id: w.tabs.create(res.url).id };
   w.focus();
   return res;
 }
 
-function watchLumioCookie() {
-  normal.session.cookies.on('changed', (_e, cookie, _cause, removed) => {
+function watchLumioCookie(p) {
+  const { account } = p;
+  p.session.cookies.on('changed', (_e, cookie, _cause, removed) => {
     if (removed || !account.pending || cookie.name !== account.cookieName) return;
     if (cookie.domain.replace(/^\./, '') !== account.host) return;
     account.adopt(cookie.value).then((ok) => {
-      if (!ok || !signInTab) return;
-      const { w, id } = signInTab;
-      signInTab = null;
+      if (!ok || !p.signInTab) return;
+      const { w, id } = p.signInTab;
+      p.signInTab = null;
       const tab = !w.closed && w.tabs.get(id);
       // Close the sign-in tab if it's still on the website.
       if (tab && (() => { try { return new URL(w.tabs.displayUrl(tab)).hostname === account.host; } catch { return false; } })()) w.tabs.close(id);
@@ -448,23 +505,24 @@ function watchLumioCookie() {
 }
 
 // Signing out ends the Lumio session and forgets the website's cookie too.
-async function signOutLumio() {
-  await account.signOut();
-  await normal.session.cookies.remove(account.base, account.cookieName).catch(() => {});
+async function signOutLumio(p) {
+  await p.account.signOut();
+  await p.session.cookies.remove(p.account.base, p.account.cookieName).catch(() => {});
 }
 
 function openAccountPage(which, from) {
   const path = ACCOUNT_PAGES[which];
   if (!path) return;
-  const w = from && !from.incognito ? from : normalWin() || createWindow({ urls: [] });
-  w.tabs.create(account.url(path));
+  const p = from?.profile.base || curProfile();
+  const w = from && !from.incognito ? from : normalWin(p) || createWindow({ profile: p, urls: [] });
+  w.tabs.create(p.account.url(path));
   w.focus();
 }
 
 // ---------------------------------------------------------------- plan and billing (Settings)
 // The Lumio server talks to Stripe; Settings shows the plan, switches it,
 // cancels (with a reason) or resumes it.
-async function billingCall(path, body) {
+async function billingCall({ account }, path, body) {
   if (!account.token()) return { ok: false, error: 'Sign in to Lumio first.' };
   const r = await account.api(path, body ? { method: 'POST', body } : {}).catch(() => null);
   if (!r) return { ok: false, error: 'Couldn’t reach Lumio. Check your internet connection.' };
@@ -482,10 +540,11 @@ let checkoutWin = null;
 async function openCheckout(w, plan) {
   if (!['go', 'plus', 'pro', 'max'].includes(plan)) return { ok: false, error: 'Choose Go, Plus, Pro or Max.' };
   if (checkoutWin && !checkoutWin.isDestroyed()) { checkoutWin.focus(); return { ok: false, error: 'The payment window is already open.' }; }
+  const { account, session: ses } = w.profile.base;
   const token = account.token();
   if (!token) return { ok: false, error: 'Sign in to Lumio first.' };
-  // The window uses the normal profile, signed in to the website as this account.
-  await normal.session.cookies.set({
+  // The window uses the profile's session, signed in to the website as this account.
+  await ses.cookies.set({
     url: account.base, name: account.cookieName, value: token, path: '/', httpOnly: true, sameSite: 'lax',
     secure: account.base.startsWith('https:'), expirationDate: Math.floor(Date.now() / 1000) + 30 * 86400,
   }).catch(() => {});
@@ -493,7 +552,7 @@ async function openCheckout(w, plan) {
   const win = new BrowserWindow({
     parent: w.win, modal: true, show: false, width: Math.max(420, Math.min(980, pw - 40)), height: Math.max(520, Math.min(780, ph - 30)),
     minWidth: 400, minHeight: 480, title: 'Subscribe to Lumio', backgroundColor: theme.colors(theme.isDark()).frame, autoHideMenuBar: true,
-    webPreferences: { session: normal.session, contextIsolation: true, sandbox: true, nodeIntegration: false },
+    webPreferences: { session: ses, contextIsolation: true, sandbox: true, nodeIntegration: false },
   });
   checkoutWin = win;
   const wc = win.webContents;
@@ -511,13 +570,14 @@ async function openCheckout(w, plan) {
 
 // Updating the card: Stripe's billing portal, in the same kind of window.
 async function openCardWindow(w) {
-  const r = await billingCall('/api/billing/portal', {});
+  const { account } = w.profile.base;
+  const r = await billingCall(w.profile.base, '/api/billing/portal', {});
   if (!r.ok || !r.url) return r.ok ? { ok: false, error: 'Billing isn’t available right now.' } : r;
   const [pw, ph] = w.win.getContentSize();
   const win = new BrowserWindow({
     parent: w.win, modal: true, width: Math.max(420, Math.min(900, pw - 40)), height: Math.max(520, Math.min(760, ph - 30)),
     title: 'Card and invoices', backgroundColor: '#ffffff', autoHideMenuBar: true,
-    webPreferences: { session: normal.session, contextIsolation: true, sandbox: true, nodeIntegration: false },
+    webPreferences: { session: w.profile.base.session, contextIsolation: true, sandbox: true, nodeIntegration: false },
   });
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) w.tabs.create(url); return { action: 'deny' }; });
   // Stripe's "Return to Lumio" link ends the visit.
@@ -579,53 +639,62 @@ function shareCancel(w) {
   for (const [id, p] of sharePending) if (p.w === w) shareAnswer(id, null);
 }
 
-function profileState() { return { ...store.settings.profile }; }
+function profileState({ store }) { return { ...store.settings.profile }; }
 const firstName = (name) => String(name || '').trim().split(/\s+/)[0].slice(0, 40) || null;
 
 const THEMES = ['blue', 'purple', 'green', 'orange', 'pink', 'mono'];
 const COLOR_RE = /^#[0-9a-f]{6}$/i;
-function setProfile(patch = {}) {
+// p: the profile (its windows, incognito ones too, show the new look).
+function setProfile(p, patch = {}) {
+  const { store } = p;
   const next = { ...store.settings.profile };
   if (typeof patch.name === 'string') next.name = patch.name.trim().slice(0, 40);
   if (typeof patch.color === 'string' && COLOR_RE.test(patch.color)) next.color = patch.color;
   if (THEMES.includes(patch.theme)) next.theme = patch.theme;
   if (patch.photo === null) next.photo = null;
   store.setSetting('profile', next);
-  alive().forEach((w) => w.emit('profile', next));
+  profileWindows(p).forEach((w) => w.emit('profile', next));
+  profilesChanged();
   return next;
 }
 
 async function pickProfilePhoto(w) {
+  const p = w.profile.base;
   const { canceled, filePaths } = await dialog.showOpenDialog(w.win, {
     properties: ['openFile'],
     filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'heic', 'webp', 'gif'] }],
   });
-  if (canceled || !filePaths[0]) return profileState();
+  if (canceled || !filePaths[0]) return profileState(p);
   const img = nativeImage.createFromPath(filePaths[0]);
-  if (img.isEmpty()) return { ...profileState(), error: "That image couldn't be opened." };
+  if (img.isEmpty()) return { ...profileState(p), error: "That image couldn't be opened." };
   // Square-crop the center and keep it small; it's stored in settings.
   const { width, height } = img.getSize();
   const side = Math.min(width, height);
   const square = img.crop({ x: Math.floor((width - side) / 2), y: Math.floor((height - side) / 2), width: side, height: side }).resize({ width: 160, height: 160, quality: 'best' });
-  const next = { ...store.settings.profile, photo: square.toDataURL() };
-  store.setSetting('profile', next);
-  alive().forEach((x) => x.emit('profile', next));
+  const next = { ...p.store.settings.profile, photo: square.toDataURL() };
+  p.store.setSetting('profile', next);
+  profileWindows(p).forEach((x) => x.emit('profile', next));
+  profilesChanged();
   return next;
 }
 
-// Clear browsing data. range: milliseconds back from now, or 0 for all time.
-async function clearData({ range = 0, what = [] } = {}) {
+// Clear a profile's browsing data. range: milliseconds back from now, or 0 for all time.
+async function clearData(p, { range = 0, what = [] } = {}) {
+  const { store } = p;
   const from = range ? Date.now() - range : null;
   if (what.includes('history')) { if (from) store.deleteHistory({ from }); else store.clearHistory(); }
   if (what.includes('downloads')) store.clearDownloads({ from });
-  if (what.includes('cookies')) await normal.session.clearStorageData();
-  if (what.includes('cache')) await normal.session.clearCache();
+  if (what.includes('cookies')) await p.session.clearStorageData();
+  if (what.includes('cache')) await p.session.clearCache();
   if (what.includes('chats')) {
-    alive().filter((w) => !w.incognito).forEach((w) => w.ai.stop());
-    normal.chats.clear();
+    alive().filter((w) => !w.incognito && w.profile === p).forEach((w) => w.ai.stop());
+    p.chats.clear();
   }
-  if (what.includes('permissions')) normal.permissions.clear();
-  if (what.includes('closed')) { recentlyClosed.length = 0; menuChanged(); }
+  if (what.includes('permissions')) p.permissions.clear();
+  if (what.includes('closed')) {
+    for (let i = recentlyClosed.length - 1; i >= 0; i--) if (recentlyClosed[i].profileId === p.id) recentlyClosed.splice(i, 1);
+    menuChanged();
+  }
   return true;
 }
 
@@ -658,9 +727,9 @@ async function startUpdate(w, { confirmed = false } = {}) {
 const announced = new Set();
 function announceUpdate(state) {
   if (state.status !== 'available' || !state.latest || announced.has(state.latest)) return;
-  if (!state.critical && store.settings.updateAnnounced === state.latest) return;
+  if (!state.critical && rootStore.settings.updateAnnounced === state.latest) return;
   announced.add(state.latest);
-  if (!state.critical) store.setSetting('updateAnnounced', state.latest);
+  if (!state.critical) rootStore.setSetting('updateAnnounced', state.latest);
   const w = lastFocused && !lastFocused.win.isDestroyed() && !lastFocused.incognito ? lastFocused : alive().find((x) => !x.incognito);
   setTimeout(() => w?.emit('update-announce', state), 1200);
 }
@@ -700,33 +769,40 @@ function internalHandle(channel, hosts, fn) {
 const ALL_PAGES = ['newtab', 'error', 'history', 'settings', 'downloads', 'bookmarks', 'extensions', 'passwords', 'welcome'];
 
 function registerIpc() {
-  handle('shell:init', (w) => ({
-    tabs: w.tabs.state(),
-    downloads: w.profile.downloads.list(),
-    panel: { open: store.settings.panelOpen, width: store.settings.panelWidth },
-    sidebar: { open: store.settings.sidebarOpen !== false, getStarted: store.settings.getStartedDone !== true },
-    ai: w.ai.state(),
-    bookmarks: bookmarksPayload(),
-    account: account.state(),
-    profile: profileState(),
-    incognito: w.incognito,
-    extensions: !w.incognito && !!extensions?.ece,
-    platform: process.platform,
-    version: app.getVersion(),
-    beta: FLAVOR.beta,
-    update: updater?.state || null,
-  }));
+  handle('shell:init', (w) => {
+    const { store, account, extensions } = w.profile;
+    return {
+      tabs: w.tabs.state(),
+      downloads: w.profile.downloads.list(),
+      panel: { open: store.settings.panelOpen, width: store.settings.panelWidth },
+      sidebar: { open: store.settings.sidebarOpen !== false, getStarted: store.settings.getStartedDone !== true },
+      ai: w.ai.state(),
+      bookmarks: bookmarksPayload(store),
+      account: account.state(),
+      profile: profileState(w.profile),
+      incognito: w.incognito,
+      guest: !!w.profile.guest,
+      profiles: profilesFor(w),
+      partition: w.profile.partition, // the extension buttons' session
+      perf: perf.shellState(),
+      extensions: !w.incognito && !!extensions?.ece,
+      platform: process.platform,
+      version: app.getVersion(),
+      beta: FLAVOR.beta,
+      update: updater?.state || null,
+    };
+  });
 
-  on('layout:slot', (w, rect) => { w.tabs.setSlot(rect); w.indicator.place(); });
+  on('layout:slot', (w, rect) => { w.tabs.setSlot(rect); w.indicator.place(); printPreview.place(w); });
   on('aura:size', (w, size) => { if (w.indicator.bar?.webContents) w.indicator.resize(size); });
   on('panel:full', (w, { on: covered, slot } = {}) => w.tabs.setCovered(!!covered, slot && Number.isFinite(slot.width) ? slot : null));
-  on('sidebar:set', (_w, { open, getStarted } = {}) => {
-    if (typeof open === 'boolean') store.setSetting('sidebarOpen', open);
-    if (getStarted === false) store.setSetting('getStartedDone', true);
+  on('sidebar:set', (w, { open, getStarted } = {}) => {
+    if (typeof open === 'boolean') w.profile.store.setSetting('sidebarOpen', open);
+    if (getStarted === false) w.profile.store.setSetting('getStartedDone', true);
   });
-  on('panel:set', (_w, { open, width }) => {
-    if (typeof open === 'boolean') store.setSetting('panelOpen', open);
-    if (typeof width === 'number') store.setSetting('panelWidth', Math.round(Math.max(320, Math.min(760, width))));
+  on('panel:set', (w, { open, width }) => {
+    if (typeof open === 'boolean') w.profile.store.setSetting('panelOpen', open);
+    if (typeof width === 'number') w.profile.store.setSetting('panelWidth', Math.round(Math.max(320, Math.min(760, width))));
   });
 
   on('tab:new', (w, url) => w.tabs.create(url || NEWTAB));
@@ -743,19 +819,19 @@ function registerIpc() {
   on('tab:bookmark', (w) => toggleBookmark(w));
   on('tab:focus-page', (w) => w.tabs.wc()?.focus());
   on('tab:context', (w, id) => tabContextMenu(w, id));
-  on('window:new', () => createWindow());
+  on('window:new', (w) => createWindow({ profile: w.profile.base }));
   on('app:menu', (w, { x, y }) => {
     buildBrowserMenu(cmd, menuState()).popup({ window: w.win, x: Math.max(0, Math.round(x) - 290), y: Math.round(y) });
   });
-  on('window:incognito', () => createWindow({ incognito: true }));
+  on('window:incognito', (w) => createWindow({ profile: w.profile.base, incognito: true }));
 
   handle('omnibox:suggest', (w, text) => suggest(text, {
-    history: w.incognito ? [] : store.history(),
-    bookmarks: store.bookmarks(),
+    history: w.incognito ? [] : w.profile.store.history(),
+    bookmarks: w.profile.store.bookmarks(),
     searchTemplate: w.tabs.searchTemplate(),
   }));
 
-  on('overlay:show', (w, { rect, payload }) => w.showOverlay(rect, payload));
+  on('overlay:show', (w, { rect, payload }) => { w.showOverlay(rect, payload); perf.overlayShown(w, payload); });
   // The shell names the dropdown it means, so it can't close one it didn't open.
   on('overlay:hide', (w, kind) => { if (!kind || !w.overlayKind || w.overlayKind === kind) w.hideOverlay(); });
   // Dropdowns that size themselves (account menu, site info).
@@ -791,18 +867,18 @@ function registerIpc() {
   on('bookmarks:open', (w, { url, disposition }) => openUrl(url, disposition || 'current', w));
   on('bookmarks:context', (w, url) => bookmarkContextMenu(w, url));
   on('bookmarks:overflow', (w, { urls, x, y }) => {
-    const items = store.bookmarks().filter((b) => urls.includes(b.url));
-    Menu.buildFromTemplate(items.map((b) => ({ label: b.title.slice(0, 60) || b.url, click: () => openUrl(b.url, 'current', w) })))
+    const items = w.profile.store.bookmarks().filter((b) => urls.includes(b.url));
+    Menu.buildFromTemplate(items.map((b) => ({ label: b.title.slice(0, 60) || b.url, translate: false, click: () => openUrl(b.url, 'current', w) })))
       .popup({ window: w.win, x: Math.round(x), y: Math.round(y) });
   });
-  on('bookmarks:move', (_w, { url, index }) => { store.moveBookmark(url, index); bookmarksChanged(); });
+  on('bookmarks:move', (w, { url, index }) => { w.profile.store.moveBookmark(url, index); bookmarksChanged(w.profile); });
   // A link, or the address bar's site icon, dropped on the bar.
   on('bookmarks:add', (w, { url, title, index }) => {
     url = String(url || '').trim();
     if (!/^(https?|file):/i.test(url) || url.length > 4096) return;
     const tab = w.tabs.tabs.find((t) => t.url === url);
-    store.addBookmarkAt(url, String(title || tab?.title || '').trim().slice(0, 300) || url, Number(index) || 0, tab?.favicon);
-    bookmarksChanged();
+    w.profile.store.addBookmarkAt(url, String(title || tab?.title || '').trim().slice(0, 300) || url, Number(index) || 0, tab?.favicon);
+    bookmarksChanged(w.profile);
   });
 
   // ---- site info (lock icon) ----
@@ -826,23 +902,37 @@ function registerIpc() {
   on('site:settings', () => openInternal('lumio://settings/#sites'));
 
   // ---- account button ----
-  handle('account:state', () => account.state());
+  handle('account:state', (w) => w.profile.account.state());
   on('account:sign-in', (w) => { w.hideOverlay(); signIn(w); });
-  on('account:cancel', () => account.cancelSignIn());
-  on('account:sign-out', (w) => { w.hideOverlay(); signOutLumio(); });
+  on('account:cancel', (w) => w.profile.account.cancelSignIn());
+  on('account:sign-out', (w) => { w.hideOverlay(); signOutLumio(w.profile.base); });
   on('account:open', (w, which) => { w.hideOverlay(); openAccountPage(which, w); });
   on('account:page', (w, which) => {
     w.hideOverlay();
     const pages = { passwords: 'lumio://passwords/', settings: 'lumio://settings/', profile: 'lumio://settings/#profile', plan: 'lumio://settings/#plan' };
     if (pages[which]) openInternal(pages[which]);
   });
-  on('account:close-incognito', () => alive().filter((x) => x.incognito).forEach((x) => x.close()));
+  on('account:close-incognito', (w) => alive().filter((x) => x.incognito && x.profile === w.profile).forEach((x) => x.close()));
+  on('account:close-guest', () => alive().filter((x) => x.profile.guest).forEach((x) => x.close()));
+
+  // ---- profiles (account menu, the profile picker) ----
+  registerProfileIpc();
+
+  // ---- performance (the toolbar's Performance issues and Energy Saver buttons) ----
+  on('perf:battery', (_w, b) => perf.setBattery(b || {}));
+  // Keyboard users were in the popup: focus goes back to the window.
+  const perfDone = (w) => { const keys = w.overlay.webContents.isFocused(); w.hideOverlay(); w.emit('overlay-picked', { kind: 'perf' }); if (keys) w.win.webContents.focus(); };
+  on('perf:fix', (w) => { perfDone(w); perf.fix(w); });
+  on('perf:dismiss', (w) => { perfDone(w); perf.dismiss(); });
+  on('perf:close', (w) => perfDone(w));
+  on('perf:settings', (w) => { perfDone(w); openInternal('lumio://settings/#performance'); });
+  handle('perf:alert', () => perf.alertPayload());
 
   // ---- passwords (dropdown under sign-in fields, save prompt) ----
-  on('passwords:fill', (w, choice) => passwords.fill(w, choice || {}));
-  on('passwords:decide', (w, d) => { w.hideOverlay(); passwords.decide(w, d || {}); });
-  on('passwords:passkey', (w, d) => passwords.passkeyDecide(w, d || {}));
-  handle('passwords:reveal-pending', (w, id) => passwords.revealPending(w, Number(id)));
+  on('passwords:fill', (w, choice) => w.profile.passwords?.fill(w, choice || {}));
+  on('passwords:decide', (w, d) => { w.hideOverlay(); w.profile.passwords?.decide(w, d || {}); });
+  on('passwords:passkey', (w, d) => w.profile.passwords?.passkeyDecide(w, d || {}));
+  handle('passwords:reveal-pending', (w, id) => w.profile.passwords?.revealPending(w, Number(id)) ?? null);
   on('passwords:manage', (w) => { w.hideOverlay(); openInternal('lumio://passwords/'); });
   on('extensions:manage', () => openInternal('lumio://extensions/'));
 
@@ -858,17 +948,17 @@ function registerIpc() {
   handle('ai:set-mode', (w, mode) => w.ai.setMode(mode));
   handle('ai:send', (w, payload) => w.ai.send(payload));
   handle('ai:steer', (w, payload) => w.ai.steer(payload || {}));
-  handle('ai:workflows', (w) => (w.incognito ? [] : workflows.list()));
+  handle('ai:workflows', (w) => (w.incognito ? [] : w.profile.workflows.list()));
   // The sidebar: projects, chats, scheduled tasks.
   const sidebarReply = (fn) => { try { return { ok: true, ...fn() }; } catch (err) { return { ok: false, error: err.message }; } };
-  handle('ai:projects', (w) => (w.incognito ? [] : projects.list()));
-  handle('ai:project-add', (w, spec) => sidebarReply(() => ({ project: projects.add(spec || {}) })));
-  handle('ai:project-update', (w, id, patch) => sidebarReply(() => ({ project: projects.update(String(id), patch || {}) })));
-  handle('ai:project-remove', (w, id) => sidebarReply(() => { projects.remove(String(id)); normal.chats.unfile(String(id)); return {}; }));
+  handle('ai:projects', (w) => (w.incognito ? [] : w.profile.projects.list()));
+  handle('ai:project-add', (w, spec) => sidebarReply(() => ({ project: w.profile.projects.add(spec || {}) })));
+  handle('ai:project-update', (w, id, patch) => sidebarReply(() => ({ project: w.profile.projects.update(String(id), patch || {}) })));
+  handle('ai:project-remove', (w, id) => sidebarReply(() => { w.profile.projects.remove(String(id)); w.profile.base.chats.unfile(String(id)); return {}; }));
   handle('ai:chat-rename', (w, id, title) => ({ ok: w.ai.chatStore.rename(String(id), title) }));
-  handle('ai:chat-move', (w, id, projectId) => ({ ok: w.ai.chatStore.move(String(id), projectId && projects.get(String(projectId)) ? String(projectId) : null) }));
+  handle('ai:chat-move', (w, id, projectId) => ({ ok: w.ai.chatStore.move(String(id), projectId && w.profile.projects.get(String(projectId)) ? String(projectId) : null) }));
   handle('ai:chat-search', (w, q) => w.ai.chatStore.search(String(q || '')));
-  handle('ai:schedules', (w) => (w.incognito || !schedules ? [] : schedules.list().map(({ id, title, when, nextRun, paused, done }) => ({ id, title, when, nextRun, paused, done }))));
+  handle('ai:schedules', (w) => (w.incognito || !w.profile.schedules ? [] : w.profile.schedules.list().map(({ id, title, when, nextRun, paused, done }) => ({ id, title, when, nextRun, paused, done }))));
   handle('ai:chats', (w) => w.ai.listChats());
   handle('ai:chat', (w, id) => w.ai.getChat(id));
   handle('ai:delete-chat', (w, id) => w.ai.deleteChat(id));
@@ -879,7 +969,7 @@ function registerIpc() {
   handle('ai:voice-speak', (w, payload) => w.ai.speak(payload || {}));
   handle('ai:tab-pdf', (w, tabId) => require('./ai/tools/browser').tabPdf(w.tabs, Number.isSafeInteger(tabId) ? tabId : null));
   on('ai:doc-built', (w, result) => w.ai.docBuilt(result || {}));
-  on('ai:connect', (w, id) => { if (/^[a-z_]{2,40}$/.test(String(id))) w.tabs.create(`${account.base}/api/connect/${id}/start?next=/account`); });
+  on('ai:connect', (w, id) => { if (/^[a-z_]{2,40}$/.test(String(id))) w.tabs.create(`${w.profile.account.base}/api/connect/${id}/start?next=/account`); });
   on('ai:open-file', (w, p) => { if (w.ai.ownsFile(p)) shell.openPath(p); });
   on('ai:show-file', (w, p) => { if (w.ai.ownsFile(p)) shell.showItemInFolder(p); });
   on('ai:stop', (w) => w.ai.stop());
@@ -889,26 +979,29 @@ function registerIpc() {
   on('open-url', (w, url) => w.tabs.create(url));
 
   // ---- internal pages ----
-  internalHandle('page:newtab-data', ['newtab'], ({ w }) => ({
-    topSites: w.incognito ? [] : topSites(store.history(), 8),
-    bookmarks: store.bookmarks().slice(-12).reverse(),
-    engine: (SEARCH_ENGINES[store.settings.searchEngine] || SEARCH_ENGINES.google).name,
-    aiReady: w.ai.state().ready,
-    incognito: w.incognito,
-    // "Good morning, Juan": the profile name they chose, else their Lumio account name.
-    name: firstName(store.settings.profile?.name || account.state().name),
-    chats: w.incognito ? [] : w.ai.listChats().slice(0, 3),
-  }));
+  internalHandle('page:newtab-data', ['newtab'], ({ w }) => {
+    const { store, account } = w.profile;
+    return {
+      topSites: w.incognito ? [] : topSites(store.history(), 8),
+      bookmarks: store.bookmarks().slice(-12).reverse(),
+      engine: (SEARCH_ENGINES[store.settings.searchEngine] || SEARCH_ENGINES.google).name,
+      aiReady: w.ai.state().ready,
+      incognito: w.incognito,
+      // "Good morning, Juan": the profile name they chose, else their Lumio account name.
+      name: w.profile.guest ? null : firstName(store.settings.profile?.name || account.state().name),
+      chats: w.incognito ? [] : w.ai.listChats().slice(0, 3),
+    };
+  });
   internalHandle('page:open-chat', ['newtab'], ({ w }, id) => w.openChat(String(id || '')));
   internalHandle('page:navigate', ALL_PAGES, ({ w, tab }, input) => w.tabs.navigate(input, tab.id));
   internalHandle('page:open', ALL_PAGES, ({ w }, url, disposition) => openUrl(String(url || ''), disposition, w));
   internalHandle('page:ask-ai', ['newtab'], ({ w }, text) => w.askAI(String(text || ''), { includePage: false, full: true }));
 
-  internalHandle('page:history', ['history'], () => store.history().slice().reverse());
-  internalHandle('page:history-delete', ['history'], (_ctx, what) => store.deleteHistory(what || {}));
-  internalHandle('page:history-clear', ['history', 'settings'], () => store.clearHistory());
-  internalHandle('page:other-tabs', ['history'], () => Object.values(sync?.remoteTabs || {}).filter((d) => d?.windows?.length).sort((a, b) => (b.at || 0) - (a.at || 0)));
-  internalHandle('page:recently-closed', ['history'], () => recentlyClosed.map((e, index) => ({
+  internalHandle('page:history', ['history'], ({ w }) => w.profile.store.history().slice().reverse());
+  internalHandle('page:history-delete', ['history'], ({ w }, what) => w.profile.store.deleteHistory(what || {}));
+  internalHandle('page:history-clear', ['history', 'settings'], ({ w }) => w.profile.store.clearHistory());
+  internalHandle('page:other-tabs', ['history'], ({ w }) => Object.values(w.profile.sync?.remoteTabs || {}).filter((d) => d?.windows?.length).sort((a, b) => (b.at || 0) - (a.at || 0)));
+  internalHandle('page:recently-closed', ['history'], ({ w }) => recentlyClosed.map((e, index) => ({
     index,
     kind: e.kind,
     title: e.title,
@@ -916,95 +1009,103 @@ function registerIpc() {
     favicon: e.favicon || null,
     time: e.time,
     tabs: e.kind === 'window' ? e.tabs.map((t) => ({ title: t.title, url: t.url })) : undefined,
-  })).reverse());
+    profileId: e.profileId,
+  })).filter((e) => e.profileId === w.profile.id).reverse());
   internalHandle('page:reopen-closed', ['history'], (_ctx, index) => reopenClosed(index));
-  internalHandle('page:clear-data', ['history', 'settings', 'downloads'], (_ctx, opts) => clearData(opts));
+  internalHandle('page:clear-data', ['history', 'settings', 'downloads'], ({ w }, opts) => clearData(w.profile.base, opts));
 
   internalHandle('page:downloads', ['downloads'], ({ w }) => w.profile.downloads.all());
   internalHandle('page:download-action', ['downloads'], ({ w }, id, action) => w.profile.downloads.action(id, action));
   internalHandle('page:downloads-clear', ['downloads'], ({ w }) => w.profile.downloads.clearAll());
 
-  internalHandle('page:bookmarks', ['bookmarks', 'newtab'], () => store.bookmarks());
-  internalHandle('page:bookmark-update', ['bookmarks'], (_ctx, url, patch) => { const ok = store.updateBookmark(url, patch || {}); bookmarksChanged(); return ok; });
-  internalHandle('page:bookmark-remove', ['bookmarks', 'newtab'], (_ctx, url) => { store.removeBookmark(url); bookmarksChanged(); });
-  internalHandle('page:bookmark-move', ['bookmarks'], (_ctx, url, index) => { store.moveBookmark(url, index); bookmarksChanged(); });
+  internalHandle('page:bookmarks', ['bookmarks', 'newtab'], ({ w }) => w.profile.store.bookmarks());
+  internalHandle('page:bookmark-update', ['bookmarks'], ({ w }, url, patch) => { const ok = w.profile.store.updateBookmark(url, patch || {}); bookmarksChanged(w.profile); return ok; });
+  internalHandle('page:bookmark-remove', ['bookmarks', 'newtab'], ({ w }, url) => { w.profile.store.removeBookmark(url); bookmarksChanged(w.profile); });
+  internalHandle('page:bookmark-move', ['bookmarks'], ({ w }, url, index) => { w.profile.store.moveBookmark(url, index); bookmarksChanged(w.profile); });
   internalHandle('page:bookmarks-export', ['bookmarks'], ({ w }) => exportBookmarks(w));
-  internalHandle('page:bookmarks-bar', ['bookmarks'], () => !!store.settings.showBookmarksBar);
-  internalHandle('page:set-bookmarks-bar', ['bookmarks', 'settings'], (_ctx, show) => setBookmarksBar(!!show));
+  internalHandle('page:bookmarks-bar', ['bookmarks'], ({ w }) => !!w.profile.store.settings.showBookmarksBar);
+  internalHandle('page:set-bookmarks-bar', ['bookmarks', 'settings'], ({ w }, show) => setBookmarksBar(w.profile, !!show));
 
-  internalHandle('page:extensions', ['extensions'], () => ({
-    available: !!extensions?.ece,
-    developerMode: !!store.settings.developerMode,
-    items: extensions?.ece ? extensions.list() : [],
-  }));
-  internalHandle('page:extension-toggle', ['extensions'], (_ctx, key, on_) => extensions?.setEnabled(key, !!on_));
+  internalHandle('page:extensions', ['extensions'], ({ w }) => {
+    const { extensions, store } = w.profile;
+    return {
+      available: !!extensions?.ece,
+      developerMode: !!store.settings.developerMode,
+      items: extensions?.ece ? extensions.list() : [],
+    };
+  });
+  internalHandle('page:extension-toggle', ['extensions'], ({ w }, key, on_) => w.profile.extensions?.setEnabled(key, !!on_));
   internalHandle('page:extension-remove', ['extensions'], async ({ w }, key, name) => {
     const { response } = await dialog.showMessageBox(w.win, {
       type: 'question', buttons: ['Remove', 'Cancel'], defaultId: 1, cancelId: 1,
       message: `Remove “${name || 'this extension'}”?`,
     });
     if (response !== 0) return false;
-    await extensions?.remove(key);
+    await w.profile.extensions?.remove(key);
     return true;
   });
-  internalHandle('page:extension-reload', ['extensions'], (_ctx, key) => extensions?.reload(key));
+  internalHandle('page:extension-reload', ['extensions'], ({ w }, key) => w.profile.extensions?.reload(key));
   internalHandle('page:extension-load-unpacked', ['extensions'], async ({ w }) => {
+    if (!w.profile.extensions) return { ok: false, error: 'Extensions aren’t available here.' };
     const { canceled, filePaths } = await dialog.showOpenDialog(w.win, { properties: ['openDirectory'], message: 'Choose an extension folder (with manifest.json)' });
     if (canceled || !filePaths[0]) return { ok: false, canceled: true };
-    return extensions.loadUnpacked(filePaths[0]);
+    return w.profile.extensions.loadUnpacked(filePaths[0]);
   });
   internalHandle('page:extension-options', ['extensions'], ({ w }, id, page) => {
     if (!/^[a-p]{32}$/.test(id) || typeof page !== 'string') return;
     w.tabs.create(`chrome-extension://${id}/${page.replace(/^\//, '')}`);
   });
-  internalHandle('page:set-developer-mode', ['extensions'], (_ctx, on_) => store.setSetting('developerMode', !!on_));
+  internalHandle('page:set-developer-mode', ['extensions'], ({ w }, on_) => w.profile.store.setSetting('developerMode', !!on_));
   internalHandle('page:open-webstore', ['extensions', 'settings'], () => cmd.webStore());
 
-  internalHandle('page:settings', ['settings'], ({ w }) => ({
-    account: account.state(),
-    profile: profileState(),
-    startup: store.settings.startup,
-    downloadDir: store.settings.downloadDir || app.getPath('downloads'),
-    askDownload: !!store.settings.askDownload,
-    memorySaver: store.settings.memorySaver !== false,
-    memorySaverMinutes: store.settings.memorySaverMinutes || 60,
-    offerPasswords: store.settings.offerPasswords !== false,
-    autofillPasswords: store.settings.autofillPasswords !== false,
-    platform: process.platform,
-    searchEngine: store.settings.searchEngine,
-    engines: Object.entries(SEARCH_ENGINES).map(([id, e]) => ({ id, name: e.name })),
-    approvalMode: store.settings.approvalMode,
-    showBookmarksBar: !!store.settings.showBookmarksBar,
-    appearance: theme.appearance(),
-    ai: w.ai.state(),
-    version: app.getVersion(),
-    update: updater?.state || null,
-    isDefault: app.isDefaultProtocolClient('https'),
-    importSources: importer.detect(),
-    sitePermissions: Object.entries(normal.permissions.all()).map(([origin, perms]) => ({ origin, perms })),
-  }));
-  // Lumio Sync (Settings › Sync)
+  internalHandle('page:settings', ['settings'], ({ w }) => {
+    const { store, account } = w.profile;
+    return {
+      account: account.state(),
+      profile: profileState(w.profile),
+      guest: !!w.profile.guest,
+      startup: store.settings.startup,
+      downloadDir: store.settings.downloadDir || app.getPath('downloads'),
+      askDownload: !!store.settings.askDownload,
+      offerPasswords: store.settings.offerPasswords !== false,
+      autofillPasswords: store.settings.autofillPasswords !== false,
+      platform: process.platform,
+      searchEngine: store.settings.searchEngine,
+      engines: Object.entries(SEARCH_ENGINES).map(([id, e]) => ({ id, name: e.name })),
+      approvalMode: store.settings.approvalMode,
+      showBookmarksBar: !!store.settings.showBookmarksBar,
+      appearance: theme.appearance(),
+      ai: w.ai.state(),
+      version: app.getVersion(),
+      update: updater?.state || null,
+      isDefault: app.isDefaultProtocolClient('https'),
+      importSources: importer.detect(),
+      sitePermissions: Object.entries(w.profile.base.permissions.all()).map(([origin, perms]) => ({ origin, perms })),
+    };
+  });
+  // Lumio Sync (Settings › Sync). Guest has none: it shows as off.
   const syncReply = async (fn) => { try { return { ok: true, ...(await fn()) }; } catch (err) { return { ok: false, error: err.message }; } };
-  internalHandle('page:sync', ['settings'], () => sync.state());
-  internalHandle('page:sync-devices', ['settings'], () => syncReply(async () => (sync.keys ? sync.api('/api/sync') : { devices: [] })));
-  internalHandle('page:sync-set', ['settings'], (_ctx, prefs) => { sync.setPrefs(prefs || {}); return sync.state(); });
-  internalHandle('page:sync-now', ['settings'], () => syncReply(async () => { await sync.tick(); return sync.state(); }));
-  internalHandle('page:sync-answer', ['settings'], (_ctx, id, approve) => syncReply(() => sync.answer(String(id), !!approve)));
-  internalHandle('page:sync-recovery', ['settings'], () => ({ key: sync.recoveryKey() }));
-  internalHandle('page:sync-use-recovery', ['settings'], (_ctx, text) => syncReply(() => sync.useRecoveryKey(String(text || ''))));
-  internalHandle('page:sync-remove-device', ['settings'], (_ctx, id) => syncReply(() => sync.api(`/api/sync/devices/${encodeURIComponent(String(id))}`, { method: 'DELETE' })));
-  internalHandle('page:sync-delete-all', ['settings'], () => syncReply(() => sync.deleteEverything()));
+  const syncOf = (w) => w.profile.sync || { state: () => ({ on: false, status: 'off', types: {}, requests: [] }), setPrefs() {}, keys: null, tick: async () => {}, answer() { throw new Error('Sync isn’t available in Guest mode.'); }, recoveryKey: () => null, useRecoveryKey() { throw new Error('Sync isn’t available in Guest mode.'); }, api: async () => ({ devices: [] }), deleteEverything: async () => ({}) };
+  internalHandle('page:sync', ['settings'], ({ w }) => syncOf(w).state());
+  internalHandle('page:sync-devices', ['settings'], ({ w }) => syncReply(async () => (syncOf(w).keys ? syncOf(w).api('/api/sync') : { devices: [] })));
+  internalHandle('page:sync-set', ['settings'], ({ w }, prefs) => { syncOf(w).setPrefs(prefs || {}); return syncOf(w).state(); });
+  internalHandle('page:sync-now', ['settings'], ({ w }) => syncReply(async () => { await syncOf(w).tick(); return syncOf(w).state(); }));
+  internalHandle('page:sync-answer', ['settings'], ({ w }, id, approve) => syncReply(() => syncOf(w).answer(String(id), !!approve)));
+  internalHandle('page:sync-recovery', ['settings'], ({ w }) => ({ key: syncOf(w).recoveryKey() }));
+  internalHandle('page:sync-use-recovery', ['settings'], ({ w }, text) => syncReply(() => syncOf(w).useRecoveryKey(String(text || ''))));
+  internalHandle('page:sync-remove-device', ['settings'], ({ w }, id) => syncReply(() => syncOf(w).api(`/api/sync/devices/${encodeURIComponent(String(id))}`, { method: 'DELETE' })));
+  internalHandle('page:sync-delete-all', ['settings'], ({ w }) => syncReply(() => syncOf(w).deleteEverything()));
 
   // Saved workflows (Settings › Workflows, and the new tab page)
-  internalHandle('page:workflows', ['settings', 'newtab'], () => ({ workflows: workflows.list() }));
-  internalHandle('page:site-tips', ['settings'], () => ({ sites: siteTips.list() }));
-  internalHandle('page:site-tip-remove', ['settings'], (_ctx, site, tip) => siteTips.remove(String(site || ''), String(tip || '')));
-  internalHandle('page:workflow-update', ['settings'], (_ctx, id, patch) => { try { return { ok: true, workflow: workflows.update(String(id), patch || {}) }; } catch (err) { return { ok: false, error: err.message }; } });
-  internalHandle('page:workflow-remove', ['settings'], (_ctx, id) => ({ ok: workflows.remove(String(id)) }));
+  internalHandle('page:workflows', ['settings', 'newtab'], ({ w }) => ({ workflows: w.profile.workflows.list() }));
+  internalHandle('page:site-tips', ['settings'], ({ w }) => ({ sites: w.profile.siteTips.list() }));
+  internalHandle('page:site-tip-remove', ['settings'], ({ w }, site, tip) => w.profile.siteTips.remove(String(site || ''), String(tip || '')));
+  internalHandle('page:workflow-update', ['settings'], ({ w }, id, patch) => { try { return { ok: true, workflow: w.profile.workflows.update(String(id), patch || {}) }; } catch (err) { return { ok: false, error: err.message }; } });
+  internalHandle('page:workflow-remove', ['settings'], ({ w }, id) => ({ ok: w.profile.workflows.remove(String(id)) }));
   // Running one happens in the panel, which asks for any blanks first.
   internalHandle('page:workflow-run', ['settings', 'newtab'], ({ w }, id) => {
-    if (!workflows.get(String(id))) return { ok: false, error: 'That workflow doesn’t exist anymore.' };
-    store.setSetting('panelOpen', true);
+    if (!w.profile.workflows.get(String(id))) return { ok: false, error: 'That workflow doesn’t exist anymore.' };
+    w.profile.store.setSetting('panelOpen', true);
     w.emit('ai-workflow', { id: String(id) });
     w.win.webContents.focus();
     return { ok: true };
@@ -1012,12 +1113,12 @@ function registerIpc() {
 
   // Scheduled tasks (Settings › Scheduled tasks)
   const scheduleReply = (fn) => { try { return { ok: true, ...fn() }; } catch (err) { return { ok: false, error: err.message }; } };
-  internalHandle('page:schedules', ['settings'], () => ({ tasks: schedules.list(), signedIn: !!account.state().signedIn }));
-  internalHandle('page:schedule-add', ['settings'], (_ctx, spec) => scheduleReply(() => ({ task: schedules.add(spec || {}) })));
-  internalHandle('page:schedule-update', ['settings'], (_ctx, id, patch) => scheduleReply(() => ({ task: schedules.update(String(id), patch || {}) })));
-  internalHandle('page:schedule-remove', ['settings'], (_ctx, id) => ({ ok: schedules.remove(String(id)) }));
+  internalHandle('page:schedules', ['settings'], ({ w }) => ({ tasks: w.profile.schedules.list(), signedIn: !!w.profile.account.state().signedIn }));
+  internalHandle('page:schedule-add', ['settings'], ({ w }, spec) => scheduleReply(() => ({ task: w.profile.schedules.add(spec || {}) })));
+  internalHandle('page:schedule-update', ['settings'], ({ w }, id, patch) => scheduleReply(() => ({ task: w.profile.schedules.update(String(id), patch || {}) })));
+  internalHandle('page:schedule-remove', ['settings'], ({ w }, id) => ({ ok: w.profile.schedules.remove(String(id)) }));
   internalHandle('page:schedule-run', ['settings'], ({ w }, id) => {
-    const task = schedules.get(String(id));
+    const task = w.profile.schedules.get(String(id));
     if (!task) return { ok: false, error: 'That scheduled task doesn’t exist anymore.' };
     if (runningSchedules.has(task.id) || w.ai.isRunning()) return { ok: false, error: 'Lumio is busy right now. Try again when it’s done.' };
     runningSchedules.add(task.id);
@@ -1025,69 +1126,88 @@ function registerIpc() {
     return { ok: true };
   });
   internalHandle('page:schedule-open', ['settings'], ({ w }, id) => {
-    const chatId = schedules.get(String(id))?.lastChatId;
+    const chatId = w.profile.schedules.get(String(id))?.lastChatId;
     return { ok: !!chatId && w.openChat(chatId, { full: false }) };
   });
   internalHandle('page:check-updates', ['settings'], () => updater.check({ manual: true }));
   internalHandle('page:update-now', ['settings'], ({ w }) => startUpdate(w));
   internalHandle('page:set-setting', ['settings', 'passwords'], ({ w }, key, value) => {
+    const { store } = w.profile;
     if (key === 'searchEngine' && SEARCH_ENGINES[value]) store.setSetting('searchEngine', value);
     if (key === 'approvalMode') w.ai.setMode(value);
     if (key === 'reasoning') w.ai.setReasoning(value);
-    if (key === 'showBookmarksBar') setBookmarksBar(!!value);
-    if (key === 'appearance' && theme.APPEARANCES.includes(value)) store.setSetting('appearance', value);
+    if (key === 'showBookmarksBar') setBookmarksBar(w.profile, !!value);
+    if (key === 'appearance' && theme.APPEARANCES.includes(value)) rootStore.setSetting('appearance', value); // app-wide
     if (key === 'startup' && ['restore', 'newtab'].includes(value)) store.setSetting('startup', value);
     if (key === 'askDownload') store.setSetting('askDownload', !!value);
     if (key === 'offerPasswords') store.setSetting('offerPasswords', !!value);
     if (key === 'autofillPasswords') store.setSetting('autofillPasswords', !!value);
-    if (key === 'memorySaver') store.setSetting('memorySaver', !!value);
-    if (key === 'memorySaverMinutes' && [15, 30, 60, 120, 240].includes(Number(value))) store.setSetting('memorySaverMinutes', Number(value));
     services.broadcastAIState();
   });
-  internalHandle('page:set-site-permission', ['settings'], (_ctx, origin, permission, value) => {
+  // Settings › Languages and › System, and Reset settings (main/languages.js, main/system.js)
+  languages.register({ internalHandle, rootStore, app });
+  system.register({
+    internalHandle,
+    shell,
+    onReset: (w) => {
+      const p = w.profile.base;
+      bookmarksChanged(p);
+      profileWindows(p).forEach((x) => x.emit('profile', profileState(p)));
+      services.broadcastAIState();
+      menuChanged();
+    },
+  });
+  // Settings › Performance (app-wide: main/perf.js)
+  internalHandle('page:performance', ['settings'], () => perf.pageState());
+  internalHandle('page:set-performance', ['settings'], (_ctx, key, value) => perf.set(String(key), value));
+  internalHandle('page:task-manager', ['settings'], ({ w }) => { taskManager.open(w.win); });
+  internalHandle('page:set-site-permission', ['settings'], ({ w }, origin, permission, value) => {
     if (typeof origin !== 'string' || typeof permission !== 'string') return;
-    normal.permissions.set(origin, permission, value === 'allow' ? true : value === 'block' ? false : undefined);
+    w.profile.base.permissions.set(origin, permission, value === 'allow' ? true : value === 'block' ? false : undefined);
   });
   internalHandle('page:make-default', ['settings', 'welcome'], () => makeDefaultBrowser());
   internalHandle('page:mac-permissions', ['settings'], ({ w }) => w.ai.macPermissions());
   internalHandle('page:mac-permissions-open', ['settings'], ({ w }, which) => w.ai.openMacPermissionSettings(which));
-  internalHandle('page:passwords', ['passwords'], () => passwords.pageState());
-  internalHandle('page:password-reveal', ['passwords'], ({ w }, id) => passwords.reveal(w, String(id)));
-  internalHandle('page:password-copy', ['passwords'], ({ w }, id) => passwords.copy(w, String(id)));
-  internalHandle('page:password-edit', ['passwords'], ({ w }, id, patch) => passwords.edit(w, String(id), patch));
-  internalHandle('page:password-add', ['passwords'], (_ctx, entry) => passwords.add(entry));
-  internalHandle('page:password-delete', ['passwords'], (_ctx, id) => passwords.store.remove(String(id)));
-  internalHandle('page:passkey-delete', ['passwords'], async ({ w }, id) => ((await passwords.authorize(w, 'delete a passkey')) ? passwords.passkeys.remove(String(id)) : false));
-  internalHandle('page:passwords-import', ['passwords'], ({ w }) => passwords.importFile(w));
-  internalHandle('page:passwords-export', ['passwords'], ({ w }) => passwords.exportFile(w));
-  internalHandle('page:password-never-remove', ['passwords'], (_ctx, site) => passwords.store.removeNever(String(site)));
+  internalHandle('page:passwords', ['passwords'], ({ w }) => w.profile.passwords.pageState());
+  internalHandle('page:password-reveal', ['passwords'], ({ w }, id) => w.profile.passwords.reveal(w, String(id)));
+  internalHandle('page:password-copy', ['passwords'], ({ w }, id) => w.profile.passwords.copy(w, String(id)));
+  internalHandle('page:password-edit', ['passwords'], ({ w }, id, patch) => w.profile.passwords.edit(w, String(id), patch));
+  internalHandle('page:password-add', ['passwords'], ({ w }, entry) => w.profile.passwords.add(entry));
+  internalHandle('page:password-delete', ['passwords'], ({ w }, id) => w.profile.passwords.store.remove(String(id)));
+  internalHandle('page:passkey-delete', ['passwords'], async ({ w }, id) => ((await w.profile.passwords.authorize(w, 'delete a passkey')) ? w.profile.passwords.passkeys.remove(String(id)) : false));
+  internalHandle('page:passwords-import', ['passwords'], ({ w }) => w.profile.passwords.importFile(w));
+  internalHandle('page:passwords-export', ['passwords'], ({ w }) => w.profile.passwords.exportFile(w));
+  internalHandle('page:password-never-remove', ['passwords'], ({ w }, site) => w.profile.passwords.store.removeNever(String(site)));
   internalHandle('page:password-generate', ['passwords'], () => generatePassword());
-  internalHandle('page:account', ['settings', 'newtab', 'welcome'], () => account.state());
-  internalHandle('page:account-refresh', ['settings'], () => account.refresh());
+  internalHandle('page:account', ['settings', 'newtab', 'welcome'], ({ w }) => w.profile.account.state());
+  internalHandle('page:account-refresh', ['settings'], ({ w }) => w.profile.account.refresh());
   internalHandle('page:account-sign-in', ['settings', 'newtab', 'welcome'], ({ w }) => signIn(w));
-  internalHandle('page:account-cancel', ['settings'], () => { account.cancelSignIn(); return account.state(); });
-  internalHandle('page:account-sign-out', ['settings'], async () => { await signOutLumio(); return account.state(); });
+  internalHandle('page:account-cancel', ['settings'], ({ w }) => { w.profile.account.cancelSignIn(); return w.profile.account.state(); });
+  internalHandle('page:account-sign-out', ['settings'], async ({ w }) => { await signOutLumio(w.profile.base); return w.profile.account.state(); });
   internalHandle('page:account-open', ['settings', 'newtab'], ({ w }, which) => openAccountPage(String(which), w));
-  internalHandle('page:billing', ['settings'], () => billingCall('/api/billing/subscription'));
-  internalHandle('page:billing-change', ['settings'], (_ctx, plan) => billingCall('/api/billing/change', { plan: String(plan || '') }));
-  internalHandle('page:billing-cancel', ['settings'], (_ctx, form) => billingCall('/api/billing/cancel', { reason: String(form?.reason || ''), comment: String(form?.comment || '').slice(0, 1000) }));
-  internalHandle('page:billing-resume', ['settings'], () => billingCall('/api/billing/resume', {}));
-  internalHandle('page:billing-redeem', ['settings'], (_ctx, code) => billingCall('/api/billing/redeem', { code: String(code || '').slice(0, 40) }));
+  internalHandle('page:billing', ['settings'], ({ w }) => billingCall(w.profile, '/api/billing/subscription'));
+  internalHandle('page:billing-change', ['settings'], ({ w }, plan) => billingCall(w.profile, '/api/billing/change', { plan: String(plan || '') }));
+  internalHandle('page:billing-cancel', ['settings'], ({ w }, form) => billingCall(w.profile, '/api/billing/cancel', { reason: String(form?.reason || ''), comment: String(form?.comment || '').slice(0, 1000) }));
+  internalHandle('page:billing-resume', ['settings'], ({ w }) => billingCall(w.profile, '/api/billing/resume', {}));
+  internalHandle('page:billing-redeem', ['settings'], ({ w }, code) => billingCall(w.profile, '/api/billing/redeem', { code: String(code || '').slice(0, 40) }));
   internalHandle('page:billing-subscribe', ['settings'], ({ w }, plan) => openCheckout(w, String(plan || '')));
   internalHandle('page:billing-card', ['settings'], ({ w }) => openCardWindow(w));
-  internalHandle('page:set-profile', ['settings'], (_ctx, patch) => setProfile(patch || {}));
+  internalHandle('page:set-profile', ['settings'], ({ w }, patch) => setProfile(w.profile.base, patch || {}));
   internalHandle('page:profile-photo', ['settings'], ({ w }) => pickProfilePhoto(w));
+  internalHandle('page:profiles', ['settings'], ({ w }) => ({ count: profiles.count, guest: !!w.profile.guest }));
+  internalHandle('page:profiles-manage', ['settings'], () => picker.open());
   internalHandle('page:choose-download-dir', ['settings'], async ({ w }) => {
+    const { store } = w.profile;
     const { canceled, filePaths } = await dialog.showOpenDialog(w.win, { properties: ['openDirectory', 'createDirectory'], defaultPath: store.settings.downloadDir || app.getPath('downloads') });
     if (!canceled && filePaths[0]) store.setSetting('downloadDir', filePaths[0]);
     return store.settings.downloadDir || app.getPath('downloads');
   });
-  internalHandle('page:import', ['settings', 'welcome'], async (_ctx, id, opts) => {
+  internalHandle('page:import', ['settings', 'welcome'], async ({ w }, id, opts) => {
     const o = opts || {};
     // Tests use a known key instead of the macOS Keychain.
     const secret = process.env.LUMIO_TEST ? process.env.LUMIO_IMPORT_SECRET : undefined;
-    const res = await importer.importFrom(String(id), { store, passwordStore: passwords.store }, { bookmarks: o.bookmarks !== false, history: o.history !== false, passwords: !!o.passwords, ...(secret ? { secret } : {}) });
-    if (res.ok) bookmarksChanged();
+    const res = await importer.importFrom(String(id), { store: w.profile.store, passwordStore: w.profile.passwords.store }, { bookmarks: o.bookmarks !== false, history: o.history !== false, passwords: !!o.passwords, ...(secret ? { secret } : {}) });
+    if (res.ok) bookmarksChanged(w.profile);
     return res;
   });
   internalHandle('page:import-sources', ['settings', 'welcome'], () => importer.detect());
@@ -1103,11 +1223,11 @@ function registerIpc() {
     try {
       const text = fs.readFileSync(filePaths[0], 'utf8');
       if (bookmarks) {
-        const added = store.importBookmarks(importer.parseBookmarksHtml(text));
-        bookmarksChanged();
+        const added = w.profile.store.importBookmarks(importer.parseBookmarksHtml(text));
+        bookmarksChanged(w.profile);
         return { ok: true, bookmarks: added };
       }
-      return { ok: true, passwords: passwords.store.importCsv(text) };
+      return { ok: true, passwords: w.profile.passwords.store.importCsv(text) };
     } catch (err) {
       return { ok: false, error: err.message };
     }
@@ -1116,7 +1236,7 @@ function registerIpc() {
   internalHandle('page:open-disk-access', ['settings', 'welcome'], () => shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles'));
 
   // ---- first-run welcome ----
-  internalHandle('page:welcome-state', ['welcome'], () => ({ platform: process.platform, sources: importer.detect(), account: account.state() }));
+  internalHandle('page:welcome-state', ['welcome'], ({ w }) => ({ platform: process.platform, sources: importer.detect(), account: w.profile.account.state() }));
   // Lumio's own Keychain item (saved passwords and sign-ins): touching it now
   // makes macOS ask while the welcome screen explains what to click.
   internalHandle('page:keychain-check', ['welcome'], () => {
@@ -1127,8 +1247,8 @@ function registerIpc() {
     } catch { return { ok: false }; }
   });
   internalHandle('page:welcome-done', ['welcome'], ({ w, tab }) => {
-    store.setSetting('onboarded', true);
-    store.setSetting('panelOpen', true);
+    w.profile.store.setSetting('onboarded', true);
+    w.profile.store.setSetting('panelOpen', true);
     w.tabs.navigate('lumio://newtab/', tab.id);
     w.emit('panel-open');
     return true;
@@ -1157,7 +1277,7 @@ async function exportBookmarks(w) {
   });
   if (canceled || !filePath) return false;
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const rows = store.bookmarks().map((b) => `    <DT><A HREF="${esc(b.url)}" ADD_DATE="${Math.round((b.time || Date.now()) / 1000)}">${esc(b.title)}</A>`).join('\n');
+  const rows = w.profile.store.bookmarks().map((b) => `    <DT><A HREF="${esc(b.url)}" ADD_DATE="${Math.round((b.time || Date.now()) / 1000)}">${esc(b.title)}</A>`).join('\n');
   fs.writeFileSync(filePath, `<!DOCTYPE NETSCAPE-Bookmark-file-1>\n<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">\n<TITLE>Bookmarks</TITLE>\n<H1>Bookmarks</H1>\n<DL><p>\n${rows}\n</DL><p>\n`);
   return true;
 }
@@ -1167,7 +1287,7 @@ function tabContextMenu(w, id) {
   if (!tab) return;
   const tabs = w.tabs;
   const i = tabs.tabs.indexOf(tab);
-  const closedCount = w.incognito ? w.closedTabs.length : recentlyClosed.length;
+  const closedCount = w.incognito || w.profile.guest ? w.closedTabs.length : recentlyClosed.filter((e) => e.profileId === w.profile.id).length;
   Menu.buildFromTemplate([
     { label: 'New Tab to the Right', click: () => tabs.create(NEWTAB, { index: i + 1 }) },
     { type: 'separator' },
@@ -1186,6 +1306,7 @@ function tabContextMenu(w, id) {
 }
 
 function bookmarkContextMenu(w, url) {
+  const { store } = w.profile;
   const b = store.bookmarks().find((x) => x.url === url);
   if (!b) { barContextMenu(w); return; }
   Menu.buildFromTemplate([
@@ -1195,7 +1316,7 @@ function bookmarkContextMenu(w, url) {
     { label: 'Open in Incognito Window', click: () => openUrl(url, 'incognito', w) },
     { type: 'separator' },
     { label: 'Edit…', click: () => openInternal(`lumio://bookmarks/?edit=${encodeURIComponent(url)}`) },
-    { label: 'Delete', click: () => { store.removeBookmark(url); bookmarksChanged(); } },
+    { label: 'Delete', click: () => { store.removeBookmark(url); bookmarksChanged(w.profile); } },
     { type: 'separator' },
     { label: 'Show Bookmarks Bar', type: 'checkbox', checked: !!store.settings.showBookmarksBar, click: () => cmd.toggleBookmarksBar() },
     { label: 'Bookmark Manager', click: () => cmd.bookmarksManager() },
@@ -1204,6 +1325,7 @@ function bookmarkContextMenu(w, url) {
 
 // Right-click on the bar itself, not on a bookmark.
 function barContextMenu(w) {
+  const { store } = w.profile;
   const tab = w.tabs.active;
   const url = tab ? w.tabs.displayUrl(tab) : '';
   const canAdd = /^https?:/.test(url) && !store.isBookmarked(url);
@@ -1227,19 +1349,306 @@ function openExternalUrls(urls) {
 
 app.on('open-url', (e, url) => {
   e.preventDefault();
-  if (store && windows.size) openExternalUrls([url]); else pendingUrls.push(url);
+  // Links wait while the profile picker is up, then open in the chosen profile.
+  if (profiles && alive().length) openExternalUrls([url]); else pendingUrls.push(url);
 });
 
 app.on('second-instance', (_e, argv) => {
   const urls = launchTargets(argv.slice(1));
-  if (urls.length) openExternalUrls(urls); else ensureWin().focus();
+  if (urls.length && alive().length) openExternalUrls(urls);
+  else if (urls.length && picker?.isOpen) pendingUrls.push(...urls);
+  else if (urls.length) openExternalUrls(urls);
+  else if (!alive().length && (picker?.isOpen || profiles?.wantsPicker())) picker.open();
+  else ensureWin().focus();
 });
 
+// ---------------------------------------------------------------- profiles
+// Opens a profile's services the first time it's used: its session, files,
+// Lumio account, sync, extensions. It stays open until Lumio quits.
+function openProfile(id) {
+  if (loaded.has(id)) return loaded.get(id);
+  const dir = profiles.dirOf(id);
+  const store = id === DEFAULT_PROFILE ? rootStore : new Store(dir, safeStorage);
+  const partition = profiles.partitionOf(id);
+  const ses = session.fromPartition(partition);
+  setupTabSession(ses);
+  languages.attach(ses, store, app);
+  const profile = { id, dir, partition, incognito: false, guest: false, incog: null, session: ses, store, chats: new ChatStore(store.chatsFile), timers: [] };
+  profile.base = profile;
+  loaded.set(id, profile);
+  const wins = () => profileWindows(profile); // its windows, incognito ones too
+  store.onBookmarkIcons = () => bookmarksChanged(profile);
+  profile.downloads = new Downloads(ses, { store, emit: (c, p) => alive().filter((w) => w.profile === profile).forEach((w) => w.emit(c, p)) });
+
+  const account = new LumioAccount({
+    store,
+    onChange: (state) => {
+      wins().forEach((w) => { w.emit('account', state); w.ai.refreshCapabilities(); });
+      services.broadcastAIState();
+      profile.sync?.soon(500);
+      // The picker shows who's signed in (kept while offline, cleared on sign-out).
+      const known = state.signedIn || !account.token();
+      if (known && profiles.remember(id, { email: state.email, accountName: state.name })) profilesChanged();
+    },
+  });
+  profile.account = account;
+  account.refresh();
+  watchLumioCookie(profile);
+  const refresher = setInterval(() => { if (account.token()) account.refresh(); }, 10 * 60 * 1000);
+  refresher.unref?.();
+  profile.timers.push(refresher);
+  const workflows = new Workflows(dir);
+  const siteTips = new SiteTips(dir);
+  workflows.onChange(() => wins().forEach((w) => w.emit('workflows-changed', {})));
+  const projects = new Projects(dir);
+  // The sidebar refreshes when chats or projects change (a moment after, not per word).
+  let sidebarTimer = null;
+  const sidebarChanged = () => {
+    clearTimeout(sidebarTimer);
+    sidebarTimer = setTimeout(() => wins().forEach((w) => w.emit('sidebar-changed', {})), 400);
+  };
+  projects.onChange(sidebarChanged);
+  profile.chats.onChange(sidebarChanged);
+  const schedules = new Schedules(dir);
+  schedules.onChange(() => wins().forEach((w) => w.emit('schedules-changed', {})));
+  Object.assign(profile, { workflows, siteTips, projects, schedules });
+
+  const passwords = new PasswordManager({
+    dir,
+    safeStorage,
+    settings: store,
+    helper,
+    findTab: tabOfWc,
+    toast: (w, text) => w.emit('toast', { text }),
+  });
+  profile.passwords = passwords;
+
+  // Lumio Sync: bookmarks, passwords, history, chats, workflows, settings and
+  // open tabs on every device signed in to this Lumio account (encrypted here).
+  const sync = new SyncEngine({
+    dir,
+    store,
+    account,
+    onState: (state) => wins().forEach((w) => w.emit('sync-state', state)),
+    onPairRequest: (r) => {
+      if (!Notification.isSupported()) return;
+      const n = new Notification({ title: t(`“${r.name}” wants to sync with Lumio`), body: t(`Check that it shows ${r.code.replace(/(\d{3})/, '$1 ')}, then approve it in Settings › Sync.`) });
+      n.on('click', () => { const w = normalWin(profile) || createWindow({ profile }); w.focus(); w.tabs.create('lumio://settings/#sync'); });
+      n.show();
+    },
+  });
+  // Each profile is a device of its own to Lumio Sync: "MacBook (Work)".
+  if (id !== DEFAULT_PROFILE) sync.deviceName = `${sync.deviceName} (${profiles.describe(id).name})`.slice(0, 60);
+  profile.sync = sync;
+  sync.addAdapters([
+    syncAdapters.bookmarks(store),
+    syncAdapters.history(store),
+    syncAdapters.passwords(passwords.store),
+    syncAdapters.chats(profile.chats),
+    syncAdapters.workflows(workflows),
+    syncAdapters.projects(projects),
+    syncAdapters.settings(store, { onApplied: () => { services.broadcastAIState(); menuChanged(); } }),
+    syncAdapters.tabs({
+      deviceId: sync.deviceId,
+      deviceName: sync.deviceName,
+      platform: process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'windows' : 'linux',
+      windows: () => alive().filter((w) => !w.incognito && w.profile === profile).map((w) => ({ tabs: w.tabs.sessionTabs() })),
+      remote: sync.remoteTabs,
+    }),
+  ]);
+  const syncSoon = () => sync.soon();
+  for (const f of [store.bookmarksFile, store.historyFile, store.settingsFile, store.chatsFile, store.sessionFile, passwords.store.file]) f.onSave(syncSoon);
+  workflows.onChange(syncSoon);
+  projects.onChange(syncSoon);
+  // Bookmarks from another device: redraw the bar.
+  store.bookmarksFile.onSave(() => { if (sync.busy) bookmarksChanged(profile); });
+  sync.start();
+  const companion = new CompanionBridge({
+    sync,
+    windows: () => alive().filter((w) => !w.incognito && w.profile === profile),
+    pickWindow: () => (lastFocused && !lastFocused.incognito && lastFocused.profile === profile && windows.has(lastFocused) ? lastFocused : normalWin(profile) || createWindow({ profile, focus: false })),
+    openChat: (w, chatId) => w.openChat(chatId, { full: false }),
+  });
+  profile.companion = companion;
+  companion.start();
+  profile.permissions = new Permissions(ses, { store, emitFor, persist: true });
+  setupScreenShare(ses);
+
+  const extensions = new ExtensionManager({
+    session: ses,
+    dir,
+    store,
+    hooks: {
+      // Extensions can open tabs and windows, but never Lumio's own pages.
+      createTab: (details) => {
+        const w = alive().find((x) => x.win.id === details.windowId && !x.incognito && x.profile === profile) || normalWin(profile) || createWindow({ profile });
+        const tab = w.tabs.create(extensionUrl(details.url), { active: details.active !== false, index: details.index });
+        return [tab.view.webContents, w.win];
+      },
+      selectTab: (wc) => { const f = tabOfWc(wc); if (f) { f.w.tabs.activate(f.tab.id); f.w.focus(); } },
+      removeTab: (wc) => { const f = tabOfWc(wc); if (f) f.w.tabs.close(f.tab.id); },
+      createWindow: (details) => {
+        const urls = (Array.isArray(details.url) ? details.url : details.url ? [details.url] : []).map(extensionUrl);
+        return createWindow({ profile, urls }).win;
+      },
+      removeWindow: (win) => alive().find((w) => w.win === win)?.close(),
+      changed: () => alive().filter((w) => !w.incognito && w.profile === profile).forEach((w) => w.emit('extensions-changed')),
+    },
+  });
+  profile.extensions = extensions;
+  // Load extensions before restoring tabs so their content scripts run there,
+  // but never hold up the first window for long.
+  profile.ready = Promise.race([
+    extensions.init().catch((err) => { console.error('Extensions failed to start:', err); extensions.ece = null; }),
+    new Promise((r) => setTimeout(r, 4000)),
+  ]);
+  profilesChanged(); // "open" in the picker and menus
+  return profile;
+}
+
+// Opens a profile's windows: its last session (or a new tab), or the welcome
+// screens on a first launch. restore: Lumio restarted itself (Settings), so
+// the tabs come back whatever the startup setting.
+async function startProfile(p, { restore = false } = {}) {
+  await p.ready;
+  const { store } = p;
+  const saved = store.settings.startup === 'newtab' && !restore ? [] : store.sessionWindows();
+  // First launch: the welcome screens (people updating from an older version
+  // already have history, bookmarks or tabs, and skip them).
+  if (store.settings.onboarded !== true && (saved.length || store.history().length || store.bookmarks().length)) store.setSetting('onboarded', true);
+  if (store.settings.onboarded !== true && (!process.env.LUMIO_TEST || process.env.LUMIO_TEST_WELCOME)) {
+    store.setSetting('panelOpen', false);
+    createWindow({ profile: p, tabs: [{ url: 'lumio://welcome/', title: 'Welcome to Lumio Browser' }], active: 0 });
+  } else if (saved.length) saved.forEach((s) => createWindow({ profile: p, tabs: s.tabs, active: s.active, bounds: s.bounds }));
+  else createWindow({ profile: p });
+}
+
+// A profile picked in the picker or the account menu: its window comes to
+// the front, or its windows open.
+async function switchToProfile(id) {
+  if (!profiles.get(id)) return false;
+  const p = openProfile(id);
+  const w = normalWin(p);
+  if (w) w.focus();
+  else await startProfile(p);
+  picker.close();
+  if (pendingUrls.length) openExternalUrls(pendingUrls.splice(0));
+  return true;
+}
+
+// Guest: a profile that's thrown away when its last window closes. Its tabs
+// use an in-memory session; its files go in a folder that's wiped after.
+function openGuest() {
+  if (!guest) {
+    const dir = profiles.guestDir(Date.now());
+    const store = new Store(dir, safeStorage);
+    store.setSetting('offerPasswords', false); // nothing here is kept
+    const partition = `lumio-guest-${++incogSeq}`; // in memory only
+    const ses = session.fromPartition(partition);
+    setupTabSession(ses);
+    languages.attach(ses, store, app);
+    const profile = { id: 'guest', dir, partition, incognito: false, guest: true, incog: null, session: ses, store, chats: new ChatStore(null), timers: [] };
+    profile.base = profile;
+    const wins = () => alive().filter((w) => w.profile === profile);
+    profile.downloads = new Downloads(ses, { settings: store, emit: (c, p) => wins().forEach((w) => w.emit(c, p)) });
+    profile.permissions = new Permissions(ses, { store, emitFor, persist: false });
+    profile.account = new LumioAccount({ store, onChange: (state) => { wins().forEach((w) => { w.emit('account', state); w.ai.refreshCapabilities(); }); services.broadcastAIState(); } });
+    watchLumioCookie(profile);
+    profile.passwords = new PasswordManager({ dir, safeStorage, settings: store, helper, findTab: tabOfWc, toast: (w, text) => w.emit('toast', { text }) });
+    Object.assign(profile, { workflows: new Workflows(dir), siteTips: new SiteTips(dir), projects: new Projects(dir), schedules: new Schedules(dir) });
+    setupScreenShare(ses);
+    guest = profile;
+  }
+  const w = createWindow({ profile: guest });
+  picker.close();
+  return w;
+}
+
+// The last Guest window closed: sign out of Lumio there, and wipe everything.
+function endGuest() {
+  const p = guest;
+  guest = null;
+  if (!p) return;
+  p.session.clearStorageData().catch(() => {});
+  p.session.clearCache().catch(() => {});
+  const wipe = () => setTimeout(() => profiles.rm(p.dir), 1000); // after any pending writes
+  if (p.account.token()) p.account.signOut().catch(() => {}).finally(wipe); else wipe();
+}
+
+// Deletes a profile (never the first one): closes its windows, signs it out
+// of Lumio, and removes its files and session.
+async function deleteProfile(id) {
+  if (id === DEFAULT_PROFILE || !profiles.get(id)) return false;
+  const p = loaded.get(id);
+  if (p) {
+    // A page that holds its window open gets 3 seconds before the window goes anyway.
+    await Promise.all(profileWindows(p).map((w) => new Promise((resolve) => {
+      w.win.once('closed', resolve);
+      w.close();
+      setTimeout(() => { if (!w.closed) w.win.destroy(); }, 3000);
+    })));
+    loaded.delete(id);
+    p.timers.forEach(clearInterval);
+    p.sync.stop();
+    p.companion.stop();
+    if (p.account.token()) await p.account.signOut().catch(() => {});
+    await p.session.clearStorageData().catch(() => {});
+    await p.session.clearCache().catch(() => {});
+    p.store.flushAll();
+    await new Promise((r) => setTimeout(r, 600)); // let any last debounced file writes land before the folder goes
+  }
+  for (let i = recentlyClosed.length - 1; i >= 0; i--) if (recentlyClosed[i].profileId === id) recentlyClosed.splice(i, 1);
+  profiles.remove(id);
+  profilesChanged();
+  return true;
+}
+
+// What the picker and the account menus show, with open profiles' live names.
+function profilesList() {
+  return profiles.ids().map((id) => ({
+    ...profiles.describe(id, loaded.get(id)?.store.settings.profile),
+    open: alive().some((w) => w.profile.base.id === id && !w.profile.guest),
+  }));
+}
+const profilesFor = (w) => profilesList().map((p) => ({ ...p, current: !w.profile.guest && p.id === w.profile.id }));
+function profilesChanged() {
+  for (const w of alive()) w.emit('profiles-changed', profilesFor(w));
+  picker?.changed();
+  menuChanged();
+}
+
+// The account menu ('profiles:…' from a window) and the picker window.
+function registerProfileIpc() {
+  const allowed = (e) => windowOfWc(e.sender) || picker.isOurs(e.sender);
+  const onProfiles = (channel, fn) => ipcMain.on(channel, (e, ...args) => { if (allowed(e)) fn(...args); });
+  ipcMain.handle('profiles:state', (e) => {
+    if (!allowed(e)) throw new Error('Not allowed');
+    return { profiles: profilesList(), showPicker: profiles.showPicker, platform: process.platform };
+  });
+  onProfiles('profiles:open', (id) => { switchToProfile(String(id)); });
+  onProfiles('profiles:add', (spec) => {
+    const p = profiles.add({ name: spec?.name, color: spec?.color });
+    profilesChanged();
+    switchToProfile(p.id);
+  });
+  onProfiles('profiles:guest', () => openGuest());
+  onProfiles('profiles:remove', (id) => { deleteProfile(String(id)); });
+  onProfiles('profiles:show-picker', (on) => { profiles.showPicker = !!on; picker.changed(); });
+  onProfiles('profiles:manage', (mode) => picker.open({ mode: mode === 'add' ? 'add' : 'pick' }));
+  // Edit: the profile's own Settings › Customize profile.
+  onProfiles('profiles:edit', async (id) => {
+    if (!(await switchToProfile(String(id)))) return;
+    const w = normalWin(loaded.get(String(id)));
+    if (w) { w.tabs.create('lumio://settings/#profile'); w.focus(); }
+  });
+}
+
 app.whenReady().then(async () => {
-  store = new Store(app.getPath('userData'), safeStorage);
-  store.onBookmarkIcons = () => bookmarksChanged();
+  profiles = new ProfileRegistry(app.getPath('userData'));
+  profiles.emptyTrash(); // what deleted profiles and Guest left behind
+  rootStore = new Store(app.getPath('userData'), safeStorage);
   // Light or dark, before any window opens; changes then apply live.
-  theme.init({ store, nativeTheme });
+  theme.init({ store: rootStore, nativeTheme });
   theme.onChange(appearanceChanged);
   helper = new MacHelper();
   app.userAgentFallback = chromeUserAgent();
@@ -1255,99 +1664,26 @@ app.whenReady().then(async () => {
   });
   session.defaultSession.setPermissionCheckHandler((wc, permission, origin) => permission !== 'media' || (isShell(wc) && String(origin).startsWith('lumio://shell')));
 
-  const ses = session.fromPartition('persist:lumio');
-  setupTabSession(ses);
-  normal = {
-    incognito: false,
-    session: ses,
-    chats: new ChatStore(store.chatsFile),
-  };
-  normal.downloads = new Downloads(ses, { store, emit: (c, p) => alive().filter((w) => !w.incognito).forEach((w) => w.emit(c, p)) });
-
-  account = new LumioAccount({
-    store,
-    onChange: (state) => { alive().forEach((w) => { w.emit('account', state); w.ai.refreshCapabilities(); }); services.broadcastAIState(); sync?.soon(500); },
-  });
-  account.refresh();
-  watchLumioCookie();
-  setInterval(() => { if (account.token()) account.refresh(); }, 10 * 60 * 1000).unref?.();
-  workflows = new Workflows(app.getPath('userData'));
-  siteTips = new SiteTips(app.getPath('userData'));
-  workflows.onChange(() => alive().forEach((w) => w.emit('workflows-changed', {})));
-  projects = new Projects(app.getPath('userData'));
-  // The sidebar refreshes when chats or projects change (a moment after, not per word).
-  let sidebarTimer = null;
-  const sidebarChanged = () => {
-    clearTimeout(sidebarTimer);
-    sidebarTimer = setTimeout(() => alive().forEach((w) => w.emit('sidebar-changed', {})), 400);
-  };
-  projects.onChange(sidebarChanged);
-  normal.chats.onChange(sidebarChanged);
-  schedules = new Schedules(app.getPath('userData'));
-  schedules.onChange(() => alive().forEach((w) => w.emit('schedules-changed', {})));
   setInterval(runDueSchedules, 20 * 1000).unref?.();
   setTimeout(runDueSchedules, 8000).unref?.(); // catch up after launch, once tabs and sign-in are back
-  // Memory Saver: once a minute, tabs nobody has looked at for a while go to sleep.
-  setInterval(() => {
-    if (!store.settings.memorySaver) return;
-    const minutes = Math.max(5, Number(store.settings.memorySaverMinutes) || 60);
-    for (const w of alive()) if (!w.ai?.isRunning()) w.tabs.sleepIdle(minutes);
-  }, 60 * 1000).unref?.();
-
-  passwords = new PasswordManager({
-    dir: app.getPath('userData'),
-    safeStorage,
-    settings: store,
-    helper,
-    findTab: tabOfWc,
+  perf = new PerformanceManager({ store: rootStore, windows: alive, toast: (w, text) => w.emit('toast', { text }) });
+  perf.start();
+  taskManager = new TaskManager({ windows: alive, focusTab: (w, tab) => { w.tabs.activate(tab.id); w.focus(); } });
+  taskManager.register(ipcMain);
+  printPreview = new PrintPreview({
+    store: rootStore,
+    downloadsDir: (w) => w.profile.store.settings.downloadDir || app.getPath('downloads'),
     toast: (w, text) => w.emit('toast', { text }),
   });
-
-  // Lumio Sync: bookmarks, passwords, history, chats, workflows, settings and
-  // open tabs on every device signed in to this Lumio account (encrypted here).
-  sync = new SyncEngine({
-    dir: app.getPath('userData'),
-    store,
-    account,
-    onState: (state) => alive().forEach((w) => w.emit('sync-state', state)),
-    onPairRequest: (r) => {
-      if (!Notification.isSupported()) return;
-      const n = new Notification({ title: `“${r.name}” wants to sync with Lumio`, body: `Check that it shows ${r.code.replace(/(\d{3})/, '$1 ')}, then approve it in Settings › Sync.` });
-      n.on('click', () => { const w = ensureWin(); w.focus(); w.tabs.create('lumio://settings/#sync'); });
-      n.show();
-    },
+  printPreview.register(ipcMain);
+  system = new System({ app, rootStore, started });
+  picker = new ProfilePicker({
+    state: () => ({ profiles: profilesList(), showPicker: profiles.showPicker, platform: process.platform }),
+    // Closed without picking anyone: like Chrome, Windows quits (a Mac keeps the app in the Dock).
+    onClosed: () => { if (!alive().length && !quitting && process.platform !== 'darwin') app.quit(); },
   });
-  sync.addAdapters([
-    syncAdapters.bookmarks(store),
-    syncAdapters.history(store),
-    syncAdapters.passwords(passwords.store),
-    syncAdapters.chats(normal.chats),
-    syncAdapters.workflows(workflows),
-    syncAdapters.projects(projects),
-    syncAdapters.settings(store, { onApplied: () => { services.broadcastAIState(); menuChanged(); } }),
-    syncAdapters.tabs({
-      deviceId: sync.deviceId,
-      deviceName: sync.deviceName,
-      platform: process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'windows' : 'linux',
-      windows: () => alive().filter((w) => !w.incognito).map((w) => ({ tabs: w.tabs.sessionTabs() })),
-      remote: sync.remoteTabs,
-    }),
-  ]);
-  const syncSoon = () => sync.soon();
-  for (const f of [store.bookmarksFile, store.historyFile, store.settingsFile, store.chatsFile, store.sessionFile, passwords.store.file]) f.onSave(syncSoon);
-  workflows.onChange(syncSoon);
-  projects.onChange(syncSoon);
-  // Bookmarks from another device: redraw the bar.
-  store.bookmarksFile.onSave(() => { if (sync.busy) bookmarksChanged(); });
-  sync.start();
-  companion = new CompanionBridge({
-    sync,
-    windows: () => alive().filter((w) => !w.incognito),
-    pickWindow: () => (lastFocused && !lastFocused.incognito && windows.has(lastFocused) ? lastFocused : alive().find((w) => !w.incognito) || createWindow({ focus: false })),
-    openChat: (w, id) => w.openChat(id, { full: false }),
-  });
-  companion.start();
-  passwords.register();
+  // Each tab's password and passkey requests go to its own profile's manager.
+  PasswordManager.register((wc) => tabOfWc(wc)?.w.profile.passwords || null);
   screenAura.register();
 
   // Updates from GitHub Releases (packaged builds; tests point it at a mock).
@@ -1369,59 +1705,31 @@ app.whenReady().then(async () => {
     setInterval(() => updater.check(), 60 * 60 * 1000).unref?.(); // every hour (GitHub allows 60/hour)
   }
   // Just updated? Say so once, with what's new.
-  const lastVersion = store.settings.lastVersion;
+  const lastVersion = rootStore.settings.lastVersion;
   if (lastVersion && compareVersions(app.getVersion(), lastVersion) > 0) {
     setTimeout(() => { const w = lastFocused && !lastFocused.win.isDestroyed() ? lastFocused : alive()[0]; w?.emit('toast', { text: `Updated to Lumio Browser ${app.getVersion()}` }); }, 2500);
   }
-  if (lastVersion !== app.getVersion()) store.setSetting('lastVersion', app.getVersion());
-  normal.permissions = new Permissions(ses, { store, emitFor, persist: true });
-  setupScreenShare(ses);
-
-  extensions = new ExtensionManager({
-    session: ses,
-    store,
-    hooks: {
-      // Extensions can open tabs and windows, but never Lumio's own pages.
-      createTab: (details) => {
-        const w = alive().find((x) => x.win.id === details.windowId && !x.incognito) || normalWin() || createWindow();
-        const tab = w.tabs.create(extensionUrl(details.url), { active: details.active !== false, index: details.index });
-        return [tab.view.webContents, w.win];
-      },
-      selectTab: (wc) => { const f = tabOfWc(wc); if (f) { f.w.tabs.activate(f.tab.id); f.w.focus(); } },
-      removeTab: (wc) => { const f = tabOfWc(wc); if (f) f.w.tabs.close(f.tab.id); },
-      createWindow: (details) => {
-        const urls = (Array.isArray(details.url) ? details.url : details.url ? [details.url] : []).map(extensionUrl);
-        return createWindow({ urls }).win;
-      },
-      removeWindow: (win) => alive().find((w) => w.win === win)?.close(),
-      changed: () => alive().filter((w) => !w.incognito).forEach((w) => w.emit('extensions-changed')),
-    },
-  });
-  // Load extensions before restoring tabs so their content scripts run there,
-  // but never hold up the first window for long.
-  await Promise.race([
-    extensions.init().catch((err) => { console.error('Extensions failed to start:', err); extensions.ece = null; }),
-    new Promise((r) => setTimeout(r, 4000)),
-  ]);
+  if (lastVersion !== app.getVersion()) rootStore.setSetting('lastVersion', app.getVersion());
 
   registerIpc();
   Menu.setApplicationMenu(buildMenu(cmd, menuState()));
 
-  const saved = store.settings.startup === 'newtab' ? [] : store.sessionWindows();
-  // First launch: the welcome screens (people updating from an older version
-  // already have history, bookmarks or tabs, and skip them).
-  if (store.settings.onboarded !== true && (saved.length || store.history().length || store.bookmarks().length)) store.setSetting('onboarded', true);
-  if (store.settings.onboarded !== true && (!process.env.LUMIO_TEST || process.env.LUMIO_TEST_WELCOME)) {
-    store.setSetting('panelOpen', false);
-    createWindow({ tabs: [{ url: 'lumio://welcome/', title: 'Welcome to Lumio Browser' }], active: 0 });
-  } else if (saved.length) saved.forEach((s) => createWindow({ tabs: s.tabs, active: s.active, bounds: s.bounds }));
-  else createWindow();
   // Windows passes links to open on the command line.
   if (process.platform !== 'darwin' && !process.env.LUMIO_TEST) pendingUrls.push(...launchTargets(process.argv.slice(1)));
+  // Several profiles: "Who's using Lumio?" first, unless that's turned off.
+  // Otherwise the profiles that were open come back (or the last one used).
+  if (profiles.wantsPicker() && (!process.env.LUMIO_TEST || process.env.LUMIO_TEST_PICKER)) picker.open();
+  else {
+    const ids = profiles.lastOpen();
+    for (const id of ids.length ? ids : [profiles.lastUsed()]) await startProfile(openProfile(id), { restore: system.restarted });
+  }
   if (process.platform === 'win32' && app.isPackaged && !process.windowsStore) startMenuShortcut();
-  if (pendingUrls.length) openExternalUrls(pendingUrls.splice(0));
+  if (pendingUrls.length && alive().length) openExternalUrls(pendingUrls.splice(0));
 
-  app.on('activate', () => { if (!alive().length) createWindow(); });
+  app.on('activate', () => {
+    if (alive().length) return;
+    if (profiles.wantsPicker()) picker.open(); else createWindow();
+  });
 });
 
 app.on('window-all-closed', () => {
@@ -1430,10 +1738,12 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   saveSession();
+  if (profiles && !quitting) profiles.setLastOpen([...new Set(alive().filter((w) => !w.profile.guest).map((w) => w.profile.id))]);
   quitting = true;
   for (const w of alive()) w.ai.shutdown();
   helper?.stop();
-  store?.flushAll();
+  for (const p of loaded.values()) p.store.flushAll();
+  profiles?.flush();
 });
 
 // Composite screenshot of a window (browser UI + active page) for tests.
@@ -1478,15 +1788,23 @@ global.lumio = {
   get win() { return cur()?.win; },
   get current() { return cur(); },
   get windows() { return alive(); },
-  get store() { return store; },
-  get extensions() { return extensions; },
-  get account() { return account; },
-  get passwords() { return passwords; },
-  get workflows() { return workflows; },
-  get siteTips() { return siteTips; },
-  get schedules() { return schedules; },
-  get sync() { return sync; },
-  get profiles() { return { normal, incognito: incog }; },
+  // The front window's profile's (the first profile's before any window opens).
+  get store() { return (cur()?.profile || openProfile(DEFAULT_PROFILE)).store; },
+  get extensions() { return curProfile().extensions; },
+  get account() { return curProfile().account; },
+  get passwords() { return curProfile().passwords; },
+  get workflows() { return curProfile().workflows; },
+  get siteTips() { return curProfile().siteTips; },
+  get schedules() { return curProfile().schedules; },
+  get sync() { return curProfile().sync; },
+  // normal/incognito: the front window's profile and its incognito session.
+  get profiles() { const p = curProfile(); return { normal: p, incognito: p.incog, registry: profiles, loaded, guest, list: profilesList(), open: openProfile, start: switchToProfile, remove: deleteProfile, openGuest }; },
+  get rootStore() { return rootStore; },
+  get perf() { return perf; },
+  get taskManager() { return taskManager; },
+  get picker() { return picker; },
+  get printPreview() { return printPreview; },
+  get system() { return system; },
   get recentlyClosed() { return recentlyClosed; },
   screenAura,
   get updater() { return updater; },
@@ -1494,7 +1812,7 @@ global.lumio = {
   focus: (w) => { lastFocused = w; },
   createWindow,
   openUrl,
-  clearData,
+  clearData: (opts) => clearData(curProfile(), opts),
   cmd,
   snapshot,
   BrowserWindow,

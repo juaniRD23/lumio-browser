@@ -1,5 +1,5 @@
 // lumio:// serves the browser's own UI and internal pages from disk.
-//   lumio://shell/, overlay/, aura/           -> renderer/ui   (default session only)
+//   lumio://shell/, overlay/, aura/, picker/, taskmanager/, print/ -> renderer/ui (default session only)
 //   lumio://newtab/, settings, history, downloads, bookmarks, extensions,
 //   error, welcome                                     -> renderer/pages (tab sessions)
 //   */assets/*  -> renderer/assets,  */vendor/* -> whitelisted node_modules files
@@ -7,6 +7,7 @@
 //   shell/web/*      -> Lumio Chat's file code (docmaker, attach) and its libraries, copied at build
 const fs = require('fs');
 const path = require('path');
+const { localizeHtml } = require('./i18n');
 
 const ROOT = path.join(__dirname, '..');
 const UI_DIR = path.join(ROOT, 'renderer', 'ui');
@@ -17,7 +18,7 @@ const VENDOR = {
   'purify.js': path.join(ROOT, 'node_modules', 'dompurify', 'dist', 'purify.es.mjs'),
 };
 
-const UI_HOSTS = new Set(['shell', 'overlay', 'aura']);
+const UI_HOSTS = new Set(['shell', 'overlay', 'aura', 'picker', 'taskmanager', 'print']);
 const PAGE_HOSTS = new Set(['newtab', 'settings', 'history', 'downloads', 'bookmarks', 'extensions', 'passwords', 'error', 'welcome']);
 
 const MIME = {
@@ -85,6 +86,7 @@ function makeHandler(hosts, { dark = false } = {}) {
       if (path.extname(file) === '.html' && (dark || url.searchParams.get('appearance') === 'dark')) {
         body = String(body).replace(/<html\b/i, '<html data-appearance="dark"');
       }
+      if (path.extname(file) === '.html') body = localizeHtml(body); // Lumio's language (main/i18n.js)
       return new Response(body, {
         headers: {
           'content-type': MIME[path.extname(file)] || 'application/octet-stream',

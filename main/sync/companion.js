@@ -7,6 +7,7 @@
 // - notices that wake the phone: a task it started finished or needs an OK,
 //   a scheduled task finished.
 const C = require('./crypto');
+const { t } = require('../i18n');
 
 const IDLE_POLL = 15_000;
 const WATCHED_POLL = 3_000; // someone has the phone app open
@@ -147,7 +148,8 @@ class CompanionBridge {
   // see: the Lumio app's notification says just that.
   async notice({ title, body, chatId = null, hint = 'info' }) {
     if (!this.ready()) return;
-    const data = await this.seal({ at: Date.now(), title: String(title).slice(0, 100), body: String(body || '').slice(0, 300), chatId, computer: this.sync.deviceName });
+    // In Lumio's language, like the computer's own notifications.
+    const data = await this.seal({ at: Date.now(), title: t(String(title)).slice(0, 100), body: t(String(body || '')).slice(0, 300), chatId, computer: this.sync.deviceName });
     await this.sync.api('/api/companion/messages', { method: 'POST', body: { kind: 'notice', device: this.sync.deviceId, data, hint } }).catch(() => {});
   }
 }

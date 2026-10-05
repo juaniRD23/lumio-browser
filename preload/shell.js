@@ -1,17 +1,20 @@
-// Preload for the browser UI (shell + overlay). Exposes a narrow, channel-
-// whitelisted bridge; the main process also checks that calls come from us.
+// Preload for the browser UI (shell + overlay, the profile picker and Task
+// Manager windows, and the print preview). Exposes a narrow,
+// channel-whitelisted bridge; the main process also checks that calls come
+// from us.
 // Bundled into preload/dist/shell.js by scripts/build-preload.mjs.
 const { contextBridge, ipcRenderer } = require('electron');
 const { injectBrowserAction } = require('electron-chrome-extensions/browser-action');
 
-const INVOKE = /^(shell|omnibox|ai|site|account|passwords|update):/;
-const SEND = /^(layout|panel|sidebar|tab|overlay|find|download|permission|ai|bookmarks|site|window|extensions|account|passwords|app|aura|update):|^open-url$/;
+const INVOKE = /^(shell|omnibox|ai|site|account|passwords|update|profiles|taskmanager|perf|print):/;
+const SEND = /^(layout|panel|sidebar|tab|overlay|find|download|permission|ai|bookmarks|site|window|extensions|account|passwords|app|aura|update|profiles|taskmanager|perf|print):|^open-url$/;
 const EVENTS = new Set([
   'tabs', 'downloads', 'permission', 'permission-cancel', 'find-result', 'find-open', 'find-close', 'find-step',
   'focus-omnibox', 'panel-toggle', 'panel-open', 'ai-focus', 'ai-prefill', 'ai-event', 'ai-state', 'overlay-data',
   'overlay-picked', 'toast', 'zoom', 'fullscreen', 'agent-state', 'bookmarks', 'site-info', 'extensions-changed',
   'account', 'profile', 'passwords-prompt', 'passwords-changed', 'aura', 'update', 'update-announce', 'ai-build-doc', 'ai-open-chat',
   'ai-workflow', 'workflows-changed', 'sync-state', 'sync-pair-request', 'sidebar-changed', 'sidebar-toggle',
+  'profiles-changed', 'perf-alert', 'perf-state',
 ]);
 
 contextBridge.exposeInMainWorld('lumio', {
