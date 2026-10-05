@@ -1428,6 +1428,8 @@ global.lumio = {
   get sync() { return sync; },
   get omnibox() { return omnibox; },
   get bookmarks() { return bookmarks; },
+  get groups() { return groups; },
+  get sidePanel() { return sidePanel; },
   get profiles() { return { normal, incognito: incog }; },
   get recentlyClosed() { return recentlyClosed; },
   screenAura,
