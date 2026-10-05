@@ -1,7 +1,9 @@
 // One browser window: the shell page (tab strip, toolbar, bookmarks bar, AI
 // panel), an overlay view for dropdowns drawn above the page, the window's
-// tabs and its Lumio AI controller. Incognito windows use a throwaway
-// profile (see main.js) and never write history, sessions or chats to disk.
+// tabs and its Lumio AI controller. Each window belongs to one profile (its
+// session, settings, bookmarks, account: see main.js). Incognito windows use
+// a throwaway copy of it and never write history, sessions or chats to disk;
+// Guest windows' profile is thrown away when the last one closes.
 const { BrowserWindow, WebContentsView, screen } = require('electron');
 const path = require('path');
 const { TabManager, NEWTAB } = require('./tabs');
@@ -42,7 +44,7 @@ function visibleBounds(b) {
 }
 
 class BrowserWin {
-  // app: services from main.js. profile: { session, downloads, permissions, chats }.
+  // app: services from main.js. profile: { session, store, account, downloads, permissions, chats, … }.
   // maximized: as it was when the session was saved. inactive: shown without
   // taking focus (a tab being dragged out, main/tab-drag.js).
   constructor(app, profile, { incognito = false, tabs = null, active = 0, groups = [], bounds = null, urls = [], adopt = null, near = null, maximized = false, inactive = false } = {}) {
@@ -58,7 +60,7 @@ class BrowserWin {
       ...(visibleBounds(bounds) || defaultBounds(near)),
       minWidth: 760,
       minHeight: 500,
-      title: incognito ? 'Lumio Browser (Incognito)' : 'Lumio Browser',
+      title: incognito ? 'Lumio Browser (Incognito)' : profile.guest ? 'Lumio Browser (Guest)' : 'Lumio Browser',
       ...(process.platform === 'darwin'
         ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 15 } }
         // Windows: our tab strip is the title bar; Windows draws its own
@@ -104,8 +106,9 @@ class BrowserWin {
     this.tabs = new TabManager({
       win: this.win,
       session: profile.session,
-      store: app.store,
+      store: profile.store,
       incognito,
+      guest: !!profile.guest,
       emit,
       hooks: {
         askAI: (text, opts) => this.askAI(text, opts),
@@ -127,13 +130,14 @@ class BrowserWin {
         allowInsecure: (url) => !!profile.siteControls?.insecureAllowed(url),
         loadFailed: (wc, code, url) => !!app.loadFailed?.(this, wc, code, url),
         captureOf: (tab) => app.captureOf?.(tab),
-        openInNewWindow: (url, inc) => app.createWindow({ incognito: inc, urls: [url] }),
+        openInNewWindow: (url, inc) => app.createWindow({ profile: profile.base, incognito: inc, urls: [url] }),
         openPopup: (tab, opts) => app.openPopup(this, tab, opts),
         openExternal: (tab, req) => app.openExternal(this, tab, req),
         dialogInProcess: (wc) => app.dialogInProcess(wc),
         popupsAllowed: (pageUrl) => profile.permissions.allowsPopups(pageUrl),
         saveAs: (wc, url) => profile.downloads.saveAs(wc, url),
         savePage: (tab) => app.savePage(this, tab),
+        print: (tab) => app.print(this, tab),
         contextMenuExtras: (tab, params) => app.contextMenuExtras(this, tab, params),
         readingList: (url, title) => app.addToReadingList(this, url, title),
       },
@@ -142,18 +146,19 @@ class BrowserWin {
     this.dialogs = new DialogView(this); // a page's dialogs, over its tab
     this.notice = new AccessNotice(this); // "Press Esc to exit full screen"
     this.ai = new AIController({
-      store: app.store,
+      store: profile.store,
       chats: profile.chats,
       tabs: this.tabs,
       emit,
       helper: app.helper,
-      account: app.account,
+      account: profile.account,
       indicator: this.indicator,
-      schedules: incognito ? null : app.schedules,
-      workflows: incognito ? null : app.workflows,
-      siteTips: app.siteTips,
-      learnTips: !incognito,
-      projects: incognito ? null : app.projects,
+      // Guest keeps nothing, so Lumio doesn't schedule or learn there.
+      schedules: incognito || profile.guest ? null : profile.schedules,
+      workflows: incognito ? null : profile.workflows,
+      siteTips: profile.siteTips,
+      learnTips: !incognito && !profile.guest,
+      projects: incognito ? null : profile.projects,
       notify: (title, body, chatId) => app.notify(this, title, body, chatId),
       onSettingsChanged: () => app.broadcastAIState(),
     });
@@ -413,7 +418,7 @@ class BrowserWin {
 
   // full: open the chat full size, over the page (asked from the new tab page).
   askAI(text, opts = {}) {
-    this.app.store.setSetting('panelOpen', true);
+    this.profile.store.setSetting('panelOpen', true);
     this.emit('ai-prefill', { text, includePage: !!opts.includePage, send: !opts.draft, full: !!opts.full });
     this.win.webContents.focus();
   }
@@ -422,7 +427,7 @@ class BrowserWin {
   // side panel, from a notification or Settings).
   openChat(id, { full = true } = {}) {
     if (!this.profile.chats.get(id)) return false;
-    this.app.store.setSetting('panelOpen', true);
+    this.profile.store.setSetting('panelOpen', true);
     this.emit('ai-open-chat', { id, full });
     this.win.webContents.focus();
     return true;

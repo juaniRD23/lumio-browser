@@ -8,7 +8,7 @@ const DAY = 24 * 3600 * 1000;
 const HISTORY_DAYS = 30;
 const HISTORY_MAX = 2000;
 const CHAT_MAX = 400 * 1024;
-const SETTINGS = ['searchEngine', 'approvalMode', 'reasoning', 'showBookmarksBar', 'memorySaver', 'memorySaverMinutes', 'startup', 'offerPasswords', 'autofillPasswords', 'profile', 'appearance', 'newTab', 'startupPages', 'showHome', 'homePage', 'searchEngines', 'searchSuggest'];
+const SETTINGS = ['searchEngine', 'approvalMode', 'reasoning', 'showBookmarksBar', 'memorySaver', 'memorySaverMinutes', 'memorySaverMode', 'startup', 'offerPasswords', 'autofillPasswords', 'profile', 'appearance', 'newTab', 'startupPages', 'showHome', 'homePage', 'searchEngines', 'searchSuggest', 'languages', 'spellcheck'];
 
 function simple(name, { entries, apply, keepAbsent }) {
   return {

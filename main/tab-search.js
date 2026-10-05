@@ -16,7 +16,7 @@ const hostOf = (url) => {
 };
 
 class TabSearch {
-  // deps: { alive(), recentlyClosed: [], reopenClosed(index) }
+  // deps: { alive(), recentlyClosed: [], reopenClosed(index), ownsClosed(w, entry) }
   constructor(deps) {
     this.deps = deps;
     this.watched = new WeakSet(); // windows whose list closes when it loses the keyboard
@@ -45,9 +45,11 @@ class TabSearch {
     const wins = this.deps.alive().filter((x) => x.incognito === w.incognito);
     const tabs = wins.flatMap((x) => x.tabs.tabs.map((t) => this.row(x, t, x === w)))
       .sort((a, b) => (b.current - a.current) || (b.lastActive - a.lastActive));
-    const list = w.incognito ? w.closedTabs.map((e) => ({ kind: 'tab', ...e })) : this.deps.recentlyClosed;
-    const closed = list.map((e, index) => ({
-      index,
+    // (A profile's own closed tabs and windows: ownsClosed(w, entry).)
+    const list = w.incognito || w.profile?.guest ? w.closedTabs.map((e, index) => ({ kind: 'tab', ...e, index }))
+      : this.deps.recentlyClosed.map((e, index) => ({ ...e, index })).filter((e) => this.deps.ownsClosed?.(w, e) ?? true);
+    const closed = list.map((e) => ({
+      index: e.index,
       kind: e.kind,
       title: e.kind === 'window' ? `${e.tabs.length} tab${e.tabs.length === 1 ? '' : 's'}` : e.title || e.url,
       url: e.kind === 'window' ? '' : e.url,

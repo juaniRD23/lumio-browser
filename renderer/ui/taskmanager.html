@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Task Manager</title>
+  <link rel="stylesheet" href="taskmanager.css" />
+</head>
+<body>
+  <div class="wrap" id="wrap">
+    <table id="tm" aria-label="Lumio Browser processes">
+      <thead>
+        <tr>
+          <th class="task" aria-sort="none"><button type="button" data-key="title">Task</button></th>
+          <th class="num" aria-sort="descending"><button type="button" data-key="memory">Memory</button></th>
+          <th class="num" aria-sort="none"><button type="button" data-key="cpu">CPU</button></th>
+          <th class="num" aria-sort="none"><button type="button" data-key="network">Network</button></th>
+          <th class="num" aria-sort="none"><button type="button" data-key="pid">Process ID</button></th>
+        </tr>
+      </thead>
+      <tbody id="rows" tabindex="0" aria-label="Processes. Use the arrow keys to choose one."></tbody>
+    </table>
+  </div>
+  <footer>
+    <span id="summary" class="summary"></span>
+    <span class="spacer"></span>
+    <button type="button" id="end" class="btn danger" disabled>End process</button>
+  </footer>
+  <script type="module" src="taskmanager.js"></script>
+</body>
+</html>

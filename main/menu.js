@@ -50,6 +50,7 @@ function buildMenu(cmd, state = {}) {
         { type: 'separator' },
         { label: 'Save Page As…', accelerator: 'CmdOrCtrl+S', click: cmd.savePage },
         { label: 'Print…', accelerator: 'CmdOrCtrl+P', click: cmd.print },
+        { label: 'Print Using System Dialog…', accelerator: MAC ? 'Cmd+Alt+P' : 'Ctrl+Shift+P', click: cmd.printSystemDialog },
         ...(MAC ? [] : [{ type: 'separator' }, { label: 'Settings', accelerator: 'Ctrl+,', click: cmd.settings }, { label: 'Delete Browsing Data…', accelerator: 'Ctrl+Shift+Delete', click: cmd.clearBrowsingData }, { role: 'quit', label: 'Exit' }]),
       ],
     },
@@ -113,10 +114,10 @@ function buildMenu(cmd, state = {}) {
         { label: 'Home', accelerator: MAC ? 'Cmd+Shift+H' : 'Alt+Home', click: cmd.home },
         { type: 'separator' },
         { label: 'Recently Closed', enabled: false },
-        // A closed window opens whole, or one of its tabs.
+        // A closed window opens whole, or one of its tabs. (Page titles aren't translated.)
         ...(state.recentlyClosed || []).map((e) => (e.tabs?.length > 1
-          ? { label: short(e.label), submenu: [{ label: 'Restore Window', click: () => cmd.reopenClosed(e.index) }, { type: 'separator' }, ...e.tabs.map((t, i) => ({ label: short(t), click: () => cmd.reopenClosed(e.index, i) }))] }
-          : { label: short(e.label), click: () => cmd.reopenClosed(e.index) })),
+          ? { label: short(e.label), translate: false, submenu: [{ label: 'Restore Window', click: () => cmd.reopenClosed(e.index) }, { type: 'separator' }, ...e.tabs.map((t, i) => ({ label: short(t), translate: false, click: () => cmd.reopenClosed(e.index, i) }))] }
+          : { label: short(e.label), translate: false, click: () => cmd.reopenClosed(e.index) })),
         { type: 'separator' },
         { label: 'Show All History', accelerator: MAC ? 'Cmd+Y' : 'Ctrl+H', click: cmd.history },
         { label: 'Downloads', accelerator: MAC ? 'Cmd+Alt+L' : 'Ctrl+J', click: cmd.downloads },
@@ -136,9 +137,21 @@ function buildMenu(cmd, state = {}) {
       ],
     },
     {
+      label: 'Profiles',
+      submenu: [
+        ...(state.profiles || []).map((p) => ({ label: p.name, translate: false, type: 'checkbox', checked: !!p.current, click: () => cmd.openProfile(p.id) })),
+        { type: 'separator' },
+        { label: 'Manage Profiles…', click: cmd.profilePicker },
+        { label: 'Add Profile…', click: cmd.addProfile },
+        { label: 'Open Guest Window', click: cmd.newGuest },
+      ],
+    },
+    {
       label: 'Window',
       submenu: [
         ...(MAC ? [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }] : []),
+        { label: 'Task Manager', ...(MAC ? {} : { accelerator: 'Shift+Escape' }), click: cmd.taskManager },
+        { type: 'separator' },
         { label: 'Pin/Unpin Tab', click: cmd.pinTab },
         { label: 'Move Tab to New Window', click: cmd.moveTabToNewWindow },
         { label: 'Search Tabs…', accelerator: 'CmdOrCtrl+Shift+A', click: cmd.tabSearch },
@@ -232,6 +245,7 @@ function buildBrowserMenu(cmd, state = {}) {
       icon: 'tools',
       submenu: [
         { label: 'Delete browsing data…', icon: 'trash', accel: k('Cmd+Shift+Backspace', 'Ctrl+Shift+Delete'), run: cmd.clearBrowsingData },
+        { label: 'Task manager', icon: 'gauge', accel: MAC ? '' : 'Shift+Escape', run: cmd.taskManager },
         SEP,
         { label: 'Developer tools', icon: 'terminal', accel: k('Cmd+Alt+I', 'Ctrl+Shift+I'), run: cmd.devtools },
         ...(cmd.isDev ? [{ label: 'Browser UI developer tools', icon: 'terminal', accel: 'CmdOrCtrl+Alt+Shift+I', run: cmd.shellDevtools }] : []),

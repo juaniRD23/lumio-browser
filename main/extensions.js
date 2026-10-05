@@ -76,11 +76,12 @@ function iconDataUrl(extPath, manifest) {
 }
 
 class ExtensionManager {
-  constructor({ session, store, hooks }) {
+  // dir: the profile's folder (its installs go in dir/Extensions).
+  constructor({ session, store, hooks, dir = app.getPath('userData') }) {
     this.session = session;
     this.store = store;
     this.hooks = hooks; // createTab, selectTab, removeTab, createWindow, removeWindow, changed
-    this.root = path.join(app.getPath('userData'), 'Extensions');
+    this.root = path.join(dir, 'Extensions');
     this.ece = null;
     this.errors = new Map(); // id or path -> last load error
   }

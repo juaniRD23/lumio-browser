@@ -79,7 +79,7 @@ function stripMenuTemplate(c, act) {
 }
 
 class TabStrip {
-  // deps: { alive(), createWindow(opts), recentlyClosed: [], reopenClosed(w),
+  // deps: { alive(), createWindow(opts), recentlyClosed: [], ownsClosed(w, entry), reopenClosed(w),
   //         bookmarkAllTabs(w), removeExtensionTab(wc), siteMute,
   //         menuExtras(w, ids, tab): { groups, reading } items for the tab menu }
   constructor(deps) {
@@ -109,7 +109,10 @@ class TabStrip {
   }
 
   // ---------------------------------------------------------------- menus
-  closedCount(w) { return w.incognito ? w.closedTabs.length : this.deps.recentlyClosed.length; }
+  closedCount(w) {
+    if (w.incognito || w.profile?.guest) return w.closedTabs.length;
+    return this.deps.recentlyClosed.filter((e) => this.deps.ownsClosed?.(w, e) ?? true).length;
+  }
 
   menuContext(w, ids) {
     const m = w.tabs;
@@ -200,7 +203,8 @@ class TabStrip {
     for (const id of ids) {
       const tab = w.tabs.detach(id);
       if (!tab) continue;
-      if (tab.view && !w.incognito) this.deps.removeExtensionTab(tab.view.webContents);
+      this.deps.detached?.(w, tab); // its print preview belongs to the old window
+      if (tab.view && !w.incognito) this.deps.removeExtensionTab(tab.view.webContents, w);
       out.push(tab);
     }
     return out;

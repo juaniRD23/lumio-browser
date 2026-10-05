@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Lumio Browser</title>
+  <link rel="stylesheet" href="picker.css" />
+</head>
+<body>
+  <main id="pick" aria-labelledby="pick-title">
+    <div class="brand"><span class="mark" aria-hidden="true"></span></div>
+    <h1 id="pick-title">Who’s using Lumio?</h1>
+    <p class="sub">Each profile has its own history, bookmarks, passwords, Lumio account and settings.</p>
+    <div id="profiles" class="grid" role="list" aria-label="Profiles"></div>
+    <footer>
+      <button id="guest" class="btn" type="button"><span class="ic" aria-hidden="true"></span>Guest mode</button>
+      <span class="spacer"></span>
+      <label class="check"><input type="checkbox" id="show-picker"> Show on startup</label>
+    </footer>
+  </main>
+
+  <main id="add" hidden aria-labelledby="add-title">
+    <form id="add-form" class="panel" novalidate>
+      <h1 id="add-title">Add a profile</h1>
+      <p class="sub">For another person, or to keep work and personal browsing apart.</p>
+      <div class="preview" id="add-preview" aria-hidden="true"></div>
+      <label class="field-label" for="add-name">Name</label>
+      <input id="add-name" class="field" type="text" maxlength="40" autocomplete="off" spellcheck="false" placeholder="Like “Work” or “Sam”" />
+      <div class="field-label" id="color-label">Color</div>
+      <div id="add-colors" class="swatches" role="radiogroup" aria-labelledby="color-label"></div>
+      <div class="actions">
+        <button type="button" class="btn" id="add-cancel">Cancel</button>
+        <button type="submit" class="btn primary" id="add-done">Add</button>
+      </div>
+    </form>
+  </main>
+
+  <div id="confirm" class="scrim" hidden>
+    <div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-text">
+      <h2 id="confirm-title"></h2>
+      <p id="confirm-text">This deletes its history, bookmarks, passwords, Lumio chats and settings from this computer, and signs it out of Lumio. What’s synced to your Lumio account stays there.</p>
+      <div class="actions">
+        <button type="button" class="btn" id="confirm-cancel">Cancel</button>
+        <button type="button" class="btn danger" id="confirm-delete">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="menu" class="menu" role="menu" hidden>
+    <button type="button" role="menuitem" data-act="edit">Edit</button>
+    <button type="button" role="menuitem" data-act="delete" class="danger">Delete</button>
+  </div>
+  <script type="module" src="picker.js"></script>
+</body>
+</html>

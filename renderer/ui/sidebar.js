@@ -159,7 +159,7 @@ export function initSidebar({ api, panel, isNewTab, onLayout, getAi }) {
     if (wf) { panel.runWorkflow(wf.dataset.wf); return; }
     const tpl = e.target.closest('[data-tpl]');
     if (tpl) {
-      const text = TEMPLATES[Number(tpl.dataset.tpl)].text;
+      const text = window.lumioI18n?.t(TEMPLATES[Number(tpl.dataset.tpl)].text) ?? TEMPLATES[Number(tpl.dataset.tpl)].text; // in Lumio's language
       panel.newTask({ projectId: projectView, full: isNewTab() });
       panel.prefill(text);
       // Select the first [blank] to type over.

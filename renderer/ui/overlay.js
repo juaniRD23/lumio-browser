@@ -12,6 +12,7 @@ import './overlay-groups.js'; // the tab group editor
 import { siteIcon } from '/assets/site-icons.js';
 import { permissionBubble } from './overlay-site.js';
 import { securityChoosers } from './overlay-security.js';
+import { renderPerf, perfAction } from './overlay-perf.js';
 
 const api = window.lumio;
 const card = document.getElementById('card');
@@ -174,8 +175,28 @@ function renderSiteInfo({ info }) {
     </div>`;
 }
 
-function renderAccount({ account = {}, profile = {}, incognito }) {
+// The other profiles to switch to, and Add, Guest and Manage profiles.
+function profilesSection(profiles = [], guest = false) {
+  const others = profiles.filter((p) => !p.current);
+  const rows = others.map((p) => `<button class="acc-item acc-profile" data-acc="profile:${esc(p.id)}">${avatarHtml({ profile: p, size: 22 })}<span class="t">${esc(p.name)}</span>${p.email ? `<span class="acc-meta acc-email">${esc(p.email)}</span>` : ''}</button>`).join('');
+  return `<div class="acc-list acc-profiles">
+      ${others.length ? `<div class="acc-sec">${guest ? 'Profiles' : 'Other profiles'}</div>${rows}` : ''}
+      <div class="acc-tools">
+        <button class="acc-tool" data-acc="profiles:add">${icons.plus}<span>Add</span></button>
+        ${guest ? '' : `<button class="acc-tool" data-acc="profiles:guest">${icons.person}<span>Guest</span></button>`}
+        <button class="acc-tool" data-acc="profiles:manage">${icons.users}<span>Manage</span></button>
+      </div>
+    </div>`;
+}
+
+function renderAccount({ account = {}, profile = {}, incognito, guest, profiles }) {
   const item = (act, icon, label, extra = '') => `<button class="acc-item" data-acc="${act}"><span class="ic">${icon}</span><span class="t">${esc(label)}</span>${extra}</button>`;
+  if (guest) {
+    card.innerHTML = `<div class="acc-head">${avatarHtml({ guest: true, size: 56 })}<div class="acc-name">Guest</div><div class="acc-sub">Nothing you do here is kept after you close Guest</div></div>
+      <div class="acc-list">${item('page:settings', icons.gear, 'Settings')}${item('close-guest', icons.x, 'Close Guest')}</div>
+      ${profilesSection(profiles, true)}`;
+    return;
+  }
   if (incognito) {
     card.innerHTML = `<div class="acc-head">${avatarHtml({ incognito: true, size: 56 })}<div class="acc-name">Incognito</div><div class="acc-sub">Pages here aren’t saved to history</div></div>
       <div class="acc-list">${item('page:passwords', icons.key, 'Passwords and Autofill')}${item('page:settings', icons.gear, 'Settings')}${item('close-incognito', icons.x, 'Close all incognito windows')}</div>`;
@@ -205,7 +226,8 @@ function renderAccount({ account = {}, profile = {}, incognito }) {
       ${item('page:plan', icons.gauge, planLabel, planExtra + upgrade)}
       ${item('page:settings', icons.gear, 'Settings')}
       ${account.signedIn ? item('sign-out', icons.logout, 'Sign out of Lumio') : ''}
-    </div>`;
+    </div>
+    ${profilesSection(profiles)}`;
 }
 
 // Saved accounts under a sign-in field (or a suggested strong password).
@@ -679,6 +701,7 @@ const RENDER = {
   zoom: (p) => renderZoom(card, p), tabsearch: (p) => renderTabSearch(card, p),
   permission: (p) => bubble.show(p), // overlay-site.js
   device: (p) => choosers.show(p), clientcert: (p) => choosers.show(p), // overlay-security.js
+  perf: (p) => renderPerf(card, p), // overlay-perf.js
 };
 // These keep the size main gives them; the rest are as tall as what's in them.
 const FIXED = new Set(['suggest', 'downloads', 'screenshare', 'menu', 'bm-menu', 'bm-edit', 'tab-group']);
@@ -828,6 +851,10 @@ document.addEventListener('keydown', (e) => {
 initZoom(card, api, () => kind);
 initTabSearch(card, api, () => kind);
 
+// The performance popup's buttons answer clicks and keys (overlay-perf.js).
+card.addEventListener('click', (e) => { if (kind === 'perf') perfAction(e, api); });
+document.addEventListener('keydown', (e) => { if (kind === 'perf' && e.key === 'Escape') api.send('perf:close'); });
+
 card.addEventListener('change', (e) => {
   const sel = e.target.closest('select[data-perm]');
   if (kind !== 'siteinfo' || !sel) return;
@@ -852,6 +879,7 @@ card.addEventListener('mousedown', async (e) => {
   if (kind === 'popups') return; // its buttons and choices work like normal ones (see above)
   if (kind === 'tabsearch') return; // overlay-tabsearch.js has its own
   if (kind === 'permission' || choosers.owns(kind)) return; // overlay-site.js and overlay-security.js handle their own clicks
+  if (kind === 'perf') return;
   if (kind === 'screenshare') {
     if (!e.target.closest('#ss-audio, .ss-audio')) pickShare(e);
     return;
@@ -910,6 +938,11 @@ card.addEventListener('mousedown', async (e) => {
     else if (act === 'cancel') api.send('account:cancel');
     else if (act === 'sign-out') api.send('account:sign-out');
     else if (act === 'close-incognito') api.send('account:close-incognito');
+    else if (act === 'close-guest') api.send('account:close-guest');
+    else if (act.startsWith('profile:')) api.send('profiles:open', act.slice(8));
+    else if (act === 'profiles:add') api.send('profiles:manage', 'add');
+    else if (act === 'profiles:guest') api.send('profiles:guest');
+    else if (act === 'profiles:manage') api.send('profiles:manage');
     else if (act.startsWith('open:')) api.send('account:open', act.slice(5));
     else if (act.startsWith('page:')) api.send('account:page', act.slice(5));
     if (act !== 'cancel') api.send('overlay:pick', { kind });

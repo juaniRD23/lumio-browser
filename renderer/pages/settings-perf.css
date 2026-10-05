@@ -1,0 +1,14 @@
+/* Settings › Performance (settings-perf.js) and the Profiles row. */
+.perf-sub { border-top: 1px solid var(--line); padding-left: 24px; }
+.perf-sub .row { padding-top: 12px; padding-bottom: 12px; }
+.perf-sub.dim { opacity: .45; }
+.perf-sub.dim .row { pointer-events: none; }
+.keep-list { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 0; padding: 0; }
+.keep-list li { display: inline-flex; align-items: center; gap: 2px; height: 28px; padding: 0 4px 0 12px; border-radius: 999px; background: var(--overlay-3); border: 1px solid var(--line); font-size: 12.5px; }
+.keep-x { width: 22px; height: 22px; border: 0; border-radius: 50%; background: none; color: var(--dim); cursor: pointer; font-size: 15px; line-height: 1; }
+.keep-x:hover { background: var(--overlay-5); color: var(--text); }
+.keep-x:focus-visible, .keep-form .field:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.keep-form { display: flex; gap: 8px; margin-top: 10px; }
+.keep-form .field { flex: 1; max-width: 300px; }
+.profiles-card { margin-top: 12px; }
+.perf-sub + .row { border-top: 1px solid var(--line); }

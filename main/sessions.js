@@ -135,7 +135,7 @@ class Sessions {
   pending() {
     const recent = this.deps.recentlyClosed;
     return [...(this.kept || []), ...this.offered].filter((e) => recent.includes(e) && e.tabs?.length)
-      .map(({ tabs, active, bounds, maximized }) => ({ tabs, active, bounds, ...(maximized ? { maximized } : {}) }));
+      .map(({ tabs, active, groups, bounds, maximized }) => ({ tabs, active, ...(groups?.length ? { groups } : {}), bounds, ...(maximized ? { maximized } : {}) }));
   }
 
   // Browsing data's "Recently closed" was cleared: nothing left to restore.
@@ -182,14 +182,14 @@ class Sessions {
     const target = w && !w.closed && !w.incognito ? w : null;
     list.forEach((s, i) => {
       if (i === 0 && target) this.restoreInto(target, s);
-      else this.deps.createWindow({ tabs: s.tabs, active: s.active, bounds: s.bounds, maximized: !!s.maximized });
+      else this.deps.createWindow({ tabs: s.tabs, active: s.active, groups: s.groups, bounds: s.bounds, maximized: !!s.maximized });
     });
   }
 
   restoreInto(w, s) {
     const m = w.tabs;
     const blank = m.tabs.length === 1 && isUnusedNewTab(m.tabs[0]) ? m.tabs[0] : null;
-    m.restore(s.tabs, s.active);
+    m.restore(s.tabs, s.active, s.groups);
     if (blank && m.tabs.length > 1) m.close(blank.id);
   }
 }

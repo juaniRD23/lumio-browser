@@ -89,6 +89,8 @@
   --ntbg-meadow-1: light-dark(#ddf3c0, #1f4420);
   --ntbg-meadow-2: light-dark(#c3e3f6, #10314a);
   --sheet-scrim: light-dark(#0000001f, #0006); /* behind a side sheet */
+  --paper: light-dark(#ffffff, #ffffff); /* a printed sheet in the print preview: white in both */
+  --paper-shadow: 0 1px 3px light-dark(#00000024, #000c), 0 10px 30px light-dark(#0000001a, #0009);
 
   /* Menus and popups (renderer/ui/overlay.css) */
   --text-strong: light-dark(#000000, #ffffff); /* emphasis, and a label under the pointer */
@@ -157,6 +159,13 @@
 }
 :root[data-appearance="dark"] { color-scheme: dark; }
 :root[data-appearance="light"] { color-scheme: light; }
+
+/* Energy Saver is on (main/perf.js puts this class on the window's <html>):
+   the browser's own animations stop, like with reduced motion. */
+:root.energy-saver *, :root.energy-saver *::before, :root.energy-saver *::after {
+  animation-duration: .01ms !important; animation-iteration-count: 1 !important;
+  transition-duration: .01ms !important; scroll-behavior: auto !important;
+}
 
 /* The accent is the profile's theme color, set on <html> as --accent-dark and
    --accent-light (renderer/assets/theme-colors.js). It's chosen here instead

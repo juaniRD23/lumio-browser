@@ -77,14 +77,19 @@ export const icons = {
   stepNow: '<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="10" cy="10" r="7.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path class="pie" d="M10 5.2A4.8 4.8 0 0 1 14.8 10H10z" fill="currentColor"/></svg>',
   stepTodo: '<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="10" cy="10" r="7.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.6 2.4"/></svg>',
   dots: '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="5.5" r="1.7" fill="currentColor"/><circle cx="12" cy="12" r="1.7" fill="currentColor"/><circle cx="12" cy="18.5" r="1.7" fill="currentColor"/></svg>',
+  users: s('<circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19c.9-3 3-4.6 5.5-4.6s4.6 1.6 5.5 4.6"/><path d="M15.5 5.6a3.2 3.2 0 0 1 0 6M17 14.6c1.8.4 3 1.9 3.6 4.4"/>', 'width="16" height="16"'),
+  leaf: s('<path d="M5 19.5C5 11 10 5.5 19.5 4.5 19 14 13.5 19 5 19.5z"/><path d="M5 19.5c3-4.2 6.2-7 10-9"/>', 'width="15" height="15"'),
+  pulse: s('<path d="M3 12h4l2.5-6 4 12 2.5-6h5"/>', 'width="15" height="15"'),
 };
 
 const escapeHtml = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-// The round avatar on the account button and in its menu.
-export function avatarHtml({ profile = {}, account = {}, incognito = false, size = 26 } = {}) {
+// The round avatar on the account button and in its menu (and for each
+// profile in the profile picker).
+export function avatarHtml({ profile = {}, account = {}, incognito = false, guest = false, size = 26 } = {}) {
   const box = `width:${size}px;height:${size}px`;
   if (incognito) return `<span class="avatar incog" style="${box}">${icons.incognito}</span>`;
+  if (guest) return `<span class="avatar guest" style="${box}">${icons.person}</span>`;
   if (typeof profile.photo === 'string' && profile.photo.startsWith('data:image/')) {
     return `<span class="avatar" style="${box}"><img src="${escapeHtml(profile.photo)}" alt=""></span>`;
   }

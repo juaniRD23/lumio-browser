@@ -58,10 +58,11 @@ class CookieClock {
 
 class BrowsingData {
   // profile: the normal profile ({ session, chats, permissions }).
-  // recentlyClosed: main.js's list (changed in place); onClosedChanged
+  // recentlyClosed: main.js's list (changed in place), of every profile:
+  // ownsClosed(entry) says which are this profile's. onClosedChanged
   // redraws the menu. stopAI stops Lumio AI in normal windows.
-  constructor({ store, profile, passwords, clock, recentlyClosed, onClosedChanged = () => {}, stopAI = () => {}, siteOf = null }) {
-    Object.assign(this, { store, profile, passwords, clock, recentlyClosed, onClosedChanged, stopAI, siteOf });
+  constructor({ store, profile, passwords, clock, recentlyClosed, ownsClosed = () => true, onClosedChanged = () => {}, stopAI = () => {}, siteOf = null }) {
+    Object.assign(this, { store, profile, passwords, clock, recentlyClosed, ownsClosed, onClosedChanged, stopAI, siteOf });
   }
 
   // range: milliseconds back from now, or 0 for all time.
@@ -95,7 +96,7 @@ class BrowsingData {
       passwords: (pw?.store.entries || []).filter((e) => since(e.updated || e.created)).length + (pw?.passkeys.list() || []).filter((k) => since(k.created)).length,
       siteSettings: this.profile.permissions.settings.count({ from }),
       chats: this.profile.chats.list().filter((c) => since(c.updatedAt)).length,
-      closed: this.recentlyClosed.filter((e) => since(e.time)).length,
+      closed: this.recentlyClosed.filter((e) => this.ownsClosed(e) && since(e.time)).length,
     };
   }
 
@@ -128,7 +129,7 @@ class BrowsingData {
       else for (const c of this.profile.chats.list().filter((x) => since(x.updatedAt))) this.profile.chats.delete(c.id);
     }
     if (what.includes('closed')) {
-      const keep = this.recentlyClosed.filter((e) => !since(e.time));
+      const keep = this.recentlyClosed.filter((e) => !this.ownsClosed(e) || !since(e.time));
       this.recentlyClosed.splice(0, this.recentlyClosed.length, ...keep);
       this.onClosedChanged();
     }

@@ -26,6 +26,8 @@ const MODES = { ask: { name: 'Ask', icon: icons.shield }, auto: { name: 'Auto', 
 const RISK_LABEL = { browser: 'Browser action', mac: `Controls your ${PC}`, shell: `Runs on your ${PC}` };
 
 const $ = (s) => document.querySelector(s);
+// Prompts Lumio writes for you, in Lumio's language (renderer/assets/i18n).
+const tr = (text) => window.lumioI18n?.t(text) ?? text;
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 marked.setOptions({ gfm: true, breaks: true });
@@ -89,7 +91,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     api, prompt, autosize: () => autosize(), notice: (t) => notice(t),
     isEnabled: () => !!ai.workflows,
     run: (id, values) => runWorkflow(id, values),
-    onSave: () => submit('Save what you just did as a workflow I can run again. Make the steps general, with {blanks} for anything that changes each time.'),
+    onSave: () => submit(tr('Save what you just did as a workflow I can run again. Make the steps general, with {blanks} for anything that changes each time.')),
   });
   // Runs a saved workflow in a new chat.
   async function runWorkflow(id, values) {
@@ -387,10 +389,10 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     summarized.add(`${chatId}|${t.url}`);
     renderSuggest();
     let res = null;
-    if (kind === 'video') res = await submit('Summarize this video: a one-line takeaway first, then the key points with their timestamps.', true);
+    if (kind === 'video') res = await submit(tr('Summarize this video: a one-line takeaway first, then the key points with their timestamps.'), true);
     else {
       const items = await readTabPdf(t);
-      if (items) res = await submit('Summarize this PDF: a one-line takeaway first, then the key points.', false, items);
+      if (items) res = await submit(tr('Summarize this PDF: a one-line takeaway first, then the key points.'), false, items);
     }
     if (res?.chatId) summarized.add(`${res.chatId}|${t.url}`);
     renderSuggest();
@@ -559,7 +561,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     messages.append(el);
     el.querySelectorAll('.suggestion').forEach((b) => b.addEventListener('click', () => {
       const s = SUGGESTIONS[Number(b.dataset.i)];
-      submit(s.text, !!s.page);
+      submit(tr(s.text), !!s.page);
     }));
   }
 

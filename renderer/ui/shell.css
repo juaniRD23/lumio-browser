@@ -1,5 +1,6 @@
 @import url('/assets/fonts/fonts.css');
 @import url('/assets/theme.css'); /* colors and type */
+@import url('perf.css'); /* performance buttons, Guest avatar */
 
 :root {
   --slide: .38s cubic-bezier(.32, .72, 0, 1);      /* AI panel opening */

@@ -15,6 +15,7 @@ import { initTabGroups } from './tab-groups.js';
 import { initSidePanel } from './side-panel.js';
 import { initPermissionChip } from './permission-chip.js';
 import { initCaptureBar, captureWords } from './capture-bar.js';
+import { initPerf } from './perf.js';
 import './keys.js';
 import '/assets/ui-prefs.js';
 import { initA11y, textScale } from './a11y.js';
@@ -26,7 +27,7 @@ const modKey = (e) => (IS_MAC ? e.metaKey : e.ctrlKey);
 const api = window.lumio;
 const $ = (sel) => document.querySelector(sel);
 
-const state = { tabs: [], groups: [], activeId: null, downloads: [], incognito: false, account: {}, profile: {} };
+const state = { tabs: [], groups: [], activeId: null, downloads: [], incognito: false, guest: false, account: {}, profile: {}, profiles: [] };
 const activeTab = () => state.tabs.find((t) => t.id === state.activeId) || null;
 
 // ------------------------------------------------------------------ icons
@@ -567,7 +568,10 @@ function renderToolbar() {
   popups.render(t);
   renderZoomBadge(t?.zoom);
   if (typeof renderPwKey === 'function') renderPwKey();
-  document.title = t ? `${t.title} — Lumio Browser${state.incognito ? ' (Incognito)' : ''}` : 'Lumio Browser';
+  // With several profiles, the window's title says whose it is (Guest's too).
+  const name = state.profiles.length > 1 && state.profiles.find((p) => p.current)?.name;
+  const who = state.guest ? ' (Guest)' : name ? ` (${name})` : '';
+  document.title = `${t ? `${t.title} — ` : ''}Lumio Browser${state.incognito ? ' (Incognito)' : ''}${who}`;
   // Extension buttons show the state for the active tab.
   const ext = $('#ext-actions');
   if (t?.wcId && ext.getAttribute('tab') !== String(t.wcId)) ext.setAttribute('tab', String(t.wcId));
@@ -885,10 +889,10 @@ function applyTheme() {
   setAccent(document.documentElement, accent());
 }
 function renderAccount() {
-  accountBtn.innerHTML = avatarHtml({ profile: state.profile, account: state.account, incognito: state.incognito, size: 26 });
+  accountBtn.innerHTML = avatarHtml({ profile: state.profile, account: state.account, incognito: state.incognito, guest: state.guest, size: 26 });
   accountBtn.classList.toggle('connecting', !!state.account.connecting);
   const a = state.account;
-  accountBtn.title = state.incognito ? 'Incognito'
+  accountBtn.title = state.incognito ? 'Incognito' : state.guest ? 'Guest'
     : a.signedIn ? `${state.profile.name || a.name || a.email}\n${a.email}${a.planName ? ` · Lumio ${a.planName}` : ''}`
       : 'Sign in to Lumio';
   applyTheme();
@@ -902,7 +906,7 @@ function showAccountMenu() {
   api.send('overlay:show', {
     // The overlay page measures itself and asks for the right height.
     rect: { x: r.right - width - 12 + 6, y: r.bottom + 4, width: width + 24, height: 420 },
-    payload: { kind: 'account', account: state.account, profile: state.profile, incognito: state.incognito, accent: accent(), anchor: anchorOf(accountBtn) },
+    payload: { kind: 'account', account: state.account, profile: state.profile, incognito: state.incognito, guest: state.guest, profiles: state.profiles, accent: accent(), anchor: anchorOf(accountBtn) },
   });
 }
 accountBtn.addEventListener('mousedown', (e) => e.preventDefault());
@@ -913,6 +917,7 @@ accountBtn.addEventListener('click', () => {
 window.addEventListener('mousedown', (e) => { if (overlayKind === 'account' && !e.target.closest('#account-btn')) hideOverlay(); });
 api.on('account', (a) => { state.account = a || {}; renderAccount(); });
 api.on('profile', (p) => { state.profile = p || {}; renderAccount(); });
+api.on('profiles-changed', (list) => { state.profiles = Array.isArray(list) ? list : []; renderAccount(); renderToolbar(); });
 
 // ------------------------------------------------------------------ updates
 // A blue Update button next to the avatar while a newer release is out.
@@ -1179,11 +1184,15 @@ bookmarksBar.set(init.bookmarks, init.savedGroups);
 state.incognito = init.incognito;
 state.account = init.account || {};
 state.profile = init.profile || {};
+state.guest = !!init.guest;
+state.profiles = init.profiles || [];
 document.body.classList.toggle('incognito', init.incognito);
 document.body.classList.toggle('windows', init.platform === 'win32');
 $('#incognito-badge').hidden = !init.incognito;
 $('#beta-badge').hidden = !init.beta; // Lumio Beta (main/flavor.js)
 $('#ext-area').hidden = !init.extensions;
+if (init.extensions && init.partition) $('#ext-actions').setAttribute('partition', init.partition); // this profile's extensions
+initPerf(api, init);
 renderTabs();
 renderToolbar();
 renderLoad(activeTab(), true);

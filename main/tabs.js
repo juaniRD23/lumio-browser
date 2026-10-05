@@ -16,6 +16,7 @@ const zoomPrefs = require('./zoom');
 const sessions = require('./sessions');
 const sadTab = require('./sad-tab');
 const { TabGroups } = require('./tab-groups');
+const i18n = require('./i18n');
 
 const NEWTAB = 'lumio://newtab/';
 const INTERNAL_PRELOAD = path.join(__dirname, '..', 'preload', 'internal.js');
@@ -57,7 +58,7 @@ let nextPopupId = 1;
 
 class TabManager {
   // radius: the page's corners (a pop-up's page has none).
-  constructor({ win, session, store, emit, hooks, incognito = false, radius = 10 }) {
+  constructor({ win, session, store, emit, hooks, incognito = false, guest = false, radius = 10 }) {
     this.win = win;
     this.session = session;
     this.store = store;
@@ -65,6 +66,7 @@ class TabManager {
     this.hooks = hooks;
     this.incognito = incognito;
     this.radius = radius;
+    this.guest = guest; // a Guest window: like incognito, nothing is remembered
     this.tabs = [];
     this.activeId = null;
     this.slot = { x: 0, y: 84, width: 800, height: 600 };
@@ -178,10 +180,10 @@ class TabManager {
   // Memory Saver: closes the page of a tab you haven't looked at for a while,
   // keeping its address, title, icon and history; it reloads when you return.
   // Never the tab you're on, one playing sound, loading, being captured
-  // (screen share, camera) or with devtools open.
+  // (screen share, camera), with devtools open, or a Lumio AI working in it.
   discard(id) {
     const tab = this.get(id);
-    if (!tab?.view || tab.id === this.activeId || tab.audible || tab.dialogs?.length || tab.closing) return false;
+    if (!tab?.view || tab.id === this.activeId || tab.audible || tab.agent || tab.dialogs?.length || tab.closing) return false;
     const wc = tab.view.webContents;
     if (wc.isDestroyed() || wc.isLoading() || wc.isCurrentlyAudible() || wc.isBeingCaptured() || wc.isDevToolsOpened()) return false;
     const url = wc.getURL();
@@ -270,7 +272,7 @@ class TabManager {
     const wc = tab.view.webContents;
     const M = () => tab.owner;
     const update = (patch) => { Object.assign(tab, patch); M().changed(); };
-    const remember = (fn) => { if (!M().incognito) fn(M().store); };
+    const remember = (fn) => { if (!M().incognito && !M().guest) fn(M().store); };
 
     // Chrome's rule for "Leave site?": only a page you've clicked or typed in
     // may ask (each new page starts untouched). A click or key press also lets
@@ -990,9 +992,10 @@ class TabManager {
   // Quick Lumio AI actions for highlighted text (right-click › Lumio).
   selectionActions(selection) {
     const quoted = selection.slice(0, 8000).split('\n').map((l) => `> ${l}`).join('\n');
-    const ask = (instruction, includePage = false) => this.hooks.askAI(`${instruction}\n\n${quoted}`, { includePage });
+    // The instructions are in Lumio's language, so Lumio AI answers in it.
+    const ask = (instruction, includePage = false) => this.hooks.askAI(`${i18n.t(instruction)}\n\n${quoted}`, { includePage });
     let lang = 'English';
-    try { lang = new Intl.DisplayNames(['en'], { type: 'language' }).of(app.getLocale().split('-')[0]) || 'English'; } catch { /* keep English */ }
+    try { lang = new Intl.DisplayNames([i18n.lang()], { type: 'language' }).of(app.getLocale().split('-')[0]) || 'English'; } catch { /* keep English */ }
     return [
       { label: 'Explain', click: () => ask('Explain this simply, using the page for context:', true) },
       { label: 'Summarize', click: () => ask('Summarize this in a few short bullet points:') },
@@ -1148,7 +1151,7 @@ class TabManager {
 
     if (params.misspelledWord) {
       const suggestions = (params.dictionarySuggestions || []).slice(0, 5);
-      for (const word of suggestions) items.push({ label: word, click: () => wc.replaceMisspelling(word) });
+      for (const word of suggestions) items.push({ label: word, translate: false, click: () => wc.replaceMisspelling(word) }); // (main/i18n.js)
       if (!suggestions.length) items.push({ label: 'No spelling suggestions', enabled: false });
       items.push({ label: 'Add to Dictionary', click: () => this.session.addWordToSpellCheckerDictionary(params.misspelledWord) });
       sep();
@@ -1159,12 +1162,12 @@ class TabManager {
       items.push(
         { label: 'Open Link in New Tab', click: openLink(() => this.create(params.linkURL, { active: false, index })) },
         { label: 'Open Link in New Window', click: openLink(() => this.hooks.openInNewWindow?.(params.linkURL, this.incognito)) },
-        ...(this.incognito ? [] : [{ label: 'Open Link in Incognito Window', click: openLink(() => this.hooks.openInNewWindow?.(params.linkURL, true)) }]),
+        ...(this.incognito || this.guest ? [] : [{ label: 'Open Link in Incognito Window', click: openLink(() => this.hooks.openInNewWindow?.(params.linkURL, true)) }]),
         { type: 'separator' },
         { label: 'Save Link As…', click: () => this.hooks.saveAs(wc, params.linkURL) },
         { label: 'Copy Link Address', click: () => clipboard.writeText(params.linkURL) },
-        ...(this.incognito || !/^https?:/.test(params.linkURL) || !this.hooks.readingList ? [] : [{ label: 'Add Link to Reading List', click: () => this.hooks.readingList(params.linkURL, params.linkText) }]),
-        ...(ai ? [{ label: 'Ask Lumio About This Link', click: () => this.hooks.askAI(`What is at this link? ${params.linkURL}`, { includePage: false }) }] : []),
+        ...(this.incognito || this.guest || !/^https?:/.test(params.linkURL) || !this.hooks.readingList ? [] : [{ label: 'Add Link to Reading List', click: () => this.hooks.readingList(params.linkURL, params.linkText) }]),
+        ...(ai ? [{ label: 'Ask Lumio About This Link', click: () => this.hooks.askAI(i18n.t(`What is at this link? ${params.linkURL}`), { includePage: false }) }] : []),
       );
       sep();
     }
@@ -1204,7 +1207,7 @@ class TabManager {
         { role: 'copy' },
         { label: `Search ${engine.name} for “${short}”`, click: () => this.create(parseInput(selection, engine.url).url, { index }) },
         ...(ai ? [
-          { label: `Ask Lumio About “${short}”`, click: () => this.hooks.askAI(`About this text from the page:\n\n> ${selection}\n\n`, { includePage: true, draft: true }) },
+          { label: `Ask Lumio About “${short}”`, click: () => this.hooks.askAI(`${i18n.t('About this text from the page:')}\n\n> ${selection}\n\n`, { includePage: true, draft: true }) },
           { label: 'Lumio', submenu: this.selectionActions(selection) },
         ] : []),
       );
@@ -1217,10 +1220,10 @@ class TabManager {
         { label: 'Reload', click: () => this.reload(false, tab.id) },
         { type: 'separator' },
         { label: 'Save Page As…', click: () => this.hooks.savePage?.(tab) },
-        { label: 'Print…', click: () => wc.print() },
-        ...(this.incognito || !/^https?:/.test(wc.getURL()) ? [] : [{ label: 'Add Page to Reading List', click: () => this.hooks.readingList?.(wc.getURL(), wc.getTitle()) }]),
+        { label: 'Print…', click: () => (this.hooks.print ? this.hooks.print(tab) : wc.print()) },
+        ...(this.incognito || this.guest || !/^https?:/.test(wc.getURL()) ? [] : [{ label: 'Add Page to Reading List', click: () => this.hooks.readingList?.(wc.getURL(), wc.getTitle()) }]),
         { type: 'separator' },
-        ...(ai ? [{ label: 'Summarize This Page with Lumio', click: () => this.hooks.askAI('Summarize this page.', { includePage: true }) }] : []),
+        ...(ai ? [{ label: 'Summarize This Page with Lumio', click: () => this.hooks.askAI(i18n.t('Summarize this page.'), { includePage: true }) }] : []),
         { label: 'View Page Source', click: () => this.create('view-source:' + wc.getURL(), { index }) },
       );
       sep();

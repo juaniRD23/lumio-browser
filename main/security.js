@@ -87,7 +87,7 @@ class Security {
     this.findTab = findTab;
     this.fetch = fetchImpl;
     this.profiles = new Set();
-    this.unused = null; // normal windows only
+    // (Each normal profile's unused permissions: profile.security.unused.)
     this.lastCheck = null;
     this.cache = { at: 0, visited: new Set(), targets: BRAND_TARGETS };
 
@@ -138,10 +138,13 @@ class Security {
     profile.permissions.onGranted = (wcId, cats) => this.capture.granted(wcId, cats);
     profile.downloads.danger = (item, wc) => this.downloadDanger(item, wc);
     if (!profile.incognito) {
-      this.unused = new UnusedPermissions({ store: this.store, siteSettings });
-      const sweep = () => { if (this.settings().autoRevoke) this.unused.sweep(); };
+      const unused = new UnusedPermissions({ store: profile.store || this.store, siteSettings }); // its own visits
+      profile.security.unused = unused;
+      const sweep = () => { if (this.settings().autoRevoke && this.profiles.has(profile)) unused.sweep(); };
       setTimeout(sweep, 30_000).unref?.();
-      setInterval(sweep, DAY).unref?.();
+      const daily = setInterval(sweep, DAY);
+      daily.unref?.();
+      profile.security.timer = daily;
     }
     this.profiles.add(profile);
   }
@@ -153,6 +156,7 @@ class Security {
     s.guard.dispose();
     s.extras.dispose();
     s.devices.dispose();
+    clearInterval(s.timer);
     this.profiles.delete(profile);
   }
 
@@ -169,7 +173,7 @@ class Security {
     const id = wc.id;
     wc.on('did-navigate', (_e, url) => {
       this.capture.ended(id); // the page's captures went with it
-      if (!w.incognito) this.unused?.visited(url);
+      if (!w.incognito) w.profile.security?.unused?.visited(url);
     });
     wc.once('destroyed', () => this.capture.ended(id));
   }
@@ -251,7 +255,7 @@ class Security {
   }
 
   // ---------------------------------------------------------------- Safety check
-  async safetyCheck() {
+  async safetyCheck(w) {
     const [update, passwords] = await Promise.all([
       this.updater ? this.updater.check({ manual: true }).catch(() => this.updater.state) : null,
       this.checkup.run().catch(() => ({ error: 'Couldn’t check your passwords. Try again later.' })),
@@ -266,11 +270,13 @@ class Security {
       safeBrowsing: this.settings().safeBrowsing,
       extensions: { on: on.length, unpacked: on.filter((e) => e.type === 'unpacked').map((e) => e.name) },
     };
-    return this.safetyState();
+    return this.safetyState(w);
   }
 
-  safetyState() {
-    return { last: this.lastCheck, unused: this.unused?.list() || [], autoRevoke: this.settings().autoRevoke, safeBrowsing: this.settings().safeBrowsing };
+  // w: the window of the Settings page asking (its profile's unused permissions).
+  safetyState(w) {
+    const unused = w?.profile.base?.security?.unused;
+    return { last: this.lastCheck, unused: unused?.list() || [], autoRevoke: this.settings().autoRevoke, safeBrowsing: this.settings().safeBrowsing };
   }
 
   // ---------------------------------------------------------------- IPC
@@ -298,9 +304,9 @@ class Security {
       const error = await shell.openPath(where);
       return error ? { ok: false, error } : { ok: true };
     });
-    internalHandle('page:safety-state', ['settings'], () => this.safetyState());
-    internalHandle('page:safety-check', ['settings'], () => this.safetyCheck());
-    internalHandle('page:unused-undo', ['settings'], (_ctx, origin) => { this.unused?.undo(String(origin || '')); return this.safetyState(); });
+    internalHandle('page:safety-state', ['settings'], ({ w }) => this.safetyState(w));
+    internalHandle('page:safety-check', ['settings'], ({ w }) => this.safetyCheck(w));
+    internalHandle('page:unused-undo', ['settings'], ({ w }, origin) => { w.profile.base?.security?.unused?.undo(String(origin || '')); return this.safetyState(w); });
 
     // ---- Password Checkup (Passwords page, Safety check) ----
     const checkupState = (extra = {}) => ({ ...this.checkup.summary(), ...extra, flags: this.checkup.flags() });

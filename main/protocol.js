@@ -1,5 +1,5 @@
 // lumio:// serves the browser's own UI and internal pages from disk.
-//   lumio://shell/, overlay/, aura/, dialog/, popup/, notice/  -> renderer/ui   (default session only)
+//   lumio://shell/, overlay/, aura/, dialog/, popup/, notice/, picker/, taskmanager/, print/ -> renderer/ui (default session only)
 //   lumio://newtab/, settings, history, downloads, bookmarks, extensions,
 //   error, welcome, credits, interstitial (warning pages) -> renderer/pages (tab sessions)
 //   */assets/*  -> renderer/assets,  */vendor/* -> whitelisted node_modules files
@@ -9,6 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const { electronFile, chromiumCreditsHtml } = require('./credits');
+const { localizeHtml } = require('./i18n');
 
 const ROOT = path.join(__dirname, '..');
 const UI_DIR = path.join(ROOT, 'renderer', 'ui');
@@ -19,7 +20,7 @@ const VENDOR = {
   'purify.js': path.join(ROOT, 'node_modules', 'dompurify', 'dist', 'purify.es.mjs'),
 };
 
-const UI_HOSTS = new Set(['shell', 'overlay', 'aura', 'dialog', 'popup', 'notice']);
+const UI_HOSTS = new Set(['shell', 'overlay', 'aura', 'dialog', 'popup', 'notice', 'picker', 'taskmanager', 'print']);
 const PAGE_HOSTS = new Set(['newtab', 'settings', 'history', 'downloads', 'bookmarks', 'extensions', 'passwords', 'error', 'welcome', 'credits', 'interstitial']);
 const CHROMIUM_CREDITS = 'LICENSES.chromium.html';
 // Settings' sub-pages are pages of their own under the same host, like
@@ -101,6 +102,7 @@ function makeHandler(hosts, { dark = false } = {}) {
         body = String(body).replace(/<html\b/i, '<html data-appearance="dark"');
       }
       if (path.extname(file) === '.html') {
+        body = localizeHtml(body); // Lumio's language (main/i18n.js)
         const attrs = pageAttributes();
         if (attrs) body = String(body).replace(/<html\b/i, `<html${attrs}`);
       }

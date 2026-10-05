@@ -1,12 +1,13 @@
-// Preload for the browser UI (shell, overlay, a pop-up's bar). Exposes a
-// narrow, channel-whitelisted bridge; the main process also checks that
-// calls come from us.
+// Preload for the browser UI (shell, overlay, a pop-up's bar, the profile
+// picker and Task Manager windows, and the print preview). Exposes a narrow,
+// channel-whitelisted bridge; the main process also checks that calls come
+// from us.
 // Bundled into preload/dist/shell.js by scripts/build-preload.mjs.
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 const { injectBrowserAction } = require('electron-chrome-extensions/browser-action');
 
-const INVOKE = /^(shell|omnibox|ai|site|account|passwords|update|popup|side):/;
-const SEND = /^(layout|panel|sidebar|tab|overlay|find|download|permission|ai|bookmarks|site|window|extensions|account|passwords|app|aura|update|dialog|popup|notice|hud|omnibox|groups|side|security|capture):|^open-url$/;
+const INVOKE = /^(shell|omnibox|ai|site|account|passwords|update|popup|side|profiles|taskmanager|perf|print):/;
+const SEND = /^(layout|panel|sidebar|tab|overlay|find|download|permission|ai|bookmarks|site|window|extensions|account|passwords|app|aura|update|dialog|popup|notice|hud|omnibox|groups|side|security|capture|profiles|taskmanager|perf|print):|^open-url$/;
 const EVENTS = new Set([
   'tabs', 'downloads', 'permission', 'permission-cancel', 'permission-blocked', 'permission-reset', 'permission-focus', 'find-result', 'find-open', 'find-close', 'find-step',
   'focus-omnibox', 'panel-toggle', 'panel-open', 'ai-focus', 'ai-prefill', 'ai-event', 'ai-state', 'overlay-data',
@@ -17,6 +18,7 @@ const EVENTS = new Set([
   'hud', 'nav-prefs', 'find-text', // main/navigation.js
   'infobars', 'tab-search', 'tab-drag-hint', // main/infobars.js, tab-search.js, tab-drag.js
   'saved-groups', 'tab-group-edit', 'side-panel', 'side-changed', // tab groups, side panel
+  'profiles-changed', 'perf-alert', 'perf-state', // profiles, performance
 ]);
 
 contextBridge.exposeInMainWorld('lumio', {

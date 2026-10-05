@@ -1,0 +1,21 @@
+/* The toolbar's performance buttons (renderer/ui/perf.js) and the Guest
+   avatar on the account button. Imported by shell.css. */
+.perf-btn {
+  height: 28px; margin: 0 2px; padding: 0 11px 0 8px; border-radius: 999px; flex: none;
+  display: inline-flex; align-items: center; gap: 6px;
+  color: var(--warn-text); font-weight: 600; font-size: 12px; letter-spacing: -.1px;
+  background: color-mix(in srgb, var(--warn) 13%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 30%, transparent);
+  transition: background var(--fast) var(--ease);
+  animation: pop .3s var(--ease);
+}
+.perf-btn .ic { display: grid; color: var(--warn); }
+.perf-btn:hover, .perf-btn[aria-expanded="true"] { background: color-mix(in srgb, var(--warn) 20%, transparent); }
+.perf-btn:focus-visible, .energy-btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.energy-btn { color: var(--ok); }
+.energy-btn:hover:not(:disabled) { color: var(--ok); }
+/* Too little room: just the icon. */
+@media (max-width: 980px) { .perf-btn .label { display: none; } .perf-btn { padding: 0 8px; } }
+@media (prefers-reduced-motion: reduce) { .perf-btn { animation: none; } }
+
+.avatar.guest { background: var(--field); color: var(--dim); box-shadow: inset 0 0 0 1px var(--line-strong); }
