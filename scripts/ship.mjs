@@ -8,7 +8,7 @@
 //   npm run ship -- 0.6.0 --notes "Big update" --critical       a chosen version, urgent
 //
 // Steps: check the version, run the tests, set package.json, build both Mac
-// DMGs and the Windows ZIP, commit + tag + push, create the GitHub release
+// DMGs (Mac only for now), commit + tag + push, create the GitHub release
 // with the notes (and the urgent marker), then check the files are live.
 // In the workflow the same steps run as --prepare and --publish.
 import { fileURLToPath } from 'node:url';
@@ -18,9 +18,8 @@ import path from 'node:path';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REPO = 'juaniRD23/lumio-browser';
-const ASSETS = ['Lumio-Browser-mac-apple-silicon.dmg', 'Lumio-Browser-mac-intel.dmg', 'Lumio-Browser-Setup-windows-x64.exe', 'Lumio-Browser-windows-x64.zip'];
-// Attached when built: the Microsoft Store package (needs the Store identity).
-const OPTIONAL = ['Lumio-Browser-windows-x64.msix'];
+const ASSETS = ['Lumio-Browser-mac-apple-silicon.dmg', 'Lumio-Browser-mac-intel.dmg']; // Windows is paused
+const OPTIONAL = []; // attached when built
 const pkgFile = path.join(root, 'package.json');
 
 const args = process.argv.slice(2);
@@ -53,7 +52,6 @@ function notesMarkdown(text, critical) {
 
 - **Mac (Apple Silicon):** \`Lumio-Browser-mac-apple-silicon.dmg\`
 - **Mac (Intel):** \`Lumio-Browser-mac-intel.dmg\`
-- **Windows:** \`Lumio-Browser-windows-x64.zip\`
 
 Already have Lumio Browser? It updates itself: click **Update** next to your profile picture.
 `;
@@ -74,7 +72,7 @@ function setVersion(version) {
 }
 
 function publish(version, notes, critical) {
-  for (const a of ASSETS) if (!fs.existsSync(path.join(root, 'dist', 'release', a))) throw new Error(`Missing dist/release/${a}. Release from GitHub (Actions → Release Lumio Browser): the Windows setup is built on Windows.`);
+  for (const a of ASSETS) if (!fs.existsSync(path.join(root, 'dist', 'release', a))) throw new Error(`Missing dist/release/${a}. Build it first (node build/package.mjs --release --mac) or release from GitHub (Actions → Release Lumio Browser).`);
   const notesFile = path.join(root, 'dist', 'release', 'NOTES.md');
   fs.writeFileSync(notesFile, notesMarkdown(notes, critical));
   if (process.env.GITHUB_ACTIONS) {
