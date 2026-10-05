@@ -9,6 +9,7 @@
 // A link with a handled scheme then opens the site's page instead of
 // another app: in a new tab next to the one you're on, so the page you were
 // reading stays, or in the tab itself when it was opened just for the link.
+// A page's own link only does this right after a click or key press in it.
 //
 // Limits: only a tab's top frame can register (that's where the preload
 // runs); incognito windows use the saved handlers but can't add one; each
@@ -23,6 +24,9 @@ const SAFE_SCHEMES = new Set(['bitcoin', 'cabal', 'dat', 'did', 'doi', 'dweb', '
   'webcal', 'wtai', 'xmpp']);
 const NAMES = { mailto: 'email', webcal: 'calendar', tel: 'phone number', sms: 'text message', smsto: 'text message' };
 const KEY = 'protocolHandlers';
+// Input that counts as the person acting in a page, and for how long (Chrome's user activation lasts 5 s).
+const ACTIVATION = new Set(['mouseDown', 'rawKeyDown', 'keyDown', 'gestureTap', 'touchStart', 'pointerDown']);
+const GESTURE_MS = 5000;
 
 // What links a scheme makes, in words: 'email links', 'web+notes: links'.
 const linksOf = (scheme) => (NAMES[scheme] ? `${NAMES[scheme]} links` : `${scheme}: links`);
@@ -79,7 +83,8 @@ class ProtocolHandlers {
   // A page called navigator.registerProtocolHandler (from the preload).
   register(wc, pageUrl, scheme, url) {
     const found = this.tabOf(wc);
-    if (!found || found.w.incognito) return { ok: false };
+    // Not from a page a helper AI is working in: the person didn't pick that site.
+    if (!found || found.w.incognito || found.tab?.agent) return { ok: false };
     const h = normalize(scheme, url, pageUrl);
     if (h.error) return { ok: false, error: h.error };
     const current = this.handlerFor(h.scheme);
@@ -139,16 +144,21 @@ class ProtocolHandlers {
   // Follows the navigations of a webContents: links with a handled scheme
   // go to the handler (only in tabs).
   watch(wc) {
-    // A link or script in the page: open the handler beside it. One tab a
-    // second at most, so a script can't open a flood of them.
+    // A link or script in the page: open the handler beside it, only right
+    // after a click or key press in the page (each one opens one tab, like
+    // Chrome's links to other apps), so a script or ad frame can't open tabs
+    // on its own. One tab a second at most, too.
     let opened = 0;
+    let pressed = 0;
+    wc.on('input-event', (_e, input) => { if (ACTIVATION.has(input?.type)) pressed = Date.now(); });
     wc.on('will-frame-navigate', (e) => {
       const to = this.target(e.url);
       const found = to && this.tabOf(wc);
       if (!found) return;
       e.preventDefault();
-      if (Date.now() - opened < 1000) return;
+      if (Date.now() - pressed > GESTURE_MS || Date.now() - opened < 1000) return;
       opened = Date.now();
+      pressed = 0;
       const { w, tab } = found;
       w.tabs.create(to, { index: w.tabs.tabs.indexOf(tab) + 1 });
     });

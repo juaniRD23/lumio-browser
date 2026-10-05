@@ -201,9 +201,22 @@ test('Protocol handlers: a site asks, Allow sends its mailto: links to it, Setti
   assert.ok(await until(() => L.main(() => global.lumio.store.settings.protocolHandlers?.[0]?.allowed === true)));
   assert.equal(await L.main((_e, b) => global.lumio.store.settings.protocolHandlers[0].url, base), `${base}/compose?to=%s`);
 
-  // A mailto: link opens the site's page in a new tab next to this one.
+  // A mailto: link opens the site's page in a new tab next to this one, when
+  // the person clicks it (a script's click() alone opens nothing).
+  const clickMail = async () => {
+    const at = JSON.parse(await L.page(`(() => { const r = document.getElementById('mail').getBoundingClientRect(); return JSON.stringify({ x: Math.round(r.left + 4), y: Math.round(r.top + r.height / 2) }) })()`));
+    await L.main((_e, p) => {
+      const wc = global.lumio.tabs.wc();
+      wc.focus();
+      wc.sendInputEvent({ type: 'mouseDown', x: p.x, y: p.y, button: 'left', clickCount: 1 });
+      wc.sendInputEvent({ type: 'mouseUp', x: p.x, y: p.y, button: 'left', clickCount: 1 });
+    }, at);
+  };
   const tabsBefore = await L.main(() => global.lumio.tabs.tabs.length);
   await L.page(`document.getElementById('mail').click(); true`);
+  await L.wait(800);
+  assert.equal(await L.main(() => global.lumio.tabs.tabs.length), tabsBefore, 'no tab from a script');
+  await clickMail();
   const want = `${base}/compose?to=${encodeURIComponent('mailto:sam@example.com?subject=Hi')}`;
   assert.ok(await until(() => L.main((_e, u) => global.lumio.tabs.tabs.some((t) => t.view?.webContents.getURL() === u), want)), 'the handler opened');
   assert.equal(await L.main(() => global.lumio.tabs.tabs.length), tabsBefore + 1);
@@ -217,7 +230,7 @@ test('Protocol handlers: a site asks, Allow sends its mailto: links to it, Setti
   // mailto: links aren't routed any more.
   await open(`${base}/mail2`, 'Page mail2');
   const count = await L.main(() => global.lumio.tabs.tabs.length);
-  await L.page(`document.getElementById('mail').click(); true`);
+  await clickMail();
   await L.wait(800);
   assert.equal(await L.main(() => global.lumio.tabs.tabs.length), count);
 });

@@ -10,6 +10,7 @@ let st = await page.invoke('page:power-state');
 function render() {
   if (!st) return;
   $('#caret-browsing').checked = st.caretBrowsing;
+  $('#vertical-tabs').checked = st.verticalTabs; // settings.js handles its changes
   $('#caret-key-note').textContent = st.caretKey ? ` Press ${st.caretKey} to turn it on or off.` : '';
   $('#force-dark').checked = st.forceDark.on;
   // The switch only takes effect when Lumio starts.

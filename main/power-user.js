@@ -29,6 +29,7 @@ function state() {
     caretKey: keyFor('caret-browsing'),
     forceDark: forceDark.state(deps.store),
     protocolHandlers: handlers.list(),
+    verticalTabs: !!deps.store.settings.verticalTabs, // a tab's menu may have changed it since Settings opened
   };
 }
 

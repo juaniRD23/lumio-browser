@@ -380,6 +380,9 @@ test('Protocol handlers: incognito can’t add one, bad calls are refused, and a
   const inc = addTab(incognito, wcStandIn('https://mail.example/'));
   assert.deepEqual(handlers.register(inc.view.webContents, 'https://mail.example/', 'mailto', '/c?to=%s'), { ok: false });
   assert.equal(handlers.register(wcStandIn(), 'https://mail.example/', 'mailto', '/c?to=%s').ok, false, 'not a tab');
+  const helped = addTab(normal, wcStandIn('https://mail.example/'));
+  helped.agent = { name: 'Helper 1' };
+  assert.deepEqual(handlers.register(helped.view.webContents, 'https://mail.example/', 'mailto', '/c?to=%s'), { ok: false }, 'not from a page a helper AI is on');
   const tab = addTab(normal, wcStandIn('https://mail.example/'));
   assert.deepEqual(handlers.register(tab.view.webContents, 'https://mail.example/', 'mailto', 'https://evil.example/?%s'), { ok: false, error: 'SecurityError' });
   // At most three questions per page at a time.
@@ -399,13 +402,21 @@ test('Protocol handlers: links open the site’s page beside the tab, one tab a 
   const handlers = new ph.ProtocolHandlers({ store, tabOf: tabFinder([w]) });
   handlers.watch(wc);
   const navigate = (url) => { const e = { url, isMainFrame: true, prevented: false, preventDefault() { this.prevented = true; } }; wc.fire('will-frame-navigate', e); return e; };
+  const click = () => wc.fire('input-event', {}, { type: 'mouseDown' });
 
   assert.equal(navigate('https://blog.example/next').prevented, false, 'other links are left alone');
   assert.equal(navigate('tel:+15551234').prevented, false, 'no handler for that scheme');
+  // A script (or an ad's frame) going to a mailto: link by itself opens nothing.
+  wc.fire('input-event', {}, { type: 'mouseMove' });
+  assert.equal(navigate('mailto:nobody@example.com').prevented, true);
+  assert.equal(w.created.length, 0, 'no tab without a click or key press');
+  click();
   const e = navigate('mailto:sam@example.com');
   assert.equal(e.prevented, true);
   assert.deepEqual(w.created, [{ url: 'https://mail.example/c?to=mailto%3Asam%40example.com', index: 2 }], 'a new tab right after this one');
-  // A script clicking mailto: links over and over doesn't flood the window.
+  // One click opens one tab, and a script clicking mailto: links over and over doesn't flood the window.
+  assert.equal(navigate('mailto:again@example.com').prevented, true);
+  click();
   assert.equal(navigate('mailto:again@example.com').prevented, true);
   assert.equal(w.created.length, 1);
 
@@ -449,7 +460,10 @@ test('power-user.js: new pages are watched, and Settings reads and changes the f
   appEvents['web-contents-created'].forEach((fn) => fn({}, page));
   assert.ok(page.listeners['dom-ready'] && page.listeners['will-frame-navigate'], 'caret browsing and handler links are watched');
 
-  assert.deepEqual(ask('page:power-state'), { caretBrowsing: false, caretKey: 'F7', forceDark: { on: false, active: forceDark.state(powerStore).active }, protocolHandlers: [] });
+  assert.deepEqual(ask('page:power-state'), { caretBrowsing: false, caretKey: 'F7', forceDark: { on: false, active: forceDark.state(powerStore).active }, protocolHandlers: [], verticalTabs: false });
+  powerStore.settings.verticalTabs = true; // turned on from a tab's menu while Settings is open
+  assert.equal(ask('page:power-state').verticalTabs, true, 'Settings shows it when it gets the focus back');
+  delete powerStore.settings.verticalTabs;
   const menus = world.menus;
   assert.equal(ask('page:power-set', 'caretBrowsing', true).caretBrowsing, true);
   assert.equal(page.caret, true, 'open tabs follow');
