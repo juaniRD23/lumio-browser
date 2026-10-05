@@ -48,6 +48,10 @@ const IS_DEV = !app.isPackaged;
 // modal error box: log it and keep going.
 process.on('uncaughtException', (err) => console.error('[lumio] uncaught exception:', err?.stack || err));
 process.on('unhandledRejection', (err) => console.error('[lumio] unhandled rejection:', err?.stack || err));
+// Opt-in crash reports (Settings › Privacy): Crashpad has to start before the app is ready.
+const crashReports = require('./crash-reports').setup(app);
+// Protected content (Widevine) on DRM builds; nothing at all on stock Electron (main/drm.js).
+const drm = require('./drm').setup(app, { theme });
 
 if (!process.env.LUMIO_TEST && !app.requestSingleInstanceLock()) app.quit();
 // Windows shows an app's notifications only under its app ID, matched by its
@@ -1049,6 +1053,10 @@ function registerIpc() {
     normal.permissions.set(origin, permission, value === 'allow' ? true : value === 'block' ? false : undefined);
   });
   internalHandle('page:make-default', ['settings', 'welcome'], () => makeDefaultBrowser());
+  // "Send crash reports to Lumio" (main/crash-reports.js): Settings › Privacy and the welcome screens.
+  internalHandle('page:crash-reports', ['settings', 'welcome'], () => crashReports.state());
+  internalHandle('page:set-crash-reports', ['settings', 'welcome'], (_ctx, on) => crashReports.setEnabled(store, on === true));
+  internalHandle('page:protected-content', ['settings'], () => drm.status());
   internalHandle('page:mac-permissions', ['settings'], ({ w }) => w.ai.macPermissions());
   internalHandle('page:mac-permissions-open', ['settings'], ({ w }, which) => w.ai.openMacPermissionSettings(which));
   internalHandle('page:passwords', ['passwords'], () => passwords.pageState());
@@ -1403,6 +1411,10 @@ app.whenReady().then(async () => {
     extensions.init().catch((err) => { console.error('Extensions failed to start:', err); extensions.ece = null; }),
     new Promise((r) => setTimeout(r, 4000)),
   ]);
+  await drm.whenReady(); // DRM builds: Widevine before the first window, 15 s at most
+  // Quit while it waited (Cmd+Q on the waiting window): opening windows now
+  // would stall the quit and leave Lumio unable to quit or save its tabs.
+  if (quitting) return;
 
   registerIpc();
   Menu.setApplicationMenu(buildMenu(cmd, menuState()));

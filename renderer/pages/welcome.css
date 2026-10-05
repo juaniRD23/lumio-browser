@@ -78,3 +78,16 @@ h1 em { color: var(--accent); }
 .card-row > div { flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .card-row b { font-weight: 600; }
 .card-row span { color: var(--dim); font-size: 13px; }
+
+/* "Help improve Lumio": crash reports, off until turned on (crash-optin.js) */
+label.card-row { cursor: pointer; }
+.card-row .crash-note:empty { display: none; }
+.card-row .crash-note { color: var(--text); margin-top: 2px; }
+.switch { position: relative; width: 36px; height: 20px; flex: none; }
+.switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+.switch i { position: absolute; inset: 0; border-radius: 999px; background: var(--switch-off); transition: background .15s; }
+.switch i::after { content: ''; position: absolute; left: 3px; top: 3px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform .18s var(--ease); }
+.switch input:checked + i { background: var(--accent); }
+.switch input:checked + i::after { transform: translateX(16px); }
+.switch input:focus-visible + i { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .switch i, .switch i::after { transition: none; } }

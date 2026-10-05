@@ -69,6 +69,14 @@
       <p class="fine">All Free accounts together, over the last 24 hours. When it’s full, Free users see “at capacity” until it frees up.</p>
     </section>
 
+    <section class="panel" id="crashes" aria-labelledby="crashes-title" hidden>
+      <h2 id="crashes-title">Crashes</h2>
+      <p class="fine first" id="crash-sum"></p>
+      <div class="crash-groups" id="crash-groups"></div>
+      <h3 class="crash-h" id="crash-latest-title" hidden>Latest</h3>
+      <div class="crash-list" id="crash-list"></div>
+    </section>
+
     <p class="fine" id="note" hidden>Days, weeks and months are in UTC, like OpenRouter (weeks start on Monday). OpenRouter’s numbers cover everything billed to Lumio’s key.</p>
   </main>
   <script type="module" src="/admin.js"></script>

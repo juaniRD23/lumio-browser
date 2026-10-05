@@ -113,6 +113,38 @@ $('#code-new').addEventListener('click', async (e) => {
   setTimeout(() => { b.textContent = 'Copy'; }, 1500);
 });
 
+// ---- crashes (from people who turned on crash reports in Lumio Browser)
+const OS = { darwin: 'Mac', win32: 'Windows', linux: 'Linux' };
+const when = (t) => new Date(t).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+async function loadCrashes() {
+  const res = await fetch('/api/admin/crashes', { cache: 'no-store' }).catch(() => null);
+  if (!res?.ok) return;
+  const d = await res.json();
+  const t = d.totals;
+  $('#crashes').hidden = false;
+  $('#crash-sum').textContent = t.reports
+    ? `${t.reports.toLocaleString()} report${t.reports === 1 ? '' : 's'} in the last ${d.days} days, ${t.last24h.toLocaleString()} in the last 24 hours, ${t.dumps.toLocaleString()} with a minidump. Only from people who turned on crash reports.`
+    : `No crash reports in the last ${d.days} days. Only people who turned on crash reports in Lumio Browser send them.`;
+  $('#crash-groups').innerHTML = d.groups.length ? `<table class="crash-table">
+    <thead><tr><th scope="col">Reports</th><th scope="col">Crash</th><th scope="col">Version</th><th scope="col">Where</th><th scope="col">Last seen</th></tr></thead>
+    <tbody>${d.groups.map((g) => `<tr>
+      <td class="n">${g.count.toLocaleString()}</td>
+      <td><code>${esc(g.signature)}</code><span>${esc(g.process || 'unknown process')}${g.dumps ? ` · ${g.dumps} dump${g.dumps === 1 ? '' : 's'}` : ''}</span></td>
+      <td>${esc(g.version || '—')}${g.channels.length ? `<span>${esc(g.channels.join(', '))}</span>` : ''}</td>
+      <td>${esc(g.platforms.map((p) => OS[p] || p).join(', ') || '—')}</td>
+      <td>${esc(when(g.lastAt))}</td>
+    </tr>`).join('')}</tbody></table>` : '';
+  $('#crash-latest-title').hidden = !d.recent.length;
+  $('#crash-list').innerHTML = d.recent.map((c) => `<details class="crash-item">
+      <summary><span class="when">${esc(when(c.at))}</span><code>${esc(c.signature)}</code>
+        <span class="meta">${esc([c.version, [OS[c.platform] || c.platform, c.arch].filter(Boolean).join(' '), c.channel, c.process, c.reason].filter(Boolean).join(' · '))}</span></summary>
+      ${c.message ? `<p>${esc(c.message)}</p>` : ''}
+      ${c.stack ? `<pre>${esc(c.stack)}</pre>` : ''}
+      ${c.dump ? `<a class="btn small" href="${esc(c.dump)}" download>Download minidump</a>` : ''}
+      ${!c.message && !c.stack && !c.dump ? '<p>No more details.</p>' : ''}
+    </details>`).join('');
+}
+
 let loading = false;
 let codesLoaded = false;
 async function load() {
@@ -124,7 +156,7 @@ async function load() {
     if (res.status === 401) { status('Sign in with the Lumio owner account to see this page. <a href="/signin?next=/admin">Sign in</a>'); return; }
     if (!res.ok) { status('This page is only for the owner of Lumio.'); return; }
     render(await res.json());
-    if (!codesLoaded) { codesLoaded = true; loadCodes(); }
+    if (!codesLoaded) { codesLoaded = true; loadCodes(); loadCrashes(); }
   } catch {
     status('Couldn’t load the numbers. Check your connection and try again.', 'err');
   } finally {
@@ -137,6 +169,7 @@ async function load() {
 // so the page refreshes every 15 seconds while it's open (and right away when
 // you come back to the tab).
 $('#refresh').addEventListener('click', load);
+$('#refresh').addEventListener('click', () => { if (codesLoaded) loadCrashes(); }); // crashes change slowly: only when asked
 setInterval(() => { if (!document.hidden) load(); }, 15_000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
 load();

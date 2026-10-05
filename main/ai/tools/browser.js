@@ -38,6 +38,10 @@ function hostOf(url) {
   try { return new URL(url).host || url; } catch { return url; }
 }
 
+// Settings and the welcome screens hold the person's own choices (like
+// sending crash reports), so only they change them, never the AI.
+const OWN_CHOICES = /^lumio:\/\/(settings|welcome)/i;
+
 function tabFor(ctx, id, { activate = false } = {}) {
   const tab = id ? ctx.tabs.get(id) : ctx.tabs.active;
   if (!tab) throw new Error(id ? `There is no tab ${id}. Use list_tabs.` : 'No tab is open.');
@@ -45,7 +49,7 @@ function tabFor(ctx, id, { activate = false } = {}) {
   if (activate && ctx.tabs.activeId !== tab.id) ctx.tabs.activate(tab.id);
   const wc = tab.view.webContents;
   const url = wc.getURL() || tab.url || '';
-  if (url.startsWith('lumio://settings')) throw new Error("Lumio can't read or operate its own Settings page. Ask the user to change settings themselves.");
+  if (OWN_CHOICES.test(url)) throw new Error("Lumio can't read or operate its own Settings or welcome pages. Ask the user to change settings themselves.");
   ctx.onPage?.(wc); // the page glows while Lumio works on it
   return { tab, wc, url };
 }
@@ -70,7 +74,7 @@ function safeUrl(ctx, input) {
   const parsed = parseInput(input, ctx.tabs.searchTemplate());
   if (!parsed) throw new Error('Empty URL.');
   if (/^(file|view-source|data|javascript):/i.test(parsed.url)) throw new Error('Lumio can only open web pages (http/https).');
-  if (/^lumio:\/\/settings/i.test(parsed.url)) throw new Error("Lumio can't open its own Settings page.");
+  if (OWN_CHOICES.test(parsed.url)) throw new Error("Lumio can't open its own Settings or welcome pages.");
   return parsed.url;
 }
 

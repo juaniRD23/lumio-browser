@@ -1,0 +1,37 @@
+@import url('/assets/fonts/fonts.css');
+@import url('/assets/theme.css'); /* colors and type, light or dark like the rest of Lumio */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body {
+  background: var(--bg); color: var(--text);
+  font: 13px/1.45 var(--font); -webkit-font-smoothing: antialiased;
+  user-select: none; cursor: default;
+  -webkit-app-region: drag; /* frameless: drag it anywhere */
+}
+.card {
+  height: 100%; padding: 22px 22px 18px;
+  display: grid; grid-template-columns: auto 1fr; grid-template-rows: 1fr auto; gap: 10px 14px;
+  border: 1px solid var(--line-strong); border-radius: 10px; /* about the corners macOS gives a frameless window */
+}
+.text { min-width: 0; }
+h1 { margin: 0 0 4px; font: 400 21px/1.15 var(--serif); letter-spacing: -.01em; color: var(--text); }
+p { margin: 0; color: var(--dim); }
+.spinner {
+  width: 20px; height: 20px; margin-top: 2px; border-radius: 50%;
+  border: 2px solid var(--overlay-5); border-top-color: var(--text);
+  animation: spin .9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.btn {
+  grid-column: 2; justify-self: end; -webkit-app-region: no-drag;
+  display: inline-flex; align-items: center; height: 30px; padding: 0 14px; border-radius: 999px;
+  border: 1px solid var(--line-strong); background: var(--overlay-2); color: var(--text);
+  font: 500 12.5px var(--font); text-decoration: none; cursor: pointer; transition: background .15s;
+}
+.btn:hover { background: var(--overlay-4); }
+.btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  /* A still ring with its top lit, instead of a spinning one. */
+  .spinner { animation: none; }
+  .btn { transition: none; }
+}

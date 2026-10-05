@@ -258,6 +258,13 @@
           </div>
           <div class="row"><div class="grow desc" id="clear-status">Clears everything, from all time. For a time range, use Clear browsing data on the History page. Cookies and site data will sign you out of websites.</div><button class="btn danger" id="clear">Clear data</button></div>
         </div>
+        <h3 id="improve">Help improve Lumio</h3>
+        <div class="card">
+          <label class="row" style="cursor:pointer">
+            <div class="grow"><div class="title" id="crash-title">Send crash reports to Lumio</div><div class="desc" id="crash-desc">When Lumio crashes, it sends a report so we can fix the problem: the Lumio version, your system and technical details of the crash, which can include bits of what was open. Turning it on takes effect the next time you open Lumio.</div><div class="desc" id="crash-note" role="status" aria-live="polite"></div></div>
+            <span class="switch"><input type="checkbox" id="crash-reports" aria-labelledby="crash-title" aria-describedby="crash-desc crash-note"><i></i></span>
+          </label>
+        </div>
         <h3 id="sites">Site settings</h3>
         <div class="card" id="site-list"></div>
       </section>
@@ -390,5 +397,7 @@
     </main>
   </div>
   <script type="module" src="settings.js"></script>
+  <script type="module" src="crash-optin.js"></script>
+  <script type="module" src="protected-content.js"></script>
 </body>
 </html>
