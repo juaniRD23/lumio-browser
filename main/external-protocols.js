@@ -68,8 +68,11 @@ function decide({ url, typed = false, origin = null, topOrigin = null, isMainFra
   const always = ALWAYS.has(schemeOf(url));
   if (typed) return always ? 'launch' : 'ask';
   if (locked) return 'deny';
-  // A frame from another site (an ad), or a page without a site, only after a click.
-  if (!activated && (!origin || (!isMainFrame && origin !== topOrigin))) return 'deny';
+  // A frame from another site (an ad), or a frame without a site, only after
+  // a click. A page that has no site yet (a new tab redirected to the app:
+  // "Join on Zoom") still asks.
+  if (!activated && !isMainFrame && (!origin || origin !== topOrigin)) return 'deny';
+  if (!origin && !activated) return 'ask'; // nobody to name or remember: never without asking
   return always || remembered ? 'launch' : 'ask';
 }
 

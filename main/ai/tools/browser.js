@@ -20,7 +20,7 @@ const DIALOGS = {
 const pageTabs = new WeakMap(); // a tab's webContents -> the tab (tabFor, pageContext)
 // A page stops on its own alert, or on one in another tab or pop-up that
 // shares its process (an alert() there stops this page too).
-const sharedStop = (tab) => { const wc = tab?.view?.webContents; return !!(wc && !wc.isDestroyed() && tab.owner?.hooks?.dialogInProcess?.(wc)); };
+const sharedStop = (tab) => { const wc = tab?.view?.webContents; return !!(wc && !wc.isDestroyed?.() && tab.owner?.hooks?.dialogInProcess?.(wc)); };
 const stopped = (tab) => !!tab?.dialogs?.some((d) => d.spec.kind === 'js' || d.spec.kind === 'unresponsive') || sharedStop(tab);
 function dialogNote(tab) {
   const kind = tab?.dialogs?.[0]?.spec.kind;

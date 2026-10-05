@@ -903,6 +903,7 @@ function registerIpc() {
     const tab = w.tabs.active;
     if (!tab?.blockedPopups?.length) return null;
     const info = siteInfo(w); // only a website can be always allowed
+    w.popupsSite = info?.origin || null; // what "Always allow" is about
     return {
       host: info?.host || null,
       allowed: !!info && w.profile.permissions.allowsPopups(info.origin),
@@ -912,7 +913,8 @@ function registerIpc() {
   on('site:popup-open', (w, id) => { const tab = w.tabs.active; if (tab) w.tabs.openBlockedPopup(tab, Number(id)); });
   on('site:popups-allow', (w, allow) => {
     const info = siteInfo(w);
-    if (info) w.profile.permissions.set(info.origin, 'popups', allow ? true : undefined);
+    // Only the site the list was shown for: the page may have moved on since.
+    if (info && info.origin === w.popupsSite) w.profile.permissions.set(info.origin, 'popups', allow ? true : undefined);
   });
   // "Turn on warnings": forget the certificate you went past for this site.
   on('site:cert-revoke', async (w) => {
@@ -1389,14 +1391,16 @@ async function openExternalLink(w, tab, { url, typed = false, requestingUrl = ''
   if (!url || !wc || wc.isDestroyed() || tab.agent) return; // a helper AI's tab has nobody to ask
   if (tab.dialogs?.some((d) => d.spec.kind === 'external')) return; // one prompt at a time
   const origin = typed ? null : external.originOf(requestingUrl || wc.getURL());
+  const topOrigin = external.originOf(wc.getURL());
   const key = external.permissionKey(url);
   const verdict = external.decide({
     url,
     typed,
     origin,
     isMainFrame,
-    topOrigin: external.originOf(wc.getURL()),
-    activated: tab.owner.recentlyActivated(tab),
+    topOrigin,
+    // A frame from another site needs a click inside a frame, not on the page.
+    activated: tab.owner.recentlyActivated(tab, { frame: !isMainFrame && origin !== topOrigin }),
     locked: !!tab.externalLock,
     remembered: !!origin && w.profile.permissions.remembered(origin, key) === true,
   });
@@ -1425,7 +1429,7 @@ function externalRequest(wc, details) {
 // open its pop-up.
 ipcMain.on('user-activation', (e) => {
   const found = e.senderFrame === e.sender.mainFrame && tabOfWc(e.sender);
-  if (found) found.tab.owner.noteActivation(found.tab);
+  if (found) found.tab.owner.noteActivation(found.tab, { frame: true });
 });
 
 // The person sent a form on a tab's page (preload/internal.js): it may leave
@@ -1472,7 +1476,8 @@ app.on('login', (event, wc, details, authInfo, callback) => {
 app.on('certificate-error', (event, wc, url, error, cert, callback, isMainFrame) => {
   event.preventDefault();
   const host = (() => { try { return new URL(url).host; } catch { return ''; } })();
-  const ok = !!wc && certErrors.isAllowed(wc.session, host, cert?.fingerprint);
+  // (Only for an error you could have gone past: a certificate since revoked isn't.)
+  const ok = !!wc && certErrors.OVERRIDABLE.has(certErrors.errorName(error)) && certErrors.isAllowed(wc.session, host, cert?.fingerprint);
   const found = !ok && isMainFrame && wc && tabOfWc(wc);
   if (found) found.tab.certError = certErrors.record(url, error, cert);
   callback(ok);

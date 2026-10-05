@@ -47,13 +47,14 @@ if (/^(https?|file|lumio|chrome-extension):$/.test(window.location.protocol) && 
 if (/^(https?|file):$/.test(window.location.protocol) && window === window.top) {
   const inFrame = () => document.activeElement?.tagName === 'IFRAME';
   let timer = 0;
-  let told = 0;
+  let was = false;
   const look = () => {
-    if (!inFrame()) { clearInterval(timer); timer = 0; return; }
-    if (navigator.userActivation?.isActive && Date.now() - told > 400) {
-      told = Date.now();
-      ipcRenderer.send('user-activation');
-    }
+    if (!inFrame()) { clearInterval(timer); timer = 0; was = false; return; }
+    // Once per click: activation stays on for a few seconds after it, which
+    // mustn't count as many clicks.
+    const now = !!navigator.userActivation?.isActive;
+    if (now && !was) ipcRenderer.send('user-activation');
+    was = now;
   };
   // Focus went into a frame (the page itself gets no more events): watch until it's back.
   window.addEventListener('blur', () => setTimeout(() => {

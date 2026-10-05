@@ -37,9 +37,13 @@ test('when Lumio opens the app, asks first, or does nothing', () => {
   assert.equal(x.decide({ url: zoom, origin: 'https://ads.example', topOrigin: site, isMainFrame: false }), 'deny');
   assert.equal(x.decide({ url: zoom, origin: 'https://ads.example', topOrigin: site, isMainFrame: false, activated: true }), 'ask');
   assert.equal(x.decide({ url: zoom, origin: site, topOrigin: site, isMainFrame: false }), 'ask');
-  // A page without a site (a sandboxed frame, a data: page) only after a click.
-  assert.equal(x.decide({ url: zoom, origin: null, topOrigin: site }), 'deny');
-  assert.equal(x.decide({ url: zoom, origin: null, topOrigin: site, activated: true }), 'ask');
+  // A frame without a site (a sandboxed frame) only after a click.
+  assert.equal(x.decide({ url: zoom, origin: null, topOrigin: site, isMainFrame: false }), 'deny');
+  assert.equal(x.decide({ url: zoom, origin: null, topOrigin: site, isMainFrame: false, activated: true }), 'ask');
+  // A page with no site yet (a new tab sent on to the app, "Join on Zoom")
+  // asks, even for mailto:, and never offers "Always allow".
+  assert.equal(x.decide({ url: zoom, origin: null, topOrigin: null }), 'ask');
+  assert.equal(x.decide({ url: 'mailto:a@b.c', origin: null, topOrigin: null }), 'ask');
   // Typed in the address bar (or a bookmark): the person asked for it.
   assert.equal(x.decide({ url: zoom, typed: true, locked: true }), 'ask');
   assert.equal(x.decide({ url: 'mailto:a@b.c', typed: true }), 'launch');

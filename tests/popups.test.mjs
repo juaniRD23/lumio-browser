@@ -67,7 +67,7 @@ function setup(url = 'https://news.example/story', hooks = {}) {
   children.push(view);
   m.wire(tab);
   m.activeId = tab.id;
-  const open = (u, { disposition = 'foreground-tab', features = '', frameName = '' } = {}) => wc.open({ url: u, disposition, features, frameName });
+  const open = (u, { disposition = 'foreground-tab', features = '', frameName = '', referrer } = {}) => wc.open({ url: u, disposition, features, frameName, referrer });
   const blocked = () => m.state().tabs[0].popupsBlocked;
   return { m, wc, tab, calls, open, blocked };
 }
@@ -142,7 +142,7 @@ test('links to other apps go to the app prompt; dangerous schemes never open', (
   const { wc, calls, open, blocked } = setup('https://zoom.example/j/1');
   wc.click();
   assert.deepEqual(open('zoommtg://zoom.example/join?confno=1'), { action: 'deny' });
-  assert.deepEqual(calls.external, [{ url: 'zoommtg://zoom.example/join?confno=1', requestingUrl: 'https://zoom.example/j/1' }]);
+  assert.deepEqual(calls.external, [{ url: 'zoommtg://zoom.example/join?confno=1', requestingUrl: 'https://zoom.example/j/1', isMainFrame: true }]);
   assert.equal(calls.created.length, 0, 'no empty tab for it');
   open('zoommtg://zoom.example/join?confno=2');
   assert.equal(calls.external.length, 1, 'without a click it’s a blocked pop-up');
@@ -153,6 +153,41 @@ test('links to other apps go to the app prompt; dangerous schemes never open', (
   }
   assert.equal(blocked(), 1, 'not even listed');
   assert.equal(calls.created.length + calls.external.length, 1);
+});
+
+test('a frame from another site needs a click of its own; a click inside a frame counts for it', () => {
+  const { m, tab, wc, calls, open, blocked } = setup();
+  const ad = { url: 'https://ads.example/', policy: 'strict-origin-when-cross-origin' };
+  wc.click(); // on the article
+  open('https://ads.example/landing', { referrer: ad });
+  assert.equal(calls.created.length, 0, 'an ad frame can’t use a click on the page');
+  assert.equal(blocked(), 1);
+  m.noteActivation(tab, { frame: true }); // preload/internal.js: a click inside a frame
+  open('https://ads.example/landing', { referrer: ad });
+  assert.equal(calls.created.length, 1);
+  // The page's own window.open() still takes a click on the page.
+  wc.click();
+  open('https://news.example/more', { referrer: { url: 'https://news.example/story', policy: 'no-referrer-when-downgrade' } });
+  assert.equal(calls.created.length, 2);
+});
+
+test('pages can’t open browser-internal pages; "noopener" alone isn’t a pop-up window; a helper AI’s tab only opens background tabs', () => {
+  const { wc, tab, calls, open, blocked } = setup();
+  for (const u of ['chrome://process-internals', 'devtools://devtools/bundled/inspector.html?ws=evil.example', 'chrome-extension://abcdefghijklmnop/options.html', 'about:settings']) {
+    wc.click();
+    assert.deepEqual(open(u), { action: 'deny' }, u);
+  }
+  assert.equal(calls.created.length + blocked(), 0, 'not opened, not listed');
+  wc.click();
+  assert.deepEqual(open('https://news.example/a', { disposition: 'new-window', features: 'noopener' }), { action: 'deny' });
+  assert.equal(calls.popups.length, 0, 'not a pop-up window');
+  tab.agent = { name: 'Helper' };
+  wc.click(); // the helper's own click
+  assert.deepEqual(open('https://pay.example/', { disposition: 'new-window', features: 'width=400' }), { action: 'deny' });
+  assert.equal(calls.popups.length, 0, 'no window jumps in front of the person');
+  assert.equal(calls.created.at(-1)[1].active, false);
+  open('zoommtg://zoom.example/join');
+  assert.equal(calls.external.length, 0);
 });
 
 test('picking a blocked pop-up: the page opens it again itself, once', () => {

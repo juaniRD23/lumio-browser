@@ -10,7 +10,7 @@ const { parseInput, displayUrl } = require('./omnibox');
 const { SEARCH_ENGINES } = require('./store');
 const theme = require('./theme');
 const certErrors = require('./cert-errors');
-const { classify } = require('./external-protocols');
+const { classify, originOf } = require('./external-protocols');
 
 const NEWTAB = 'lumio://newtab/';
 const INTERNAL_PRELOAD = path.join(__dirname, '..', 'preload', 'internal.js');
@@ -360,28 +360,47 @@ class TabManager {
     // Web pages may not navigate to (or open) internal lumio:// pages.
     const guard = (e) => {
       const target = e.url || '';
-      if (target.startsWith('lumio:') && !wc.getURL().startsWith('lumio:')) e.preventDefault();
+      // Who started it, not what the frame shows now: an opener may navigate
+      // a pop-up that happens to be on a lumio:// page.
+      const from = e.initiator?.url ?? wc.getURL();
+      if (target.startsWith('lumio:') && !from.startsWith('lumio:')) e.preventDefault();
     };
     wc.on('will-navigate', guard);
     wc.on('will-frame-navigate', (e) => { if (!e.isMainFrame) guard(e); });
 
     // New tabs and windows from the page: links with target=_blank, window.open().
-    wc.setWindowOpenHandler(({ url, disposition, features, frameName }) => {
+    wc.setWindowOpenHandler(({ url, disposition, features, frameName, referrer }) => {
       const m = M();
       const page = wc.getURL();
       const own = page.startsWith('lumio:'); // Lumio's own pages
+      const extension = page.startsWith('chrome-extension:');
       const kind = classify(url);
       if (!own && (url.startsWith('lumio:') || (kind !== 'web' && kind !== 'external'))) return { action: 'deny' }; // file:, javascript:, data:…
+      // Web pages open web pages: not chrome://, devtools:// or an extension's
+      // inside (a tab opened by Lumio would skip the renderer's own checks).
+      const sameExtension = extension && url.startsWith(new URL(page).origin + '/');
+      if (!own && !sameExtension && kind === 'web' && !/^(https?|blob):|^about:blank$/i.test(url)) return { action: 'deny' };
+      // A helper AI's tab never opens windows or jumps the person's view: a
+      // link it opens goes to a background tab.
+      if (tab.agent) {
+        if (kind === 'web' && /^https?:/i.test(url)) m.create(url, { active: false, index: m.tabs.indexOf(tab) + 1 });
+        return { action: 'deny' };
+      }
+      // Which frame asked, when the page sends a referrer: a frame from
+      // another site (an ad) needs a click of its own, not one on the page.
+      const from = originOf(referrer?.url || '');
+      const fromFrame = !!from && from !== originOf(page);
       // The pop-up blocker: only right after a click or key press in the page,
       // or from a site the person allowed. Lumio's and extensions' own pages
       // aren't blocked, like in Chrome.
-      if (!own && !page.startsWith('chrome-extension:') && !m.mayOpenPopup(tab, url)) {
+      if (!own && !extension && !m.mayOpenPopup(tab, url, { frame: fromFrame })) {
         m.blockPopup(tab, { url, features, frameName });
         return { action: 'deny' };
       }
-      // A link to another app (mailto:, zoommtg:…) asks in this tab; no tab opens for it.
+      // A link to another app (mailto:, zoommtg:…) asks in this tab, in the
+      // name of the frame that asked; no tab opens for it.
       if (kind === 'external') {
-        m.hooks.openExternal(tab, { url, requestingUrl: page });
+        m.hooks.openExternal(tab, { url, requestingUrl: fromFrame ? referrer.url : page, isMainFrame: !fromFrame });
         return { action: 'deny' };
       }
       if (disposition === 'new-window') {
@@ -389,7 +408,8 @@ class TabManager {
         // small window of its own, with the page's settings, an address bar
         // the page can't change, and window.opener (main/popup-window.js).
         // Shift-click opens a normal browser window.
-        if (features) {
+        // ("noopener" alone isn't a size: a tab, like Chrome.)
+        if (/\b(width|height|left|top|popup)\b/i.test(features || '')) {
           return {
             action: 'allow',
             outlivesOpener: true, // like Chrome: closing the tab leaves its pop-up open
@@ -425,23 +445,27 @@ class TabManager {
   // The person clicked or typed in the tab's page (or in a frame on it, see
   // preload/internal.js): the page may open one pop-up now, and another app
   // again.
-  noteActivation(tab) {
+  noteActivation(tab, { frame = false } = {}) {
     tab.activatedAt = Date.now();
+    if (frame) tab.frameActivatedAt = tab.activatedAt; // a click inside a frame on the page
     tab.usedSinceAsked = true; // "Leave site?" may ask again (not used up by a pop-up)
     tab.externalLock = false;
   }
-  recentlyActivated(tab) { return Date.now() - (tab.activatedAt || 0) <= ACTIVATION_MS; }
+  // frame: a click inside a frame on the page (one on the page doesn't count for a frame).
+  recentlyActivated(tab, { frame = false } = {}) { return Date.now() - ((frame ? tab.frameActivatedAt : tab.activatedAt) || 0) <= ACTIVATION_MS; }
 
   // Chrome's pop-up rule: a page may open a window or tab right after a click
   // or key press in it (one per click), or any time if you allowed its site.
   // A blocked one you clicked in the address bar's list gets through once.
-  mayOpenPopup(tab, url) {
+  // frame: a frame from another site asks, which a click on the page doesn't cover.
+  mayOpenPopup(tab, url, { frame = false } = {}) {
     const pass = tab.popupPass;
     tab.popupPass = null;
     if (pass && pass.url === url && Date.now() - pass.at <= PASS_MS) return true;
     if (this.hooks.popupsAllowed?.(tab.view.webContents.getURL())) return true;
-    if (!this.recentlyActivated(tab)) return false;
+    if (!this.recentlyActivated(tab, { frame })) return false;
     tab.activatedAt = 0; // used up
+    tab.frameActivatedAt = 0;
     return true;
   }
 
