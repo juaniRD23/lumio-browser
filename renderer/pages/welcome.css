@@ -78,3 +78,17 @@ h1 em { color: var(--accent); }
 .card-row > div { flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .card-row b { font-weight: 600; }
 .card-row span { color: var(--dim); font-size: 13px; }
+
+/* Search engine choice */
+.engines { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; text-align: left; max-width: 520px; margin: 0 auto; }
+.engine { position: relative; display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: 14px; border: 1px solid var(--line); background: var(--card2); cursor: pointer; transition: border-color .15s, background .15s; }
+.engine:hover { border-color: var(--line2); }
+.engine input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.engine:has(input:checked) { border-color: var(--accent); background: radial-gradient(160px 80px at 50% 0%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 70%), var(--card2); }
+.engine:has(input:focus-visible) { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.engine-logo { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; flex: none; background: var(--overlay-4); color: var(--text); font-weight: 700; font-size: 15px; }
+.engine:has(input:checked) .engine-logo { background: var(--accent); color: var(--on-accent); }
+.engine-name { display: flex; flex-direction: column; min-width: 0; }
+.engine-name b { font-weight: 600; font-size: 14px; }
+.engine-name small { color: var(--label); font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { .engine { transition: none; } }

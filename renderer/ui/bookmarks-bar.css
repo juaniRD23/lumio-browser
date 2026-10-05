@@ -1,0 +1,12 @@
+/* The bookmarks bar's folders, its right end and drag and drop
+   (renderer/ui/bookmarks-bar.js). The items themselves are in shell.css. */
+#bookmarks-bar .bm-items { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; height: 100%; overflow: hidden; }
+#bookmarks-bar .bm-end { display: flex; align-items: center; gap: 2px; flex: none; margin-left: 6px; padding-left: 6px; border-left: 1px solid var(--line); height: 18px; }
+.bm-end .bm-item { height: 26px; }
+#bm-all span { display: none; }
+#bm-all { padding: 0 6px; }
+.bm-folder svg, #bm-all svg { color: var(--dim); border-radius: 0; }
+.bm-item[aria-expanded="true"] { background: var(--active); }
+.bm-item:focus-visible, #bm-more:focus-visible, #bm-import:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+/* A drag held over a folder: it goes inside. */
+.bm-item.drop-into { background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 55%, transparent); }

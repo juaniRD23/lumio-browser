@@ -1,5 +1,5 @@
 // First run: Welcome → Keychain → Import (a fake Chrome with a bookmark and a
-// saved password) → Done. Run: node --test tests/e2e/welcome.e2e.mjs
+// saved password) → Search engine → Done. Run: node --test tests/e2e/welcome.e2e.mjs
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
@@ -86,6 +86,15 @@ test('import: Chrome bookmarks and passwords (macOS asks to read Chrome’s key)
   }
   await shot('53-imported');
   await L.page(`document.getElementById('imp-go').click(); true`);
+});
+
+test('search engine: the four engines, nothing chosen for you; the choice becomes the default', { skip: process.platform !== 'darwin' && 'follows the Mac-only import step' }, async () => {
+  assert.equal(await until(async () => (await visibleStep()) === 'search'), true);
+  assert.deepEqual((await L.page(`[...document.querySelectorAll('.engine b')].map((b) => b.textContent)`)).sort(), ['Bing', 'Brave', 'DuckDuckGo', 'Google']);
+  assert.equal(await L.page(`document.getElementById('se-go').disabled`), true, 'a choice is needed first');
+  await shot('53b-search-engine');
+  await L.page(`document.querySelector('input[name=engine][value=duckduckgo]').click(); document.getElementById('se-go').click(); true`);
+  assert.ok(await until(async () => (await L.main(() => global.lumio.store.settings.searchEngine)) === 'duckduckgo'));
 });
 
 test('done: Start browsing opens a new tab and the AI panel, and the welcome won’t show again', { skip: process.platform !== 'darwin' && 'follows the Mac-only import step' }, async () => {

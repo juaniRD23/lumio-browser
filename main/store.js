@@ -2,6 +2,7 @@
 // Secrets (the Lumio session) are encrypted with safeStorage (Keychain).
 const fs = require('fs');
 const path = require('path');
+const { BookmarkTree } = require('./bookmarks');
 
 class JsonFile {
   constructor(dir, name, fallback) {
@@ -58,7 +59,6 @@ const DEFAULT_SETTINGS = {
 };
 
 const HISTORY_DAYS = 90;
-const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
 const HISTORY_MAX = 20000;
 
 const SEARCH_ENGINES = {
@@ -76,7 +76,12 @@ class Store {
     this.settingsFile.data = { ...DEFAULT_SETTINGS, ...this.settingsFile.data };
     this.settingsFile.data.profile = { ...DEFAULT_SETTINGS.profile, ...(this.settingsFile.data.profile || {}) };
     this.historyFile = new JsonFile(dir, 'history.json', []);
-    this.bookmarksFile = new JsonFile(dir, 'bookmarks.json', []);
+    // Bookmarks are a tree of folders (main/bookmarks.js); before folders they
+    // were a flat list in bookmarks.json, which becomes the Bookmarks bar.
+    this.bookmarksFile = new JsonFile(dir, 'bookmark-tree.json', null);
+    let legacy = null;
+    if (!this.bookmarksFile.data) { try { legacy = JSON.parse(fs.readFileSync(path.join(dir, 'bookmarks.json'), 'utf8')); } catch { /* none */ } }
+    this.marks = new BookmarkTree(this.bookmarksFile, { legacy });
     this.sessionFile = new JsonFile(dir, 'session.json', { windows: [] });
     this.downloadsFile = new JsonFile(dir, 'downloads.json', []);
     this.chatsFile = new JsonFile(dir, 'chats.json', []);
@@ -162,17 +167,9 @@ class Store {
     }
     this.learnBookmarkIcon(url, favicon);
   }
-  // Bookmarks get their icon when the page is open (imported ones come without
-  // one). Bookmarks on the same site that have no icon yet take it too.
+  // Bookmarks get their icon when the page is open (imported ones come without one).
   learnBookmarkIcon(url, favicon) {
-    const host = hostOf(url);
-    let changed = false;
-    for (const b of this.bookmarksFile.data) {
-      const match = b.url === url ? b.favicon !== favicon : !b.favicon && host && hostOf(b.url) === host;
-      if (match) { b.favicon = favicon; changed = true; }
-    }
-    if (!changed) return false;
-    this.bookmarksFile.save();
+    if (!this.marks.learnIcon(url, favicon)) return false;
     this.onBookmarkIcons?.();
     return true;
   }
@@ -217,57 +214,13 @@ class Store {
   }
 
   // ---- bookmarks ----
-  // A flat, ordered list of { url, title, time, favicon? }.
-  bookmarks() { return this.bookmarksFile.data; }
-  isBookmarked(url) { return this.bookmarksFile.data.some((b) => b.url === url); }
-  toggleBookmark(url, title, favicon) {
-    const list = this.bookmarksFile.data;
-    const i = list.findIndex((b) => b.url === url);
-    if (i >= 0) list.splice(i, 1);
-    else list.push({ url, title: title || url, time: Date.now(), ...(favicon ? { favicon } : {}) });
-    this.bookmarksFile.save();
-    return i < 0;
-  }
-  removeBookmark(url) {
-    this.bookmarksFile.data = this.bookmarksFile.data.filter((b) => b.url !== url);
-    this.bookmarksFile.save();
-  }
-  updateBookmark(url, { title, url: newUrl } = {}) {
-    const b = this.bookmarksFile.data.find((x) => x.url === url);
-    if (!b) return false;
-    if (typeof title === 'string') b.title = title.trim() || b.title;
-    if (typeof newUrl === 'string' && /^(https?|file):/i.test(newUrl.trim())) b.url = newUrl.trim();
-    this.bookmarksFile.save();
-    return true;
-  }
-  moveBookmark(url, toIndex) {
-    const list = this.bookmarksFile.data;
-    const i = list.findIndex((b) => b.url === url);
-    if (i < 0) return;
-    const [b] = list.splice(i, 1);
-    list.splice(Math.max(0, Math.min(toIndex, list.length)), 0, b);
-    this.bookmarksFile.save();
-  }
-  // Dropped on the bookmarks bar: added at that spot (moved there if it's already a bookmark).
-  addBookmarkAt(url, title, index, favicon) {
-    const list = this.bookmarksFile.data;
-    const i = list.findIndex((b) => b.url === url);
-    const b = i >= 0 ? list.splice(i, 1)[0] : { url, title: title || url, time: Date.now(), ...(favicon ? { favicon } : {}) };
-    list.splice(Math.max(0, Math.min(index, list.length)), 0, b);
-    this.bookmarksFile.save();
-  }
-  importBookmarks(items) {
-    const have = new Set(this.bookmarksFile.data.map((b) => b.url));
-    let added = 0;
-    for (const it of items) {
-      if (!/^https?:/.test(it.url) || have.has(it.url)) continue;
-      have.add(it.url);
-      this.bookmarksFile.data.push({ url: it.url, title: it.title || it.url, time: it.time || Date.now() });
-      added++;
-    }
-    this.bookmarksFile.save(true);
-    return added;
-  }
+  // The tree is this.marks (main/bookmarks.js); the window's side of it is
+  // main/bookmarks-service.js. Every bookmark as a flat list (for the
+  // address bar's suggestions), and whether a page is bookmarked (the star).
+  bookmarks() { return this.marks.urls(); }
+  isBookmarked(url) { return this.marks.has(url); }
+  // A flat list goes on the bar; { bar, other, mobile } keeps its folders.
+  importBookmarks(items, opts) { return this.marks.import(items, opts); }
 
   // ---- Lumio Sync (main/sync): applying other devices' changes ----
   // history: { key: "time|url", record: { url, title, time } | null }
@@ -285,20 +238,6 @@ class Store {
     this.historyFile.data = [...list.filter((h) => !drop.has(keyOf(h))), ...add].sort((a, b) => a.time - b.time);
     this.pruneHistory();
     this.historyFile.save();
-  }
-  // bookmarks: { key: url, record: { url, title, time, pos } | null }
-  applySyncedBookmarks(changes) {
-    let list = this.bookmarksFile.data;
-    const keys = new Set(changes.map((c) => c.key));
-    const old = new Map(list.map((b) => [b.url, b]));
-    list = list.filter((b) => !keys.has(b.url));
-    for (const c of changes.filter((x) => x.record && /^(https?|file):/i.test(x.record.url)).sort((a, b) => a.record.pos - b.record.pos)) {
-      const prev = old.get(c.key);
-      const b = { url: c.record.url, title: c.record.title || c.record.url, time: Number(c.record.time) || Date.now(), ...(prev?.favicon ? { favicon: prev.favicon } : {}) };
-      list.splice(Math.max(0, Math.min(Number(c.record.pos) || 0, list.length)), 0, b);
-    }
-    this.bookmarksFile.data = list;
-    this.bookmarksFile.save();
   }
 
   // ---- downloads (history of finished and running downloads) ----

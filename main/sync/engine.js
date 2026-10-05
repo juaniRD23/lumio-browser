@@ -50,6 +50,7 @@ class SyncEngine {
     this.pairing = null; // this device asking for the key: { id, privateKey, code }
     this.requests = []; // other devices asking: { id, name, kind, pubkey, code }
     this.ids = new Map(); // "collection\nkey" -> record id
+    this.serverCollections = null; // what the server keeps (older servers don't say)
     this.timer = null;
     this.busy = null;
     this.again = false;
@@ -57,6 +58,13 @@ class SyncEngine {
   }
 
   addAdapters(list) { for (const a of list) this.adapters.set(a.name, a); }
+  // Whether a collection syncs: its switch is on (some follow another type's,
+  // like bookmark folders with Bookmarks), and for a newer, optional one, the
+  // server says it keeps it (an older server would refuse the whole upload).
+  syncs(adapter) {
+    if (!this.prefs.types[adapter.type || adapter.name]) return false;
+    return !adapter.optional || !!this.serverCollections?.has(adapter.name);
+  }
 
   // ---------------------------------------------------------------- settings
   get prefs() {
@@ -154,10 +162,25 @@ class SyncEngine {
     if (!(await this.ensureKey())) return;
     this.status = 'ready';
     this.error = null;
+    this.catchUp();
     await this.pull();
     await this.push();
     await this.checkRequests();
     this.lastSync = Date.now();
+  }
+
+  // A collection this device starts syncing (new in this version, or one the
+  // server only now keeps) pulls everything once first, so what other devices
+  // already sent arrives before this device sends its own version.
+  catchUp() {
+    const d = this.file.data;
+    const on = [...this.adapters.values()].filter((a) => this.syncs(a));
+    d.started ||= on.filter((a) => !a.optional).map((a) => a.name);
+    const fresh = on.map((a) => a.name).filter((n) => !d.started.includes(n));
+    if (!fresh.length) return;
+    d.started.push(...fresh);
+    d.cursor = 0;
+    this.file.save();
   }
 
   // ---------------------------------------------------------------- the key
@@ -173,6 +196,7 @@ class SyncEngine {
       if (saved) await this.useKey(C.fromB64(saved));
     }
     const status = await this.api('/api/sync');
+    this.serverCollections = Array.isArray(status.collections) ? new Set(status.collections) : null;
     if (!status.keyCheck) {
       // The first device: make the account's key.
       if (!this.keys) {
@@ -283,13 +307,12 @@ class SyncEngine {
 
   async pull() {
     const records = this.file.data.records;
-    const types = this.prefs.types;
     for (let pages = 0; pages < 50; pages++) {
       const res = await this.api(`/api/sync/changes?since=${this.file.data.cursor}&device=${encodeURIComponent(this.deviceId)}&limit=500`);
       const byType = new Map();
       for (const it of res.items) {
         const adapter = this.adapters.get(it.collection);
-        if (!adapter || !types[it.collection]) continue;
+        if (!adapter || !this.syncs(adapter)) continue;
         let key;
         let record = null;
         if (it.deleted) {
@@ -329,10 +352,9 @@ class SyncEngine {
 
   async push() {
     const records = this.file.data.records;
-    const types = this.prefs.types;
     const out = [];
     for (const [type, adapter] of this.adapters) {
-      if (!types[type]) continue;
+      if (!this.syncs(adapter)) continue;
       const seen = new Set();
       for (const e of adapter.entries()) {
         const id = await this.idFor(type, e.key);

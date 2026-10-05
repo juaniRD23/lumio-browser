@@ -141,6 +141,10 @@ test('bookmarks and history are recorded', async () => {
   await L.main(() => global.lumio.cmd.bookmark());
   const marks = await L.main(() => global.lumio.store.bookmarks());
   assert.ok(marks.some((b) => b.title.includes('Lighthouses')));
+  // The star's bubble opened over the page; Done closes it.
+  assert.ok(await until(() => L.main(() => global.lumio.current.overlayKind === 'bm-edit')));
+  await L.main(() => global.lumio.current.overlay.webContents.executeJavaScript(`document.querySelector('[data-act=done]').click(); true`));
+  assert.ok(await until(() => L.main(() => global.lumio.current.overlayKind === null)));
   const hist = await L.main(() => global.lumio.store.history());
   assert.ok(hist.length >= 2);
 });

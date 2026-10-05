@@ -65,19 +65,29 @@ test('favicons are remembered per site for new visits', () => {
   assert.equal(s.history().at(-1).favicon, 'https://site.example/icon.png', 'only http(s) or data: images');
 });
 
-test('bookmarks: toggle, edit, move, import', () => {
-  const s = fresh();
-  assert.equal(s.toggleBookmark('https://a.example/', 'A', 'https://a.example/f.ico'), true);
-  s.toggleBookmark('https://b.example/', 'B');
-  assert.equal(s.bookmarks()[0].favicon, 'https://a.example/f.ico');
-  assert.equal(s.updateBookmark('https://b.example/', { title: 'Bee', url: 'https://bee.example/' }), true);
-  assert.equal(s.updateBookmark('https://bee.example/', { url: 'javascript:alert(1)' }), true);
-  assert.equal(s.bookmarks()[1].url, 'https://bee.example/', 'rejects non-web URLs');
-  s.moveBookmark('https://bee.example/', 0);
-  assert.deepEqual(s.bookmarks().map((b) => b.title), ['Bee', 'A']);
+test('bookmarks: a tree of folders; the flat list from before folders becomes the Bookmarks bar', () => {
+  // An older install: bookmarks.json is a flat list.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lumio-store-'));
+  const old = [
+    { url: 'https://a.example/', title: 'A', time: 1000, favicon: 'https://a.example/f.ico' },
+    { url: 'https://b.example/', title: 'B', time: 2000 },
+  ];
+  fs.writeFileSync(path.join(dir, 'bookmarks.json'), JSON.stringify(old));
+  const s = new Store(dir, null);
+  assert.deepEqual(s.marks.root('bar').children.map(({ url, title, time, favicon }) => ({ url, title, time, ...(favicon ? { favicon } : {}) })), old);
+  assert.deepEqual(s.bookmarks().map((b) => b.url), ['https://a.example/', 'https://b.example/']);
+  assert.equal(s.isBookmarked('https://b.example/'), true);
+  // Saved as the tree; the old file is left as it was.
+  s.marks.addFolder('other', null, 'Work');
+  s.bookmarksFile.flush();
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'bookmarks.json'), 'utf8')).length, 2);
+  const again = new Store(dir, null);
+  assert.deepEqual(again.marks.root('other').children.map((f) => f.title), ['Work'], 'migrates only once');
+  assert.equal(again.marks.root('bar').children.length, 2);
+  // A flat import goes on the bar; one with folders keeps them.
   assert.equal(s.importBookmarks([{ url: 'https://a.example/', title: 'dup' }, { url: 'https://c.example/', title: 'C' }, { url: 'ftp://x/', title: 'no' }]), 1);
-  assert.equal(s.toggleBookmark('https://a.example/'), false);
-  assert.equal(s.isBookmarked('https://a.example/'), false);
+  assert.equal(s.importBookmarks({ other: [{ title: 'Recipes', children: [{ url: 'https://soup.example/', title: 'Soup' }] }] }), 1);
+  assert.deepEqual(s.marks.root('other').children.map((f) => f.title), ['Work', 'Recipes']);
 });
 
 test('bookmarks bar: on by default, turned on once for older installs, then the person decides', () => {
@@ -91,7 +101,7 @@ test('bookmarks bar: on by default, turned on once for older installs, then the 
   assert.equal(new Store(dir, null).settings.showBookmarksBar, false, 'turning it off sticks');
 });
 
-test('bookmarks learn their icon when the page is open, and drops add them in place', () => {
+test('bookmarks learn their icon when the page is open', () => {
   const s = fresh();
   s.importBookmarks([{ url: 'https://youtube.com/', title: 'YouTube' }, { url: 'https://youtube.com/feed/library', title: 'Library' }, { url: 'https://news.example/', title: 'News' }]);
   let told = 0;
@@ -106,10 +116,12 @@ test('bookmarks learn their icon when the page is open, and drops add them in pl
   assert.equal(s.bookmarks()[0].favicon, 'https://www.youtube.com/favicon.ico');
   s.updateFavicon('https://youtube.com/feed/library', 'https://www.youtube.com/lib.png');
   assert.equal(told, 2);
-  s.addBookmarkAt('https://new.example/', 'New', 1, 'https://new.example/f.png');
-  assert.deepEqual(s.bookmarks().map((b) => b.title), ['YouTube', 'New', 'Library', 'News']);
-  s.addBookmarkAt('https://news.example/', 'ignored', 0);
-  assert.deepEqual(s.bookmarks().map((b) => b.title), ['News', 'YouTube', 'New', 'Library'], 'an existing bookmark moves instead');
+  // Icons in folders learn theirs too.
+  const f = s.marks.addFolder('bar', null, 'News folder');
+  s.marks.move([s.marks.byUrl('https://news.example/')[0].id], f.id, null);
+  s.updateFavicon('https://news.example/', 'https://news.example/n.png');
+  assert.equal(s.marks.get(f.id).children[0].favicon, 'https://news.example/n.png');
+  assert.equal(told, 3);
 });
 
 test('sessions: several windows, and the old single-window format', () => {

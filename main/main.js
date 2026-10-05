@@ -24,7 +24,10 @@ const { registerUiProtocol, registerPagesProtocol } = require('./protocol');
 const theme = require('./theme');
 const { chromeUserAgent, Downloads, Permissions } = require('./features');
 const { buildMenu, buildBrowserMenu } = require('./menu');
-const { suggest, topSites } = require('./omnibox');
+const { OmniboxService } = require('./omnibox-service');
+const { BookmarksService } = require('./bookmarks-service');
+const { NtpShortcuts } = require('./ntp-shortcuts');
+const searchEngines = require('./search-engines');
 const { ChatStore } = require('./ai/chats');
 const { MacHelper } = require('./mac/helper');
 const { ExtensionManager } = require('./extensions');
@@ -83,6 +86,8 @@ let siteTips = null; // how to get things done on sites (main/site-tips.js)
 let projects = null; // chat projects (main/projects.js)
 let sync = null; // Lumio Sync (main/sync)
 let companion = null; // the phone companion's link to this computer
+let omnibox = null; // the address bar's suggestions and search engines (main/omnibox-service.js)
+let bookmarks = null; // the bookmarks bar, the star's bubble and the manager (main/bookmarks-service.js)
 let quitting = false;
 const windows = new Set();
 let lastFocused = null;
@@ -170,7 +175,10 @@ const services = {
     menuChanged();
   },
   onSessionChanged: () => saveSession(),
-  onViewCreated: (w, tab) => { if (!w.incognito && tab.view) extensions?.addTab(tab.view.webContents, w.win); },
+  onViewCreated: (w, tab) => {
+    if (!w.incognito && tab.view) extensions?.addTab(tab.view.webContents, w.win);
+    if (!w.incognito && tab.view) omnibox?.watchTab(tab.view.webContents); // sites' OpenSearch engines
+  },
   onPasskeyPromptClosed: (w) => passwords?.passkeyClosed(w),
   onScreenSharePickerClosed: (w) => shareCancel(w),
   onTabActivated: (w, tab) => { if (!w.incognito && tab.view) extensions?.selectTab(tab.view.webContents); },
@@ -332,8 +340,9 @@ const cmd = {
   passwords: () => openInternal('lumio://passwords/'),
   about: () => openInternal('lumio://settings/#about'),
   settings: () => openInternal('lumio://settings/'),
-  bookmark: () => toggleBookmark(cur()),
-  toggleBookmarksBar: () => setBookmarksBar(!store.settings.showBookmarksBar),
+  bookmark: () => bookmarks.star(cur()),
+  bookmarkAllTabs: () => bookmarks.allTabs(cur()),
+  toggleBookmarksBar: () => bookmarks.setBar(!store.settings.showBookmarksBar),
   setAppearance: (value) => store.setSetting('appearance', value),
   pinTab: () => { const w = cur(); const t = w?.tabs.active; if (t) w.tabs.setPinned(t.id, !t.pinned); },
   moveTabToNewWindow: () => { const w = cur(); if (w?.tabs.active) moveTabToNewWindow(w, w.tabs.activeId); },
@@ -352,40 +361,12 @@ function openInternal(url) {
   w.focus();
 }
 
-function bookmarksPayload() {
-  return {
-    show: !!store.settings.showBookmarksBar,
-    items: store.bookmarks().map(({ url, title, favicon }) => ({ url, title, favicon: favicon || store.faviconFor(url) || null })),
-  };
-}
-
-function bookmarksChanged() {
-  const payload = bookmarksPayload();
-  for (const w of alive()) { w.tabs.changed(); w.emit('bookmarks', payload); }
-}
-
-function setBookmarksBar(show) {
-  store.setSetting('showBookmarksBar', !!show);
-  bookmarksChanged();
-  menuChanged();
-}
-
 // Light or dark changed (main/theme.js): native colors follow in every window
 // and the payment window, and the View menu shows the choice.
 function appearanceChanged() {
   for (const w of alive()) w.applyAppearance();
   if (checkoutWin && !checkoutWin.isDestroyed()) checkoutWin.setBackgroundColor(theme.colors(theme.isDark()).frame);
   menuChanged();
-}
-
-function toggleBookmark(w) {
-  const tab = w?.tabs.active;
-  if (!tab) return;
-  const url = w.tabs.displayUrl(tab);
-  if (!/^https?:/.test(url)) return;
-  const added = store.toggleBookmark(url, tab.view?.webContents.getTitle() || tab.title, tab.favicon); // the page's title now, not a moment ago
-  bookmarksChanged();
-  w.emit('toast', { text: added ? 'Bookmarked' : 'Bookmark removed' });
 }
 
 function openUrl(url, disposition = 'tab', from = cur()) {
@@ -706,7 +687,7 @@ function registerIpc() {
     panel: { open: store.settings.panelOpen, width: store.settings.panelWidth },
     sidebar: { open: store.settings.sidebarOpen !== false, getStarted: store.settings.getStartedDone !== true },
     ai: w.ai.state(),
-    bookmarks: bookmarksPayload(),
+    bookmarks: bookmarks.payload(),
     account: account.state(),
     profile: profileState(),
     incognito: w.incognito,
@@ -740,7 +721,7 @@ function registerIpc() {
   on('tab:reload', (w) => w.tabs.reload(false));
   on('tab:stop', (w) => w.tabs.stop());
   on('tab:navigate', (w, input) => { w.hideOverlay(); w.tabs.navigate(input); });
-  on('tab:bookmark', (w) => toggleBookmark(w));
+  on('tab:bookmark', (w) => bookmarks.star(w));
   on('tab:focus-page', (w) => w.tabs.wc()?.focus());
   on('tab:context', (w, id) => tabContextMenu(w, id));
   on('window:new', () => createWindow());
@@ -749,11 +730,8 @@ function registerIpc() {
   });
   on('window:incognito', () => createWindow({ incognito: true }));
 
-  handle('omnibox:suggest', (w, text) => suggest(text, {
-    history: w.incognito ? [] : store.history(),
-    bookmarks: store.bookmarks(),
-    searchTemplate: w.tabs.searchTemplate(),
-  }));
+  omnibox = new OmniboxService({ store, dir: app.getPath('userData'), windows: alive, cmd, openUrl, openInternal, fetch: (url, init) => net.fetch(url, init) });
+  omnibox.register({ handle, on, internalHandle });
 
   on('overlay:show', (w, { rect, payload }) => w.showOverlay(rect, payload));
   // The shell names the dropdown it means, so it can't close one it didn't open.
@@ -787,23 +765,10 @@ function registerIpc() {
   });
   on('permission:respond', (w, { id, allow, remember }) => w.profile.permissions.respond(id, allow, remember));
 
-  // ---- bookmarks bar ----
-  on('bookmarks:open', (w, { url, disposition }) => openUrl(url, disposition || 'current', w));
-  on('bookmarks:context', (w, url) => bookmarkContextMenu(w, url));
-  on('bookmarks:overflow', (w, { urls, x, y }) => {
-    const items = store.bookmarks().filter((b) => urls.includes(b.url));
-    Menu.buildFromTemplate(items.map((b) => ({ label: b.title.slice(0, 60) || b.url, click: () => openUrl(b.url, 'current', w) })))
-      .popup({ window: w.win, x: Math.round(x), y: Math.round(y) });
-  });
-  on('bookmarks:move', (_w, { url, index }) => { store.moveBookmark(url, index); bookmarksChanged(); });
-  // A link, or the address bar's site icon, dropped on the bar.
-  on('bookmarks:add', (w, { url, title, index }) => {
-    url = String(url || '').trim();
-    if (!/^(https?|file):/i.test(url) || url.length > 4096) return;
-    const tab = w.tabs.tabs.find((t) => t.url === url);
-    store.addBookmarkAt(url, String(title || tab?.title || '').trim().slice(0, 300) || url, Number(index) || 0, tab?.favicon);
-    bookmarksChanged();
-  });
+  // ---- bookmarks: the bar, its folder menus, the star's bubble, the manager page
+  bookmarks.register({ on, internalHandle });
+  // ---- the new tab page's shortcuts
+  new NtpShortcuts({ store }).register({ internalHandle });
 
   // ---- site info (lock icon) ----
   handle('site:info', (w) => siteInfo(w));
@@ -890,9 +855,8 @@ function registerIpc() {
 
   // ---- internal pages ----
   internalHandle('page:newtab-data', ['newtab'], ({ w }) => ({
-    topSites: w.incognito ? [] : topSites(store.history(), 8),
-    bookmarks: store.bookmarks().slice(-12).reverse(),
-    engine: (SEARCH_ENGINES[store.settings.searchEngine] || SEARCH_ENGINES.google).name,
+    bookmarks: store.marks.recent(12),
+    engine: searchEngines.defaultEngine(store.settings).name,
     aiReady: w.ai.state().ready,
     incognito: w.incognito,
     // "Good morning, Juan": the profile name they chose, else their Lumio account name.
@@ -923,14 +887,6 @@ function registerIpc() {
   internalHandle('page:downloads', ['downloads'], ({ w }) => w.profile.downloads.all());
   internalHandle('page:download-action', ['downloads'], ({ w }, id, action) => w.profile.downloads.action(id, action));
   internalHandle('page:downloads-clear', ['downloads'], ({ w }) => w.profile.downloads.clearAll());
-
-  internalHandle('page:bookmarks', ['bookmarks', 'newtab'], () => store.bookmarks());
-  internalHandle('page:bookmark-update', ['bookmarks'], (_ctx, url, patch) => { const ok = store.updateBookmark(url, patch || {}); bookmarksChanged(); return ok; });
-  internalHandle('page:bookmark-remove', ['bookmarks', 'newtab'], (_ctx, url) => { store.removeBookmark(url); bookmarksChanged(); });
-  internalHandle('page:bookmark-move', ['bookmarks'], (_ctx, url, index) => { store.moveBookmark(url, index); bookmarksChanged(); });
-  internalHandle('page:bookmarks-export', ['bookmarks'], ({ w }) => exportBookmarks(w));
-  internalHandle('page:bookmarks-bar', ['bookmarks'], () => !!store.settings.showBookmarksBar);
-  internalHandle('page:set-bookmarks-bar', ['bookmarks', 'settings'], (_ctx, show) => setBookmarksBar(!!show));
 
   internalHandle('page:extensions', ['extensions'], () => ({
     available: !!extensions?.ece,
@@ -1034,7 +990,7 @@ function registerIpc() {
     if (key === 'searchEngine' && SEARCH_ENGINES[value]) store.setSetting('searchEngine', value);
     if (key === 'approvalMode') w.ai.setMode(value);
     if (key === 'reasoning') w.ai.setReasoning(value);
-    if (key === 'showBookmarksBar') setBookmarksBar(!!value);
+    if (key === 'showBookmarksBar') bookmarks.setBar(!!value);
     if (key === 'appearance' && theme.APPEARANCES.includes(value)) store.setSetting('appearance', value);
     if (key === 'startup' && ['restore', 'newtab'].includes(value)) store.setSetting('startup', value);
     if (key === 'askDownload') store.setSetting('askDownload', !!value);
@@ -1087,7 +1043,7 @@ function registerIpc() {
     // Tests use a known key instead of the macOS Keychain.
     const secret = process.env.LUMIO_TEST ? process.env.LUMIO_IMPORT_SECRET : undefined;
     const res = await importer.importFrom(String(id), { store, passwordStore: passwords.store }, { bookmarks: o.bookmarks !== false, history: o.history !== false, passwords: !!o.passwords, ...(secret ? { secret } : {}) });
-    if (res.ok) bookmarksChanged();
+    if (res.ok) bookmarks.changed();
     return res;
   });
   internalHandle('page:import-sources', ['settings', 'welcome'], () => importer.detect());
@@ -1103,8 +1059,8 @@ function registerIpc() {
     try {
       const text = fs.readFileSync(filePaths[0], 'utf8');
       if (bookmarks) {
-        const added = store.importBookmarks(importer.parseBookmarksHtml(text));
-        bookmarksChanged();
+        const added = store.importBookmarks(importer.parseBookmarksHtml(text), { folder: 'Imported' });
+        bookmarks.changed();
         return { ok: true, bookmarks: added };
       }
       return { ok: true, passwords: passwords.store.importCsv(text) };
@@ -1150,18 +1106,6 @@ function siteInfo(w) {
   };
 }
 
-async function exportBookmarks(w) {
-  const { canceled, filePath } = await dialog.showSaveDialog(w.win, {
-    defaultPath: path.join(app.getPath('downloads'), 'lumio-bookmarks.html'),
-    filters: [{ name: 'HTML', extensions: ['html'] }],
-  });
-  if (canceled || !filePath) return false;
-  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const rows = store.bookmarks().map((b) => `    <DT><A HREF="${esc(b.url)}" ADD_DATE="${Math.round((b.time || Date.now()) / 1000)}">${esc(b.title)}</A>`).join('\n');
-  fs.writeFileSync(filePath, `<!DOCTYPE NETSCAPE-Bookmark-file-1>\n<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">\n<TITLE>Bookmarks</TITLE>\n<H1>Bookmarks</H1>\n<DL><p>\n${rows}\n</DL><p>\n`);
-  return true;
-}
-
 function tabContextMenu(w, id) {
   const tab = w.tabs.get(id);
   if (!tab) return;
@@ -1182,37 +1126,6 @@ function tabContextMenu(w, id) {
     { label: 'Close Tabs to the Right', enabled: i < tabs.tabs.length - 1, click: () => tabs.tabs.slice(i + 1).forEach((t) => tabs.close(t.id)) },
     { type: 'separator' },
     { label: 'Reopen Closed Tab', enabled: closedCount > 0, click: () => reopenClosed() },
-  ]).popup({ window: w.win });
-}
-
-function bookmarkContextMenu(w, url) {
-  const b = store.bookmarks().find((x) => x.url === url);
-  if (!b) { barContextMenu(w); return; }
-  Menu.buildFromTemplate([
-    { label: 'Open', click: () => openUrl(url, 'current', w) },
-    { label: 'Open in New Tab', click: () => openUrl(url, 'tab', w) },
-    { label: 'Open in New Window', click: () => openUrl(url, 'window', w) },
-    { label: 'Open in Incognito Window', click: () => openUrl(url, 'incognito', w) },
-    { type: 'separator' },
-    { label: 'Edit…', click: () => openInternal(`lumio://bookmarks/?edit=${encodeURIComponent(url)}`) },
-    { label: 'Delete', click: () => { store.removeBookmark(url); bookmarksChanged(); } },
-    { type: 'separator' },
-    { label: 'Show Bookmarks Bar', type: 'checkbox', checked: !!store.settings.showBookmarksBar, click: () => cmd.toggleBookmarksBar() },
-    { label: 'Bookmark Manager', click: () => cmd.bookmarksManager() },
-  ]).popup({ window: w.win });
-}
-
-// Right-click on the bar itself, not on a bookmark.
-function barContextMenu(w) {
-  const tab = w.tabs.active;
-  const url = tab ? w.tabs.displayUrl(tab) : '';
-  const canAdd = /^https?:/.test(url) && !store.isBookmarked(url);
-  Menu.buildFromTemplate([
-    { label: 'Bookmark This Tab', enabled: canAdd, click: () => toggleBookmark(w) },
-    { label: 'Import Bookmarks…', click: () => openInternal('lumio://settings/#import') },
-    { type: 'separator' },
-    { label: 'Show Bookmarks Bar', type: 'checkbox', checked: !!store.settings.showBookmarksBar, click: () => cmd.toggleBookmarksBar() },
-    { label: 'Bookmark Manager', click: () => cmd.bookmarksManager() },
   ]).popup({ window: w.win });
 }
 
@@ -1237,7 +1150,8 @@ app.on('second-instance', (_e, argv) => {
 
 app.whenReady().then(async () => {
   store = new Store(app.getPath('userData'), safeStorage);
-  store.onBookmarkIcons = () => bookmarksChanged();
+  bookmarks = new BookmarksService({ store, windows: alive, cmd, openUrl, openInternal, createWindow, menuChanged });
+  store.onBookmarkIcons = () => bookmarks.changed();
   // Light or dark, before any window opens; changes then apply live.
   theme.init({ store, nativeTheme });
   theme.onChange(appearanceChanged);
@@ -1319,6 +1233,7 @@ app.whenReady().then(async () => {
   });
   sync.addAdapters([
     syncAdapters.bookmarks(store),
+    syncAdapters.bookmarkTree(store),
     syncAdapters.history(store),
     syncAdapters.passwords(passwords.store),
     syncAdapters.chats(normal.chats),
@@ -1338,7 +1253,7 @@ app.whenReady().then(async () => {
   workflows.onChange(syncSoon);
   projects.onChange(syncSoon);
   // Bookmarks from another device: redraw the bar.
-  store.bookmarksFile.onSave(() => { if (sync.busy) bookmarksChanged(); });
+  store.bookmarksFile.onSave(() => { if (sync.busy) bookmarks.changed(); });
   sync.start();
   companion = new CompanionBridge({
     sync,
@@ -1486,6 +1401,8 @@ global.lumio = {
   get siteTips() { return siteTips; },
   get schedules() { return schedules; },
   get sync() { return sync; },
+  get omnibox() { return omnibox; },
+  get bookmarks() { return bookmarks; },
   get profiles() { return { normal, incognito: incog }; },
   get recentlyClosed() { return recentlyClosed; },
   screenAura,

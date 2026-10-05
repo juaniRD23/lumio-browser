@@ -8,7 +8,7 @@ const DAY = 24 * 3600 * 1000;
 const HISTORY_DAYS = 30;
 const HISTORY_MAX = 2000;
 const CHAT_MAX = 400 * 1024;
-const SETTINGS = ['searchEngine', 'approvalMode', 'reasoning', 'showBookmarksBar', 'memorySaver', 'memorySaverMinutes', 'startup', 'offerPasswords', 'autofillPasswords', 'profile', 'appearance'];
+const SETTINGS = ['searchEngine', 'approvalMode', 'reasoning', 'showBookmarksBar', 'memorySaver', 'memorySaverMinutes', 'startup', 'offerPasswords', 'autofillPasswords', 'profile', 'appearance', 'searchEngines', 'searchSuggest'];
 
 function simple(name, { entries, apply, keepAbsent }) {
   return {
@@ -21,11 +21,26 @@ function simple(name, { entries, apply, keepAbsent }) {
 }
 
 // ---------------------------------------------------------------- bookmarks
+// The flat list, one record per address ({ url, title, time, pos }), exactly
+// as versions before folders sync it, so they keep working alongside newer
+// ones. Here it only adds, renames or removes addresses: where bookmarks sit
+// comes from bookmarkTree.
 function bookmarks(store) {
   return simple('bookmarks', {
-    entries: () => store.bookmarks().map((b, i) => [b.url, { url: b.url, title: b.title, time: b.time, pos: i }]),
-    apply: (changes) => store.applySyncedBookmarks(changes),
+    entries: () => store.marks.legacyEntries(),
+    apply: (changes) => store.marks.applyLegacy(changes),
   });
+}
+
+// Folders: one record per bookmark or folder (key: its id) with its parent
+// and position. It follows the Bookmarks switch, and only syncs with servers
+// that keep it (`optional`): older versions never see these records, so they
+// can't delete them.
+function bookmarkTree(store) {
+  return { ...simple('bookmarkTree', {
+    entries: () => store.marks.syncedTree(),
+    apply: (changes) => store.marks.applySyncedTree(changes),
+  }), type: 'bookmarks', optional: true };
 }
 
 // ---------------------------------------------------------------- history
@@ -196,4 +211,4 @@ function tabs({ deviceId, deviceName, platform, windows, remote, onApplied = () 
   };
 }
 
-module.exports = { bookmarks, history, passwords, chats, workflows, projects, settings, tabs, shrinkChat, SETTINGS };
+module.exports = { bookmarks, bookmarkTree, history, passwords, chats, workflows, projects, settings, tabs, shrinkChat, SETTINGS };

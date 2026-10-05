@@ -1,4 +1,5 @@
 import './keys.js';
+import { initShortcuts, icon, fixIcons } from './ntp-shortcuts.js';
 const page = window.lumioPage;
 const $ = (s) => document.querySelector(s);
 // The Lumio mark in the text color, with an accent dot.
@@ -16,18 +17,6 @@ $('#ask').insertAdjacentHTML('afterbegin', MARK.replace('width="40" height="40"'
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
-
-function icon(url, cls) {
-  let origin = '';
-  try { origin = new URL(url).origin; } catch {}
-  const letter = esc((host(url)[0] || '?').toUpperCase());
-  return `<span class="${cls}" data-letter="${letter}"><img src="${esc(origin)}/favicon.ico" alt="" loading="lazy"></span>`;
-}
-function fixIcons(root) {
-  root.querySelectorAll('img').forEach((img) => {
-    img.addEventListener('error', () => { const p = img.parentElement; img.remove(); if (p.dataset.letter) p.textContent = p.dataset.letter; });
-  });
-}
 
 const q = $('#q');
 // After picking an idea, ↵ asks Lumio instead of searching.
@@ -49,7 +38,7 @@ q.addEventListener('input', () => { if (!q.value.trim() && asking) setAsking(fal
 $('#ask').addEventListener('click', () => submit(true));
 q.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit(true); } });
 
-data = await page.invoke('page:newtab-data').catch(() => ({ topSites: [], bookmarks: [], engine: 'Google', chats: [] }));
+data = await page.invoke('page:newtab-data').catch(() => ({ bookmarks: [], engine: 'Google', chats: [] }));
 greet(data.incognito ? null : data.name);
 if (data.incognito) {
   document.body.classList.add('incognito');
@@ -117,14 +106,7 @@ if (data.aiReady && !data.incognito) {
   }
 }
 
-const sites = data.incognito ? [] : data.topSites.length ? data.topSites : [
-  { url: 'https://www.google.com/', title: 'Google' },
-  { url: 'https://www.youtube.com/', title: 'YouTube' },
-  { url: 'https://github.com/', title: 'GitHub' },
-  { url: 'https://lumio-usa.online/', title: 'Lumio' },
-];
-$('#sites').innerHTML = sites.map((s) => `<a class="site" href="${esc(s.url)}" title="${esc(s.title)}">${icon(s.url, 'ico')}<span class="name">${esc(host(s.url))}</span></a>`).join('');
-fixIcons($('#sites'));
+initShortcuts({ page, incognito: data.incognito });
 
 if (data.bookmarks.length && !data.incognito) {
   $('#marks-wrap').hidden = false;

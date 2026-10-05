@@ -2,6 +2,7 @@
 // and the site-information popup (lock icon).
 import { icons, markSvg, avatarHtml } from './icons.js';
 import { setAccent } from '/assets/theme-colors.js';
+import './overlay-bookmarks.js'; // the bookmarks bar's folder menus and the star's bubble
 
 const api = window.lumio;
 const card = document.getElementById('card');
@@ -10,15 +11,36 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const pretty = (u) => String(u || '').replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '');
 const size = (n) => (n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : n >= 1e6 ? (n / 1e6).toFixed(1) + ' MB' : n >= 1e3 ? Math.round(n / 1e3) + ' KB' : n + ' B');
 
+// The address bar's suggestions (main/omnibox.js makes the rows).
+const ACTION_ICONS = { clearData: 'trash', passwords: 'key', settings: 'gear', incognito: 'incognito' };
+const SCOPE_ICONS = { tabs: 'tabs', bookmarks: 'star', history: 'clock' };
+function suggestIcon(it) {
+  if (it.type === 'ai' || it.scope === 'lumio') return markSvg(15);
+  if (it.type === 'answer') return '<b class="eq" aria-hidden="true">=</b>';
+  if (it.type === 'action') return icons[ACTION_ICONS[it.action]] || icons.bolt;
+  if (it.type === 'keyword') return icons[SCOPE_ICONS[it.scope]] || icons.search;
+  return icons[{ search: 'search', bookmark: 'star', history: 'clock', tab: 'tabs', clipboard: 'copy' }[it.type]] || icons.globe;
+}
 function renderSuggest({ items, selected }) {
+  card.setAttribute('role', 'listbox');
+  card.setAttribute('aria-label', 'Suggestions');
+  const hint = (text, cls = '') => `<span class="spacer" style="flex:1"></span><span class="hint ${cls}">${text}</span>`;
   card.innerHTML = items.map((it, i) => {
-    const icon = it.type === 'ai' ? markSvg(15) : it.type === 'search' ? icons.search : it.type === 'bookmark' ? icons.star : it.type === 'history' ? icons.clock : icons.globe;
+    const t = `<span class="t">${esc(it.title)}</span>`;
+    const u = it.url ? `<span class="u">${esc(pretty(it.url))}</span>` : '';
     let body;
-    if (it.type === 'ai') body = `<span class="t">${esc(it.title)}</span><span class="spacer" style="flex:1"></span><span class="hint">Ask Lumio</span>`;
-    else if (it.type === 'search') body = `<span class="t">${esc(it.title)}</span><span class="spacer" style="flex:1"></span><span class="hint">Search</span>`;
-    else if (it.type === 'url') body = `<span class="t">${esc(it.title)}</span>`;
-    else body = `<span class="t">${esc(it.title)}</span><span class="u">${esc(pretty(it.url))}</span>`;
-    return `<div class="row ${it.type} ${i === selected ? 'sel' : ''}" data-i="${i}"><span class="ic">${icon}</span>${body}</div>`;
+    if (it.type === 'ai') body = t + hint('Ask Lumio');
+    else if (it.type === 'search') body = t + (it.remote ? '' : hint(esc(it.hint || 'Search')));
+    else if (it.type === 'url') body = t;
+    else if (it.type === 'tab') body = t + u + hint('Switch to this tab', 'pill');
+    else if (it.type === 'action') body = t + hint('Action', 'pill');
+    else if (it.type === 'answer') body = t + hint('Copy');
+    else if (it.type === 'keyword') body = t + hint('<kbd>Tab</kbd>');
+    else body = t + u;
+    const rmLabel = it.type === 'clipboard' ? 'Remove' : 'Remove from history';
+    const remove = it.removable || it.type === 'clipboard' ? `<button class="rm" data-rm="${i}" tabindex="-1" title="${rmLabel}" aria-label="${rmLabel}">${icons.close}</button>` : '';
+    const cls = `row ${it.type}${it.remote ? ' remote' : ''}${i === selected ? ' sel' : ''}`;
+    return `<div class="${cls}" data-i="${i}" role="option" aria-selected="${i === selected}"><span class="ic">${suggestIcon(it)}</span>${body}${remove}</div>`;
   }).join('');
 }
 
@@ -216,6 +238,7 @@ function reportSize() {
 let kind = null;
 api.on('overlay-data', (payload) => {
   kind = payload.kind;
+  if (kind !== 'suggest') { card.removeAttribute('role'); card.removeAttribute('aria-label'); } // the same card shows every kind
   if (payload.accent) setAccent(document.documentElement, payload.accent); // { dark, light } from the shell
   if (kind === 'suggest') renderSuggest(payload);
   else if (kind === 'downloads') renderDownloads(payload);
@@ -318,8 +341,13 @@ card.addEventListener('mousedown', async (e) => {
   }
   e.preventDefault();
   if (kind === 'suggest') {
+    if (e.button === 2) return;
+    const rm = e.target.closest('[data-rm]');
+    if (rm) { api.send('overlay:pick', { kind, index: Number(rm.dataset.rm), action: 'remove' }); return; }
     const row = e.target.closest('.row');
-    if (row) api.send('overlay:pick', { kind, index: Number(row.dataset.i) });
+    // ⌘/Ctrl-click: a new tab; middle click: a background tab; ⇧-click: a new window.
+    const disposition = e.button === 1 ? 'background' : e.metaKey || e.ctrlKey ? 'tab' : e.shiftKey ? 'window' : 'current';
+    if (row) api.send('overlay:pick', { kind, index: Number(row.dataset.i), disposition });
   } else if (kind === 'downloads') {
     const btn = e.target.closest('button[data-act]');
     if (!btn) return;

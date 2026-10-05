@@ -139,13 +139,14 @@ test('bookmarks bar: under the address bar, icons, the new tab page, right-click
   const firstIcon = await page.evaluate(() => {
     window.__emit('tabs', { activeId: 1, tabs: [{ id: 1, title: 'YouTube', url: 'https://www.youtube.com/watch?v=abc' }] });
     window.__emit('bookmarks', { show: true, items: [
-      { url: 'https://a.example/', title: 'Alpha', favicon: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==' },
-      { url: 'https://b.example/page', title: 'Beta', favicon: null },
-      { url: 'https://c.example/', title: 'Gamma', favicon: null },
-    ] });
+      { id: 'a1', url: 'https://a.example/', title: 'Alpha', favicon: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==' },
+      { id: 'b2', url: 'https://b.example/page', title: 'Beta', favicon: null },
+      { id: 'c3', url: 'https://c.example/', title: 'Gamma', favicon: null },
+    ], other: { id: 'other', title: 'Other bookmarks', children: [] }, mobile: { id: 'mobile', title: 'Mobile bookmarks', children: [] }, folders: [], recent: [] });
     return document.querySelector('.bm-item[data-i="1"] img')?.getAttribute('src'); // before it loads (or fails)
   });
-  assert.deepEqual(await page.$$eval('.bm-item span', (els) => els.map((e) => e.textContent)), ['Alpha', 'Beta', 'Gamma']);
+  assert.deepEqual(await page.$$eval('.bm-items .bm-item span', (els) => els.map((e) => e.textContent)), ['Alpha', 'Beta', 'Gamma']);
+  assert.equal(await page.isVisible('#bm-all'), true, 'All bookmarks at the right end');
   const [toolbar, barBox] = await page.evaluate(() => ['toolbar', 'bookmarks-bar'].map((id) => document.getElementById(id).getBoundingClientRect().toJSON()));
   assert.ok(barBox.top >= toolbar.bottom - 1 && barBox.top - toolbar.bottom < 6, 'right under the address bar');
   // A bookmark without an icon yet shows its site's /favicon.ico; a site without one gets the globe.
@@ -154,8 +155,8 @@ test('bookmarks bar: under the address bar, icons, the new tab page, right-click
 
   // Right-click: on a bookmark, its menu; on the bar itself, the bar's menu.
   await page.click('.bm-item[data-i="1"]', { button: 'right' });
-  assert.equal(await lastSent('bookmarks:context'), 'https://b.example/page');
-  const r = await page.evaluate(() => document.getElementById('bookmarks-bar').getBoundingClientRect().toJSON());
+  assert.equal(await lastSent('bookmarks:context'), 'b2');
+  const r = await page.evaluate(() => document.querySelector('#bookmarks-bar .bm-items').getBoundingClientRect().toJSON());
   await page.mouse.click(r.right - 30, r.top + r.height / 2, { button: 'right' });
   assert.equal(await lastSent('bookmarks:context'), null);
 
@@ -173,19 +174,19 @@ test('bookmarks bar: under the address bar, icons, the new tab page, right-click
     return shown;
   });
   assert.equal(marked, true, 'a marker shows where it lands');
-  assert.deepEqual(await lastSent('bookmarks:add'), { url: 'https://d.example/', title: 'Delta site', index: 1 });
+  assert.deepEqual(await lastSent('bookmarks:add'), { url: 'https://d.example/', title: 'Delta site', parentId: 'bar', index: 1 });
   assert.equal(await page.$$eval('.drop-before, .drop-after', (els) => els.length), 0);
   // Dragging Alpha past Gamma moves it to the end.
   await page.evaluate(() => {
     const bar = document.getElementById('bookmarks-bar');
-    const [alpha, , gamma] = bar.querySelectorAll('.bm-item');
+    const [alpha, , gamma] = bar.querySelectorAll('.bm-items .bm-item');
     const dt = new DataTransfer();
     alpha.dispatchEvent(new DragEvent('dragstart', { dataTransfer: dt, bubbles: true }));
     const g = gamma.getBoundingClientRect();
     bar.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, clientX: g.right + 4, clientY: g.top + 5, bubbles: true, cancelable: true }));
     alpha.dispatchEvent(new DragEvent('dragend', { bubbles: true }));
   });
-  assert.deepEqual(await lastSent('bookmarks:move'), { url: 'https://a.example/', index: 2 });
+  assert.deepEqual(await lastSent('bookmarks:move'), { ids: ['a1'], parentId: 'bar', index: 3 }, 'before what\'s at 3: the end');
   // The address bar's site icon drags as a link to the page.
   const dragged = await page.evaluate(() => {
     const dt = new DataTransfer();

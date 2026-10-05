@@ -113,7 +113,8 @@ function buildMenu(cmd, state = {}) {
     {
       label: 'Bookmarks',
       submenu: [
-        { label: 'Bookmark This Page', accelerator: 'CmdOrCtrl+D', click: cmd.bookmark },
+        { label: 'Bookmark This Page…', accelerator: 'CmdOrCtrl+D', click: cmd.bookmark },
+        { label: 'Bookmark All Tabs…', accelerator: 'CmdOrCtrl+Shift+D', click: cmd.bookmarkAllTabs },
         { label: 'Bookmark Manager', accelerator: MAC ? 'Cmd+Alt+B' : 'Ctrl+Shift+O', click: cmd.bookmarksManager },
       ],
     },
@@ -151,7 +152,8 @@ function buildBrowserMenu(cmd, state = {}) {
     {
       label: 'Bookmarks',
       submenu: [
-        { label: 'Bookmark this page', accelerator: 'CmdOrCtrl+D', click: cmd.bookmark },
+        { label: 'Bookmark this page…', accelerator: 'CmdOrCtrl+D', click: cmd.bookmark },
+        { label: 'Bookmark all tabs…', accelerator: 'CmdOrCtrl+Shift+D', click: cmd.bookmarkAllTabs },
         { label: 'Show bookmarks bar', type: 'checkbox', checked: !!state.bookmarksBar, accelerator: 'CmdOrCtrl+Shift+B', click: cmd.toggleBookmarksBar },
         { label: 'Bookmark manager', accelerator: k('Cmd+Alt+B', 'Ctrl+Shift+O'), click: cmd.bookmarksManager },
       ],

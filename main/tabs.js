@@ -7,7 +7,7 @@ const { WebContentsView, Menu, clipboard, shell, app } = require('electron');
 const { isSynthetic } = require('./synthetic-input');
 const path = require('path');
 const { parseInput, displayUrl } = require('./omnibox');
-const { SEARCH_ENGINES } = require('./store');
+const searchEngines = require('./search-engines');
 const theme = require('./theme');
 
 const NEWTAB = 'lumio://newtab/';
@@ -33,7 +33,7 @@ class TabManager {
   get active() { return this.tabs.find((t) => t.id === this.activeId) || null; }
   get(id) { return this.tabs.find((t) => t.id === id) || null; }
   byWebContents(wc) { return this.tabs.find((t) => t.view?.webContents === wc) || null; }
-  searchTemplate() { return (SEARCH_ENGINES[this.store.settings.searchEngine] || SEARCH_ENGINES.google).url; }
+  searchTemplate() { return searchEngines.defaultEngine(this.store.settings).url; }
   pinnedCount() { return this.tabs.filter((t) => t.pinned).length; }
   // What a tab shows before its page paints: Lumio's own pages follow light
   // or dark; websites get white, like in Chrome.
@@ -560,7 +560,7 @@ class TabManager {
     const items = [];
     const sep = () => { if (items.length && items[items.length - 1].type !== 'separator') items.push({ type: 'separator' }); };
     const index = this.tabs.indexOf(tab) + 1;
-    const engine = SEARCH_ENGINES[this.store.settings.searchEngine] || SEARCH_ENGINES.google;
+    const engine = searchEngines.defaultEngine(this.store.settings);
 
     if (params.misspelledWord) {
       const suggestions = (params.dictionarySuggestions || []).slice(0, 5);

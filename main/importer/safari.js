@@ -21,9 +21,11 @@ class AccessError extends Error {
 }
 const denied = (err) => ['EPERM', 'EACCES'].includes(err?.code) || /Operation not permitted|Permission denied/i.test(String(err?.stderr || err?.message || ''));
 
+// { bar, other, mobile }: Favorites (BookmarksBar) is the bar; the
+// Bookmarks menu and other folders go in Other bookmarks.
 function readBookmarks() {
   const file = path.join(safariDir(), 'Bookmarks.plist');
-  if (!fs.existsSync(file)) return [];
+  if (!fs.existsSync(file)) return { bar: [], other: [], mobile: [] };
   let data;
   try {
     fs.accessSync(file, fs.constants.R_OK);
@@ -32,16 +34,17 @@ function readBookmarks() {
     if (denied(err)) throw new AccessError();
     throw err;
   }
-  const out = [];
-  const walk = (node) => {
-    if (!node) return;
-    if (node.Title === 'com.apple.ReadingList') return; // the reading list isn't bookmarks
-    if (node.WebBookmarkType === 'WebBookmarkTypeLeaf' && /^https?:/i.test(node.URLString || '')) {
-      out.push({ url: node.URLString, title: node.URIDictionary?.title || node.URLString, time: Date.now() });
-    }
-    for (const child of node.Children || []) walk(child);
-  };
-  walk(data);
+  const list = (node, depth = 0) => (depth > 40 ? [] : (node?.Children || []).flatMap((n) => {
+    if (n.Title === 'com.apple.ReadingList') return []; // the reading list isn't bookmarks
+    if (n.WebBookmarkType === 'WebBookmarkTypeList' || Array.isArray(n.Children)) return [{ title: n.Title || 'Folder', children: list(n, depth + 1) }];
+    return n.WebBookmarkType === 'WebBookmarkTypeLeaf' && /^https?:/i.test(n.URLString || '') ? [{ url: n.URLString, title: n.URIDictionary?.title || n.URLString, time: Date.now() }] : [];
+  }));
+  const out = { bar: [], other: [], mobile: [] };
+  for (const n of list(data)) {
+    if (n.children && n.title === 'BookmarksBar') out.bar.push(...n.children);
+    else if (n.children && n.title === 'BookmarksMenu') out.other.push(...n.children);
+    else out.other.push(n);
+  }
   return out;
 }
 
@@ -77,7 +80,7 @@ function readHistory({ days = 90, limit = 20000 } = {}) {
 function importFrom(store, { bookmarks = true, history = true } = {}) {
   const res = { ok: true, browser: 'Safari', bookmarks: 0, history: 0, passwords: null };
   try {
-    if (bookmarks) res.bookmarks = store.importBookmarks(readBookmarks());
+    if (bookmarks) res.bookmarks = store.importBookmarks(readBookmarks(), { folder: 'Imported from Safari' });
     if (history) res.history = store.importHistory(readHistory());
   } catch (err) {
     if (err.code === 'needs_access') return { ok: false, needsAccess: true, error: err.message };

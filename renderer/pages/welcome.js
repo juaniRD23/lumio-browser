@@ -1,4 +1,5 @@
-// First run: welcome → Keychain (Mac) → import from another browser → done.
+// First run: welcome → Keychain (Mac) → import from another browser →
+// choose a search engine → done.
 import './keys.js';
 const page = window.lumioPage;
 const $ = (s) => document.querySelector(s);
@@ -10,7 +11,7 @@ $('#mark').innerHTML = '<svg viewBox="0 0 64 64"><path d="M35 12a21 21 0 1 0 17 
 
 const state = await page.invoke('page:welcome-state');
 const mac = state.platform === 'darwin';
-const steps = ['hello', ...(mac ? ['keychain'] : []), 'import', 'done'];
+const steps = ['hello', ...(mac ? ['keychain'] : []), 'import', 'search', 'done'];
 let at = 0;
 
 function show(i) {
@@ -52,12 +53,12 @@ $('#kc-go').addEventListener('click', async () => {
 $('#kc-skip').addEventListener('click', () => show(at + 1));
 
 // ------------------------------------------------------------ Import
-const LOOK = { chrome: ['#1A73E8', 'C'], edge: ['#0C8BD8', 'E'], brave: ['#FB542B', 'B'], arc: ['#E2477B', 'A'], vivaldi: ['#EF3939', 'V'], chromium: ['#4A7FE0', 'C'], safari: ['#1B8CF2', 'S'] };
+const LOOK = { chrome: ['#1A73E8', 'C'], edge: ['#0C8BD8', 'E'], brave: ['#FB542B', 'B'], arc: ['#E2477B', 'A'], vivaldi: ['#EF3939', 'V'], chromium: ['#4A7FE0', 'C'], firefox: ['#FF7139', 'F'], safari: ['#1B8CF2', 'S'] };
 const sources = state.sources || [];
 let chosen = sources[0]?.id || null;
 function renderSources() {
   $('#sources').innerHTML = sources.length ? sources.map((s) => {
-    const [bg, letter] = LOOK[s.id] || ['#555', s.name[0]];
+    const [bg, letter] = LOOK[s.id.split(':')[0]] || ['#555', s.name[0]]; // "chrome:Profile 2": one of Chrome's profiles
     return `<label class="src ${s.id === chosen ? 'on' : ''}"><input type="radio" name="src" value="${esc(s.id)}" ${s.id === chosen ? 'checked' : ''}><span class="logo" style="background:${bg}">${letter}</span><b>${esc(s.name)}</b></label>`;
   }).join('') : '<div class="empty-src">No other browsers found on this computer. You can still import files below.</div>';
   const src = sources.find((s) => s.id === chosen);
@@ -122,6 +123,27 @@ document.querySelectorAll('[data-file]').forEach((b) => b.addEventListener('clic
   if (!res.ok) { $('#imp-note').className = 'note bad'; $('#imp-note').textContent = res.error || 'Couldn’t import that file.'; return; }
   showResult(res);
 }));
+
+// ------------------------------------------------------------ Search engine
+// The built-in engines in a random order, and none picked until you choose.
+const engines = ((await page.invoke('page:search-engines').catch(() => null))?.engines || []).slice();
+if (!engines.length) steps.splice(steps.indexOf('search'), 1); // nothing to choose from: skip it
+for (let i = engines.length - 1; i > 0; i--) {
+  const j = Math.floor(Math.random() * (i + 1));
+  [engines[i], engines[j]] = [engines[j], engines[i]];
+}
+$('#engines').innerHTML = engines.map((e) => `
+  <label class="engine"><input type="radio" name="engine" value="${esc(e.id)}">
+    <span class="engine-logo" aria-hidden="true">${esc(e.name[0])}</span>
+    <span class="engine-name"><b>${esc(e.name)}</b><small>${esc(e.keyword)}</small></span></label>`).join('');
+$('#engines').addEventListener('change', () => { $('#se-go').disabled = false; $('#se-note').textContent = ''; });
+$('#se-go').addEventListener('click', async () => {
+  const id = document.querySelector('input[name=engine]:checked')?.value;
+  if (!id) return;
+  const res = await page.invoke('page:search-engine-default', id).catch(() => null);
+  if (res?.default !== id) { $('#se-note').className = 'note bad'; $('#se-note').textContent = 'Couldn’t save that. Try again.'; return; }
+  show(at + 1);
+});
 
 // ------------------------------------------------------------ Done
 $('#default').addEventListener('click', async () => { await page.invoke('page:make-default'); $('#default').textContent = 'Done ✓'; $('#default').disabled = true; });
