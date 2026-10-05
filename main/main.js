@@ -20,7 +20,8 @@ protocol.registerSchemesAsPrivileged([
 const { Store, SEARCH_ENGINES } = require('./store');
 const { NEWTAB } = require('./tabs');
 const { BrowserWin } = require('./window');
-const { registerUiProtocol, registerPagesProtocol } = require('./protocol');
+const { registerUiProtocol, registerPagesProtocol, setPageAttributes } = require('./protocol');
+const accessibility = require('./accessibility');
 const theme = require('./theme');
 const { chromeUserAgent, Downloads, Permissions } = require('./features');
 const { buildMenu, buildBrowserMenu } = require('./menu');
@@ -314,6 +315,14 @@ const cmd = {
   reopenTab: () => reopenClosed(),
   reopenClosed: (index) => reopenClosed(index),
   focusOmnibox: () => cur()?.focusOmnibox(),
+  // F6 / Shift+F6: the next or previous part of the window (renderer/ui/a11y.js).
+  focusPane: (dir) => {
+    const w = cur();
+    if (!w) return;
+    const fromPage = !!w.tabs.wc()?.isFocused();
+    w.win.webContents.focus();
+    w.emit('focus-pane', { dir, fromPage });
+  },
   print: () => cur()?.tabs.wc()?.print(),
   savePage: () => { const w = cur(); if (w) savePage(w, w.tabs.active); },
   find: () => { const w = cur(); if (!w) return; w.win.webContents.focus(); w.emit('find-open'); },
@@ -924,6 +933,7 @@ function registerIpc() {
     chats: w.incognito ? [] : w.ai.listChats().slice(0, 3),
   }));
   internalHandle('page:open-chat', ['newtab'], ({ w }, id) => w.openChat(String(id || '')));
+  accessibility.register({ internalHandle, store });
   require('./customize').register({ internalHandle, store, dir: app.getPath('userData'), dialog, nativeImage, theme, setProfile });
   internalHandle('page:navigate', ALL_PAGES, ({ w, tab }, input) => w.tabs.navigate(input, tab.id));
   internalHandle('page:open', ALL_PAGES, ({ w }, url, disposition) => openUrl(String(url || ''), disposition, w));
@@ -1268,6 +1278,7 @@ app.whenReady().then(async () => {
   theme.onChange(appearanceChanged);
   helper = new MacHelper();
   app.userAgentFallback = chromeUserAgent();
+  setPageAttributes(() => accessibility.htmlAttrs(accessibility.prefs(store.settings)));
   registerUiProtocol(session.defaultSession);
   // Lumio's own UI (the window and its popups) may use the microphone for
   // voice mode in the AI panel, and no other device. Everything else keeps

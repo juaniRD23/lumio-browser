@@ -1,4 +1,5 @@
 import './keys.js';
+import '/assets/ui-prefs.js';
 import { patchList } from './page-motion.js';
 const page = window.lumioPage;
 const $ = (s) => document.querySelector(s);

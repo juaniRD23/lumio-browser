@@ -524,6 +524,7 @@ class TabManager {
       if (!wc || wc.isDestroyed() || !t.url.startsWith('lumio:')) continue;
       t.view.setBackgroundColor(this.pageBackground(t.url));
       wc.send('appearance', theme.appearance());
+      wc.send('ui-prefs', theme.uiPrefs());
     }
   }
 

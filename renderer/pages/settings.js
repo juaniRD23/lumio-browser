@@ -1,4 +1,5 @@
 import './keys.js';
+import '/assets/ui-prefs.js';
 import { THEME_COLORS, accentFor, setAccent } from '/assets/theme-colors.js';
 const page = window.lumioPage;
 const $ = (sel) => document.querySelector(sel);
@@ -503,14 +504,21 @@ function highlight(id) {
 function spy() {
   if (heading) return;
   const line = innerHeight * 0.3;
-  const atEnd = innerHeight + scrollY >= document.documentElement.scrollHeight - 4;
   let at = sections[0];
   for (const sec of sections) if (sec.getBoundingClientRect().top <= line) at = sec;
-  highlight(atEnd ? sections.at(-1).id : at?.id);
+  highlight(atEnd() ? sections.at(-1).id : at?.id);
 }
 let spyFrame = 0;
 addEventListener('scroll', () => { spyFrame ||= requestAnimationFrame(() => { spyFrame = 0; spy(); }); }, { passive: true });
-addEventListener('scrollend', () => { heading = null; spy(); });
+const atEnd = () => innerHeight + scrollY >= document.documentElement.scrollHeight - 4;
+addEventListener('scrollend', () => {
+  // An earlier scroll ending while a click's scroll is under way: keep going.
+  if (heading && Math.abs(document.getElementById(heading).getBoundingClientRect().top - 24) > 4 && !atEnd()) return;
+  heading = null;
+  spy();
+});
+// Scrolling yourself takes over from a click's scroll.
+for (const ev of ['wheel', 'touchstart', 'keydown']) addEventListener(ev, () => { heading = null; }, { passive: true });
 links.forEach((a) => a.addEventListener('click', (e) => {
   const sec = document.querySelector(a.getAttribute('href'));
   if (!sec) return;

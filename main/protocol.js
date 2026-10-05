@@ -70,6 +70,11 @@ function resolveFile(url, hosts) {
   return inside(base, f) ? f : null;
 }
 
+// Attributes for every page's <html>: Settings › Accessibility
+// (main/accessibility.js), so the first paint already has them.
+let pageAttributes = () => '';
+function setPageAttributes(fn) { pageAttributes = fn; }
+
 // dark: every page is served dark (incognito tabs). Otherwise a page asks for
 // it with ?appearance=dark (an incognito window's shell and overlay).
 function makeHandler(hosts, { dark = false } = {}) {
@@ -84,6 +89,10 @@ function makeHandler(hosts, { dark = false } = {}) {
       // (the CSP allows no inline script to do it).
       if (path.extname(file) === '.html' && (dark || url.searchParams.get('appearance') === 'dark')) {
         body = String(body).replace(/<html\b/i, '<html data-appearance="dark"');
+      }
+      if (path.extname(file) === '.html') {
+        const attrs = pageAttributes();
+        if (attrs) body = String(body).replace(/<html\b/i, `<html${attrs}`);
       }
       return new Response(body, {
         headers: {
@@ -108,4 +117,4 @@ function registerPagesProtocol(tabSession, { dark = false } = {}) {
   tabSession.protocol.handle('lumio', makeHandler(PAGE_HOSTS, { dark }));
 }
 
-module.exports = { registerUiProtocol, registerPagesProtocol, PAGE_HOSTS, resolveFile, CSP };
+module.exports = { registerUiProtocol, registerPagesProtocol, setPageAttributes, PAGE_HOSTS, resolveFile, CSP };

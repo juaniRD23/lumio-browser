@@ -4,6 +4,7 @@
 import { icons, markSvg, avatarHtml } from './icons.js';
 import { setAccent } from '/assets/theme-colors.js';
 import { animate } from './motion.js';
+import '/assets/ui-prefs.js';
 
 const api = window.lumio;
 const card = document.getElementById('card');

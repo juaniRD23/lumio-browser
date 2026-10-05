@@ -21,6 +21,7 @@
       <a href="#autofill">Passwords and autofill</a>
       <a href="#privacy">Privacy and security</a>
       <a href="#appearance">Appearance</a>
+      <a href="#accessibility">Accessibility</a>
       <a href="#performance">Performance</a>
       <a href="#search">Search engine</a>
       <a href="#downloads">Downloads</a>
@@ -285,6 +286,25 @@
         </div>
       </section>
 
+      <!-- Accessibility (settings-a11y.js) -->
+      <section id="accessibility">
+        <h2>Accessibility</h2>
+        <div class="card">
+          <label class="row" style="cursor:pointer">
+            <div class="grow"><div class="title">Show a focus outline around objects</div><div class="desc">A ring around whatever you clicked or tabbed to, so you can always see where you are.</div></div>
+            <span class="switch"><input type="checkbox" data-a11y="focusRing"><i></i></span>
+          </label>
+          <label class="row" style="cursor:pointer">
+            <div class="grow"><div class="title">Reduce motion in Lumio</div><div class="desc">Lumio’s menus, tabs and panels appear without sliding or zooming, even if your computer’s setting is off.</div></div>
+            <span class="switch"><input type="checkbox" data-a11y="reduceMotion"><i></i></span>
+          </label>
+          <label class="row" style="cursor:pointer">
+            <div class="grow"><div class="title">Larger text in Lumio’s interface</div><div class="desc">Bigger words in tabs, the address bar, menus, the Lumio chat and Lumio’s own pages. Websites keep their size; zoom them from the ⋮ menu.</div></div>
+            <span class="switch"><input type="checkbox" data-a11y="largerText"><i></i></span>
+          </label>
+        </div>
+      </section>
+
       <!-- Performance -->
       <section id="performance">
         <h2>Performance</h2>
@@ -390,5 +410,6 @@
     </main>
   </div>
   <script type="module" src="settings.js"></script>
+  <script type="module" src="settings-a11y.js"></script>
 </body>
 </html>

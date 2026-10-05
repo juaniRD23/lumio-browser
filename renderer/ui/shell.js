@@ -5,6 +5,8 @@ import { initPanel } from './ai-panel.js';
 import { initSidebar } from './sidebar.js';
 import { reduced, dur, animate, cancel, slide, instantly } from './motion.js';
 import './keys.js';
+import '/assets/ui-prefs.js';
+import { initA11y } from './a11y.js';
 
 const IS_MAC = /Mac/.test(navigator.platform);
 // "Open in a new tab" modifier: ⌘ on the Mac, Ctrl elsewhere.
@@ -518,7 +520,8 @@ address.addEventListener('focus', () => {
   address.value = t?.url || '';
   address.classList.remove('url-view');
   swapSiteIcon(() => siteIcon(t));
-  requestAnimationFrame(() => address.select());
+  // (select() would take focus back if it moved on within the frame: F6 twice.)
+  requestAnimationFrame(() => { if (document.activeElement === address) address.select(); });
 });
 address.addEventListener('mousedown', () => { if (!omniFocused) address.dataset.justFocused = '1'; });
 address.addEventListener('mouseup', (e) => {
@@ -1205,6 +1208,7 @@ const sidebar = initSidebar({
   onLayout: () => requestAnimationFrame(() => reportSlot()),
 });
 sidebar.init(init);
+initA11y({ api, tabsEl, address });
 // Signing in or out changes what the sidebar shows.
 let sidebarSignedIn = !!init.ai?.lumio?.signedIn;
 api.on('ai-state', (s) => { if (!!s.lumio?.signedIn !== sidebarSignedIn) { sidebarSignedIn = !!s.lumio?.signedIn; sidebar.refresh(); } });

@@ -161,6 +161,8 @@ class BrowserWin {
     const c = theme.colors(theme.isDark(this.incognito), this.incognito);
     this.win.setBackgroundColor(c.frame);
     if (process.platform !== 'darwin') this.win.setTitleBarOverlay({ color: c.frame, symbolColor: c.symbol });
+    this.emit('ui-prefs', theme.uiPrefs());
+    if (!this.overlay.webContents.isDestroyed()) this.overlay.webContents.send('ui-prefs', theme.uiPrefs());
     this.tabs.applyAppearance();
   }
 

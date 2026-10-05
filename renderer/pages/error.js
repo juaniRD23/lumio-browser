@@ -1,3 +1,4 @@
+import '/assets/ui-prefs.js';
 const params = new URLSearchParams(location.search);
 const url = params.get('url') || '';
 const code = params.get('code') || '';

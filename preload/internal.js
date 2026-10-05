@@ -12,7 +12,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 if (window.location.protocol === 'lumio:') {
-  const EVENTS = new Set(['appearance']); // what the browser tells its pages
+  const EVENTS = new Set(['appearance', 'ui-prefs']); // what the browser tells its pages
   contextBridge.exposeInMainWorld('lumioPage', {
     invoke: (channel, ...args) => (/^page:/.test(channel) ? ipcRenderer.invoke(channel, ...args) : Promise.reject(new Error('blocked'))),
     on: (channel, fn) => { if (EVENTS.has(channel)) ipcRenderer.on(channel, (_e, payload) => fn(payload)); },

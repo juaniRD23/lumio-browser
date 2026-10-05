@@ -252,3 +252,11 @@ body[data-kind="menu"] #card {
 .mrow button:active { background: var(--overlay-6); }
 .zoom-val { min-width: 46px; text-align: center; font-variant-numeric: tabular-nums; }
 .mdiv { width: 1px; height: 18px; margin: 0 4px; background: var(--line); }
+
+/* ---------------------------------------------------------------- accessibility */
+/* Larger text in Lumio's interface (Settings › Accessibility). Popovers that
+   size themselves grow as a whole; the ⋮ menu and hover card, which are
+   placed by pixel, grow their words. */
+body:not([data-kind="menu"], [data-kind="hovercard"]) #card > * { zoom: var(--text-scale); }
+body[data-kind="menu"] .mpanel { font-size: calc(13px * var(--text-scale)); }
+:is(.si-perm select, .pws-field input):focus-visible { border-color: var(--focus-ring); }

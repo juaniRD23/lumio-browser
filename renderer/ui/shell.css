@@ -1140,3 +1140,26 @@ body.windows .sb-traffic { min-width: 0; }
 /* Lumio Beta's badge, next to the profile button. */
 #beta-badge { align-self: center; flex: none; height: 22px; padding: 0 9px; border-radius: 999px; display: inline-flex; align-items: center; background: color-mix(in srgb, var(--warn) 13%, transparent); color: var(--warn-text); font-size: 11.5px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
 #beta-badge[hidden] { display: none; }
+
+/* ---------------------------------------------------------------- accessibility */
+/* The tab strip is one stop for Tab; arrows move between tabs (a11y.js). */
+.tab:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+/* Controls that appear on hover also appear for the keyboard. */
+.tab:focus-visible .x, .tab:focus-within .x,
+.list-item:focus-within .li-del,
+.msg.ai pre:focus-within .copy,
+.made-img:focus-within .acts,
+.sb-item:focus-within .sb-chev,
+.sb-row:focus-within .sb-dots { opacity: 1; }
+/* Text fields that draw no outline of their own show focus on their edge. */
+:is(.wf-card input, .sb-search input, .sb-project-form input, .sb-project-form textarea, .project-new input):focus-visible { border-color: var(--focus-ring); }
+.slider:focus-visible .s-track { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.icon-btn:focus-visible, .ai-toggle:focus-visible, .account-btn:focus-visible, .bm-item:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 0; }
+
+/* Larger text in Lumio's interface (Settings › Accessibility). */
+.tab .title { font-size: calc(12.5px * var(--text-scale)); }
+#address { font-size: calc(13.5px * var(--text-scale)); }
+.bm-item { font-size: calc(12px * var(--text-scale)); }
+#prompt { font-size: calc(14px * var(--text-scale)); }
+/* The chat grows as a whole; each message still fits the panel. */
+#messages > * { zoom: var(--text-scale); }

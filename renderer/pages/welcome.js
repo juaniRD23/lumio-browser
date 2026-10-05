@@ -1,5 +1,6 @@
 // First run: welcome → Keychain (Mac) → import from another browser → done.
 import './keys.js';
+import '/assets/ui-prefs.js';
 const page = window.lumioPage;
 const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

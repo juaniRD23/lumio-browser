@@ -3,6 +3,7 @@
 import { marked } from '/vendor/marked.js';
 import DOMPurify from '/vendor/purify.js';
 import { icons, markSvg, levelBars } from './icons.js';
+import { reduced } from './motion.js';
 import { initVoice } from './voice.js';
 import { initWorkflows } from './panel-workflows.js';
 import { initExtras, filesEl, madeEl } from './panel-extras.js';
@@ -189,7 +190,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     for (const el of [$('#panel-mark'), $('#ai-toggle .mark')]) {
       let s = spinners.find((x) => x.el === el);
       if (!s) { s = { el, anim: null }; spinners.push(s); }
-      if (matchMedia('(prefers-reduced-motion: reduce)').matches) continue;
+      if (reduced()) continue;
       if (active) {
         s.anim ??= el.animate([{ transform: 'rotate(0deg)' }, { transform: 'rotate(360deg)' }], { duration: 1200, iterations: Infinity });
       } else if (s.anim) {
@@ -871,7 +872,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
       case 'approval_done': {
         // The step chip above already shows the outcome; drop the card.
         const el = messages.querySelector(`.approval[data-id="${CSS.escape(ev.id)}"]`);
-        if (el) el.animate([{ opacity: 1 }, { opacity: 0, transform: 'translateY(-4px) scale(.98)' }], { duration: matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 140, easing: 'cubic-bezier(.55, 0, 1, .45)' }).onfinish = () => el.remove();
+        if (el) el.animate([{ opacity: 1 }, { opacity: 0, transform: 'translateY(-4px) scale(.98)' }], { duration: reduced() ? 0 : 140, easing: 'cubic-bezier(.55, 0, 1, .45)' }).onfinish = () => el.remove();
         break;
       }
       case 'helper': {

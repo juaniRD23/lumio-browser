@@ -3,7 +3,8 @@
 // script animations move like the CSS ones. With Reduce Motion on, nothing
 // moves: CSS transitions finish at once (theme.css) and these skip theirs.
 const media = matchMedia('(prefers-reduced-motion: reduce)');
-export const reduced = () => media.matches;
+// (Or Settings › Accessibility › Reduce motion in Lumio: main/accessibility.js.)
+export const reduced = () => media.matches || document.documentElement.hasAttribute('data-reduce-motion');
 
 const tokens = new Map();
 function token(name) {
