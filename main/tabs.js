@@ -9,6 +9,7 @@ const path = require('path');
 const { parseInput, displayUrl } = require('./omnibox');
 const searchEngines = require('./search-engines');
 const theme = require('./theme');
+const { TabGroups } = require('./tab-groups');
 
 const NEWTAB = 'lumio://newtab/';
 const INTERNAL_PRELOAD = path.join(__dirname, '..', 'preload', 'internal.js');
@@ -28,6 +29,7 @@ class TabManager {
     this.slot = { x: 0, y: 84, width: 800, height: 600 };
     this.fullscreenTab = null;
     this.pushTimer = null;
+    this.groups = new TabGroups(this); // main/tab-groups.js
   }
 
   get active() { return this.tabs.find((t) => t.id === this.activeId) || null; }
@@ -40,7 +42,8 @@ class TabManager {
   pageBackground(url) { return url.startsWith('lumio:') ? theme.colors(theme.isDark(this.incognito), this.incognito).page : '#ffffff'; }
 
   // ---------- lifecycle ----------
-  create(url = NEWTAB, { active = true, index, title, lazy = false, pinned = false } = {}) {
+  // groupId: the group it opens in (a link opened from a grouped tab).
+  create(url = NEWTAB, { active = true, index, title, lazy = false, pinned = false, groupId = null } = {}) {
     const tab = {
       id: nextId++,
       owner: this,
@@ -55,6 +58,7 @@ class TabManager {
       muted: false,
       crashed: false,
       pinned: !!pinned,
+      groupId: pinned ? null : groupId,
       pendingUrl: lazy ? url : null,
       lastActive: Date.now(),
     };
@@ -72,6 +76,9 @@ class TabManager {
     const hi = tab.pinned ? pins : this.tabs.length;
     const at = index == null ? hi : Math.max(lo, Math.min(index, hi));
     this.tabs.splice(at, 0, tab);
+    // Opened inside a group: it joins it.
+    const left = this.tabs[at - 1]?.groupId;
+    if (!tab.pinned && !tab.groupId && left && left === this.tabs[at + 1]?.groupId) tab.groupId = left;
   }
 
   ensureView(tab) {
@@ -229,7 +236,7 @@ class TabManager {
         return { action: 'deny' };
       }
       const index = m.tabs.indexOf(tab) + 1;
-      m.create(url, { active: disposition !== 'background-tab', index });
+      m.create(url, { active: disposition !== 'background-tab', index, groupId: tab.groupId });
       return { action: 'deny' };
     });
 
@@ -307,6 +314,7 @@ class TabManager {
     if (prev) prev.lastActive = Date.now();
     tab.lastActive = Date.now();
     this.activeId = id;
+    this.groups.onActivate(tab);
     this.ensureView(tab);
     for (const t of this.tabs) if (t.view) { t.view.setVisible(t.id === id); t.view.lumioCovered = false; }
     // Keep the active page on top of the other tabs (and below any overlay).
@@ -323,6 +331,7 @@ class TabManager {
     if (i < 0) return;
     const [tab] = this.tabs.splice(i, 1);
     this.insert(tab, toIndex);
+    this.groups.afterMove(tab);
     this.changed();
   }
 
@@ -525,15 +534,17 @@ class TabManager {
         agent: t.agent || null,
         crashed: t.crashed,
         pinned: t.pinned,
+        groupId: t.groupId || null,
         bookmarked: this.store.isBookmarked(this.displayUrl(t)),
       })),
+      groups: this.groups.state(),
     };
   }
 
   // What the session file keeps for this window.
   sessionTabs() {
     return this.tabs
-      .map((t) => ({ url: t.pendingUrl || t.url, title: t.title, ...(t.pinned ? { pinned: true } : {}) }))
+      .map((t) => ({ url: t.pendingUrl || t.url, title: t.title, ...(t.pinned ? { pinned: true } : {}), ...(t.groupId ? { group: t.groupId } : {}) }))
       .filter((t) => t.url && !t.url.startsWith('lumio://error'));
   }
 
@@ -541,14 +552,16 @@ class TabManager {
     if (this.pushTimer) return;
     this.pushTimer = setImmediate(() => {
       this.pushTimer = null;
+      this.groups.normalize();
       this.emit('tabs', this.state());
       this.hooks.onChanged?.(this);
     });
   }
 
-  restore(list = [], active = 0) {
+  restore(list = [], active = 0, groups = []) {
     if (!list.length) return false;
-    list.forEach((t, i) => this.create(t.url, { active: false, lazy: i !== active, title: t.title, pinned: !!t.pinned }));
+    const made = list.map((t, i) => this.create(t.url, { active: false, lazy: i !== active, title: t.title, pinned: !!t.pinned }));
+    this.groups.restore(groups, list, made);
     const target = this.tabs[Math.min(active, this.tabs.length - 1)];
     if (target) this.activate(target.id);
     return true;
@@ -577,6 +590,7 @@ class TabManager {
         { type: 'separator' },
         { label: 'Save Link As…', click: () => wc.downloadURL(params.linkURL) },
         { label: 'Copy Link Address', click: () => clipboard.writeText(params.linkURL) },
+        ...(this.incognito || !/^https?:/.test(params.linkURL) ? [] : [{ label: 'Add Link to Reading List', click: () => this.hooks.readingList?.(params.linkURL, params.linkText) }]),
         { label: 'Ask Lumio About This Link', click: () => this.hooks.askAI(`What is at this link? ${params.linkURL}`, { includePage: false }) },
       );
       sep();
@@ -629,6 +643,7 @@ class TabManager {
         { type: 'separator' },
         { label: 'Save Page As…', click: () => this.hooks.savePage?.(tab) },
         { label: 'Print…', click: () => wc.print() },
+        ...(this.incognito || !/^https?:/.test(wc.getURL()) ? [] : [{ label: 'Add Page to Reading List', click: () => this.hooks.readingList?.(wc.getURL(), wc.getTitle()) }]),
         { type: 'separator' },
         { label: 'Summarize This Page with Lumio', click: () => this.hooks.askAI('Summarize this page.', { includePage: true }) },
         { label: 'View Page Source', click: () => this.create('view-source:' + wc.getURL(), { index }) },

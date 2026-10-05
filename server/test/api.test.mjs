@@ -1058,7 +1058,8 @@ test('sync: the first device sets the key; records go up and come down; a device
   ] } })).json();
   assert.equal(push.cursor, 2);
   // Bookmark folders are a newer collection: the server says it keeps them, so newer browsers send them.
-  assert.ok((await (await sync('/api/sync')).json()).collections.includes('bookmarkTree'));
+  const kept = (await (await sync('/api/sync')).json()).collections;
+  assert.ok(['bookmarkTree', 'readingList', 'savedGroups'].every((c) => kept.includes(c)), 'bookmark folders, the reading list and saved tab groups');
   assert.equal((await sync('/api/sync/push', { method: 'POST', body: { device: DEV_A, items: [{ id: 'folder-id-0001', collection: 'bookmarkTree', data: sealed(9) }] } })).status, 200);
   await sync('/api/sync/push', { method: 'POST', body: { device: DEV_A, items: [{ id: 'folder-id-0001', collection: 'bookmarkTree', deleted: true }] } });
   const mine = await (await sync(`/api/sync/changes?since=0&device=${DEV_A}`)).json();

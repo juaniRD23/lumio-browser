@@ -20,8 +20,9 @@ import { AgentError, type Env, fail, json, randomHex } from './util.ts';
 
 type User = { id: string; plan: Plan };
 
-// bookmarkTree: bookmark folders (newer browsers ask for it only when this lists it).
-const COLLECTIONS = new Set(['bookmarks', 'bookmarkTree', 'passwords', 'history', 'chats', 'workflows', 'projects', 'settings', 'tabs']);
+// bookmarkTree (bookmark folders), readingList and savedGroups (tab groups): newer
+// browsers sync these only when this lists them.
+const COLLECTIONS = new Set(['bookmarks', 'bookmarkTree', 'readingList', 'savedGroups', 'passwords', 'history', 'chats', 'workflows', 'projects', 'settings', 'tabs']);
 const MAX_ITEM = 600_000; // base64 ciphertext per record
 const MAX_TOTAL = 60 * 1024 * 1024; // per account
 const MAX_PUSH = 200; // records per request

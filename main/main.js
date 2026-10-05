@@ -27,6 +27,8 @@ const { buildMenu, buildBrowserMenu } = require('./menu');
 const { OmniboxService } = require('./omnibox-service');
 const { BookmarksService } = require('./bookmarks-service');
 const { NtpShortcuts } = require('./ntp-shortcuts');
+const { GroupsService } = require('./groups-service');
+const { SidePanel } = require('./side-panel');
 const searchEngines = require('./search-engines');
 const { ChatStore } = require('./ai/chats');
 const { MacHelper } = require('./mac/helper');
@@ -88,6 +90,8 @@ let sync = null; // Lumio Sync (main/sync)
 let companion = null; // the phone companion's link to this computer
 let omnibox = null; // the address bar's suggestions and search engines (main/omnibox-service.js)
 let bookmarks = null; // the bookmarks bar, the star's bubble and the manager (main/bookmarks-service.js)
+let groups = null; // tab groups' menus and editor, saved groups (main/groups-service.js)
+let sidePanel = null; // the side panel's views and the reading list (main/side-panel.js)
 let quitting = false;
 const windows = new Set();
 let lastFocused = null;
@@ -174,7 +178,8 @@ const services = {
     if (recentlyClosed.length > 25) recentlyClosed.shift();
     menuChanged();
   },
-  onSessionChanged: () => saveSession(),
+  onSessionChanged: () => { saveSession(); groups?.follow(); },
+  addToReadingList: (w, url, title) => sidePanel?.add(w, url, title),
   onViewCreated: (w, tab) => {
     if (!w.incognito && tab.view) extensions?.addTab(tab.view.webContents, w.win);
     if (!w.incognito && tab.view) omnibox?.watchTab(tab.view.webContents); // sites' OpenSearch engines
@@ -273,7 +278,7 @@ function reopenClosed(index = recentlyClosed.length - 1) {
   const [e] = recentlyClosed.splice(index, 1);
   if (!e) return;
   menuChanged();
-  if (e.kind === 'window') { createWindow({ tabs: e.tabs, active: e.active, bounds: e.bounds }); return; }
+  if (e.kind === 'window') { createWindow({ tabs: e.tabs, active: e.active, groups: e.groups, bounds: e.bounds }); return; }
   const target = alive().find((x) => x.id === e.windowId) || normalWin();
   if (!target) { createWindow({ urls: [e.url] }); return; }
   target.tabs.create(e.url, { index: e.index, title: e.title, pinned: e.pinned });
@@ -342,6 +347,8 @@ const cmd = {
   settings: () => openInternal('lumio://settings/'),
   bookmark: () => bookmarks.star(cur()),
   bookmarkAllTabs: () => bookmarks.allTabs(cur()),
+  sidePanel: (view, w = cur()) => sidePanel.show(w, view),
+  addToReadingList: () => { const w = cur(); sidePanel.addTab(w, w?.tabs.active); },
   toggleBookmarksBar: () => bookmarks.setBar(!store.settings.showBookmarksBar),
   setAppearance: (value) => store.setSetting('appearance', value),
   pinTab: () => { const w = cur(); const t = w?.tabs.active; if (t) w.tabs.setPinned(t.id, !t.pinned); },
@@ -688,6 +695,8 @@ function registerIpc() {
     sidebar: { open: store.settings.sidebarOpen !== false, getStarted: store.settings.getStartedDone !== true },
     ai: w.ai.state(),
     bookmarks: bookmarks.payload(),
+    savedGroups: w.incognito ? [] : groups.payload(),
+    side: { view: store.settings.sidePanelView || 'ai', unread: sidePanel.reading.unread() },
     account: account.state(),
     profile: profileState(),
     incognito: w.incognito,
@@ -767,6 +776,9 @@ function registerIpc() {
 
   // ---- bookmarks: the bar, its folder menus, the star's bubble, the manager page
   bookmarks.register({ on, internalHandle });
+  // ---- tab groups and saved groups; the side panel and the reading list
+  groups.register({ on });
+  sidePanel.register({ on, handle });
   // ---- the new tab page's shortcuts
   new NtpShortcuts({ store }).register({ internalHandle });
 
@@ -1113,13 +1125,15 @@ function tabContextMenu(w, id) {
   const i = tabs.tabs.indexOf(tab);
   const closedCount = w.incognito ? w.closedTabs.length : recentlyClosed.length;
   Menu.buildFromTemplate([
-    { label: 'New Tab to the Right', click: () => tabs.create(NEWTAB, { index: i + 1 }) },
+    { label: 'New Tab to the Right', click: () => tabs.create(NEWTAB, { index: i + 1, groupId: tab.groupId }) },
+    ...groups.menuItems(w, tab),
     { type: 'separator' },
     { label: 'Reload', click: () => { tabs.activate(id); tabs.reload(); } },
     { label: 'Duplicate', click: () => tabs.create(tabs.displayUrl(tab) || NEWTAB, { index: i + 1 }) },
     { label: tab.pinned ? 'Unpin Tab' : 'Pin Tab', click: () => tabs.setPinned(id, !tab.pinned) },
     { label: tab.muted ? 'Unmute Site' : 'Mute Site', click: () => tabs.toggleMute(id) },
     { label: 'Move Tab to New Window', enabled: tabs.tabs.length > 1, click: () => moveTabToNewWindow(w, id) },
+    ...sidePanel.menuItem(w, tab),
     { type: 'separator' },
     { label: 'Close Tab', click: () => tabs.close(id) },
     { label: 'Close Other Tabs', enabled: tabs.tabs.length > 1, click: () => tabs.tabs.filter((t) => t.id !== id && !t.pinned).forEach((t) => tabs.close(t.id)) },
@@ -1152,6 +1166,13 @@ app.whenReady().then(async () => {
   store = new Store(app.getPath('userData'), safeStorage);
   bookmarks = new BookmarksService({ store, windows: alive, cmd, openUrl, openInternal, createWindow, menuChanged });
   store.onBookmarkIcons = () => bookmarks.changed();
+  groups = new GroupsService({
+    dir: app.getPath('userData'),
+    windows: alive,
+    createWindow,
+    detached: (w, tab) => { if (tab.view && !w.incognito) extensions?.removeTab(tab.view.webContents); },
+  });
+  sidePanel = new SidePanel({ dir: app.getPath('userData'), store, bookmarks, windows: alive, openUrl });
   // Light or dark, before any window opens; changes then apply live.
   theme.init({ store, nativeTheme });
   theme.onChange(appearanceChanged);
@@ -1234,6 +1255,8 @@ app.whenReady().then(async () => {
   sync.addAdapters([
     syncAdapters.bookmarks(store),
     syncAdapters.bookmarkTree(store),
+    syncAdapters.readingList(sidePanel.reading),
+    syncAdapters.savedGroups(groups.saved),
     syncAdapters.history(store),
     syncAdapters.passwords(passwords.store),
     syncAdapters.chats(normal.chats),
@@ -1251,6 +1274,8 @@ app.whenReady().then(async () => {
   const syncSoon = () => sync.soon();
   for (const f of [store.bookmarksFile, store.historyFile, store.settingsFile, store.chatsFile, store.sessionFile, passwords.store.file]) f.onSave(syncSoon);
   workflows.onChange(syncSoon);
+  sidePanel.reading.onChange(syncSoon);
+  groups.saved.onChange(syncSoon);
   projects.onChange(syncSoon);
   // Bookmarks from another device: redraw the bar.
   store.bookmarksFile.onSave(() => { if (sync.busy) bookmarks.changed(); });
@@ -1329,7 +1354,7 @@ app.whenReady().then(async () => {
   if (store.settings.onboarded !== true && (!process.env.LUMIO_TEST || process.env.LUMIO_TEST_WELCOME)) {
     store.setSetting('panelOpen', false);
     createWindow({ tabs: [{ url: 'lumio://welcome/', title: 'Welcome to Lumio Browser' }], active: 0 });
-  } else if (saved.length) saved.forEach((s) => createWindow({ tabs: s.tabs, active: s.active, bounds: s.bounds }));
+  } else if (saved.length) saved.forEach((s) => createWindow({ tabs: s.tabs, active: s.active, groups: s.groups, bounds: s.bounds }));
   else createWindow();
   // Windows passes links to open on the command line.
   if (process.platform !== 'darwin' && !process.env.LUMIO_TEST) pendingUrls.push(...launchTargets(process.argv.slice(1)));

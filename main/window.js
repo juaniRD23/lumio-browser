@@ -40,7 +40,7 @@ function visibleBounds(b) {
 
 class BrowserWin {
   // app: services from main.js. profile: { session, downloads, permissions, chats }.
-  constructor(app, profile, { incognito = false, tabs = null, active = 0, bounds = null, urls = [], adopt = null, near = null } = {}) {
+  constructor(app, profile, { incognito = false, tabs = null, active = 0, groups = [], bounds = null, urls = [], adopt = null, near = null } = {}) {
     this.app = app;
     this.profile = profile;
     this.id = nextWindowId++;
@@ -97,6 +97,7 @@ class BrowserWin {
         openInNewWindow: (url, inc) => app.createWindow({ incognito: inc, urls: [url] }),
         savePage: (tab) => app.savePage(this, tab),
         contextMenuExtras: (tab, params) => app.contextMenuExtras(this, tab, params),
+        readingList: (url, title) => app.addToReadingList(this, url, title),
       },
     });
     this.indicator = new PageIndicator(this);
@@ -118,7 +119,7 @@ class BrowserWin {
     });
 
     if (adopt) this.tabs.adopt(adopt);
-    else if (!(tabs && this.tabs.restore(tabs, active))) {
+    else if (!(tabs && this.tabs.restore(tabs, active, groups))) {
       if (urls.length) urls.forEach((u, i) => this.tabs.create(u, { active: i === 0 }));
       else this.tabs.create(NEWTAB);
     }
@@ -206,7 +207,7 @@ class BrowserWin {
   }
 
   session() {
-    return { tabs: this.tabs.sessionTabs(), active: Math.max(0, this.tabs.tabs.findIndex((t) => t.id === this.tabs.activeId)), bounds: this.win.getBounds() };
+    return { tabs: this.tabs.sessionTabs(), groups: this.tabs.groups.session(), active: Math.max(0, this.tabs.tabs.findIndex((t) => t.id === this.tabs.activeId)), bounds: this.win.getBounds() };
   }
 }
 

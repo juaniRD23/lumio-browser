@@ -43,6 +43,27 @@ function bookmarkTree(store) {
   }), type: 'bookmarks', optional: true };
 }
 
+// ---------------------------------------------------------------- reading list
+// One record per page ({ url, title, added, read, updated }), keyed by an id
+// made from its address. It follows the Bookmarks switch, like the
+// bookmarks it sits next to, and only syncs with servers that keep it.
+function readingList(list) {
+  return { ...simple('readingList', {
+    entries: () => list.syncEntries(),
+    apply: (changes) => list.applySynced(changes),
+  }), type: 'bookmarks', optional: true };
+}
+
+// ---------------------------------------------------------------- saved tab groups
+// One record per saved group ({ title, color, tabs, created, updated }). It
+// follows the Open tabs switch.
+function savedGroups(saved) {
+  return { ...simple('savedGroups', {
+    entries: () => saved.syncEntries(),
+    apply: (changes) => saved.applySynced(changes),
+  }), type: 'tabs', optional: true };
+}
+
 // ---------------------------------------------------------------- history
 // The last 30 days (up to 2,000 visits). Older visits leaving that window
 // aren't deleted elsewhere.
@@ -211,4 +232,4 @@ function tabs({ deviceId, deviceName, platform, windows, remote, onApplied = () 
   };
 }
 
-module.exports = { bookmarks, bookmarkTree, history, passwords, chats, workflows, projects, settings, tabs, shrinkChat, SETTINGS };
+module.exports = { bookmarks, bookmarkTree, readingList, savedGroups, history, passwords, chats, workflows, projects, settings, tabs, shrinkChat, SETTINGS };
