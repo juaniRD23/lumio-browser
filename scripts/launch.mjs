@@ -30,6 +30,9 @@ export async function launch({ profile, env = {}, executablePath } = {}) {
     ...(executablePath ? { executablePath, args: [] } : { args: [root] }),
     cwd: root,
     env: { ...process.env, LUMIO_USER_DATA: userData, LUMIO_TEST: '1', ...env },
+    // Playwright pretends every page prefers light unless told not to; Lumio's
+    // own appearance setting (main/theme.js) must decide, like in real use.
+    colorScheme: null,
   });
   const logs = [];
   app.process().stdout.on('data', (d) => logs.push(String(d)));
