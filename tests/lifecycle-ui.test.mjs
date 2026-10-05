@@ -100,9 +100,11 @@ test('the full-screen bubble: the site, "Press Esc to exit full screen", its siz
   assert.equal(await page.textContent('kbd'), 'Esc');
   assert.equal(await page.evaluate(() => getComputedStyle(document.getElementById('n-action'), '::before').content), '"·"');
   // It tells main how big it is, so the view fits it.
-  await page.waitForFunction(() => window.__sent.length > 0);
-  const [channel, size] = await page.evaluate(() => window.__sent.at(-1));
+  // (Its first report can come before the font loads; the last one must match.)
+  await page.evaluate(() => document.fonts.ready);
   const box = await page.evaluate(() => { const r = document.getElementById('bubble').getBoundingClientRect(); return { width: Math.ceil(r.width), height: Math.ceil(r.height) }; });
+  await page.waitForFunction((b) => { const s = window.__sent.at(-1); return s && s[1].width === b.width && s[1].height === b.height; }, box, { timeout: 2000 }).catch(() => {});
+  const [channel, size] = await page.evaluate(() => window.__sent.at(-1));
   assert.equal(channel, 'notice:size');
   assert.deepEqual(size, box);
   assert.ok(box.width > 300 && box.height < 60, `one line (${box.width}×${box.height})`);
