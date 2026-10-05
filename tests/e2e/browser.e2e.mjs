@@ -519,3 +519,61 @@ test('the ⋮ menu: Chrome’s menu drawn over the page on every platform, with 
   await L.main(() => global.lumio.cmd.closeTab());
   await L.main(() => { global.lumio.cmd.zoom(0); global.lumio.cmd.closeTab(); return true; });
 });
+
+test('Settings › Accessibility reaches the window, the overlay and pages at once; F6 goes round to the page and back', async () => {
+  await L.main(() => global.lumio.cmd.newTab());
+  await go('lumio://settings/#accessibility', 'Settings');
+  const attr = (where, name) => (where === 'overlay'
+    ? L.main((_e, n) => global.lumio.current.overlay.webContents.executeJavaScript(`document.documentElement.hasAttribute('${n}')`), name)
+    : (where === 'shell' ? L.shell : L.page)(`document.documentElement.hasAttribute('${name}')`));
+  try {
+    assert.ok(await until(() => L.page(`!!document.querySelector('[data-a11y="largerText"]')`)));
+    await L.page(`document.querySelector('[data-a11y="largerText"]').click(); true`);
+    assert.ok(await until(async () => (await L.main(() => global.lumio.store.settings.accessibility?.largerText)) === true), 'saved');
+    for (const where of ['shell', 'overlay', 'page']) assert.ok(await until(() => attr(where, 'data-large-text')), `${where} has larger text`);
+    await L.page(`document.querySelector('[data-a11y="reduceMotion"]').click(); true`);
+    assert.ok(await until(() => attr('shell', 'data-reduce-motion')));
+    assert.equal(await L.shell(`getComputedStyle(document.querySelector('.tab')).transitionDuration.split(',').every((d) => parseFloat(d) <= 0.001)`), true, 'nothing moves');
+    // A page opened now is served with them.
+    await go('lumio://history/', 'History');
+    assert.equal(await attr('page', 'data-large-text'), true);
+    await shot('20-larger-text');
+    // F6: the toolbar, then onwards to the page, then back out of it.
+    await L.main(() => { global.lumio.win.webContents.focus(); return true; });
+    await L.shell(`document.activeElement?.blur(); true`);
+    await L.main(() => global.lumio.cmd.focusPane(1));
+    assert.ok(await until(async () => (await L.shell(`document.activeElement?.id`)) === 'address'), 'the address bar');
+    for (let i = 0; i < 3 && !(await L.main(() => global.lumio.tabs.wc().isFocused())); i++) {
+      await L.main(() => global.lumio.cmd.focusPane(1));
+      await L.wait(150);
+    }
+    assert.equal(await L.main(() => global.lumio.tabs.wc().isFocused()), true, 'the page');
+    await L.main(() => global.lumio.cmd.focusPane(-1));
+    assert.ok(await until(async () => !(await L.main(() => global.lumio.tabs.wc().isFocused()))), 'Shift+F6 leaves the page');
+  } finally {
+    await L.main(() => { global.lumio.store.setSetting('accessibility', {}); return true; });
+    await L.main(() => global.lumio.cmd.closeTab());
+  }
+});
+
+test('Customize Lumio: the New Tab sheet saves a background and what the page shows', async () => {
+  await L.main(() => global.lumio.cmd.newTab());
+  assert.ok(await until(() => L.page(`!!document.getElementById('cz-open')`)), 'the Customize button');
+  try {
+    await L.page(`document.getElementById('cz-open').click(); true`);
+    assert.ok(await until(() => L.page(`document.getElementById('cz-sheet').classList.contains('open')`)), 'the sheet opened');
+    await L.page(`document.querySelector('#cz-sheet input[name="cz-bg"][value="aurora"]').click(); true`);
+    assert.ok(await until(async () => (await L.main(() => global.lumio.store.settings.newTab?.background)) === 'aurora'), 'saved');
+    assert.equal(await L.page(`document.body.dataset.bg`), 'aurora');
+    await L.page(`document.querySelector('#cz-sheet input[data-key="shortcuts"]').click(); true`);
+    assert.ok(await until(async () => (await L.main(() => global.lumio.store.settings.newTab?.shortcuts)) === false));
+    await shot('21-customize');
+    // A new tab opens the same way.
+    await L.main(() => global.lumio.cmd.newTab());
+    assert.ok(await until(async () => (await L.page(`document.body.dataset.bg + ':' + document.body.classList.contains('no-shortcuts')`)) === 'aurora:true'));
+    await L.main(() => global.lumio.cmd.closeTab());
+  } finally {
+    await L.main(() => { global.lumio.store.setSetting('newTab', {}); return true; });
+    await L.main(() => global.lumio.cmd.closeTab());
+  }
+});
