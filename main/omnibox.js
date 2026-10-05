@@ -60,17 +60,18 @@ function suggest(raw, { history = [], bookmarks = [], searchTemplate, limit = 6 
     const age = (now - (item.time || 0)) / 86_400_000;
     score += bonus + Math.max(0, 3 - age / 3);
     const prev = scored.get(item.url);
-    if (prev) prev.score += 1.5;
-    else scored.set(item.url, { item, score });
+    // The site's icon, from whichever bookmark or visit has one.
+    if (prev) { prev.score += 1.5; prev.favicon ||= item.favicon; }
+    else scored.set(item.url, { item, score, favicon: item.favicon });
   };
   for (const b of bookmarks) consider(b, 6);
   for (let i = history.length - 1; i >= 0 && i >= history.length - 3000; i--) consider(history[i], 0);
 
   const ranked = [...scored.values()].sort((a, b) => b.score - a.score);
-  for (const { item } of ranked) {
+  for (const { item, favicon } of ranked) {
     if (out.length >= limit) break;
     if (out.some((o) => o.url === item.url)) continue;
-    out.push({ type: bookmarks.some((b) => b.url === item.url) ? 'bookmark' : 'history', title: item.title || displayUrl(item.url), url: item.url });
+    out.push({ type: bookmarks.some((b) => b.url === item.url) ? 'bookmark' : 'history', title: item.title || displayUrl(item.url), url: item.url, ...(favicon ? { favicon } : {}) });
   }
   if (parsed.isSearch) out.push({ type: 'ai', title: text });
   return out;

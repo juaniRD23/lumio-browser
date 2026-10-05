@@ -1,4 +1,6 @@
 import './keys.js';
+import '/assets/ui-prefs.js';
+import { patchList } from './page-motion.js';
 const page = window.lumioPage;
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -26,7 +28,7 @@ function row(d) {
     const pct = d.total ? Math.round((d.received / d.total) * 100) : 0;
     sub = `${d.paused ? 'Paused · ' : ''}${size(d.received)}${d.total ? ` of ${size(d.total)}` : ''} · ${host(d.url)}`;
     acts = `${d.paused ? '<button class="btn small" data-act="resume">Resume</button>' : '<button class="btn small" data-act="pause">Pause</button>'}<button class="btn small" data-act="cancel">Cancel</button>`;
-    bar = `<div class="bar"><i style="width:${pct}%"></i></div>`;
+    bar = `<div class="bar" role="progressbar" aria-label="Downloaded" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><i style="--p:${pct / 100}"></i></div>`;
   } else if (d.state === 'completed' && d.exists === false) {
     cls = 'gone';
     sub = `Deleted · ${host(d.url)}`;
@@ -40,21 +42,26 @@ function row(d) {
     acts = '<button class="btn small" data-act="retry">Retry</button>';
   }
   const name = d.state === 'completed' && d.exists !== false ? `<a href="#" data-act="open">${esc(d.name)}</a>` : esc(d.name);
-  return `<div class="dl ${cls}" data-id="${esc(d.id)}"><span class="file">${esc(ext)}</span><div class="meta"><div class="name">${name}</div><div class="sub">${esc(sub)}</div>${bar}</div><div class="acts">${acts}<button class="iconbtn" data-act="remove" title="Remove from list">✕</button></div></div>`;
+  return `<div class="dl ${cls}" role="listitem" data-id="${esc(d.id)}"><span class="file">${esc(ext)}</span><div class="meta"><div class="name">${name}</div><div class="sub">${esc(sub)}</div>${bar}</div><div class="acts">${acts}<button class="iconbtn" data-act="remove" title="Remove from list" aria-label="Remove ${esc(d.name)} from list">✕</button></div></div>`;
 }
 
+// Updated in place every second while something downloads, so buttons keep
+// focus and hover, and only new or removed rows move.
 function render() {
   const q = $('#search').value.trim().toLowerCase();
   const list = q ? items.filter((d) => d.name.toLowerCase().includes(q) || (d.url || '').toLowerCase().includes(q)) : items;
-  if (!list.length) { $('#list').innerHTML = `<div class="empty">${q ? 'No downloads match' : 'Files you download show up here.'}</div>`; return; }
-  let html = '';
+  if (!list.length) {
+    patchList($('#list'), [{ key: q ? 'none' : 'empty', html: `<div class="empty">${q ? 'No downloads match' : 'Files you download show up here.'}</div>` }]);
+    return;
+  }
+  const entries = [];
   let last = '';
   for (const d of list) {
     const label = dayLabel(d.time);
-    if (label !== last) { html += `<div class="day">${esc(label)}</div>`; last = label; }
-    html += row(d);
+    if (label !== last) { entries.push({ key: `day:${label}`, html: `<div class="day">${esc(label)}</div>` }); last = label; }
+    entries.push({ key: d.id, html: row(d) });
   }
-  $('#list').innerHTML = html;
+  patchList($('#list'), entries);
 }
 
 async function load() {

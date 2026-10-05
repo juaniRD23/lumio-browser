@@ -470,3 +470,110 @@ test('Settings › Theme: Light makes the window and Lumio’s pages light, inco
     });
   }
 });
+
+test('hover cards: a tab’s title, its site and a picture of its page, drawn over the page', async () => {
+  await L.main(() => global.lumio.cmd.newTab());
+  await go(`${base}/hover-card`, 'Page hover-card');
+  // Loaded: the address bar's progress line has gone all the way.
+  assert.equal(await L.main(() => global.lumio.tabs.state().tabs.find((t) => t.id === global.lumio.tabs.activeId).progress), 1);
+  const i = await L.main(() => global.lumio.tabs.tabs.findIndex((t) => (t.url || '').endsWith('/hover-card')));
+  const hover = (type) => L.shell(`document.querySelectorAll('#tabs > .tab:not(.closing)')[${i}].dispatchEvent(new PointerEvent('${type}')); true`);
+  const overlay = (js) => L.main((_e, code) => global.lumio.current.overlay.webContents.executeJavaScript(code), js);
+  // A click on the window closes whatever menu an earlier test left open (menus come before cards).
+  await L.shell(`document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); true`);
+  await hover('pointerenter');
+  assert.ok(await until(async () => (await L.main(() => global.lumio.current.overlayKind)) === 'hovercard'), 'the card opened');
+  // The tab you're on is pictured as you hover it.
+  const card = await until(() => overlay(`document.querySelector('.hc-shot img')?.src.startsWith('data:image/jpeg') ? document.getElementById('card').innerText : ''`));
+  assert.match(card, /Page hover-card[\s\S]*127\.0\.0\.1/);
+  await shot('19-hover-card');
+  await hover('pointerleave');
+  assert.ok(await until(async () => !(await L.main(() => global.lumio.win.contentView.children.includes(global.lumio.current.overlay)))), 'gone when the pointer leaves');
+  await L.main(() => global.lumio.cmd.closeTab());
+});
+
+test('the ⋮ menu: Chrome’s menu drawn over the page on every platform, with a live zoom row; a choice runs', async () => {
+  await L.main(() => global.lumio.cmd.newTab());
+  await go(`${base}/menu`, 'Page menu');
+  const overlay = (js) => L.main((_e, code) => global.lumio.current.overlay.webContents.executeJavaScript(code), js);
+  const kind = () => L.main(() => global.lumio.current.overlayKind);
+  const attached = () => L.main(() => global.lumio.win.contentView.children.includes(global.lumio.current.overlay));
+  assert.equal(await L.shell(`document.getElementById('menu-btn').offsetWidth > 0`), true, 'the ⋮ button shows (the Mac too)');
+  await L.shell(`document.getElementById('menu-btn').click(); true`);
+  assert.ok(await until(async () => (await kind()) === 'menu' && (await attached())), 'it opened');
+  assert.match(await until(() => overlay(`document.querySelector('.mpanel')?.innerText || ''`)), /New tab[\s\S]*Zoom[\s\S]*100%[\s\S]*Settings/);
+  // Over the whole window, like a native menu.
+  const [bounds, size] = await L.main(() => [global.lumio.current.overlay.getBounds(), global.lumio.win.getContentSize()]);
+  assert.deepEqual([bounds.width, bounds.height], size);
+  await shot('19b-menu');
+  // Zoom in from the menu: it stays open and its number follows the page.
+  await overlay(`document.querySelector('.mrow button[aria-label="Zoom in"]').click(); true`);
+  assert.ok(await until(async () => (await overlay(`document.querySelector('.zoom-val').textContent`)) === '110%'), 'zoom row follows');
+  assert.equal(await kind(), 'menu');
+  // New tab: the menu closes and the tab opens.
+  const count = await L.main(() => global.lumio.tabs.tabs.length);
+  await overlay(`[...document.querySelectorAll('.mi')].find((el) => el.textContent.startsWith('New tab')).click(); true`);
+  assert.ok(await until(async () => (await L.main(() => global.lumio.tabs.tabs.length)) === count + 1), 'a new tab');
+  assert.ok(await until(async () => !(await attached())), 'the menu left');
+  assert.equal(await L.shell(`document.getElementById('menu-btn').getAttribute('aria-expanded')`), 'false');
+  await L.main(() => global.lumio.cmd.closeTab());
+  await L.main(() => { global.lumio.cmd.zoom(0); global.lumio.cmd.closeTab(); return true; });
+});
+
+test('Settings › Accessibility reaches the window, the overlay and pages at once; F6 goes round to the page and back', async () => {
+  await L.main(() => global.lumio.cmd.newTab());
+  await go('lumio://settings/#accessibility', 'Settings');
+  const attr = (where, name) => (where === 'overlay'
+    ? L.main((_e, n) => global.lumio.current.overlay.webContents.executeJavaScript(`document.documentElement.hasAttribute('${n}')`), name)
+    : (where === 'shell' ? L.shell : L.page)(`document.documentElement.hasAttribute('${name}')`));
+  try {
+    assert.ok(await until(() => L.page(`!!document.querySelector('[data-a11y="largerText"]')`)));
+    await L.page(`document.querySelector('[data-a11y="largerText"]').click(); true`);
+    assert.ok(await until(async () => (await L.main(() => global.lumio.store.settings.accessibility?.largerText)) === true), 'saved');
+    for (const where of ['shell', 'overlay', 'page']) assert.ok(await until(() => attr(where, 'data-large-text')), `${where} has larger text`);
+    await L.page(`document.querySelector('[data-a11y="reduceMotion"]').click(); true`);
+    assert.ok(await until(() => attr('shell', 'data-reduce-motion')));
+    assert.equal(await L.shell(`getComputedStyle(document.querySelector('.tab')).transitionDuration.split(',').every((d) => parseFloat(d) <= 0.001)`), true, 'nothing moves');
+    // A page opened now is served with them.
+    await go('lumio://history/', 'History');
+    assert.equal(await attr('page', 'data-large-text'), true);
+    await shot('20-larger-text');
+    // F6: the toolbar, then onwards to the page, then back out of it.
+    await L.main(() => { global.lumio.win.webContents.focus(); return true; });
+    await L.shell(`document.activeElement?.blur(); true`);
+    await L.main(() => global.lumio.cmd.focusPane(1));
+    assert.ok(await until(async () => (await L.shell(`document.activeElement?.id`)) === 'address'), 'the address bar');
+    for (let i = 0; i < 3 && !(await L.main(() => global.lumio.tabs.wc().isFocused())); i++) {
+      await L.main(() => global.lumio.cmd.focusPane(1));
+      await L.wait(150);
+    }
+    assert.equal(await L.main(() => global.lumio.tabs.wc().isFocused()), true, 'the page');
+    await L.main(() => global.lumio.cmd.focusPane(-1));
+    assert.ok(await until(async () => !(await L.main(() => global.lumio.tabs.wc().isFocused()))), 'Shift+F6 leaves the page');
+  } finally {
+    await L.main(() => { global.lumio.store.setSetting('accessibility', {}); return true; });
+    await L.main(() => global.lumio.cmd.closeTab());
+  }
+});
+
+test('Customize Lumio: the New Tab sheet saves a background and what the page shows', async () => {
+  await L.main(() => global.lumio.cmd.newTab());
+  assert.ok(await until(() => L.page(`!!document.getElementById('cz-open')`)), 'the Customize button');
+  try {
+    await L.page(`document.getElementById('cz-open').click(); true`);
+    assert.ok(await until(() => L.page(`document.getElementById('cz-sheet').classList.contains('open')`)), 'the sheet opened');
+    await L.page(`document.querySelector('#cz-sheet input[name="cz-bg"][value="aurora"]').click(); true`);
+    assert.ok(await until(async () => (await L.main(() => global.lumio.store.settings.newTab?.background)) === 'aurora'), 'saved');
+    assert.equal(await L.page(`document.body.dataset.bg`), 'aurora');
+    await L.page(`document.querySelector('#cz-sheet input[data-key="shortcuts"]').click(); true`);
+    assert.ok(await until(async () => (await L.main(() => global.lumio.store.settings.newTab?.shortcuts)) === false));
+    await shot('21-customize');
+    // A new tab opens the same way.
+    await L.main(() => global.lumio.cmd.newTab());
+    assert.ok(await until(async () => (await L.page(`document.body.dataset.bg + ':' + document.body.classList.contains('no-shortcuts')`)) === 'aurora:true'));
+    await L.main(() => global.lumio.cmd.closeTab());
+  } finally {
+    await L.main(() => { global.lumio.store.setSetting('newTab', {}); return true; });
+    await L.main(() => global.lumio.cmd.closeTab());
+  }
+});

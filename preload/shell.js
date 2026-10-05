@@ -10,9 +10,10 @@ const SEND = /^(layout|panel|sidebar|tab|overlay|find|download|permission|ai|boo
 const EVENTS = new Set([
   'tabs', 'downloads', 'permission', 'permission-cancel', 'find-result', 'find-open', 'find-close', 'find-step',
   'focus-omnibox', 'panel-toggle', 'panel-open', 'ai-focus', 'ai-prefill', 'ai-event', 'ai-state', 'overlay-data',
-  'overlay-picked', 'toast', 'zoom', 'fullscreen', 'agent-state', 'bookmarks', 'site-info', 'extensions-changed',
+  'overlay-picked', 'overlay-state', 'toast', 'zoom', 'fullscreen', 'agent-state', 'bookmarks', 'site-info', 'extensions-changed',
   'account', 'profile', 'passwords-prompt', 'passwords-changed', 'aura', 'update', 'update-announce', 'ai-build-doc', 'ai-open-chat',
   'ai-workflow', 'workflows-changed', 'sync-state', 'sync-pair-request', 'sidebar-changed', 'sidebar-toggle', 'dialog-data', 'notice-data',
+  'ui-prefs', 'focus-pane',
 ]);
 
 contextBridge.exposeInMainWorld('lumio', {

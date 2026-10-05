@@ -34,7 +34,17 @@ select.field { appearance: none; padding-right: 30px; background: var(--field) v
 .side-title { font: 400 38px/1.05 var(--serif); letter-spacing: -.02em; margin: 0 0 16px 12px; }
 .side a { color: var(--dim); padding: 8px 12px; border-radius: 10px; font-size: 13.5px; text-decoration: none !important; }
 .side a:hover { color: var(--text); background: var(--overlay-2); }
-.side a.on { color: var(--text); background: var(--overlay-3); font-weight: 550; }
+.side a { position: relative; z-index: 1; transition: color var(--dur-2) var(--ease-out); }
+.side a.on { color: var(--text); font-weight: 550; }
+/* The highlight behind the section you're reading slides from link to link. */
+.side-ind {
+  position: absolute; left: 0; right: 0; top: 0; z-index: 0; border-radius: 10px; background: var(--overlay-3);
+  opacity: 0; pointer-events: none;
+  transition: transform var(--dur-3) var(--ease-out), opacity var(--dur-2) var(--ease-out);
+}
+.side-ind.shown { opacity: 1; }
+.content h2:focus { outline: none; }
+.content h2:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 4px; border-radius: 6px; }
 .content section { scroll-margin-top: 24px; padding-top: 6px; }
 .content h2 { font: 400 30px/1.1 var(--serif); letter-spacing: -.01em; text-transform: none; color: var(--text); margin: 36px 0 14px; }
 .content section:first-child h2 { margin-top: 0; }

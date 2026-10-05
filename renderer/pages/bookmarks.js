@@ -1,4 +1,6 @@
 import './keys.js';
+import '/assets/ui-prefs.js';
+import { patchList, leave } from './page-motion.js';
 const page = window.lumioPage;
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -18,24 +20,24 @@ function render() {
   const q = $('#search').value.trim().toLowerCase();
   const list = q ? items.filter((b) => b.url.toLowerCase().includes(q) || (b.title || '').toLowerCase().includes(q)) : items;
   if (!list.length) {
-    $('#list').innerHTML = `<div class="empty">${q ? 'No bookmarks match' : 'No bookmarks yet. Press ⌘D on any page to add one.'}</div>`;
+    patchList($('#list'), [{ key: q ? 'none' : 'empty', html: `<div class="empty">${q ? 'No bookmarks match' : 'No bookmarks yet. Press ⌘D on any page to add one.'}</div>` }]);
     return;
   }
-  $('#list').innerHTML = list.map((b) => {
+  patchList($('#list'), list.map((b) => {
     if (b.url === editing) {
-      return `<div class="bm-row editing" data-url="${esc(b.url)}">
+      return { key: b.url, html: `<div class="bm-row editing" data-url="${esc(b.url)}">
         <input class="field" id="edit-title" value="${esc(b.title)}" aria-label="Name" placeholder="Name">
         <input class="field" id="edit-url" value="${esc(b.url)}" aria-label="URL" placeholder="https://…">
         <span class="acts"><button class="btn small ghost" data-act="cancel">Cancel</button><button class="btn small primary" data-act="save">Save</button></span>
-      </div>`;
+      </div>` };
     }
-    return `<div class="bm-row" draggable="${q ? 'false' : 'true'}" data-url="${esc(b.url)}">
+    return { key: b.url, html: `<div class="bm-row" role="listitem" draggable="${q ? 'false' : 'true'}" data-url="${esc(b.url)}">
       <span class="grip" title="Drag to reorder">⋮⋮</span>${icon(b)}
       <a class="t" href="${esc(b.url)}">${esc(b.title || b.url)}</a>
       <span class="u">${esc(pretty(b.url))}</span>
-      <span class="acts"><button class="btn small ghost" data-act="edit">Edit</button><button class="btn small ghost danger" data-act="delete">Delete</button></span>
-    </div>`;
-  }).join('');
+      <span class="acts"><button class="btn small ghost" data-act="edit" aria-label="Edit ${esc(b.title || b.url)}">Edit</button><button class="btn small ghost danger" data-act="delete" aria-label="Delete ${esc(b.title || b.url)}">Delete</button></span>
+    </div>` };
+  }));
   $('#list').querySelectorAll('img').forEach((img) => img.addEventListener('error', () => { img.outerHTML = '<span class="dot"></span>'; }));
   const t = $('#edit-title');
   if (t) { t.focus(); t.select(); }
@@ -64,7 +66,7 @@ $('#list').addEventListener('click', async (e) => {
   if (act === 'edit') { editing = row.dataset.url; render(); }
   if (act === 'cancel') { editing = null; render(); }
   if (act === 'save') save(row);
-  if (act === 'delete') { await page.invoke('page:bookmark-remove', row.dataset.url); load(); }
+  if (act === 'delete') { await page.invoke('page:bookmark-remove', row.dataset.url); await leave(row); load(); }
 });
 $('#list').addEventListener('keydown', (e) => {
   const row = e.target.closest('.bm-row.editing');

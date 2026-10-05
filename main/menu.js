@@ -1,7 +1,7 @@
 // Application menu. Accelerators here are the browser's keyboard shortcuts;
 // they work no matter which view (shell, page, AI panel) has focus. On
-// Windows the menu bar is hidden: the same menu still provides the shortcuts,
-// and the ⋮ button opens buildBrowserMenu() instead.
+// Windows the menu bar is hidden: the same menu still provides the shortcuts.
+// The ⋮ button opens buildBrowserMenu() on every platform.
 const { Menu } = require('electron');
 
 const MAC = process.platform === 'darwin';
@@ -37,7 +37,8 @@ function buildMenu(cmd, state = {}) {
         { label: 'New Incognito Window', accelerator: 'CmdOrCtrl+Shift+N', click: cmd.newIncognito },
         { label: 'Reopen Closed Tab', accelerator: 'CmdOrCtrl+Shift+T', click: cmd.reopenTab },
         { label: 'Open Location…', accelerator: 'CmdOrCtrl+L', click: cmd.focusOmnibox },
-        ...(MAC ? [] : [hidden('Alt+D', cmd.focusOmnibox), hidden('F6', cmd.focusOmnibox)]),
+        ...(MAC ? [] : [hidden('Alt+D', cmd.focusOmnibox)]),
+        hidden('F6', () => cmd.focusPane(1)), hidden('Shift+F6', () => cmd.focusPane(-1)),
         { type: 'separator' },
         { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', click: cmd.closeTab },
         ...(MAC ? [] : [hidden('Ctrl+F4', cmd.closeTab)]),
@@ -145,50 +146,145 @@ function buildMenu(cmd, state = {}) {
   return Menu.buildFromTemplate(template);
 }
 
-// The ⋮ menu (Windows), laid out like Chrome's.
+// The ⋮ menu, laid out like Chrome's. Its entries are data: menuModel()
+// turns them into what the overlay draws (renderer/ui/overlay.js renderMenu)
+// and the actions main/window.js runs. Each shortcut shown is one the
+// application menu above really has. state: main.js menuState() plus the
+// window's zoom (in %), whether its page is bookmarked, the bookmarks,
+// open(url) and edit('cut' | 'copy' | 'paste') for that window, and
+// whatsNew() when there are release notes to open.
 function buildBrowserMenu(cmd, state = {}) {
   const k = (mac, win) => (MAC ? mac : win);
-  return Menu.buildFromTemplate([
-    { label: 'New tab', accelerator: 'CmdOrCtrl+T', click: cmd.newTab },
-    { label: 'New window', accelerator: 'CmdOrCtrl+N', click: cmd.newWindow },
-    { label: 'New Incognito window', accelerator: 'CmdOrCtrl+Shift+N', click: cmd.newIncognito },
-    { type: 'separator' },
-    { label: 'Passwords and autofill', click: cmd.passwords },
-    { label: 'History', accelerator: k('Cmd+Y', 'Ctrl+H'), click: cmd.history },
-    { label: 'Downloads', accelerator: k('Cmd+Alt+L', 'Ctrl+Shift+J'), click: cmd.downloads },
+  const SEP = { type: 'separator' };
+  const recent = (state.recentlyClosed || []).slice(0, 8);
+  const marks = (state.bookmarks || []).slice(0, 20);
+  return [
+    { label: 'New tab', icon: 'plus', accel: 'CmdOrCtrl+T', run: cmd.newTab },
+    { label: 'New window', icon: 'window', accel: 'CmdOrCtrl+N', run: cmd.newWindow },
+    { label: 'New Incognito window', icon: 'incognito', accel: 'CmdOrCtrl+Shift+N', run: cmd.newIncognito },
+    SEP,
+    { label: 'Passwords and autofill', icon: 'key', run: cmd.passwords },
     {
-      label: 'Bookmarks',
+      label: 'History',
+      icon: 'clock',
       submenu: [
-        { label: 'Bookmark this page', accelerator: 'CmdOrCtrl+D', click: cmd.bookmark },
-        { label: 'Show bookmarks bar', type: 'checkbox', checked: !!state.bookmarksBar, accelerator: 'CmdOrCtrl+Shift+B', click: cmd.toggleBookmarksBar },
-        { label: 'Bookmark manager', accelerator: k('Cmd+Alt+B', 'Ctrl+Shift+O'), click: cmd.bookmarksManager },
+        { label: 'History', icon: 'clock', accel: k('Cmd+Y', 'Ctrl+H'), run: cmd.history },
+        SEP,
+        ...(recent.length ? [{ type: 'header', label: 'Recently closed' }] : []),
+        ...recent.map((e, i) => ({
+          label: e.label, favicon: e.favicon, icon: e.window ? 'tabs' : 'globe',
+          accel: i === 0 ? 'CmdOrCtrl+Shift+T' : '', run: () => cmd.reopenClosed(e.index),
+        })),
       ],
     },
-    { label: 'Extensions', click: cmd.extensions },
-    { type: 'separator' },
-    { label: 'Zoom in', accelerator: 'CmdOrCtrl+Plus', click: () => cmd.zoom(1) },
-    { label: 'Zoom out', accelerator: 'CmdOrCtrl+-', click: () => cmd.zoom(-1) },
-    { label: 'Actual size', accelerator: 'CmdOrCtrl+0', click: () => cmd.zoom(0) },
-    { type: 'separator' },
-    { label: 'Print…', accelerator: 'CmdOrCtrl+P', click: cmd.print },
-    { label: 'Find…', accelerator: 'CmdOrCtrl+F', click: cmd.find },
-    { label: 'Save page as…', accelerator: 'CmdOrCtrl+S', click: cmd.savePage },
-    { label: 'Developer tools', accelerator: k('Cmd+Alt+I', 'Ctrl+Shift+I'), click: cmd.devtools },
-    { type: 'separator' },
-    { label: 'Settings', click: cmd.settings },
+    { label: 'Downloads', icon: 'download', accel: k('Cmd+Alt+L', 'Ctrl+Shift+J'), run: cmd.downloads },
+    {
+      label: 'Bookmarks and lists',
+      icon: 'star',
+      submenu: [
+        { label: state.bookmarked ? 'Remove bookmark' : 'Bookmark this tab', icon: state.bookmarked ? 'starFilled' : 'star', accel: 'CmdOrCtrl+D', run: cmd.bookmark },
+        { label: 'Show bookmarks bar', type: 'checkbox', checked: !!state.bookmarksBar, accel: 'CmdOrCtrl+Shift+B', run: cmd.toggleBookmarksBar },
+        { label: 'Bookmark manager', icon: 'folder', accel: k('Cmd+Alt+B', 'Ctrl+Shift+O'), run: cmd.bookmarksManager },
+        SEP,
+        ...marks.map((b) => ({ label: b.title || b.url, favicon: b.favicon, icon: 'globe', run: () => state.open(b.url) })),
+      ],
+    },
+    {
+      label: 'Extensions',
+      icon: 'puzzle',
+      submenu: [
+        { label: 'Manage Extensions', icon: 'puzzle', run: cmd.extensions },
+        { label: 'Visit Chrome Web Store', icon: 'external', run: cmd.webStore },
+      ],
+    },
+    SEP,
+    { type: 'zoom', level: state.zoom ?? 100, out: () => cmd.zoom(-1), in: () => cmd.zoom(1), fullscreen: cmd.fullscreen, keys: { out: 'CmdOrCtrl+-', in: 'CmdOrCtrl+Plus', fullscreen: k('Ctrl+Cmd+F', 'F11') } },
+    SEP,
+    { label: 'Print…', icon: 'print', accel: 'CmdOrCtrl+P', run: cmd.print },
+    { label: 'Find…', icon: 'search', accel: 'CmdOrCtrl+F', run: cmd.find },
+    { label: 'Save page as…', icon: 'page', accel: 'CmdOrCtrl+S', run: cmd.savePage },
+    {
+      label: 'More tools',
+      icon: 'tools',
+      submenu: [
+        { label: 'Clear browsing data…', icon: 'trash', run: cmd.clearBrowsingData },
+        SEP,
+        { label: 'Developer tools', icon: 'terminal', accel: k('Cmd+Alt+I', 'Ctrl+Shift+I'), run: cmd.devtools },
+        ...(cmd.isDev ? [{ label: 'Browser UI developer tools', icon: 'terminal', accel: 'CmdOrCtrl+Alt+Shift+I', run: cmd.shellDevtools }] : []),
+      ],
+    },
+    SEP,
+    { type: 'edit', cut: () => state.edit('cut'), copy: () => state.edit('copy'), paste: () => state.edit('paste'), keys: { cut: 'CmdOrCtrl+X', copy: 'CmdOrCtrl+C', paste: 'CmdOrCtrl+V' } },
+    SEP,
+    { label: 'Settings', icon: 'gear', accel: k('Cmd+,', 'Ctrl+,'), run: cmd.settings },
     {
       label: 'Help',
+      icon: 'info',
       submenu: [
-        { label: 'About Lumio Browser', click: cmd.about },
-        { type: 'separator' },
-        { label: 'Terms of Service', click: cmd.terms },
-        { label: 'Privacy Policy', click: cmd.privacy },
-        { label: 'Open-source licenses', click: cmd.credits },
+        { label: 'About Lumio Browser', icon: 'info', run: cmd.about },
+        // The release notes, once the updater has looked them up (menuModel()
+        // leaves it out until then).
+        { label: 'What’s new', icon: 'external', run: state.whatsNew },
+        SEP,
+        { label: 'Terms of Service', icon: 'page', run: cmd.terms },
+        { label: 'Privacy Policy', icon: 'page', run: cmd.privacy },
+        { label: 'Open-source licenses', icon: 'page', run: cmd.credits },
       ],
     },
-    { type: 'separator' },
-    { role: 'quit', label: MAC ? 'Quit Lumio Browser' : 'Exit' },
-  ]);
+    { label: MAC ? 'Quit Lumio Browser' : 'Exit', icon: 'logout', accel: MAC ? 'Cmd+Q' : '', run: cmd.quit },
+  ];
 }
 
-module.exports = { buildMenu, buildBrowserMenu };
+// An accelerator as menus show it: ⇧⌘N on the Mac, Ctrl+Shift+N elsewhere.
+const MAC_MODS = { cmdorctrl: '⌘', commandorcontrol: '⌘', cmd: '⌘', command: '⌘', ctrl: '⌃', control: '⌃', alt: '⌥', option: '⌥', shift: '⇧' };
+const KEY_NAMES = { plus: '+', left: '←', right: '→', up: '↑', down: '↓' };
+function accelLabel(accel, mac = MAC) {
+  if (!accel) return '';
+  const parts = accel.split(/\+(?!$)/);
+  const key = parts.pop();
+  if (!mac) return [...parts.map((m) => (/^(cmdorctrl|commandorcontrol|cmd|command)$/i.test(m) ? 'Ctrl' : m)), key].join('+');
+  const mods = parts.map((m) => MAC_MODS[m.toLowerCase()] || m);
+  return ['⌃', '⌥', '⇧', '⌘'].filter((m) => mods.includes(m)).join('') + (KEY_NAMES[key.toLowerCase()] || key);
+}
+
+// buildBrowserMenu()'s entries as the overlay draws them (plain data, with
+// shortcuts written out), and what each one does by id. Commands this build
+// doesn't have are left out, and so are the separators that leaves stranded.
+function menuModel(entries, { mac = MAC } = {}) {
+  const actions = new Map();
+  let n = 0;
+  const act = (run, keepOpen = false) => {
+    const id = `m${++n}`;
+    actions.set(id, { run, keepOpen });
+    return id;
+  };
+  const build = (list) => {
+    const out = [];
+    for (const e of list) {
+      if ('run' in e && typeof e.run !== 'function') continue;
+      let item;
+      if (e.type === 'separator') item = { type: 'separator' };
+      else if (e.type === 'header') item = { type: 'header', label: e.label };
+      // Zoom's − and + leave the menu open, so you can watch the number change.
+      else if (e.type === 'zoom') {
+        item = { type: 'zoom', label: 'Zoom', level: e.level, out: act(e.out, true), in: act(e.in, true), fullscreen: act(e.fullscreen), keys: { out: accelLabel(e.keys.out, mac), in: accelLabel(e.keys.in, mac), fullscreen: accelLabel(e.keys.fullscreen, mac) } };
+      } else if (e.type === 'edit') {
+        item = { type: 'edit', label: 'Edit', cut: act(e.cut), copy: act(e.copy), paste: act(e.paste), keys: { cut: accelLabel(e.keys.cut, mac), copy: accelLabel(e.keys.copy, mac), paste: accelLabel(e.keys.paste, mac) } };
+      } else {
+        item = { label: e.label, icon: e.icon || '', favicon: e.favicon || '', accel: accelLabel(e.accel, mac) };
+        if (e.type === 'checkbox') item.checked = !!e.checked;
+        if (e.submenu) {
+          item.submenu = build(e.submenu);
+          if (!item.submenu.some((x) => x.type !== 'separator' && x.type !== 'header')) continue;
+        } else item.id = act(e.run);
+      }
+      if (item.type === 'separator' && (!out.length || out[out.length - 1].type === 'separator')) continue;
+      out.push(item);
+    }
+    while (out[out.length - 1]?.type === 'separator') out.pop();
+    return out;
+  };
+  return { items: build(entries), actions };
+}
+
+module.exports = { buildMenu, buildBrowserMenu, menuModel, accelLabel };

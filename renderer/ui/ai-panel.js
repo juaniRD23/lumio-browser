@@ -3,6 +3,7 @@
 import { marked } from '/vendor/marked.js';
 import DOMPurify from '/vendor/purify.js';
 import { icons, markSvg, levelBars } from './icons.js';
+import { reduced } from './motion.js';
 import { initVoice } from './voice.js';
 import { initWorkflows } from './panel-workflows.js';
 import { initExtras, filesEl, madeEl } from './panel-extras.js';
@@ -30,6 +31,25 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 marked.setOptions({ gfm: true, breaks: true });
 const PURIFY = { FORBID_TAGS: ['img', 'style', 'iframe', 'form', 'input', 'video', 'audio', 'source', 'object', 'embed'], FORBID_ATTR: ['style'] };
 const renderMd = (text) => DOMPurify.sanitize(marked.parse(String(text || '')), PURIFY);
+
+// While a reply streams, only its unfinished last block is parsed again; the
+// blocks before it are drawn once. Returns where the finished blocks end: the
+// last blank line that isn't inside a ``` code fence.
+export function stableEnd(text, from = 0) {
+  let end = from;
+  let fence = false;
+  let i = from;
+  while (i < text.length) {
+    const nl = text.indexOf('\n', i);
+    const line = text.slice(i, nl < 0 ? text.length : nl);
+    if (nl < 0) break; // the last line may still be growing
+    if (/^\s{0,3}(```|~~~)/.test(line)) fence = !fence;
+    else if (!fence && !line.trim() && i > from) end = nl + 1;
+    i = nl + 1;
+  }
+  return end;
+}
+const STREAM_MS = 100; // redraw a streaming reply about 10 times a second
 
 export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   const body = document.body;
@@ -170,7 +190,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     for (const el of [$('#panel-mark'), $('#ai-toggle .mark')]) {
       let s = spinners.find((x) => x.el === el);
       if (!s) { s = { el, anim: null }; spinners.push(s); }
-      if (matchMedia('(prefers-reduced-motion: reduce)').matches) continue;
+      if (reduced()) continue;
       if (active) {
         s.anim ??= el.animate([{ transform: 'rotate(0deg)' }, { transform: 'rotate(360deg)' }], { duration: 1200, iterations: Infinity });
       } else if (s.anim) {
@@ -451,9 +471,44 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   }
 
   // ------------------------------------------------------------ rendering
+  // The chat sticks to the bottom while Lumio writes, unless the person
+  // scrolled up to read; then a pill offers the way back.
+  let stick = true;
+  const jumpWrap = document.createElement('div');
+  jumpWrap.className = 'jump-wrap';
+  jumpWrap.innerHTML = `<button id="jump-latest" type="button" class="jump-latest" tabindex="-1" aria-hidden="true">${icons.arrowDown}<span>Jump to latest</span></button>`;
+  const jump = jumpWrap.firstElementChild;
+  messages.after(jumpWrap);
+  const fromBottom = () => messages.scrollHeight - messages.scrollTop - messages.clientHeight;
+  function showJump(on) {
+    if (jump.classList.contains('show') === on) return;
+    jump.classList.toggle('show', on);
+    jump.tabIndex = on ? 0 : -1;
+    jump.setAttribute('aria-hidden', String(!on));
+  }
+  messages.addEventListener('scroll', () => {
+    stick = fromBottom() < 32;
+    if (stick) showJump(false);
+  }, { passive: true });
+  jump.addEventListener('click', () => { scrollDown(true); prompt.focus(); });
   function scrollDown(force) {
-    const near = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 140;
-    if (force || near) messages.scrollTop = messages.scrollHeight;
+    if (force) stick = true;
+    if (stick) { messages.scrollTop = messages.scrollHeight; showJump(false); }
+    else if (fromBottom() > 32) showJump(true);
+  }
+
+  // Screen readers hear each finished answer once, not every word as it streams.
+  const announcer = document.createElement('div');
+  announcer.className = 'sr-only';
+  announcer.setAttribute('aria-live', 'polite');
+  announcer.id = 'ai-announce';
+  messages.after(announcer);
+  function announce(text) {
+    const t = String(text || '').replace(/[#*_`>|]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!t) return;
+    announcer.textContent = '';
+    // A fresh node, a frame later, so the same words twice are still read.
+    requestAnimationFrame(() => { announcer.textContent = `${t.length > 600 ? t.slice(0, 600) + '…' : t}`; });
   }
 
   // Under a finished task: how long it took, and where the time went.
@@ -465,7 +520,9 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     return el;
   }
 
+  let replaying = false; // drawing a saved chat: nothing to announce
   function notice(text, cls = '') {
+    if (!replaying) announce(text);
     const el = document.createElement('div');
     el.className = 'notice ' + cls;
     el.textContent = text;
@@ -661,6 +718,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
 
   function renderChat(display) {
     messages.innerHTML = '';
+    replaying = true;
     for (const d of display) {
       if (d.kind === 'user') messages.append(userEl(d.text, d.ctx, d.files));
       else if (d.kind === 'made') messages.append(madeEl(d.file, api));
@@ -671,6 +729,10 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
       else if (d.kind === 'timing') messages.append(timingEl(d));
       else if (d.kind === 'error') { if (d.code === 'usage_limit') limitNotice(d.text); else notice(d.text); }
     }
+    replaying = false;
+    // History appears at once; only what arrives from now on moves in.
+    for (const el of messages.querySelectorAll(':scope > *, .helper')) el.classList.add('old');
+    showJump(false);
     scrollDown(true);
   }
 
@@ -691,18 +753,47 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
 
   function endText() {
     if (!live?.textEl) return;
+    clearTimeout(frame);
+    frame = 0;
     live.textEl.classList.remove('streaming');
     live.textEl.innerHTML = renderMd(live.textBuf);
     decorate(live.textEl);
+    live.said = (live.said ? live.said + ' ' : '') + live.textBuf;
     live.textEl = null;
     live.textBuf = '';
+    live.stable = 0;
+    live.tail = [];
+    scrollDown();
   }
 
+  // Draws the streaming reply: blocks that are finished are parsed once and
+  // stay; only the last one is parsed again. At most every STREAM_MS.
   let frame = 0;
+  let lastFlush = 0;
+  function queueFlush() {
+    if (frame) return;
+    const wait = Math.max(0, STREAM_MS - (performance.now() - lastFlush));
+    frame = setTimeout(() => requestAnimationFrame(flushText), wait);
+  }
   function flushText() {
     frame = 0;
-    if (!live?.textEl) return;
-    live.textEl.innerHTML = renderMd(live.textBuf);
+    lastFlush = performance.now();
+    const l = live;
+    if (!l?.textEl) return;
+    l.stable ??= 0;
+    l.tail ??= [];
+    for (const n of l.tail) n.remove();
+    const end = stableEnd(l.textBuf, l.stable);
+    if (end > l.stable) {
+      const done = document.createElement('template');
+      done.innerHTML = renderMd(l.textBuf.slice(l.stable, end));
+      l.textEl.append(done.content);
+      l.stable = end;
+    }
+    const tail = document.createElement('template');
+    tail.innerHTML = renderMd(l.textBuf.slice(l.stable));
+    l.tail = [...tail.content.childNodes];
+    l.textEl.append(tail.content);
     scrollDown();
   }
 
@@ -720,11 +811,9 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
         if (ev.mid) {
           // Said while Lumio works: its next words start a new reply below this.
           if (live) {
-            if (frame) { cancelAnimationFrame(frame); flushText(); } // finish drawing the reply so far
+            if (frame) { clearTimeout(frame); flushText(); } // finish drawing the reply so far
             thinking(false);
-            live.textEl?.classList.remove('streaming');
-            live.textEl = null;
-            live.textBuf = '';
+            endText();
           }
         } else showPlan(null); // each request starts fresh; the AI posts a new checklist if it needs one
         messages.append(userEl(ev.text, ev.ctx, ev.files));
@@ -750,7 +839,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
           messages.append(live.textEl);
         }
         live.textBuf += ev.delta;
-        if (!frame) frame = requestAnimationFrame(flushText);
+        queueFlush();
         break;
       case 'text_end':
         endText();
@@ -783,7 +872,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
       case 'approval_done': {
         // The step chip above already shows the outcome; drop the card.
         const el = messages.querySelector(`.approval[data-id="${CSS.escape(ev.id)}"]`);
-        if (el) el.animate([{ opacity: 1 }, { opacity: 0, transform: 'translateY(-4px)' }], { duration: 160 }).onfinish = () => el.remove();
+        if (el) el.animate([{ opacity: 1 }, { opacity: 0, transform: 'translateY(-4px) scale(.98)' }], { duration: reduced() ? 0 : 140, easing: 'cubic-bezier(.55, 0, 1, .45)' }).onfinish = () => el.remove();
         break;
       }
       case 'helper': {
@@ -795,6 +884,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
         const el = live?.steps.get(ev.id);
         if (el) {
           setStepStatus(el, ev.status, ev.summary);
+          el.classList.add('changed'); // the spinner turns into its result
           if (ev.thumb) {
             const img = document.createElement('img');
             img.className = 'step-thumb';
@@ -837,6 +927,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
             wf.offerSave([...messages.querySelectorAll('.msg.ai')].at(-1) || messages.lastElementChild);
           }
         }
+        if (live?.said) announce(`Lumio: ${live.said}`);
         live = null;
         planEl.classList.remove('live');
         // A finished checklist folds away; it's still one click away.
@@ -998,7 +1089,12 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     if (live) {
       messages.querySelectorAll('.step.running').forEach((el) => live.steps.set(el.dataset.id, el));
       const last = messages.lastElementChild;
-      if (last?.classList.contains('ai')) { live.textEl = last; live.textBuf = chat.display[chat.display.length - 1].text; last.classList.add('streaming'); }
+      if (last?.classList.contains('ai')) {
+        live.textEl = last;
+        live.textBuf = chat.display[chat.display.length - 1].text;
+        live.tail = [...last.childNodes]; // redrawn with the next words
+        last.classList.add('streaming');
+      }
     }
     renderState();
   }

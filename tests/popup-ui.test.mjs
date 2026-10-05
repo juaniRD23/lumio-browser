@@ -156,8 +156,14 @@ test('a pop-up’s bar in light and dark: readable, and dark when incognito', { 
 test('blocked pop-ups: the list (as text), open one with the keyboard, always allow the site, Esc', { skip }, async () => {
   for (const scheme of ['light', 'dark']) {
     const { page, errors } = await open('overlay', { colorScheme: scheme, viewport: { width: 364, height: 320 } });
-    const show = (p) => emit(page, 'overlay-data', { kind: 'popups', focus: true, host: 'news.example', allowed: false, ...p });
-    const said = async () => (await sent(page)).filter(([c]) => c !== 'overlay:size'); // it also measures itself
+    // main/window.js's steps: draw it ('show'), then bring it in ('in').
+    let seq = 0;
+    const show = async (p) => {
+      seq += 1;
+      await emit(page, 'overlay-data', { kind: 'popups', focus: true, host: 'news.example', allowed: false, ...p, op: 'show', seq });
+      await emit(page, 'overlay-data', { op: 'in', seq });
+    };
+    const said = async () => (await sent(page)).filter(([c]) => !/^overlay:(size|ready|gone)$/.test(c)); // it also measures itself
     await show({ items: [{ id: 1, url: 'https://ads.example/<b>win</b>' }, { id: 2, url: 'about:blank' }] });
     assert.equal(await page.textContent('.pb-title'), 'Pop-ups blocked:');
     assert.deepEqual(await page.$$eval('.pb-item', (els) => els.map((e) => e.textContent)), ['ads.example/<b>win</b>', 'about:blank'], 'addresses as text, never HTML');
@@ -188,6 +194,7 @@ test('blocked pop-ups: the list (as text), open one with the keyboard, always al
 test('site information: pop-ups are blocked by default, and can be allowed', { skip }, async () => {
   const { page, errors } = await open('overlay', { viewport: { width: 380, height: 600 } });
   await emit(page, 'overlay-data', {
+    op: 'show', seq: 1,
     kind: 'siteinfo',
     info: { host: 'news.example', origin: 'https://news.example', secure: true, permissions: [
       { permission: 'geolocation', label: 'Location', value: undefined },
@@ -195,7 +202,8 @@ test('site information: pop-ups are blocked by default, and can be allowed', { s
       { permission: 'window-management', label: 'Window management', value: false },
     ] },
   });
-  const said = async () => (await sent(page)).filter(([c]) => c !== 'overlay:size'); // it also measures itself
+  await emit(page, 'overlay-data', { op: 'in', seq: 1 });
+  const said = async () => (await sent(page)).filter(([c]) => !/^overlay:(size|ready|gone)$/.test(c)); // it also measures itself
   const options = (perm) => page.$$eval(`select[data-perm="${perm}"] option`, (els) => els.map((o) => `${o.textContent}${o.selected ? ' *' : ''}`));
   assert.deepEqual(await options('geolocation'), ['Ask (default) *', 'Allow', 'Block']);
   assert.deepEqual(await options('popups'), ['Block (default) *', 'Allow']);

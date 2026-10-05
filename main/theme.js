@@ -4,6 +4,8 @@
 // renderer/assets/theme.css follow it live) and websites, like Chrome. It also
 // themes native menus, dialogs and the title bar. Native backgrounds can't
 // read CSS, so colors() gives them. Incognito windows are always dark.
+const accessibility = require('./accessibility');
+
 const APPEARANCES = ['system', 'light', 'dark'];
 
 // frame: the window behind the UI (--bg in theme.css). page: Lumio's own
@@ -35,9 +37,13 @@ function apply() {
   changed();
 }
 
-// Listeners hear when the setting or the light/dark it comes to changes.
+// Settings › Accessibility (main/accessibility.js) travel with the appearance.
+const uiPrefs = () => accessibility.prefs(store.settings);
+
+// Listeners hear when the setting or the light/dark it comes to changes, or
+// an accessibility choice does.
 function changed() {
-  const key = `${appearance()}/${isDark()}`;
+  const key = `${appearance()}/${isDark()}/${accessibility.key(uiPrefs())}`;
   if (key === last) return;
   last = key;
   for (const fn of listeners) fn();
@@ -58,4 +64,4 @@ function onChange(fn) {
   return () => listeners.delete(fn);
 }
 
-module.exports = { APPEARANCES, init, appearance, isDark, colors, onChange };
+module.exports = { APPEARANCES, init, appearance, isDark, colors, onChange, uiPrefs };

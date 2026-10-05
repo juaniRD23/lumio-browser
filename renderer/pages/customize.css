@@ -1,0 +1,97 @@
+/* Customize Lumio: the New Tab page's side sheet (newtab-customize.js) and
+   the backgrounds it offers. */
+
+/* The background sits on its own layer so a new choice can fade in. */
+body[data-bg]:not([data-bg="none"])::before {
+  content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  animation: fade-in var(--dur-5) var(--ease-out);
+}
+body[data-bg]:not([data-bg="none"]) { background: var(--bg); }
+body.bg-swap::before { animation-name: fade-in-again; }
+@keyframes fade-in-again { from { opacity: 0; } }
+body[data-bg="aurora"]::before { background: radial-gradient(ellipse 80% 65% at 12% -5%, var(--ntbg-aurora-1), transparent 70%), radial-gradient(ellipse 75% 65% at 95% 105%, var(--ntbg-aurora-2), transparent 70%); }
+body[data-bg="dusk"]::before { background: radial-gradient(ellipse 90% 70% at 85% -10%, var(--ntbg-dusk-1), transparent 70%), radial-gradient(ellipse 80% 70% at 5% 100%, var(--ntbg-dusk-2), transparent 72%); }
+body[data-bg="meadow"]::before { background: radial-gradient(ellipse 85% 60% at 50% -10%, var(--ntbg-meadow-1), transparent 70%), radial-gradient(ellipse 90% 70% at 50% 110%, var(--ntbg-meadow-2), transparent 72%); }
+/* Your own picture, under a veil of the page color so the words stay readable. */
+body[data-bg="custom"]::before { background: linear-gradient(color-mix(in srgb, var(--bg) 55%, transparent), color-mix(in srgb, var(--bg) 55%, transparent)), var(--nt-image) center / cover no-repeat; }
+body.no-shortcuts #sites, body.no-recent #recent { display: none; }
+
+.cz-open {
+  position: fixed; right: 18px; bottom: 18px; z-index: 5;
+  display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 14px 0 12px;
+  border-radius: 999px; border: 1px solid var(--line); background: var(--card); color: var(--dim);
+  font: 500 13px var(--sans); cursor: pointer; box-shadow: var(--shadow-sm);
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out);
+  animation: fade-in var(--dur-5) var(--ease-out) 200ms backwards;
+}
+.cz-open:hover { background: var(--card-hover); color: var(--text); }
+.cz-open:active { transform: scale(.97); }
+
+.cz-scrim {
+  position: fixed; inset: 0; z-index: 20; background: var(--sheet-scrim);
+  opacity: 0; transition: opacity var(--dur-3) var(--ease-in);
+}
+.cz-scrim.open { opacity: 1; transition: opacity var(--dur-5) var(--ease-out); }
+
+/* Slides in from the right edge; leaves a little faster than it came. */
+.cz-sheet {
+  position: fixed; top: 8px; right: 8px; bottom: 8px; z-index: 21; width: min(360px, calc(100vw - 16px));
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--card); color: var(--text); border: 1px solid var(--line-strong); border-radius: 18px; box-shadow: var(--shadow-dialog);
+  transform: translateX(calc(100% + 16px)); opacity: .6;
+  transition: transform var(--dur-3) var(--ease-in), opacity var(--dur-3) var(--ease-in);
+}
+.cz-sheet.open { transform: none; opacity: 1; transition: transform var(--dur-5) var(--ease-out), opacity var(--dur-3) var(--ease-out); }
+.cz-head { display: flex; align-items: center; gap: 8px; padding: 18px 14px 6px 22px; }
+.cz-head h2 { flex: 1; margin: 0; font: 400 26px/1.1 var(--serif); letter-spacing: -.01em; text-transform: none; color: var(--text); }
+.cz-close { width: 32px; height: 32px; border-radius: 10px; border: 0; background: none; color: var(--label); cursor: pointer; display: grid; place-items: center; }
+.cz-close:hover { background: var(--overlay-3); color: var(--text); }
+.cz-body { flex: 1; overflow-y: auto; padding: 0 22px 22px; }
+.cz-body section { animation: rise var(--dur-4) var(--ease-out) backwards; }
+.cz-body section:nth-child(2) { animation-delay: 30ms; }
+.cz-body section:nth-child(3) { animation-delay: 60ms; }
+.cz-body section:nth-child(4) { animation-delay: 90ms; }
+.cz-body h3 { margin: 22px 0 10px; }
+
+/* Choices are radios underneath, so arrows move between them. */
+.cz-sheet label { position: relative; cursor: pointer; }
+.cz-sheet input[type=radio] { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.cz-seg { display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--field); border: 1px solid var(--line); }
+.cz-seg label { flex: 1; display: grid; place-items: center; height: 30px; border-radius: 999px; color: var(--dim); font-size: 13px; font-weight: 500; transition: background var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out); }
+.cz-seg label:hover { color: var(--text); }
+.cz-seg label:has(input:checked) { background: var(--primary-bg); color: var(--primary-fg); }
+.cz-swatches { display: flex; gap: 10px; flex-wrap: wrap; }
+.cz-swatches label { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; }
+.cz-swatches i { width: 24px; height: 24px; border-radius: 50%; background: light-dark(var(--sw-light), var(--sw-dark)); box-shadow: inset 0 0 0 1px var(--line-strong); transition: transform var(--dur-3) var(--ease-spring); }
+.cz-swatches label:hover i { transform: scale(1.08); }
+.cz-swatches label:has(input:checked) { box-shadow: 0 0 0 2px var(--text); }
+.cz-bgs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.cz-bgs label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--dim); }
+.cz-bgs i {
+  display: grid; place-items: center; height: 58px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--bg) center / cover no-repeat; color: var(--label);
+  transition: transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
+}
+.cz-bgs label:hover i { transform: translateY(-1px); }
+.cz-bgs label:has(input:checked) i { box-shadow: 0 0 0 2px var(--accent); }
+.cz-bgs label:has(input:checked) span { color: var(--text); font-weight: 550; }
+.cz-bgs .bg-aurora { background: radial-gradient(ellipse 90% 80% at 10% 0%, var(--ntbg-aurora-1), transparent 70%), radial-gradient(ellipse 90% 80% at 100% 100%, var(--ntbg-aurora-2), transparent 70%), var(--bg); }
+.cz-bgs .bg-dusk { background: radial-gradient(ellipse 90% 80% at 90% 0%, var(--ntbg-dusk-1), transparent 70%), radial-gradient(ellipse 90% 80% at 0% 100%, var(--ntbg-dusk-2), transparent 72%), var(--bg); }
+.cz-bgs .bg-meadow { background: radial-gradient(ellipse 100% 70% at 50% 0%, var(--ntbg-meadow-1), transparent 70%), radial-gradient(ellipse 100% 80% at 50% 100%, var(--ntbg-meadow-2), transparent 72%), var(--bg); }
+.cz-upload { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; }
+.cz-note { margin: 8px 0 0; color: var(--danger-text); font-size: 12.5px; min-height: 0; }
+.cz-note:empty { display: none; }
+.cz-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; font-size: 13.5px; }
+.cz-row + .cz-row { border-top: 1px solid var(--line); }
+.cz-sheet .switch { position: relative; width: 36px; height: 20px; flex: none; }
+.cz-sheet .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+.cz-sheet .switch i { position: absolute; inset: 0; border-radius: 999px; background: var(--switch-off); transition: background var(--dur-2) var(--ease-out); cursor: pointer; }
+.switch i::after { content: ''; position: absolute; left: 3px; top: 3px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: var(--shadow-xs); transition: transform var(--dur-3) var(--ease-spring); }
+.cz-sheet .switch input:checked + i { background: var(--accent); }
+.cz-sheet .switch input:checked + i::after { transform: translateX(16px); }
+.cz-sheet :is(label:has(input:focus-visible), .switch:has(input:focus-visible)) { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: 12px; }
+.cz-swatches label:has(input:focus-visible) { border-radius: 50%; }
+
+/* Reduce Motion: the sheet fades in place instead of sliding. */
+@media (prefers-reduced-motion: reduce) { .cz-sheet { transform: none; opacity: 0; } }
+:root[data-reduce-motion] .cz-sheet { transform: none; opacity: 0; }

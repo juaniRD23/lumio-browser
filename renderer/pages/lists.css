@@ -5,7 +5,6 @@
 .grow { flex: 1; }
 #search { width: 260px; }
 .day { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; color: var(--label); margin: 24px 12px 8px; }
-.empty { color: var(--label); padding: 50px 0; text-align: center; }
 .btn.small { height: 28px; padding: 0 11px; font-size: 12.5px; }
 .btn.ghost { background: transparent; }
 .iconbtn { width: 30px; height: 30px; border-radius: 8px; border: 0; background: none; color: var(--label); cursor: pointer; display: inline-grid; place-items: center; }
@@ -19,7 +18,7 @@
 .dl.gone .name, .dl.failed .name { color: var(--dim); text-decoration: line-through; }
 .dl .sub { color: var(--label); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dl .bar { height: 4px; border-radius: 4px; background: var(--overlay-4); margin-top: 7px; overflow: hidden; }
-.dl .bar i { display: block; height: 100%; background: var(--accent); border-radius: 4px; transition: width .3s; }
+.dl .bar i { display: block; height: 100%; background: var(--accent); border-radius: 4px; transform: scaleX(var(--p, 0)); transform-origin: left; transition: transform var(--dur-4) var(--ease-out); }
 .dl .acts { display: flex; gap: 6px; flex: none; }
 
 /* bookmarks */
@@ -28,13 +27,13 @@
 .bm-row.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
 .bm-row.dragging { opacity: .4; }
 .bm-row .grip { color: var(--label); cursor: grab; opacity: 0; font-size: 14px; width: 12px; }
-.bm-row:hover .grip { opacity: 1; }
+.bm-row:hover .grip, .bm-row:focus-within .grip { opacity: 1; }
 .bm-row img, .bm-row .dot { width: 16px; height: 16px; border-radius: 4px; flex: none; }
 .bm-row .dot { background: var(--overlay-4); }
 .bm-row .t { flex: 0 1 auto; min-width: 0; max-width: 45%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
 .bm-row .u { flex: 1; min-width: 0; color: var(--label); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bm-row .acts { display: flex; gap: 2px; opacity: 0; }
-.bm-row:hover .acts, .bm-row.editing .acts { opacity: 1; }
+.bm-row:hover .acts, .bm-row:focus-within .acts, .bm-row.editing .acts { opacity: 1; }
 .bm-row.editing { background: var(--card); height: auto; padding: 10px 12px; flex-wrap: wrap; }
 .bm-row.editing .field { height: 32px; flex: 1; min-width: 180px; }
 .bar-toggle { display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 13px; cursor: pointer; }

@@ -47,7 +47,7 @@
         </button>
     <button id="update-btn" class="update-btn" hidden><span class="ic"></span><span class="label">Update</span><span class="bar"></span></button>
     <button id="account-btn" class="account-btn" title="Lumio account" aria-label="Lumio account"></button>
-    <button id="menu-btn" class="icon-btn" title="Menu" aria-label="Menu" hidden></button>
+    <button id="menu-btn" class="icon-btn" title="Customize and control Lumio" aria-label="Menu" aria-haspopup="menu" aria-expanded="false"></button>
   </nav>
 
   <div id="bookmarks-bar" hidden role="toolbar" aria-label="Bookmarks"></div>
@@ -74,7 +74,7 @@
         <button id="panel-close" class="icon-btn small" title="Hide (⌘⇧L)"></button>
       </div>
       <div id="chat-menu" class="popover" hidden><div id="chat-list"></div></div>
-      <div id="messages" aria-live="polite"></div>
+      <div id="messages" role="region" aria-label="Chat" tabindex="-1"></div>
       <section id="plan" aria-label="Task progress" hidden>
         <button id="plan-head" type="button" aria-expanded="true" aria-controls="plan-list">
           <span class="plan-ic"></span><span class="plan-title">Task progress</span>

@@ -189,6 +189,28 @@ class TabManager {
     return n;
   }
 
+  // A small picture of a tab's page for its hover card (main/window.js),
+  // kept in memory with the tab and never saved, so an incognito window's
+  // stay in that window. Web pages only; a sleeping tab keeps its last one.
+  canPreview(tab) { return /^(https?|file):/.test(tab.pendingUrl || tab.url || ''); }
+  async capturePreview(tab) {
+    const wc = tab.view?.webContents;
+    const url = wc && !wc.isDestroyed() ? wc.getURL() : '';
+    if (!/^(https?|file):/.test(url)) return tab.preview || null;
+    if (tab.preview?.url === url && Date.now() - tab.preview.at < 1000) return tab.preview;
+    const { width, height } = tab.view.getBounds();
+    if (width < 80 || height < 60) return tab.preview || null; // never shown (opened in the background)
+    try {
+      // The top of the page, as wide as the card's 16:9 picture; a hidden
+      // page is drawn just for this and stays hidden.
+      const img = await wc.capturePage({ x: 0, y: 0, width, height: Math.min(height, Math.round(width * 9 / 16)) }, { stayHidden: true });
+      if (!img.isEmpty() && !wc.isDestroyed() && wc.getURL() === url) {
+        tab.preview = { url, at: Date.now(), src: `data:image/jpeg;base64,${img.resize({ width: 480, quality: 'good' }).toJPEG(75).toString('base64')}` };
+      }
+    } catch { /* the page closed meanwhile */ }
+    return tab.preview || null;
+  }
+
   wire(tab) {
     const wc = tab.view.webContents;
     const M = () => tab.owner;
@@ -356,6 +378,14 @@ class TabManager {
     });
     wc.on('found-in-page', (_e, result) => M().hooks.onFound?.(tab.id, result));
     wc.on('zoom-changed', (_e, dir) => M().zoom(dir === 'in' ? 1 : -1, tab.id));
+    // How far the page has got, for the address bar's progress line
+    // (shell.js renderLoad): started, the new page answered, its document is
+    // ready, done.
+    const advance = (p) => { if (tab.loading && p > (tab.progress || 0)) update({ progress: p }); };
+    wc.on('did-start-loading', () => update({ progress: 0.1 }));
+    wc.on('did-navigate', () => advance(0.35));
+    wc.on('dom-ready', () => advance(0.7));
+    wc.on('did-stop-loading', () => update({ progress: 1 }));
 
     // Web pages may not navigate to (or open) internal lumio:// pages.
     const guard = (e) => {
@@ -717,6 +747,8 @@ class TabManager {
     if (!tab) return;
     const prev = this.active;
     if (prev) prev.lastActive = Date.now();
+    // Picture the page you're leaving for its hover card, once the switch is on screen.
+    if (prev && prev !== tab) setTimeout(() => { if (prev.id !== this.activeId) this.capturePreview(prev); }, 150);
     tab.lastActive = Date.now();
     this.activeId = id;
     this.ensureView(tab);
@@ -938,6 +970,7 @@ class TabManager {
       if (!wc || wc.isDestroyed() || !t.url.startsWith('lumio:')) continue;
       t.view.setBackgroundColor(this.pageBackground(t.url));
       wc.send('appearance', theme.appearance());
+      wc.send('ui-prefs', theme.uiPrefs());
     }
   }
 
@@ -962,6 +995,7 @@ class TabManager {
         internal: (t.pendingUrl || t.url || '').startsWith('lumio:'),
         favicon: t.favicon,
         loading: t.loading,
+        progress: t.progress || 0,
         canGoBack: t.canGoBack,
         canGoForward: t.canGoForward,
         audible: t.audible,

@@ -299,7 +299,7 @@ test('Help, in the menu bar and the ⋮ menu: Terms of Service, Privacy Policy, 
   const help = buildMenu(cmd).find((m) => m.role === 'help');
   assert.deepEqual(help.submenu.map((i) => [i.label, i.click]), [['Terms of Service', 'terms'], ['Privacy Policy', 'privacy'], ['Open-Source Licenses', 'credits']]);
   const dots = buildBrowserMenu(cmd);
-  const sub = dots.find((i) => i.label === 'Help').submenu.filter((i) => i.label);
-  assert.deepEqual(sub.map((i) => [i.label, i.click]), [['About Lumio Browser', 'about'], ['Terms of Service', 'terms'], ['Privacy Policy', 'privacy'], ['Open-source licenses', 'credits']]);
-  assert.equal(dots.at(-1).role, 'quit', 'Exit still quits (and main.js asks first)');
+  const sub = dots.find((i) => i.label === 'Help').submenu.filter((i) => i.label && typeof i.run === 'string');
+  assert.deepEqual(sub.map((i) => [i.label, i.run]), [['About Lumio Browser', 'about'], ['Terms of Service', 'terms'], ['Privacy Policy', 'privacy'], ['Open-source licenses', 'credits']]);
+  assert.equal(dots.at(-1).run, 'quit', 'Exit still quits (and main.js asks first)');
 });
