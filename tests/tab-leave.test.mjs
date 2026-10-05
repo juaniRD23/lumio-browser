@@ -175,7 +175,7 @@ test('a link the page follows itself is caught and asked about; Leave sends the 
   a.tab.owner.answer(a.tab, d.id, { button: 'leave' });
   await tick();
   assert.deepEqual(a.wc.calls.at(-1), ['script', 'location.assign("https://elsewhere.example/page")']);
-  assert.equal(a.tab.allowUnload, true, 'and its beforeunload won’t ask again');
+  assert.ok(Date.now() - a.tab.allowUnload < 1000, 'and its beforeunload won’t ask again (for a moment)');
   // A later navigation, long after, isn't caught.
   const later = event({ url: 'https://x.example/' });
   a.wc.emit('will-navigate', later);

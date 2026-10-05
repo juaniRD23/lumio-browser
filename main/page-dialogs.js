@@ -97,9 +97,16 @@ async function signIn(tab, { details, authInfo }) {
   if (tab.agent) return null;
   const allowed = authAllowed({ requestUrl: details.url, isProxy: authInfo.isProxy, pageUrl: tab.view?.webContents.getURL(), goingTo: tab.navigatingTo });
   if (!allowed) return null;
-  const answer = await tab.owner.ask(tab, authSpec({ url: details.url, isProxy: authInfo.isProxy, host: authInfo.host, port: authInfo.port, retry: details.firstAuthAttempt === false }));
-  if (answer.button !== 'signin') return null;
-  return { username: answer.values.username, password: answer.values.password };
+  // One question per site (or proxy) and realm at a time, like Chrome: a page
+  // asking again and again in a loop can't pile up cards.
+  const key = `${!!authInfo.isProxy}|${authInfo.host}:${authInfo.port}|${authInfo.realm || ''}`;
+  const pending = (tab.authPending ||= new Map());
+  if (pending.has(key)) return pending.get(key);
+  const asking = tab.owner.ask(tab, authSpec({ url: details.url, isProxy: authInfo.isProxy, host: authInfo.host, port: authInfo.port, retry: details.firstAuthAttempt === false }))
+    .then((answer) => (answer.button === 'signin' ? { username: answer.values.username, password: answer.values.password } : null))
+    .finally(() => pending.delete(key));
+  pending.set(key, asking);
+  return asking;
 }
 
 module.exports = { jsDialogSpec, jsResult, nextStreak, jsDialog, blankAnswer, authSpec, authAllowed, signIn, STREAK_MS };

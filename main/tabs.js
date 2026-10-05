@@ -243,6 +243,8 @@ class TabManager {
       remember((s) => s.addVisit(url, wc.getTitle(), tab.favicon));
     });
     wc.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
+      // A stopped navigation's site may no longer ask to sign in over this page.
+      if (isMainFrame && code === -3 && url === tab.navigatingTo) tab.navigatingTo = null;
       if (!isMainFrame || code === -3) return; // -3: replaced by another navigation, or stopped
       M().leftPage(tab);
       if (url.startsWith('lumio://error')) return;
@@ -252,7 +254,9 @@ class TabManager {
       wc.loadURL(`lumio://error/${page}?` + q).catch(() => {});
     });
     wc.on('render-process-gone', (_e, details) => {
-      M().dismiss(tab, ['js', 'unresponsive']); // they were the old page's
+      // They were the old page's ("Leave site?" too, unless it's about closing the tab).
+      const leave = tab.dialogs?.some((d) => d.spec.kind === 'leave' && d.spec.about !== 'close');
+      M().dismiss(tab, leave ? ['js', 'unresponsive', 'leave'] : ['js', 'unresponsive']);
       if (details.reason === 'clean-exit') return;
       const failed = M().displayUrl(tab);
       update({ loading: false });
@@ -275,7 +279,9 @@ class TabManager {
     // the same thing again, this time without asking (see askLeave).
     wc.on('will-prevent-unload', (e) => {
       // "Leave" was chosen already, or it's a helper AI's own tab (only it typed there).
-      if (tab.allowUnload || tab.agent) { tab.allowUnload = false; e.preventDefault(); return; }
+      // (A "Leave" only counts for a little while: one whose navigation never
+      // happened, a download say, mustn't wave through a close hours later.)
+      if ((tab.allowUnload && Date.now() - tab.allowUnload < LEAVE_MS) || tab.agent) { tab.allowUnload = 0; e.preventDefault(); return; }
       const action = tab.leaving && Date.now() - tab.leaving.at < LEAVE_MS ? tab.leaving : null;
       tab.leaving = null;
       if (action) { M().askLeave(tab, action); return; }
@@ -305,7 +311,7 @@ class TabManager {
         // (not one that looks typed in the address bar).
         redo: () => {
           if (wc.isDestroyed()) return;
-          tab.allowUnload = true;
+          tab.allowUnload = Date.now();
           wc.executeJavaScriptInIsolatedWorld(1001, [{ code: `location.assign(${JSON.stringify(url)})` }]).catch(() => {});
         },
       });
@@ -555,6 +561,9 @@ class TabManager {
   // as they agree, but their tabs stay (asleep, like Memory Saver's), so if
   // you stay on one, the window is all still there. Resolves false then.
   async confirmLeaveAll() {
+    // Alerts first, all at once: one left up would stall every page sharing
+    // its process, and a stalled page is closed without asking.
+    for (const tab of this.tabs) if (tab.owner === this) this.dismiss(tab, ['js']);
     for (const tab of [...this.tabs]) {
       if (tab.owner !== this) continue;
       if (tab.closing) { if (!(await tab.closing)) return false; continue; }
@@ -605,7 +614,7 @@ class TabManager {
   // page's beforeunload may stop: kept so "Leave" can do it again.
   leaveBy(tab, kind, run) {
     this.dismiss(tab, ['js', 'unresponsive']); // a page waiting on its own dialog can't answer
-    tab.leaving = { kind, at: Date.now(), redo: () => { tab.allowUnload = true; run(); } };
+    tab.leaving = { kind, at: Date.now(), redo: () => { tab.allowUnload = Date.now(); run(); } };
     run();
   }
 
@@ -620,6 +629,7 @@ class TabManager {
     const reload = action.kind === 'reload';
     this.ask(tab, {
       kind: 'leave',
+      about: action.kind,
       title: reload ? 'Reload site?' : 'Leave site?',
       message: 'Changes you made may not be saved.',
       buttons: [{ id: 'cancel', label: 'Cancel' }, { id: 'leave', label: reload ? 'Reload' : 'Leave', primary: true }],
@@ -637,7 +647,8 @@ class TabManager {
   // navigation, and a "Leave" already given, are used up.
   leftPage(tab) {
     tab.navigatingTo = null;
-    tab.allowUnload = false;
+    tab.allowUnload = 0;
+    tab.catchLeave = 0; // a new page never inherits the old one's "Leave site?"
     if (tab.leaving?.kind !== 'close') tab.leaving = null;
   }
 

@@ -543,6 +543,7 @@ class AIController {
     } finally {
       if (tab && this.tabs.get(tab.id)) {
         this.tabs.setAgent(tab.id, null);
+        tab.touched = false; // only the helper typed there: closing it won't ask "Leave site?"
         try { tab.view?.webContents.setBackgroundThrottling(true); } catch {}
       }
       show(h);

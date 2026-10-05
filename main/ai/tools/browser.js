@@ -18,10 +18,14 @@ const DIALOGS = {
   unresponsive: '"Page unresponsive"',
 };
 const pageTabs = new WeakMap(); // a tab's webContents -> the tab (tabFor, pageContext)
-const stopped = (tab) => !!tab?.dialogs?.some((d) => d.spec.kind === 'js' || d.spec.kind === 'unresponsive');
+// A page stops on its own alert, or on one in another tab or pop-up that
+// shares its process (an alert() there stops this page too).
+const sharedStop = (tab) => { const wc = tab?.view?.webContents; return !!(wc && !wc.isDestroyed() && tab.owner?.hooks?.dialogInProcess?.(wc)); };
+const stopped = (tab) => !!tab?.dialogs?.some((d) => d.spec.kind === 'js' || d.spec.kind === 'unresponsive') || sharedStop(tab);
 function dialogNote(tab) {
   const kind = tab?.dialogs?.[0]?.spec.kind;
-  return kind ? `Tab ${tab.id} is showing ${DIALOGS[kind] || 'a dialog'}, which only the user can answer. Ask them to answer it, then go on.` : '';
+  if (kind) return `Tab ${tab.id} is showing ${DIALOGS[kind] || 'a dialog'}, which only the user can answer. Ask them to answer it, then go on.`;
+  return sharedStop(tab) ? `Tab ${tab.id} is waiting on a dialog in another tab or pop-up, which only the user can answer. Ask them to answer it, then go on.` : '';
 }
 
 function inPage(wc, fn, arg = {}) {
@@ -538,8 +542,11 @@ const tools = [
       if (!ctx.tabs.get(a.tab_id)) throw new Error(`There is no tab ${a.tab_id}.`);
       ctx.tabs.close(a.tab_id);
       // A page you've used runs its beforeunload first and may ask "Leave site?".
-      if (ctx.tabs.get(a.tab_id)) await new Promise((r) => setTimeout(r, 400));
-      return ctx.tabs.get(a.tab_id) ? `Tab ${a.tab_id} is asking the user to confirm leaving the page; it closes if they agree.` : `Closed tab ${a.tab_id}.`;
+      // Wait for its page to close, or for the question, whichever comes first.
+      const asking = () => !!ctx.tabs.get(a.tab_id)?.dialogs?.some((d) => d.spec.kind === 'leave');
+      for (let t = 0; t < 1500 && ctx.tabs.get(a.tab_id) && !asking(); t += 100) await wait(100);
+      if (!ctx.tabs.get(a.tab_id)) return `Closed tab ${a.tab_id}.`;
+      return asking() ? `Tab ${a.tab_id} is asking the user to confirm leaving the page; it closes if they agree.` : `Tab ${a.tab_id} is still closing.`;
     },
   },
   {
