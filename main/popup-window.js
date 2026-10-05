@@ -133,10 +133,10 @@ class PopupWin {
       if (approved) return;
       // Closing it may cancel downloads (the last Incognito window, or the
       // last window where that quits): ask first (confirmClose).
-      if (app.downloadsAtRisk(this)) { e.preventDefault(); this.confirmClose(); return; }
+      if (app.downloadsAtRisk(this)) { e.preventDefault(); app.quitCancelled?.(); this.confirmClose(); return; }
       // A page you've used may ask "Leave site?" first.
       const t = this.tabs.active;
-      if (t && this.tabs.anyMayAsk()) { e.preventDefault(); this.tabs.close(t.id); }
+      if (t && this.tabs.anyMayAsk()) { e.preventDefault(); app.quitCancelled?.(); this.tabs.close(t.id); }
     });
     this.win.on('closed', () => {
       for (const t of this.tabs.tabs) {

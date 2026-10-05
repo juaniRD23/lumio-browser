@@ -69,8 +69,15 @@ class AccessNotice {
     const { w } = this;
     if (w.closed || !tab?.view || tab !== w.tabs.active) return; // only over the page you're looking at
     this.data = { tabId: tab.id, fullscreen, pointer, ...noticeText({ host: hostOf(w.tabs.displayUrl(tab)), fullscreen, pointer }) };
-    const view = this.ensure();
-    w.win.contentView.addChildView(view); // on top of everything
+    this.ensure();
+    if (this.ready) this.attach();
+  }
+
+  // Puts the view on top once its page can draw (an empty view would still
+  // take the page's clicks), and starts the bubble's four seconds from there.
+  attach() {
+    if (!this.data || this.w.closed) return;
+    this.w.win.contentView.addChildView(this.view); // on top of everything
     this.place();
     this.send();
     clearTimeout(this.timer);
@@ -83,7 +90,7 @@ class AccessNotice {
     view.setBackgroundColor('#00000000');
     this.view = view;
     this.ready = false;
-    view.webContents.once('did-finish-load', () => { this.ready = true; this.send(); });
+    view.webContents.once('did-finish-load', () => { this.ready = true; this.attach(); });
     // A click on the bubble mustn't take the keyboard from the page (Esc has
     // to reach it), or from a dialog the page is waiting on.
     view.webContents.on('focus', () => {

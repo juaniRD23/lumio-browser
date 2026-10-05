@@ -145,7 +145,7 @@ class BrowserWin {
       // Pages you've used may ask "Leave site?" first, one at a time, and
       // closing may cancel downloads (the last Incognito window, or the last
       // window where that quits): ask before any of it (confirmClose).
-      if (!approved && (this.tabs.anyMayAsk() || app.downloadsAtRisk(this))) { e.preventDefault(); this.confirmClose(); return; }
+      if (!approved && (this.tabs.anyMayAsk() || app.downloadsAtRisk(this))) { e.preventDefault(); app.quitCancelled?.(); this.confirmClose(); return; }
       this.closing = true;
       app.onClose(this);
     });

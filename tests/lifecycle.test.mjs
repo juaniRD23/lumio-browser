@@ -78,9 +78,10 @@ test('full screen: a bubble of its own on top, at the top center of the page, th
     const notice = new AccessNotice(w);
     tab.view.getBounds = () => ({ x: 0, y: 0, width: 1440, height: 900 }); // full screen: the whole window
     notice.fullscreen(tab, true);
-    assert.equal(children.at(-1), notice.view, 'above the page');
     assert.equal(notice.view.webContents.url, 'lumio://notice/');
+    assert.equal(children.includes(notice.view), false, 'not before its page loads (an empty view would take clicks)');
     await tick();
+    assert.equal(children.at(-1), notice.view, 'above the page');
     assert.deepEqual(lastSent(notice), ['notice-data', { title: 'video.example is now full screen', action: 'exit full screen' }]);
     // It measured itself: the view fits the bubble and its shadow, centered.
     notice.resize({ width: 480, height: 38 });

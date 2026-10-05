@@ -174,6 +174,8 @@ const services = {
   onSessionChanged: () => saveSession(),
   // Closing a window may cancel downloads: what, and asking first.
   downloadsAtRisk: (holder) => downloadsAtRisk(holder),
+  // A window stopped a quit to ask "Leave site?": the app keeps running.
+  quitCancelled: () => { quitting = false; },
   confirmDownloads: (holder) => confirmDownloads(downloadsAtRisk(holder), holder.win),
   onViewCreated: (w, tab) => { if (!w.incognito && tab.view) extensions?.addTab(tab.view.webContents, w.win); },
   onPasskeyPromptClosed: (w) => passwords?.passkeyClosed(w),
@@ -1482,6 +1484,9 @@ app.on('second-instance', (_e, argv) => {
 });
 
 app.whenReady().then(async () => {
+  // Logging out, restarting or shutting down the computer quits without
+  // "Leave site?" (like Chrome), or macOS would say Lumio stopped the log out.
+  require('electron').powerMonitor.on('shutdown', () => { quitAsked = true; });
   store = new Store(app.getPath('userData'), safeStorage);
   store.onBookmarkIcons = () => bookmarksChanged();
   // Light or dark, before any window opens; changes then apply live.
@@ -1604,8 +1609,12 @@ app.whenReady().then(async () => {
     workDir: path.join(app.getPath('temp'), `${FLAVOR.name} Update`),
     onChange: (state) => { alive().forEach((w) => w.emit('update', state)); announceUpdate(state); },
     // Restarting to update asks first, like quitting, before it sets anything up.
-    confirmQuit: () => askToQuit(),
-    quit: process.env.LUMIO_UPDATE_TARGET && process.env.LUMIO_TEST ? () => {} : () => quitNow(),
+    // It doesn't ride on a quit question someone else is already answering.
+    confirmQuit: () => (confirmingQuit ? Promise.resolve(false) : askToQuit()),
+    // Through the normal quit, which asks again about anything new since
+    // (a download, a page used during the install).
+    quit: process.env.LUMIO_UPDATE_TARGET && process.env.LUMIO_TEST ? () => {} : () => app.quit(),
+    stayed: () => wakeActiveTabs(),
     openPath: (file) => shell.openPath(file),
     api: testUpdates ? process.env.LUMIO_UPDATE_API : FLAVOR.beta ? BETAS : LATEST,
     beta: FLAVOR.beta, appName: FLAVOR.name, bundleId: FLAVOR.bundleId, assetPrefix: FLAVOR.assetPrefix,
@@ -1723,14 +1732,17 @@ function askToQuit() {
     if (!(await confirmDownloads({ kind: 'quit', count }, cur()?.win))) return false;
     for (const w of tabHolders()) {
       if (await w.tabs.confirmLeaveAll()) continue;
-      // You stayed: a window whose pages already agreed shows its tab again
-      // (they went to sleep, like Memory Saver's).
-      for (const h of tabHolders()) { const t = h.tabs.active; if (t && !t.view) h.tabs.activate(t.id); }
+      wakeActiveTabs();
       return false;
     }
     return true;
   })().finally(() => { confirmingQuit = null; });
   return confirmingQuit;
+}
+// You stayed (or an update failed to install): a window whose pages already
+// agreed shows its tab again (they went to sleep, like Memory Saver's).
+function wakeActiveTabs() {
+  for (const h of tabHolders()) { const t = h.tabs.active; if (t && !t.view) h.tabs.activate(t.id); }
 }
 async function confirmQuit() {
   if (confirmingQuit) return;
