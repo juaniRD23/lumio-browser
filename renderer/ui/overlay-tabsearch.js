@@ -78,7 +78,9 @@ function fit() {
     if (kindNow() !== 'tabsearch') return;
     const box = $('.ts');
     if (!box) return;
-    const want = $('.ts-search').offsetHeight + $('#ts-list').scrollHeight + 12 + 2; // card padding and border
+    // The rows' own height: the list stretches to the card, so its scrollHeight never shrinks.
+    const rowsHeight = [...$('#ts-list').children].reduce((sum, el) => sum + el.offsetHeight, 0);
+    const want = $('.ts-search').offsetHeight + rowsHeight + 12 + 2; // card padding and border
     api.send('overlay:size', { height: Math.min(want, MAX_HEIGHT) + 2 + 22 });
   });
 }

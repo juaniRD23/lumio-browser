@@ -36,7 +36,10 @@ class TabDrag {
   // where the pointer is; grab: where it is in the window (so the new window
   // appears with the tab under the pointer).
   start(source, { ids, screenX, screenY, grabX, grabY } = {}) {
-    if (this.drag || !Array.isArray(ids) || ![screenX, screenY, grabX, grabY].every(Number.isFinite)) return null;
+    if (!Array.isArray(ids) || ![screenX, screenY, grabX, grabY].every(Number.isFinite)) return null;
+    // One pointer, one drag: a drag still here never got its end (its
+    // window's UI reloaded or closed mid-drag), so it ends where it is.
+    if (this.drag) this.end();
     const list = source.tabs.tabs.filter((t) => ids.includes(t.id)).map((t) => t.id);
     if (!list.length) return null;
     const grab = { x: Math.round(grabX), y: Math.round(grabY) };

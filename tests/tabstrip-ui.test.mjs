@@ -251,7 +251,7 @@ test('Search tabs: the ⌄ button and ⌘⇧A open the list under it, and close 
   await page.waitForFunction(() => document.querySelector('#tabs .tab').getAttribute('aria-label') === 'Crashed: Broken page');
   assert.match(await page.$eval('#tabs .tab .fav', (el) => el.innerHTML), /M8\.6 16\.3/, 'the sad face');
   assert.match(await page.getAttribute('#tabs .tab', 'title'), /^This tab crashed: Broken page/);
-  assert.equal(await page.textContent('#tabs .tab .title'), 'Broken page');
+  assert.equal(await page.textContent('#tabs .tab .title'), 'Crashed: Broken page', 'the title says so');
   assert.deepEqual(errors, []);
 });
 

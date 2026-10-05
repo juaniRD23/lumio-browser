@@ -196,7 +196,7 @@ class TabManager {
     });
     wc.on('render-process-gone', (_e, details) => {
       if (details.reason === 'clean-exit') return;
-      const failed = M().displayUrl(tab);
+      const failed = M().displayUrl(tab) || tab.url || ''; // the New Tab page shows no address, but Reload needs one
       update({ loading: false, crashed: true });
       const q = new URLSearchParams({ code: 'crashed', desc: details.reason, url: failed });
       setTimeout(() => { if (!wc.isDestroyed()) wc.loadURL('lumio://error/?' + q).catch(() => {}); }, 50);
@@ -585,8 +585,9 @@ class TabManager {
 
   restore(list = [], active = 0) {
     if (!list.length) return false;
-    list.forEach((t, i) => this.create(t.url, { active: false, lazy: i !== active, title: t.title, pinned: !!t.pinned, history: t.history }));
-    const target = this.tabs[Math.min(active, this.tabs.length - 1)];
+    // The tab to show is one of these (the window may already have others).
+    const made = list.map((t, i) => this.create(t.url, { active: false, lazy: i !== active, title: t.title, pinned: !!t.pinned, history: t.history }));
+    const target = made[Math.min(active, made.length - 1)];
     if (target) this.activate(target.id);
     return true;
   }

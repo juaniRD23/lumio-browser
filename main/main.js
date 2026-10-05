@@ -250,7 +250,7 @@ function runDueSchedules() {
 function saveSession() {
   if (quitting || !store) return;
   const list = alive().filter((w) => !w.incognito).map((w) => w.session()).filter((s) => s.tabs.length);
-  if (list.length) store.saveSession(list);
+  if (list.length) store.saveSession(list, sessions.pending());
 }
 // Tabs change all the time (loading, titles), and each save reads every tab's
 // back/forward history, so those changes are gathered into one save every
@@ -279,13 +279,17 @@ function menuState() {
 }
 
 // Tabs and windows come back with their back/forward history (main/sessions.js).
+// index: an entry picked from a list (always that one); none: the last one
+// closed in window w (⇧⌘T; incognito windows keep their own).
 // tabIndex: just that tab of a closed window (History › Recently Closed).
-function reopenClosed(index = recentlyClosed.length - 1, tabIndex = null) {
-  const w = cur();
-  if (w?.incognito && index === recentlyClosed.length - 1) {
-    const e = w.closedTabs.pop();
-    if (e) w.tabs.create(e.url, { index: e.index, title: e.title, pinned: e.pinned, history: e.history });
-    return;
+function reopenClosed(index = null, tabIndex = null, w = cur()) {
+  if (index == null) {
+    if (w?.incognito) {
+      const e = w.closedTabs.pop();
+      if (e) w.tabs.create(e.url, { index: e.index, title: e.title, pinned: e.pinned, history: e.history });
+      return;
+    }
+    index = recentlyClosed.length - 1;
   }
   const entry = recentlyClosed[index];
   if (entry?.kind === 'window' && Number.isInteger(tabIndex) && entry.tabs.length > 1) {
@@ -303,7 +307,7 @@ function reopenClosed(index = recentlyClosed.length - 1, tabIndex = null) {
   if (!e) return;
   menuChanged();
   if (e.kind === 'window') { createWindow({ tabs: e.tabs, active: e.active, bounds: e.bounds, maximized: !!e.maximized }); return; }
-  const target = alive().find((x) => x.id === e.windowId) || normalWin();
+  const target = alive().find((x) => x.id === e.windowId) || (w && !w.incognito && !w.closed ? w : normalWin());
   if (!target) { createWindow({ tabs: [{ url: e.url, title: e.title, history: e.history }], active: 0 }); return; }
   target.tabs.create(e.url, { index: e.index, title: e.title, pinned: e.pinned, history: e.history });
   target.focus();
@@ -392,7 +396,7 @@ const sessions = new Sessions({ infobars, recentlyClosed, createWindow: (opts) =
 const tabStrip = new TabStrip({
   alive, recentlyClosed,
   createWindow: (opts) => createWindow(opts),
-  reopenClosed: () => reopenClosed(),
+  reopenClosed: (w) => reopenClosed(null, null, w),
   bookmarkAllTabs: (w) => navigation.bookmarkAllTabs(w),
   removeExtensionTab: (wc) => extensions?.removeTab(wc),
   get siteMute() { return siteMute; },
@@ -683,7 +687,7 @@ async function clearData({ range = 0, what = [] } = {}) {
     normal.chats.clear();
   }
   if (what.includes('permissions')) normal.permissions.clear();
-  if (what.includes('closed')) { recentlyClosed.length = 0; menuChanged(); }
+  if (what.includes('closed')) { recentlyClosed.length = 0; sessions.forget(alive()); menuChanged(); saveSessionSoon(); }
   return true;
 }
 
@@ -974,7 +978,7 @@ function registerIpc() {
     time: e.time,
     tabs: e.kind === 'window' ? e.tabs.map((t) => ({ title: t.title, url: t.url })) : undefined,
   })).reverse());
-  internalHandle('page:reopen-closed', ['history'], (_ctx, index) => reopenClosed(index));
+  internalHandle('page:reopen-closed', ['history'], (_ctx, index) => { if (Number.isInteger(index)) reopenClosed(index); });
   internalHandle('page:clear-data', ['history', 'settings', 'downloads'], (_ctx, opts) => clearData(opts));
 
   internalHandle('page:downloads', ['downloads'], ({ w }) => w.profile.downloads.all());
@@ -1453,7 +1457,7 @@ app.whenReady().then(async () => {
 
   // Settings › On startup; after a crash, nothing reopens by itself (main/sessions.js).
   const lastSession = store.sessionWindows();
-  const plan = sessions.begin(startupPlan(store.settings, () => lastSession), lastSession, app.getPath('userData'));
+  const plan = sessions.begin(startupPlan(store.settings, () => lastSession), lastSession, app.getPath('userData'), store.earlierWindows());
   const saved = plan.windows;
   if (plan.recent.length) menuChanged(); // the last session, under History › Recently Closed
   // First launch: the welcome screens (people updating from an older version

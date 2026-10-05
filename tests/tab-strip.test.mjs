@@ -276,6 +276,12 @@ test('pulling tabs out makes a window under the pointer; over another strip they
   assert.equal(drag.start(src, { ids: 'all', screenX: 1, screenY: 1, grabX: 1, grabY: 1 }), null);
   assert.equal(drag.start(src, { ids: [12345], screenX: 1, screenY: 1, grabX: 1, grabY: 1 }), null);
   assert.equal(drag.start(src, { ids: [src.tabs.tabs[0].id], screenX: NaN, screenY: 1, grabX: 1, grabY: 1 }), null);
+  // A drag that never got its end (its window's UI reloaded) doesn't block the next one.
+  const stuck = drag.start(other, { ids: [other.tabs.tabs[1].id], screenX: 500, screenY: 500, grabX: 10, grabY: 10 });
+  const next = drag.start(other, { ids: [other.tabs.tabs[0].id], screenX: 700, screenY: 500, grabX: 10, grabY: 10 });
+  assert.ok(next && next !== other, 'a new drag starts');
+  assert.equal(stuck.win.shown, true, 'the stuck one ended where it was');
+  drag.end({});
 });
 
 test('tab search lists every window’s tabs (the one you’re on first) and Recently Closed, switches, closes and reopens', () => {

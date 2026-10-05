@@ -76,7 +76,7 @@ function stripMenuTemplate(c, act) {
 }
 
 class TabStrip {
-  // deps: { alive(), createWindow(opts), recentlyClosed: [], reopenClosed(),
+  // deps: { alive(), createWindow(opts), recentlyClosed: [], reopenClosed(w),
   //         bookmarkAllTabs(w), removeExtensionTab(wc), siteMute }
   constructor(deps) {
     this.deps = deps;
@@ -166,7 +166,7 @@ class TabStrip {
         for (const t of m.tabs.slice(last + 1).filter(unpinned)) m.close(t.id);
         return null;
       }
-      case 'reopen': return this.deps.reopenClosed();
+      case 'reopen': return this.deps.reopenClosed(w);
       case 'bookmarkAll': return this.deps.bookmarkAllTabs(w);
       default: return null;
     }

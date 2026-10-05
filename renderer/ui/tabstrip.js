@@ -346,7 +346,11 @@ export function initTabStrip({ api, getState, overlays }) {
     el.dataset.id = String(t.id);
     el.classList.toggle('selected', isSelected(t.id));
     el.classList.toggle('crashed', !!t.crashed);
-    if (t.crashed) el.title = `This tab crashed: ${t.title || 'Untitled'}${t.url ? '\n' + t.url : ''}`;
+    if (t.crashed) {
+      el.title = `This tab crashed: ${t.title || 'Untitled'}${t.url ? '\n' + t.url : ''}`;
+      const label = el.querySelector('.title');
+      if (label) label.textContent = `Crashed: ${t.title || 'Untitled'}`;
+    }
     el.setAttribute('aria-label', t.crashed ? `Crashed: ${t.title || 'Untitled'}` : t.title || 'Untitled');
   }
 

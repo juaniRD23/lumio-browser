@@ -187,6 +187,49 @@ test('Restore pages? brings the crashed session back: its first window into this
   assert.equal(s2.offer, null);
 });
 
+test('Restore shows the tab that was showing, skips windows already reopened, and the crashed session survives until restored', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lumio-crash2-'));
+  fs.writeFileSync(path.join(dir, 'Lumio Running'), '1');
+  const one = world();
+  const recentlyClosed = [];
+  const infobars = new Infobars();
+  const made = [];
+  const s = new sessions.Sessions({ infobars, recentlyClosed, createWindow: (opts) => made.push(opts) });
+  const last = [
+    { tabs: [{ url: 'https://a.example/', title: 'A' }, { url: 'https://b.example/', title: 'B' }, { url: 'https://c.example/', title: 'C' }], active: 1 },
+    { tabs: [{ url: 'https://d.example/', title: 'D' }], active: 0 },
+  ];
+  s.begin({ windows: last, urls: [] }, last, dir);
+  // What the session file keeps alongside the new windows, until restored.
+  assert.deepEqual(s.pending().map((x) => x.tabs.length), [3, 1]);
+  // The second window was reopened from Recently Closed already.
+  recentlyClosed.splice(recentlyClosed.findIndex((e) => e.title === 'D'), 1);
+  assert.deepEqual(s.pending().map((x) => x.tabs.length), [3]);
+  const w = makeWindow(one);
+  s.offerRestore(w);
+  infobars.act(w, 'restore', 'restore');
+  assert.equal(w.tabs.displayUrl(w.tabs.active), 'https://b.example/', 'the tab that was showing shows');
+  assert.equal(w.tabs.tabs.filter((t) => t.view).length, 1, 'only it loads');
+  assert.deepEqual(made, [], 'the window already reopened isn’t opened twice');
+  assert.deepEqual(s.pending(), [], 'restored: nothing left to keep');
+
+  // Not restored: next launch still has it in Recently Closed (not offered again).
+  const later = [];
+  const s2 = new sessions.Sessions({ infobars, recentlyClosed: later, createWindow: () => assert.fail('nothing opens') });
+  s2.begin({ windows: [], urls: [] }, [], dir, last);
+  assert.deepEqual(later.map((e) => e.title), ['B', 'D']);
+  assert.equal(s2.offer, null);
+  assert.equal(s2.pending().length, 2, 'and keeps it for the launch after');
+  // Clearing Recently Closed forgets it, and the bar.
+  const w2 = makeWindow(one);
+  s2.offer = last;
+  s2.offerRestore(w2);
+  later.length = 0;
+  s2.forget([w2]);
+  assert.deepEqual(infobars.list(w2), []);
+  assert.deepEqual(s2.pending(), []);
+});
+
 test('the bars over the page: shown per window, buttons answer once, unknown ones are ignored', () => {
   const infobars = new Infobars();
   const one = world();

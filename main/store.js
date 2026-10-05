@@ -19,7 +19,9 @@ class JsonFile {
     clearTimeout(this.timer);
     for (const fn of this.listeners || []) fn();
     if (now) return this.flush();
-    this.timer = setTimeout(() => this.flush(), 400);
+    // Changes that never stop (a tab's title ticking) still get written, at least every 2 s.
+    this.since ??= Date.now();
+    this.timer = setTimeout(() => this.flush(), Date.now() - this.since >= 2000 ? 0 : 400);
   }
 
   // Told about every change (Lumio Sync uploads soon after).
@@ -28,6 +30,7 @@ class JsonFile {
   flush() {
     clearTimeout(this.timer);
     this.timer = null;
+    this.since = null;
     const tmp = this.file + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify(this.data));
     fs.renameSync(tmp, this.file);
@@ -329,9 +332,14 @@ class Store {
   }
 
   // ---- session: the open (non-incognito) windows and their tabs ----
-  saveSession(windows) {
-    this.sessionFile.data = { windows };
+  // earlier: windows of a crashed session that weren't restored (main/sessions.js).
+  saveSession(windows, earlier = []) {
+    this.sessionFile.data = { windows, ...(earlier.length ? { earlier } : {}) };
     this.sessionFile.save();
+  }
+  earlierWindows() {
+    const d = this.sessionFile.data || {};
+    return Array.isArray(d.earlier) ? d.earlier.filter((w) => w && Array.isArray(w.tabs) && w.tabs.length) : [];
   }
   sessionWindows() {
     const d = this.sessionFile.data || {};

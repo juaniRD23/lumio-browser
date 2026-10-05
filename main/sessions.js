@@ -107,18 +107,42 @@ class Sessions {
 
   // Called once at launch, before the first window opens. plan: what
   // Settings › On startup opens; lastSession: the windows saved last time.
-  begin(plan, lastSession, dir) {
+  // earlier: crashed windows from a run before that weren't restored (pending()).
+  begin(plan, lastSession, dir, earlier = []) {
     this.marker = new RunMarker(dir);
     const crashed = this.marker.start();
     const out = launchPlan(plan, { crashed, lastSession });
     this.offer = out.offer;
     const now = Date.now();
-    for (const s of out.recent) {
+    const add = (s) => {
       const entry = { kind: 'window', ...s, title: s.tabs[Math.min(s.active || 0, s.tabs.length - 1)]?.title || 'Window', time: now };
       this.deps.recentlyClosed.push(entry);
+      return entry;
+    };
+    const kept = launchPlan({}, { crashed: true, lastSession: earlier }).recent;
+    this.kept = kept.map(add);
+    for (const s of out.recent) {
+      const entry = add(s);
       if (crashed) this.offered.push(entry);
     }
     return out;
+  }
+
+  // The crashed session's windows still waiting in Recently Closed. The
+  // session file keeps them (store.saveSession), so they aren't lost when
+  // the new windows are saved over them, or if Lumio stops again.
+  pending() {
+    const recent = this.deps.recentlyClosed;
+    return [...(this.kept || []), ...this.offered].filter((e) => recent.includes(e) && e.tabs?.length)
+      .map(({ tabs, active, bounds, maximized }) => ({ tabs, active, bounds, ...(maximized ? { maximized } : {}) }));
+  }
+
+  // Browsing data's "Recently closed" was cleared: nothing left to restore.
+  forget(windows = []) {
+    this.offer = null;
+    this.offered = [];
+    this.kept = [];
+    for (const w of windows) this.deps.infobars.hide(w, 'restore');
   }
 
   // A clean quit: next launch reopens normally.
@@ -140,15 +164,19 @@ class Sessions {
   // Reopens the crashed session: its first window's tabs in this window (in
   // place of a new tab page nobody used), the others as windows of their own.
   restore(w) {
-    const list = this.offer;
     this.offer = null;
-    if (!list?.length) return;
-    // Back open, so no longer under Recently Closed.
+    // Only the windows still waiting: one already reopened from Recently
+    // Closed (whole) isn't opened twice, and one reopened tab by tab keeps
+    // only the tabs left. Back open, so no longer under Recently Closed.
     const recent = this.deps.recentlyClosed;
+    const list = [];
     for (const entry of this.offered.splice(0)) {
       const i = recent.indexOf(entry);
-      if (i >= 0) recent.splice(i, 1);
+      if (i < 0) continue;
+      recent.splice(i, 1);
+      if (entry.tabs?.length) list.push(entry);
     }
+    if (!list.length) return;
     this.deps.recentChanged?.();
     const target = w && !w.closed && !w.incognito ? w : null;
     list.forEach((s, i) => {
