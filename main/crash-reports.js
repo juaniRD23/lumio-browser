@@ -177,7 +177,9 @@ function setup(app) {
   const { crashReporter } = require('electron');
   const { LUMIO_BASE } = require('./account');
   const reports = createCrashReports({ app, crashReporter, base: LUMIO_BASE, beta: require('./flavor').beta });
-  reports.start();
+  // Running from source sends only to a server of its own (LUMIO_ACCOUNT_BASE,
+  // as the tests do), so development crashes don't mix with real ones.
+  if (app.isPackaged || process.env.LUMIO_ACCOUNT_BASE) reports.start();
   return reports;
 }
 

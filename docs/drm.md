@@ -47,7 +47,7 @@ All of this is **off** until you finish the one-time steps below. Normal builds 
    - Go to https://castlabs.github.io/wv-vmp-lab/, leave the backend on UAT and click **Load Content**. The log should say `PLATFORM_SOFTWARE_VERIFIED` or better.
    - Then play something on Netflix or Spotify.
 
-After that, every release and every Lumio Beta is a DRM build. To pause DRM builds without deleting the secrets, add a repository **variable** (not a secret) named `LUMIO_DRM`, set to `0`.
+After that, every release and every Lumio Beta is a DRM build. To pause DRM builds without deleting the secrets, add a repository **variable** (not a secret) named `LUMIO_DRM`, set to `0` (`false` or `no` work too).
 
 ## How the build switch works
 
@@ -73,7 +73,7 @@ After that, every release and every Lumio Beta is a DRM build. To pause DRM buil
   - castlabs' FAQ suggests turning library validation off for the whole app. Lumio keeps it on for the app itself, which is safer.
   - If Widevine ever fails to load on a signed build, Console shows "different Team IDs". That entitlement is the place to look.
 - **Workflows:** `release.yml` (the Mac job) and `beta.yml` set `HAS_EVS` from the secrets and the `LUMIO_DRM` variable. Only when it's true do they:
-  1. install Python and the EVS client;
+  1. install Python and the EVS client (in a step without the password);
   2. sign in with `castlabs_evs.account --no-ask reauth`, passing `EVS_ACCOUNT_NAME` and `EVS_PASSWD` (the names EVS reads) to that one step only;
   3. set `LUMIO_DRM=1` for the build;
   4. sign out (`deauth`) at the end, even when the build fails.

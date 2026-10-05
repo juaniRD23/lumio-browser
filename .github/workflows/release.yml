@@ -98,7 +98,7 @@ jobs:
     env:
       HAS_CERT: ${{ secrets.MACOS_CERT_P12 != '' }}
       HAS_NOTARY: ${{ secrets.APPLE_API_KEY != '' }}
-      HAS_EVS: ${{ secrets.EVS_ACCOUNT_NAME != '' && secrets.EVS_PASSWORD != '' && vars.LUMIO_DRM != '0' }}
+      HAS_EVS: ${{ secrets.EVS_ACCOUNT_NAME != '' && secrets.EVS_PASSWORD != '' && !contains(fromJSON('["0","false","no"]'), vars.LUMIO_DRM) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -160,13 +160,17 @@ jobs:
         with:
           python-version: '3.12'
 
+      # Installed in a step of its own, so the install never sees the password.
+      - name: DRM (castlabs EVS client)
+        if: env.HAS_EVS == 'true'
+        run: python -m pip install --upgrade castlabs-evs
+
       - name: DRM (castlabs EVS sign-in)
         if: env.HAS_EVS == 'true'
         env:
           EVS_ACCOUNT_NAME: ${{ secrets.EVS_ACCOUNT_NAME }}
           EVS_PASSWD: ${{ secrets.EVS_PASSWORD }}
         run: |
-          python -m pip install --upgrade castlabs-evs
           python -m castlabs_evs.account --no-ask reauth
           echo "LUMIO_DRM=1" >> "$GITHUB_ENV"
           echo "EVS_PYTHON=python" >> "$GITHUB_ENV"

@@ -150,7 +150,7 @@ test('the release workflows change nothing without the EVS secrets, and never ho
       assert.doesNotMatch(job, /EVS|castlabs|LUMIO_DRM|setup-python/, `${file}: DRM builds are Mac only (Windows is paused)`);
     }
     for (const job of jobs.filter((j) => /runs-on: macos-/.test(j))) {
-      assert.match(job, /HAS_EVS: \$\{\{ secrets\.EVS_ACCOUNT_NAME != '' && secrets\.EVS_PASSWORD != '' && vars\.LUMIO_DRM != '0' \}\}/, `${file}: the job knows whether EVS is set up`);
+      assert.match(job, /HAS_EVS: \$\{\{ secrets\.EVS_ACCOUNT_NAME != '' && secrets\.EVS_PASSWORD != '' && !contains\(fromJSON\('\["0","false","no"\]'\), vars\.LUMIO_DRM\) \}\}/, `${file}: the job knows whether EVS is set up, and every "off" LUMIO_DRM value turns it off (like build/drm.mjs)`);
       const steps = job.split(/\n {6}- /).slice(1);
       const drmSteps = steps.filter((s) => /castlabs|EVS_|LUMIO_DRM|setup-python/.test(s));
       assert.ok(drmSteps.length >= 2, `${file}: DRM steps`);
@@ -191,10 +191,10 @@ test('docs/drm.md matches the workflows and the build: the secrets, the off swit
   for (const file of ['.github/workflows/release.yml', '.github/workflows/beta.yml']) {
     const yml = read(file);
     for (const [, name] of yml.matchAll(/secrets\.(EVS_\w+)/g)) assert.ok(steps.includes('`' + name + '`'), `${file} reads secrets.${name}: the owner’s steps say to add it`);
-    assert.match(yml, /vars\.LUMIO_DRM != '0'/);
+    assert.match(yml, /!contains\(fromJSON\('\["0","false","no"\]'\), vars\.LUMIO_DRM\)/);
   }
   assert.match(steps, /repository \*\*variable\*\* \(not a secret\) named `LUMIO_DRM`, set to `0`/);
-  assert.equal(drmSwitch({ CI: 'true', EVS_ACCOUNT_NAME: 'a', EVS_PASSWD: 'b', LUMIO_DRM: '0' }).on, false, 'which really turns it off');
+  for (const off of ['0', 'false', 'no']) assert.equal(drmSwitch({ CI: 'true', EVS_ACCOUNT_NAME: 'a', EVS_PASSWD: 'b', LUMIO_DRM: off }).on, false, `${off} really turns it off, as the workflows' guard does`);
   // The test build's log lines, as build/package.mjs prints them.
   const pkg = read('build/package.mjs');
   assert.match(pkg, /console\.log\(`DRM build \(\$\{PLAN\.why\}\): castlabs Electron \$\{PLAN\.electron\}`\)/);
@@ -541,7 +541,8 @@ for (const scheme of ['light', 'dark']) {
     await page.evaluate(() => document.fonts.ready);
     assert.equal(await page.title(), 'Getting protected content ready…');
     assert.match(await page.$eval('main', (m) => m.innerText), /^Getting protected content ready…\s+Lumio is setting up playback for sites like Netflix and Spotify\. It only takes a moment the first time\.\s+Open now$/);
-    assert.equal(await page.$eval('main', (m) => `${m.getAttribute('role')}|${m.getAttribute('aria-labelledby')}|${m.getAttribute('aria-describedby')}`), 'status|drm-title|drm-desc');
+    assert.equal(await page.$eval('main', (m) => `${m.getAttribute('role')}|${m.getAttribute('aria-labelledby')}|${m.getAttribute('aria-describedby')}`), 'null|drm-title|drm-desc');
+    assert.equal(await page.$eval('.text', (t) => t.getAttribute('role')), 'status', 'the status doesn’t include the button');
     assert.equal(await page.evaluate(() => document.activeElement.textContent), 'Open now', 'focused, so Enter opens Lumio');
     assert.equal(await page.evaluate(() => document.querySelectorAll('script').length), 0, 'no script: the browser does the rest');
     // Everything inside the window, nothing cut off.
