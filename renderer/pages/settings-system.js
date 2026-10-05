@@ -54,6 +54,15 @@ document.getElementById('about')?.insertAdjacentHTML('beforebegin', `
       </section>
 `);
 
+// A Guest can't change app-wide settings or reset them: those sections hide.
+page.invoke('page:profiles').then((info) => {
+  if (!info?.guest) return;
+  for (const id of ['system', 'reset']) {
+    document.getElementById(id).hidden = true;
+    document.querySelector(`.side a[href="#${id}"]`)?.remove();
+  }
+}).catch(() => {});
+
 // ---- System
 let sys = null;
 function render() {

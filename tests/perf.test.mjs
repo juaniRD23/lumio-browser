@@ -108,8 +108,7 @@ test('Energy Saver turns on with the battery low (or unplugged), and quiets the 
   assert.equal(pm.saving, true);
   assert.match(ran.at(-1), /classList\.toggle\('energy-saver', true\)/);
   assert.deepEqual(w.emitted.at(-1), ['perf-state', { energySaver: true }]);
-  assert.equal(w.tabs.tabs[0].view.webContents.throttled, true, 'background tabs throttled');
-  assert.equal(helperTab.view.webContents.throttled, undefined, 'a helper AI’s tab keeps its speed');
+  assert.equal(helperTab.view.webContents.throttled, undefined, 'tabs keep Chromium’s own background throttling');
   pm.setBattery({ level: 0.15, charging: true });
   assert.equal(pm.saving, false);
   assert.match(ran.at(-1), /classList\.toggle\('energy-saver', false\)/);
@@ -167,6 +166,25 @@ test('Fix now puts the heavy tabs to sleep; Not now hides them for a while', () 
   pm.dismiss();
   assert.equal(pm.issue, null);
   assert.ok(pm.dismissed.get('2:3') > Date.now());
+});
+
+test('a performance alert shows each profile only its own tabs', () => {
+  const { pm, wins, toasts } = manager();
+  const a = fakeWindow(1, [tab(1, 'https://a.example/', 1), tab(2, 'https://x.example/', 1)], 2);
+  const b = fakeWindow(2, [tab(3, 'https://secret.example/', 1), tab(4, 'https://y.example/', 1)], 4);
+  b.profile = { guest: false, incognito: true }; // e.g. an incognito window
+  wins.push(a, b);
+  pm.setIssue([{ w: a, tab: a.tabs.tabs[0], memory: 2e9, cpu: 0 }, { w: b, tab: b.tabs.tabs[0], memory: 2e9, cpu: 0 }]);
+  assert.deepEqual(a.emitted.at(-1)[1].tabs.map((t) => t.host), ['a.example']);
+  assert.deepEqual(b.emitted.at(-1)[1].tabs.map((t) => t.host), ['secret.example']);
+  assert.equal(pm.fix(a), 1);
+  assert.deepEqual(a.tabs.discarded, [1]);
+  assert.deepEqual(b.tabs.discarded, [], 'Fix now in one profile leaves the others alone');
+  assert.equal(a.emitted.at(-1)[1], null);
+  assert.equal(b.emitted.at(-1)[1].count, 1, 'the other profile still sees its own');
+  assert.match(toasts.at(-1), /A tab is sleeping now/);
+  pm.dismiss(b);
+  assert.equal(pm.issue, null);
 });
 
 test('Task Manager: one row per process, with what runs in it', () => {

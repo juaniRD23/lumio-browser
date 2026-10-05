@@ -112,6 +112,7 @@ function register({ internalHandle, rootStore, app }) {
   const state = (w) => pageState(w.profile, rootStore, app);
   internalHandle('page:languages', ['settings'], ({ w }) => state(w));
   internalHandle('page:set-ui-language', ['settings'], ({ w }, value) => {
+    if (w.profile.guest) return state(w); // app-wide: the computer owner's
     rootStore.setSetting('uiLanguage', i18n.LANGUAGES.includes(value) ? value : 'system');
     return state(w);
   });

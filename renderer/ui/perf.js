@@ -19,7 +19,7 @@ export function initPerf(api, init) {
   energy.className = 'icon-btn energy-btn';
   energy.hidden = true;
   energy.innerHTML = icons.leaf;
-  energy.title = 'Energy Saver is on: background tabs and animations are slowed to save battery';
+  energy.title = 'Energy Saver is on: preloading and animations are off to save battery';
   energy.setAttribute('aria-label', 'Energy Saver is on. Open Performance settings');
   before.before(issues, energy);
 

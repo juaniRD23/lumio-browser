@@ -82,19 +82,23 @@
       if (head != null) return head + shortcut[2];
     }
     if (key.endsWith(':') && c.exact.has(key.slice(0, -1).trim())) return c.exact.get(key.slice(0, -1).trim()) + ':';
+    // Separate lines are separate texts (a tooltip listing several tabs):
+    // a pattern never joins them.
+    if (text.includes('\n')) return joined(c, text, '\n', depth);
     const asWritten = String(text).replace(/\s+/g, ' ').trim();
     for (const p of [...(c.byWord.get(firstWord(key)) || []), ...c.loose]) {
       const m = p.re.exec(asWritten);
       if (m) return fill(p, m, c, depth);
     }
-    // Parts joined with " · " or on separate lines ("Paused · 2 MB of 9 MB").
-    for (const sep of ['\n', ' · ']) {
-      if (!text.includes(sep)) continue;
-      const parts = text.split(sep);
-      const done = parts.map((part) => (part.trim() ? lookup(c, part, depth + 1) : null));
-      if (done.some((d) => d != null)) return parts.map((part, i) => (done[i] == null ? part : part.replace(part.trim(), done[i]))).join(sep);
-    }
-    return null;
+    // Parts joined with " · " ("Paused · 2 MB of 9 MB").
+    return text.includes(' · ') ? joined(c, text, ' · ', depth) : null;
+  }
+
+  // Each part of text split at sep translated, or null if none is.
+  function joined(c, text, sep, depth) {
+    const parts = text.split(sep);
+    const done = parts.map((part) => (part.trim() ? lookup(c, part, depth + 1) : null));
+    return done.some((d) => d != null) ? parts.map((part, i) => (done[i] == null ? part : part.replace(part.trim(), done[i]))).join(sep) : null;
   }
 
   // "3 bookmarks, 2 passwords": each item translated, or null if none is.

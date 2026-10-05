@@ -186,6 +186,29 @@ test('Reset settings puts settings back and keeps bookmarks, history, passwords 
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('a Guest can’t change app-wide settings, restart or reset', () => {
+  const dir = tmp();
+  const rootStore = new Store(path.join(dir, 'root'));
+  const store = new Store(path.join(dir, 'g'));
+  const handlers = {};
+  const internalHandle = (ch, _hosts, fn) => { handlers[ch] = fn; };
+  const sys = new system.System({ app: { relaunch() { throw new Error('no restart'); }, quit() {} }, rootStore, started: { hardwareAcceleration: true }, argv: [] });
+  let resets = 0;
+  sys.register({ internalHandle, shell: { openExternal: async () => {} }, onReset: () => resets++ });
+  languages.register({ internalHandle, rootStore, app: fakeApp() });
+  rootStore.setSetting('appearance', 'dark');
+  const ctx = { w: { profile: { guest: true, store, session: fakeSession(), base: { store } } } };
+  assert.equal(handlers['page:reset-settings'](ctx), false);
+  assert.equal(resets, 0);
+  assert.equal(rootStore.settings.appearance, 'dark', 'the owner’s settings stay');
+  assert.equal(handlers['page:set-system'](ctx, 'hardwareAcceleration', false).hardwareAcceleration, true);
+  assert.equal(handlers['page:relaunch'](ctx), false);
+  handlers['page:set-ui-language'](ctx, 'es');
+  assert.equal(rootStore.settings.uiLanguage, undefined);
+  rootStore.settingsFile.flush(); store.settingsFile.flush();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 // ---------------------------------------------------------------- the page
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.png': 'image/png' };
 let server;

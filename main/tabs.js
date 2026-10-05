@@ -113,10 +113,10 @@ class TabManager {
   // Memory Saver: closes the page of a tab you haven't looked at for a while,
   // keeping its address, title, icon and history; it reloads when you return.
   // Never the tab you're on, one playing sound, loading, being captured
-  // (screen share, camera) or with devtools open.
+  // (screen share, camera), with devtools open, or a Lumio AI working in it.
   discard(id) {
     const tab = this.get(id);
-    if (!tab?.view || tab.id === this.activeId || tab.audible) return false;
+    if (!tab?.view || tab.id === this.activeId || tab.audible || tab.agent) return false;
     const wc = tab.view.webContents;
     if (wc.isDestroyed() || wc.isLoading() || wc.isCurrentlyAudible() || wc.isBeingCaptured() || wc.isDevToolsOpened()) return false;
     const url = wc.getURL();

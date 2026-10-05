@@ -199,14 +199,9 @@ class PerformanceManager {
   applyWindow(w) {
     if (w.closed) return;
     const code = `document.documentElement.classList.toggle('energy-saver', ${this.saving})`;
+    // (Background tabs are already throttled by Chromium; this turns off
+    // Lumio's own animations, and preconnect() stops preloading.)
     for (const wc of [w.win.webContents, w.overlay.webContents]) if (!wc.isDestroyed()) wc.executeJavaScript(code).catch(() => {});
-    if (!this.saving) return;
-    // Background tabs get throttled timers and animations (Chromium's own
-    // background throttling); a tab a helper AI is working in keeps its speed.
-    for (const t of w.tabs.tabs) {
-      const wc = t.view?.webContents;
-      if (wc && !wc.isDestroyed() && !t.agent) wc.setBackgroundThrottling(true);
-    }
   }
 
   // A dropdown opened: the address bar's suggestions preload; the
@@ -243,8 +238,9 @@ class PerformanceManager {
     this.hot = hot;
     const now = Date.now();
     const keep = this.settings.memorySaverSites;
+    // Never a tab a Lumio AI is working in, or any tab of a window it's driving.
     const tabs = heavy.flatMap((p) => p.tabs.map((t) => ({ ...t, memory: p.memory / p.tabs.length, cpu: p.cpu })))
-      .filter(({ w, tab }) => !keepsActive(w.tabs.displayUrl(tab), keep) && (this.dismissed.get(`${w.id}:${tab.id}`) || 0) < now);
+      .filter(({ w, tab }) => !tab.agent && !w.ai?.isRunning() && !keepsActive(w.tabs.displayUrl(tab), keep) && (this.dismissed.get(`${w.id}:${tab.id}`) || 0) < now);
     this.setIssue(tabs.length ? tabs : null);
   }
 
@@ -252,32 +248,44 @@ class PerformanceManager {
     const key = tabs ? tabs.map(({ w, tab }) => `${w.id}:${tab.id}`).sort().join(',') : null;
     if (key === (this.issue?.key || null)) return;
     this.issue = tabs ? { key, tabs } : null;
-    const payload = this.alertPayload();
-    for (const w of this.windows()) w.emit('perf-alert', payload);
+    for (const w of this.windows()) w.emit('perf-alert', this.alertPayload(w));
   }
 
-  // What the toolbar's "Performance issues" button and its popup show.
-  alertPayload() {
-    if (!this.issue) return null;
+  // The issue's tabs a window may see and act on: its own profile's (an
+  // incognito window's are its incognito ones), never another profile's.
+  tabsFor(w) {
+    return (this.issue?.tabs || []).filter((t) => !w || t.w.profile === w.profile);
+  }
+
+  // What the toolbar's "Performance issues" button and its popup show in window w.
+  alertPayload(w) {
+    const tabs = this.tabsFor(w);
+    if (!tabs.length) return null;
     return {
-      tabs: this.issue.tabs.slice(0, 6).map(({ w, tab, memory, cpu }) => ({
-        title: tab.title || hostOf(w.tabs.displayUrl(tab)) || 'Tab', host: hostOf(w.tabs.displayUrl(tab)), favicon: tab.favicon || null,
+      tabs: tabs.slice(0, 6).map(({ w: tw, tab, memory, cpu }) => ({
+        title: tab.title || hostOf(tw.tabs.displayUrl(tab)) || 'Tab', host: hostOf(tw.tabs.displayUrl(tab)), favicon: tab.favicon || null,
         memory: Math.round(memory), cpu: Math.round(cpu),
       })),
-      count: this.issue.tabs.length,
-      memory: Math.round(this.issue.tabs.reduce((sum, t) => sum + t.memory, 0)),
+      count: tabs.length,
+      memory: Math.round(tabs.reduce((sum, t) => sum + t.memory, 0)),
     };
   }
 
-  // Fix now: put the heavy background tabs to sleep.
+  // What's left of the issue once window w's tabs are handled.
+  withoutTabsOf(w) {
+    const rest = this.issue.tabs.filter((t) => !this.tabsFor(w).includes(t));
+    this.setIssue(rest.length ? rest : null);
+  }
+
+  // Fix now: put the heavy background tabs to sleep (those from's profile owns).
   fix(from) {
     if (!this.issue) return 0;
     let freed = 0;
     let n = 0;
-    for (const { w, tab, memory } of this.issue.tabs) {
+    for (const { w, tab, memory } of this.tabsFor(from)) {
       if (!w.closed && w.tabs.discard(tab.id)) { freed += memory; n++; }
     }
-    this.setIssue(null);
+    this.withoutTabsOf(from);
     if (from && !from.closed) {
       const mb = Math.round(freed / 1024 ** 2);
       this.toast(from, n ? `${n === 1 ? 'A tab is' : `${n} tabs are`} sleeping now${mb ? `, freeing about ${mb >= 1024 ? (mb / 1024).toFixed(1) + ' GB' : mb + ' MB'}` : ''}` : 'Those tabs are busy right now. Try again in a moment.');
@@ -286,11 +294,11 @@ class PerformanceManager {
   }
 
   // Not now: don't bring these tabs up again for an hour.
-  dismiss() {
+  dismiss(from) {
     if (!this.issue) return;
     const until = Date.now() + 3600_000;
-    for (const { w, tab } of this.issue.tabs) this.dismissed.set(`${w.id}:${tab.id}`, until);
-    this.setIssue(null);
+    for (const { w, tab } of this.tabsFor(from)) this.dismissed.set(`${w.id}:${tab.id}`, until);
+    this.withoutTabsOf(from);
   }
 
   // ---- Settings › Performance

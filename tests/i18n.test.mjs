@@ -57,6 +57,7 @@ test('the lookup: exact text, spacing and quotes, shortcuts, patterns', () => {
   assert.equal(t('Configuración'), 'Configuración', 'a translation is never translated again');
   assert.equal(t('12'), '12');
   assert.equal(t('x'.repeat(5000)), 'x'.repeat(5000));
+  assert.equal(tr('Tab: News\nIncognito tab: Settings'), 'Pestaña: News\nPestaña de incógnito: Settings', 'each line on its own; titles stay');
 });
 
 // ---------------------------------------------------------------- the table

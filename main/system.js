@@ -88,13 +88,17 @@ class System {
     return true;
   }
 
-  // ctx: { internalHandle, shell, onReset(w) } from main.js.
+  // ctx: { internalHandle, shell, onReset(w) } from main.js. A Guest can't
+  // change app-wide settings (they're the computer owner's), restart or reset.
   register({ internalHandle, shell, onReset }) {
+    const guest = ({ w }) => !!w.profile.guest;
     internalHandle('page:system', ['settings'], () => this.pageState());
-    internalHandle('page:set-system', ['settings'], (_ctx, key, value) => this.set(String(key), value));
+    internalHandle('page:set-system', ['settings'], (ctx, key, value) => (guest(ctx) ? this.pageState() : this.set(String(key), value)));
     internalHandle('page:open-proxy-settings', ['settings'], () => this.openProxySettings(shell));
-    internalHandle('page:relaunch', ['settings'], () => this.relaunch());
-    internalHandle('page:reset-settings', ['settings'], ({ w }) => {
+    internalHandle('page:relaunch', ['settings'], (ctx) => !guest(ctx) && this.relaunch());
+    internalHandle('page:reset-settings', ['settings'], (ctx) => {
+      const { w } = ctx;
+      if (guest(ctx)) return false;
       resetSettings(w.profile.base, this.rootStore);
       onReset?.(w);
       return true;

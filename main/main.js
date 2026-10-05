@@ -324,6 +324,7 @@ function moveTabToNewWindow(w, id) {
   if (w.tabs.tabs.length < 2) return;
   const tab = w.tabs.detach(id);
   if (!tab) return;
+  if (printPreview.stateOf(w)?.tab === tab) printPreview.close(w, { focusPage: false }); // it belongs to the old window
   if (tab.view && !w.incognito) w.profile.extensions?.removeTab(tab.view.webContents);
   createWindow({ profile: w.profile.base, incognito: w.incognito, adopt: tab });
 }
@@ -924,10 +925,10 @@ function registerIpc() {
   // Keyboard users were in the popup: focus goes back to the window.
   const perfDone = (w) => { const keys = w.overlay.webContents.isFocused(); w.hideOverlay(); w.emit('overlay-picked', { kind: 'perf' }); if (keys) w.win.webContents.focus(); };
   on('perf:fix', (w) => { perfDone(w); perf.fix(w); });
-  on('perf:dismiss', (w) => { perfDone(w); perf.dismiss(); });
+  on('perf:dismiss', (w) => { perfDone(w); perf.dismiss(w); });
   on('perf:close', (w) => perfDone(w));
   on('perf:settings', (w) => { perfDone(w); openInternal('lumio://settings/#performance'); });
-  handle('perf:alert', () => perf.alertPayload());
+  handle('perf:alert', (w) => perf.alertPayload(w));
 
   // ---- passwords (dropdown under sign-in fields, save prompt) ----
   on('passwords:fill', (w, choice) => w.profile.passwords?.fill(w, choice || {}));
@@ -1160,7 +1161,7 @@ function registerIpc() {
   });
   // Settings › Performance (app-wide: main/perf.js)
   internalHandle('page:performance', ['settings'], () => perf.pageState());
-  internalHandle('page:set-performance', ['settings'], (_ctx, key, value) => perf.set(String(key), value));
+  internalHandle('page:set-performance', ['settings'], ({ w }, key, value) => (w.profile.guest ? perf.pageState() : perf.set(String(key), value))); // app-wide: not a Guest's
   internalHandle('page:task-manager', ['settings'], ({ w }) => { taskManager.open(w.win); });
   internalHandle('page:set-site-permission', ['settings'], ({ w }, origin, permission, value) => {
     if (typeof origin !== 'string' || typeof permission !== 'string') return;
@@ -1373,8 +1374,8 @@ function openProfile(id) {
   const partition = profiles.partitionOf(id);
   const ses = session.fromPartition(partition);
   setupTabSession(ses);
-  languages.attach(ses, store, app);
-  const profile = { id, dir, partition, incognito: false, guest: false, incog: null, session: ses, store, chats: new ChatStore(store.chatsFile), timers: [] };
+  const detachLanguages = languages.attach(ses, store, app);
+  const profile = { id, dir, partition, incognito: false, guest: false, incog: null, session: ses, store, chats: new ChatStore(store.chatsFile), timers: [], detachLanguages };
   profile.base = profile;
   loaded.set(id, profile);
   const wins = () => profileWindows(profile); // its windows, incognito ones too
@@ -1526,12 +1527,20 @@ async function startProfile(p, { restore = false } = {}) {
 
 // A profile picked in the picker or the account menu: its window comes to
 // the front, or its windows open.
+// A profile still starting (its extensions load first) isn't started again
+// by a second click: its windows would come back twice.
+const starting = new Map(); // id -> startProfile promise
 async function switchToProfile(id) {
   if (!profiles.get(id)) return false;
   const p = openProfile(id);
   const w = normalWin(p);
   if (w) w.focus();
-  else await startProfile(p);
+  else if (starting.has(id)) await starting.get(id);
+  else {
+    const run = startProfile(p).finally(() => starting.delete(id));
+    starting.set(id, run);
+    await run;
+  }
   picker.close();
   if (pendingUrls.length) openExternalUrls(pendingUrls.splice(0));
   return true;
@@ -1547,8 +1556,8 @@ function openGuest() {
     const partition = `lumio-guest-${++incogSeq}`; // in memory only
     const ses = session.fromPartition(partition);
     setupTabSession(ses);
-    languages.attach(ses, store, app);
-    const profile = { id: 'guest', dir, partition, incognito: false, guest: true, incog: null, session: ses, store, chats: new ChatStore(null), timers: [] };
+    const detachLanguages = languages.attach(ses, store, app);
+    const profile = { id: 'guest', dir, partition, incognito: false, guest: true, incog: null, session: ses, store, chats: new ChatStore(null), timers: [], detachLanguages };
     profile.base = profile;
     const wins = () => alive().filter((w) => w.profile === profile);
     profile.downloads = new Downloads(ses, { settings: store, emit: (c, p) => wins().forEach((w) => w.emit(c, p)) });
@@ -1590,6 +1599,7 @@ async function deleteProfile(id) {
       setTimeout(() => { if (!w.closed) w.win.destroy(); }, 3000);
     })));
     loaded.delete(id);
+    p.detachLanguages();
     p.timers.forEach(clearInterval);
     p.sync.stop();
     p.companion.stop();
@@ -1719,8 +1729,9 @@ app.whenReady().then(async () => {
   // Windows passes links to open on the command line.
   if (process.platform !== 'darwin' && !process.env.LUMIO_TEST) pendingUrls.push(...launchTargets(process.argv.slice(1)));
   // Several profiles: "Who's using Lumio?" first, unless that's turned off.
-  // Otherwise the profiles that were open come back (or the last one used).
-  if (profiles.wantsPicker() && (!process.env.LUMIO_TEST || process.env.LUMIO_TEST_PICKER)) picker.open();
+  // Otherwise (and after a restart from Settings) the profiles that were
+  // open come back (or the last one used).
+  if (profiles.wantsPicker() && !system.restarted && (!process.env.LUMIO_TEST || process.env.LUMIO_TEST_PICKER)) picker.open();
   else {
     const ids = profiles.lastOpen();
     for (const id of ids.length ? ids : [profiles.lastUsed()]) await startProfile(openProfile(id), { restore: system.restarted });
