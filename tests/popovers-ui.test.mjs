@@ -196,11 +196,11 @@ test('the ⋮ menu: under its button, shortcuts, keyboard, submenus that slide o
     assert.equal(panel.moving, 1, 'it comes in');
     assert.match(panel.origin, /^\d+px -18px$/, 'from the button above it');
     assert.match(await page.textContent('.mi[data-i="0"]'), /New tab\s*⌘T/);
-    assert.match(await page.textContent('.mpanel'), /Zoom\s*100%[\s\S]*Edit\s*Cut\s*Copy\s*Paste[\s\S]*Settings\s*⌘,/);
+    assert.match(await page.textContent('.mpanel'), new RegExp(String.raw`Zoom\s*100%[\s\S]*Edit\s*Cut\s*Copy\s*Paste[\s\S]*Settings\s*${process.platform === 'darwin' ? '⌘' : '⌃'},`));
 
     // Keyboard (the window sends its keys while the menu is open).
     const key = (k) => send(page, { op: 'key', key: k });
-    const selected = () => page.$eval('.mpanel:last-of-type .mi.sel, .mpanel:last-of-type .mrow button.sel', (el) => el.closest('[data-i]').textContent.trim().split(/\s{2,}|⌘|⇧/)[0].trim()).catch(() => '');
+    const selected = () => page.$eval('.mpanel:last-of-type .mi.sel, .mpanel:last-of-type .mrow button.sel', (el) => el.closest('[data-i]').textContent.trim().split(/\s{2,}|⌘|⇧|⌃/)[0].trim()).catch(() => '');
     await key('ArrowDown');
     assert.equal(await selected(), 'New tab');
     // The panel in use holds the keyboard (when this view has it) and names

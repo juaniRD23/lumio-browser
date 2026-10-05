@@ -260,7 +260,7 @@ test('the ⋮ menu’s entries: Chrome’s sections, real shortcuts, and only co
   assert.equal(zoom.level, 125);
   assert.equal(actions.get(zoom.in).keepOpen, true);
   assert.equal(actions.get(zoom.fullscreen).keepOpen, false);
-  assert.deepEqual(zoom.keys, { out: '⌘-', in: '⌘+', fullscreen: '⌃⌘F' });
+  assert.deepEqual(zoom.keys, { out: '⌘-', in: '⌘+', fullscreen: process.platform === 'darwin' ? '⌃⌘F' : 'F11' }, 'the main menu’s full screen key on this platform');
   const edit = items.find((i) => i.type === 'edit');
   actions.get(edit.paste).run();
   assert.deepEqual(edits, ['paste']);
