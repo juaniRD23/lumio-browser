@@ -2,9 +2,10 @@
 // Chromium darkens light websites as it draws them, like Chrome's
 // chrome://flags/#enable-force-dark.
 //
-// Chrome's flag turns on a feature ("WebContentsForceDark") that isn't
-// built into Electron 43, but the Blink setting it ends in is, and a
-// command-line switch sets it: --blink-settings=forceDarkModeEnabled=true.
+// Chrome's flag turns on a feature ("WebContentsForceDark") whose wiring
+// lives in Chrome's own code, not in Electron 43, so Lumio also sets the
+// Blink setting it ends in with a switch: --blink-settings=forceDarkModeEnabled=true.
+// The feature switch is added too, in case a later Electron reads it.
 // Switches are read when the app starts, so a change needs a relaunch;
 // Settings shows a Relaunch button until then.
 //
@@ -25,7 +26,10 @@ let startedWith = false;
 // Before the app is ready (the Store isn't open yet, so it reads the file).
 function applyAtStartup(app) {
   try { startedWith = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'settings.json'), 'utf8'))[KEY] === true; } catch { startedWith = false; }
-  if (startedWith) appendValue(app.commandLine, 'blink-settings', 'forceDarkModeEnabled=true');
+  if (startedWith) {
+    appendValue(app.commandLine, 'blink-settings', 'forceDarkModeEnabled=true');
+    appendValue(app.commandLine, 'enable-features', 'WebContentsForceDark');
+  }
   return startedWith;
 }
 

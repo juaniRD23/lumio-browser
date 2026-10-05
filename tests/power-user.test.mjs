@@ -261,6 +261,7 @@ test('Force dark: read from settings at startup, added to the switches Chromium 
   app.commandLine = commandLineStandIn({ 'blink-settings': 'hideScrollbars=true' });
   assert.equal(forceDark.applyAtStartup(app), true);
   assert.equal(app.commandLine.switches['blink-settings'], 'hideScrollbars=true,forceDarkModeEnabled=true', 'kept what was there');
+  assert.equal(app.commandLine.switches['enable-features'], 'WebContentsForceDark', 'Chrome’s feature too');
   // Settings shows Relaunch only while the setting and this run differ.
   assert.deepEqual(forceDark.state(storeStandIn({ forceDarkPages: true })), { on: true, active: true });
   assert.deepEqual(forceDark.state(storeStandIn({})), { on: false, active: true });
