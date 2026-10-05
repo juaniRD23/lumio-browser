@@ -192,6 +192,26 @@ test('saved groups sync: records in, junk out', () => {
   assert.deepEqual(s.list(), []);
 });
 
+test('a saved group open twice (a closed window reopened): only the first copy follows it', async () => {
+  const os = await import('node:os');
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const { GroupsService } = require('../main/groups-service.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lumio-groups-'));
+  const wins = [manager(2), manager(2)].map((m) => ({ incognito: false, tabs: m, emit() {} }));
+  const svc = new GroupsService({ dir, windows: () => wins, createWindow: () => null });
+  const id = svc.saved.save({ title: 'Trip', color: 'blue', tabs: [{ url: 'https://t1.example/', title: 'A' }] });
+  const [a, b] = wins.map((w) => w.tabs.groups.create([w.tabs.tabs[0].id], { title: 'Trip', color: 'blue', savedId: id }));
+  wins[1].tabs.tabs[0].url = 'https://other.example/';
+  svc.follow();
+  assert.equal(a.savedId, id);
+  assert.equal(b.savedId, null, 'the second copy lets go');
+  assert.deepEqual(svc.saved.get(id).tabs.map((t) => t.url), ['https://t1.example/']);
+  clearTimeout(svc.broadcastTimer);
+  clearTimeout(svc.saved.file.timer);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 // ---------------------------------------------------------------- the reading list
 test('reading list: add, read and unread, remove and undo; unread first, newest first', () => {
   let now = 100;

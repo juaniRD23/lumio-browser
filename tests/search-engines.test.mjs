@@ -125,3 +125,16 @@ test('added engines and the suggestions setting sync to other devices; found one
   assert.ok(sync.SETTINGS.includes('searchSuggest'));
   assert.ok(!sync.SETTINGS.includes('searchEnginesFound'));
 });
+
+test('engines synced from another device only ever open web addresses', () => {
+  const settings = { searchEngines: [
+    { id: 'ok', name: 'MDN', keyword: 'mdn', url: 'https://developer.mozilla.org/search?q=%s' },
+    { id: 'lumio', name: 'Settings', keyword: 'set', url: 'lumio://settings/?q=%s' },
+    { id: 'file', name: 'Files', keyword: 'f', url: 'file:///Users/me/%s' },
+    { id: 'js', name: 'Script', keyword: 'js', url: 'javascript:alert(%s)' },
+    { id: 'sug', name: 'Bad suggest', keyword: 'bs', url: 'https://ok.example/?q=%s', suggestUrl: 'file:///etc/%s' },
+  ], searchEngine: 'lumio' };
+  assert.deepEqual(se.custom(settings).map((e) => e.id), ['ok']);
+  assert.equal(se.defaultEngine(settings).id, 'google', 'a bad default falls back to Google');
+  assert.equal(se.forKeyword(settings, 'set'), null);
+});

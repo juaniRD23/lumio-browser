@@ -1374,6 +1374,8 @@ app.on('before-quit', () => {
   for (const w of alive()) w.ai.shutdown();
   helper?.stop();
   store?.flushAll();
+  // The reading list and saved groups keep their own files (saved a moment after each change).
+  for (const f of [sidePanel?.reading.file, groups?.saved.file]) if (f?.timer) f.flush();
 });
 
 // Composite screenshot of a window (browser UI + active page) for tests.

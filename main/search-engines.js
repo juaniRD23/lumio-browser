@@ -45,7 +45,10 @@ function found(settings = {}) {
   return Array.isArray(settings.searchEnginesFound) ? settings.searchEnginesFound.filter(validShape) : [];
 }
 
-const validShape = (e) => e && typeof e.id === 'string' && typeof e.name === 'string' && typeof e.keyword === 'string' && typeof e.url === 'string';
+// Lists can come from another device (Lumio Sync) or a hand-edited file: an
+// engine only ever opens or asks a web address, never a Lumio page or a file.
+const webUrl = (u) => typeof u === 'string' && /^https?:\/\//i.test(u) && u.includes('%s') && u.length <= 2048;
+const validShape = (e) => e && typeof e.id === 'string' && typeof e.name === 'string' && typeof e.keyword === 'string' && webUrl(e.url) && (e.suggestUrl == null || webUrl(e.suggestUrl));
 
 // Every usable engine: built-in first, then added ones.
 function all(settings = {}) { return [...builtins(), ...custom(settings)]; }

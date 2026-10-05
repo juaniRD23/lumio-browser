@@ -252,6 +252,7 @@ test('side panel: the switcher shares the panel with Lumio AI; reading list, boo
     // Reading list: unread and read sections; the chat steps aside.
     await page.click('.ss-tab[data-view="reading"]');
     await page.waitForSelector('.sv-row[data-rid="r1"]');
+    assert.equal(await page.getAttribute('.sv-row[data-rid="r1"]', 'tabindex'), '0', 'Tab reaches the list');
     assert.equal(await page.isVisible('#messages'), false);
     assert.equal(await page.isVisible('#composer'), false);
     assert.deepEqual(await lastSent(page, 'side:set'), { view: 'reading' });
@@ -307,6 +308,16 @@ test('side panel: the switcher shares the panel with Lumio AI; reading list, boo
     assert.equal(await page.getAttribute('#side-btn', 'aria-pressed'), 'true');
     await page.click('#side-btn');
     assert.equal(await page.evaluate(() => document.body.classList.contains('panel-closed')), true);
+    // With the panel hidden, Lumio AI's button opens it on the chat, not the last view.
+    await page.click('#ai-toggle');
+    assert.equal(await page.evaluate(() => document.body.classList.contains('panel-closed')), false);
+    assert.equal(await page.getAttribute('.ss-tab[data-view="ai"]', 'aria-selected'), 'true');
+    // So does its shortcut (main sends panel-toggle).
+    await page.click('#side-btn');
+    await page.click('#side-btn');
+    await page.evaluate(() => window.__emit('panel-toggle'));
+    assert.equal(await page.evaluate(() => document.body.classList.contains('panel-closed')), false);
+    assert.equal(await page.getAttribute('.ss-tab[data-view="ai"]', 'aria-selected'), 'true');
     // The bookmarks bar's "All bookmarks" (main says which view).
     await page.evaluate(() => window.__emit('side-panel', { view: 'bookmarks' }));
     assert.equal(await page.evaluate(() => document.body.classList.contains('panel-closed')), false);

@@ -106,15 +106,21 @@ export function initSidePanel({ api, panel, modKey, activeTab }) {
     panel.open();
     select(last, { focus: true });
   });
-  // Lumio AI's button while another view shows: back to the chat (it doesn't hide the panel).
+  // Lumio AI's button while another view shows: back to the chat (it doesn't
+  // hide the panel). With the panel hidden it opens on the chat, not the last view.
   $('#ai-toggle').addEventListener('click', (e) => {
-    if (!panel.isOpen() || view === 'ai') return;
+    if (view === 'ai') return;
+    if (!panel.isOpen()) { select('ai'); return; }
     e.stopImmediatePropagation();
     select('ai', { focus: true });
   }, true);
   // Anything that asks Lumio something shows the chat.
   for (const ev of ['ai-focus', 'ai-prefill', 'ai-open-chat', 'ai-workflow']) api.on(ev, () => { if (view !== 'ai') select('ai'); });
-  api.on('panel-toggle', () => requestAnimationFrame(renderBtn));
+  // Lumio AI's shortcut (and the menu) opening the panel shows the chat too.
+  // ai-panel.js has already opened or closed it by now.
+  const chatIfOpened = () => { if (panel.isOpen() && view !== 'ai') select('ai'); requestAnimationFrame(renderBtn); };
+  api.on('panel-toggle', chatIfOpened);
+  api.on('panel-open', chatIfOpened);
   api.on('side-panel', ({ view: v } = {}) => { panel.open(); select(v, { focus: true }); });
   api.on('side-changed', ({ view: v, unread: n } = {}) => {
     if (typeof n === 'number' && n !== unread) { unread = n; drawSwitch(); }
@@ -141,6 +147,9 @@ export function initSidePanel({ api, panel, modKey, activeTab }) {
     if (v === 'reading') drawReading(data);
     else if (v === 'bookmarks') drawBookmarks(data);
     else if (v === 'history') drawHistory(data);
+    // Tab reaches the list: its first row is the one stop (the arrows do the rest).
+    const first = box.querySelector('.sv-row');
+    if (first) first.tabIndex = 0;
     if (keep != null) { const i = box.querySelector('input[type=search]'); if (i) { i.focus(); i.setSelectionRange(keep, keep); } }
     else if (focus) (box.querySelector('input[type=search], .sv-row, .sv-add') || box).focus();
   }

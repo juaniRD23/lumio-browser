@@ -46,11 +46,16 @@ class GroupsService {
   // Open groups that are saved: their copies follow them. Runs after every
   // change to a window's tabs (main.js onSessionChanged).
   follow() {
+    const claimed = new Set();
     for (const w of this.windows()) {
       if (w.incognito) continue;
       for (const g of w.tabs.groups.list.values()) {
         if (!g.savedId) continue;
-        if (!this.saved.get(g.savedId)) { g.savedId = null; continue; } // deleted elsewhere
+        // Deleted elsewhere, or a second open copy (a closed window reopened
+        // while its saved group was open again): only the first one follows,
+        // so the two don't overwrite each other's pages.
+        if (!this.saved.get(g.savedId) || claimed.has(g.savedId)) { g.savedId = null; w.tabs.changed(); continue; }
+        claimed.add(g.savedId);
         this.saved.update(g.savedId, { title: g.title, color: g.color, tabs: this.pages(w, g.id) });
       }
     }
@@ -158,7 +163,7 @@ class GroupsService {
       { label: open ? 'Go to Group' : 'Open Group', click: () => this.openSaved(w, id) },
       { type: 'separator' },
       { label: 'Delete Group', click: () => {
-        if (open) open.group.savedId = null;
+        if (open) { open.group.savedId = null; open.w.tabs.changed(); } // its chip stops showing it's saved
         this.saved.remove(id);
         w.emit('toast', { text: 'Saved group deleted' });
       } },

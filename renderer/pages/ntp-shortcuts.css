@@ -1,7 +1,9 @@
 /* The new tab page's shortcuts: tiles with ⋮, Add shortcut, the edit and
    Customize dialogs, and the Undo toast (renderer/pages/ntp-shortcuts.js). */
-.sites.wide { grid-template-columns: repeat(5, 1fr); }
-.tile { position: relative; min-width: 0; }
+/* Rows of four (five when there are more than eight), centered when a row isn't full. */
+.sites { display: flex; flex-wrap: wrap; justify-content: center; }
+.tile { position: relative; min-width: 0; flex: 0 0 calc((100% - 30px) / 4); }
+.sites.wide .tile { flex-basis: calc((100% - 40px) / 5); }
 .tile .site { width: 100%; height: 100%; }
 button.site { font: inherit; background: none; cursor: pointer; }
 .site.add .ico { color: var(--dim); }
