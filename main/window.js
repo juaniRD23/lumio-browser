@@ -185,6 +185,7 @@ class BrowserWin {
     this.overlayKind = null;
     if (kind === 'passkey') this.app.onPasskeyPromptClosed?.(this);
     if (kind === 'screenshare') this.app.onScreenSharePickerClosed?.(this);
+    if (kind === 'feedback') this.feedback = null; // the report's screenshot isn't kept (main/help.js)
     if (!this.win.isDestroyed() && this.win.contentView.children.includes(this.overlay)) {
       this.win.contentView.removeChildView(this.overlay);
     }

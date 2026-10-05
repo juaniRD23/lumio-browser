@@ -24,7 +24,7 @@ const PROMPT_MS = 10 * 60 * 1000;
 const ASKED_MS = 30 * 60 * 1000; // the same address or card isn't offered again for a while after an answer
 const SETTINGS_KEYS = ['autofillAddresses', 'autofillCards', 'formHistory'];
 // Questions Lumio is asking in the overlay: autofill never covers them (menus it may).
-const QUESTIONS = new Set(['passkey', 'pwsave', 'screenshare', 'update']);
+const QUESTIONS = new Set(['passkey', 'pwsave', 'screenshare', 'update', 'feedback', 'formsave', 'ntp-override']);
 const FIELDS = new Set(['name', 'given', 'middle', 'family', 'organization', 'street', 'line1', 'line2', 'line3', 'city', 'state', 'zip', 'country', 'phone', 'email']);
 // Dropdown sizes (renderer/ui/overlay-autofill.css): rows, the footer, and
 // the view's padding around the card.

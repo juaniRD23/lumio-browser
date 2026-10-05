@@ -155,6 +155,28 @@ test('cards: fills number, expiry and name (never the CVC, where the cursor goes
   await plain.close();
 });
 
+test('a page that fills and sends a form by itself never gets “Save address?” or “Save card?”', { skip }, async () => {
+  const { page } = await open('address.html');
+  await page.evaluate(() => {
+    const set = (id, v) => { document.getElementById(id).value = v; };
+    set('fn', 'Eve'); set('ln', 'Planted'); set('a1', '1 Fake St'); set('city', 'Miami'); set('zip', '33101');
+    const f = document.getElementById('ship');
+    f.addEventListener('submit', (e) => e.preventDefault());
+    f.requestSubmit();
+  });
+  assert.deepEqual(await sent(page, 'af:captured'), []);
+  await page.close();
+  const pay = (await open('checkout.html')).page;
+  await pay.evaluate(() => {
+    document.getElementById('cardnumber').value = '4242 4242 4242 4242';
+    const f = document.getElementById('cardnumber').form;
+    f.addEventListener('submit', (e) => e.preventDefault());
+    f.requestSubmit();
+  });
+  assert.deepEqual(await sent(pay, 'af:captured'), []);
+  await pay.close();
+});
+
 test('after a form is sent: the address, the card without its security code, and plain entries the person typed', { skip }, async () => {
   const { page } = await open('address.html');
   const type = async (sel, text) => { await page.click(sel); await page.keyboard.type(text); };

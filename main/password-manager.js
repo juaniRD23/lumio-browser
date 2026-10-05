@@ -136,6 +136,7 @@ class PasswordManager {
     if (!found || !session || session.origin !== origin || !rect) return;
     const { w, tab } = found;
     if (tab.id !== w.tabs.activeId || !tab.view) return;
+    if (w.overlayKind === 'feedback') return; // never over a report being written
     const b = tab.view.getBounds();
     const zoom = e.sender.getZoomFactor();
     const width = Math.max(280, Math.min(420, (rect.width || 0) * zoom));
@@ -279,9 +280,12 @@ class PasswordManager {
     if (!origin || !found || process.platform === 'win32') return 'none';
     this.keyDone(e.sender.id, 'closed'); // one note per tab
     const { w, tab } = found;
+    // Only for the tab in front, and never over a report being written.
+    if (tab.id !== w.tabs.activeId || w.overlayKind === 'feedback') return 'none';
     const id = this.nextPromptId();
     return new Promise((resolve) => {
       this.keyWaits.set(e.sender.id, { id, w, resolve });
+      w.keyNoteId = id;
       const b = tab.view?.getBounds() || { x: 0, y: 90, width: 800 };
       const width = 380;
       w.showOverlay(
@@ -296,7 +300,8 @@ class PasswordManager {
     if (!k) return;
     this.keyWaits.delete(wcId);
     k.resolve(answer);
-    if (k.w.overlayKind === 'passkey') k.w.hideOverlay();
+    // Only this note: another tab's passkey question stays.
+    if (k.w.overlayKind === 'passkey' && k.w.keyNoteId === k.id) k.w.hideOverlay();
   }
 
   // The person answered the prompt: confirm it's them, then create or sign.

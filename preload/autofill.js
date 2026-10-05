@@ -152,6 +152,10 @@ function autofill() {
 
   // ---------------------------------------------------------------- the dropdown
   const typed = new WeakSet(); // fields the person typed in
+  const filled = new WeakSet(); // fields Lumio filled
+  // Saving asks for the person's own input: a page filling and sending a form
+  // by itself never gets "Save address?" or "Save card?".
+  const touched = (el) => typed.has(el) || filled.has(el);
   let menu = null; // { el, count, sel } while Lumio's dropdown is under a field
   let anchor = null; // the field the last dropdown was under
   let seq = 0;
@@ -233,6 +237,7 @@ function autofill() {
   function setValue(el, value) {
     // The prototype's setter, so pages built with React and the like see the change.
     SETTERS.get(isSelect(el) ? HTMLSelectElement : isArea(el) ? HTMLTextAreaElement : HTMLInputElement).call(el, value);
+    filled.add(el);
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
   }
@@ -360,10 +365,11 @@ function autofill() {
       };
       const n = Object.values(address).filter(Boolean).length;
       if (n < 3 || !(address.street || (address.city && address.zip))) address = null;
+      if (address && !fields.some((f) => ADDRESS_TYPES.has(f.type) && touched(f.el))) address = null;
     }
     let card = null;
     const number = get('cc-number').replace(/[\s-]/g, '');
-    if (window.isSecureContext && luhn(number)) {
+    if (window.isSecureContext && luhn(number) && fields.some((f) => f.type === 'cc-number' && touched(f.el))) {
       let expMonth = monthOf(get('cc-exp-month'));
       let expYear = Number(get('cc-exp-year').match(/\d{2,4}/)?.[0]) || null;
       const exp = get('cc-exp').match(/^(\d{1,2})\s*[/\-. ]?\s*(\d{2}|\d{4})$/);
