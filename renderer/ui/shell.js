@@ -6,7 +6,7 @@ import { initSidebar } from './sidebar.js';
 import { reduced, dur, animate, cancel, slide, instantly } from './motion.js';
 import './keys.js';
 import '/assets/ui-prefs.js';
-import { initA11y } from './a11y.js';
+import { initA11y, textScale } from './a11y.js';
 
 const IS_MAC = /Mac/.test(navigator.platform);
 // "Open in a new tab" modifier: ⌘ on the Mac, Ctrl elsewhere.
@@ -582,7 +582,7 @@ function showSuggest() {
   const r = omnibox.getBoundingClientRect();
   overlayKind = 'suggest';
   api.send('overlay:show', {
-    rect: { x: r.left - 12, y: r.bottom + 2, width: r.width + 24, height: suggestions.length * 38 + 12 + 26 },
+    rect: { x: r.left - 12, y: r.bottom + 2, width: r.width + 24, height: Math.ceil(suggestions.length * 38 * textScale()) + 12 + 26 },
     payload: { kind: 'suggest', items: suggestions, selected: selIndex, query: address.value },
   });
 }
@@ -760,7 +760,7 @@ function renderDownloads(started) {
 function showDownloads() {
   const r = dlBtn.getBoundingClientRect();
   const width = 360;
-  const height = Math.min(420, state.downloads.length * 54 + 56) + 26 + 38;
+  const height = Math.min(420, Math.ceil((state.downloads.length * 54 + 56) * textScale())) + 26 + 38;
   overlayKind = 'downloads';
   api.send('overlay:show', {
     rect: { x: r.right - width + 12, y: r.bottom + 2, width: width + 24, height },

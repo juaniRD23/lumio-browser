@@ -167,6 +167,8 @@ test('controls that only show on hover also show for the keyboard; the window an
   await emit(shell.page, 'ui-prefs', { largerText: true });
   const after = await shell.page.$eval('.tab .title', (t) => parseFloat(getComputedStyle(t).fontSize));
   assert.ok(after > before * 1.1, `tab titles grow (${before} → ${after})`);
+  // Popovers the window sizes (suggestions, downloads) leave room for the bigger rows.
+  assert.equal(await shell.page.evaluate(async () => (await import('./a11y.js')).textScale()), 1.15);
   await shell.page.close();
 });
 

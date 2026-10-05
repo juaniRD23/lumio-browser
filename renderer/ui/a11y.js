@@ -7,6 +7,10 @@
 //    the sidebar, skipping parts that are hidden.
 //  - Screen readers hear when a download finishes (politely).
 
+// Settings › Accessibility › Larger text: how much bigger rows are, for the
+// popovers whose height the window works out (suggestions, downloads).
+export const textScale = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--text-scale')) || 1;
+
 export function initA11y({ api, tabsEl, address }) {
   const tabs = () => [...tabsEl.querySelectorAll('.tab:not(.closing)')];
 
