@@ -8,7 +8,13 @@ let state = await page.invoke('page:passwords');
 let selected = null; // entry id, or 'new'
 let revealed = null; // { id, password, note } after confirming it's you
 let editing = false;
-let filter = null; // 'weak' | 'reused' | null
+let filter = null; // 'compromised' | 'weak' | 'reused' | null
+// Password Checkup (main/password-checkup.js): counts, and each password's
+// result by id (true: in a data breach). Only checked when asked.
+let checkup = await page.invoke('page:password-checkup').catch(() => null);
+let checking = false;
+const compromised = (e) => checkup?.flags?.[e.id] === true;
+const flagged = (e, f) => (f === 'compromised' ? compromised(e) : e[f]);
 
 $('#vault-name').textContent = state.platform === 'darwin' ? 'macOS Keychain' : state.platform === 'win32' ? 'Windows account' : 'system keychain';
 
@@ -28,15 +34,21 @@ function fixIcons(root) {
 function renderList() {
   const q = $('#search').value.trim().toLowerCase();
   const list = state.entries.filter((e) => (!q || e.site.toLowerCase().includes(q) || e.username.toLowerCase().includes(q))
-    && (!filter || e[filter]));
+    && (!filter || flagged(e, filter)));
   $('#unavailable').hidden = state.available;
   const weak = state.entries.filter((e) => e.weak).length;
   const reused = state.entries.filter((e) => e.reused).length;
-  $('#checkup').hidden = !(weak || reused);
+  const bad = state.entries.filter(compromised).length;
+  const checked = checkup?.checked ? `Checked ${new Date(checkup.checked).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : 'Not checked for data breaches yet';
+  $('#checkup').hidden = !state.entries.length;
   $('#checkup').innerHTML = `<span class="note" style="margin:0">Checkup:</span>
+    ${bad ? `<button data-filter="compromised" class="bad ${filter === 'compromised' ? 'on' : ''}">${bad} compromised</button>` : ''}
     ${reused ? `<button data-filter="reused" class="${filter === 'reused' ? 'on' : ''}">${reused} reused</button>` : ''}
     ${weak ? `<button data-filter="weak" class="${filter === 'weak' ? 'on' : ''}">${weak} weak</button>` : ''}
-    ${filter ? '<button data-filter="">Show all</button>' : ''}`;
+    ${filter ? '<button data-filter="">Show all</button>' : ''}
+    <span class="grow"></span>
+    <span class="note checkup-status" aria-live="polite">${checking ? 'Checking…' : esc(checkup?.error || checked)}</span>
+    <button class="check-btn" data-check ${checking ? 'disabled' : ''} title="Checks your passwords against known data breaches. Only the first 5 characters of each password’s hash leave this computer.">Check passwords</button>`;
   if (!state.entries.length) {
     $('#list').innerHTML = '<div class="placeholder">No saved passwords yet.<br>Lumio offers to save them when you sign in, or you can import a CSV below.</div>';
     return;
@@ -45,7 +57,7 @@ function renderList() {
     <button class="pw-item ${selected === e.id ? 'sel' : ''}" data-id="${esc(e.id)}" role="listitem">
       ${icon(e.origin)}
       <span class="meta"><span class="site" style="display:block">${esc(e.site)}</span><span class="user" style="display:block">${esc(e.username || '(no username)')}</span></span>
-      ${e.reused ? '<span class="flag reused">Reused</span>' : ''}${e.weak ? '<span class="flag weak">Weak</span>' : ''}
+      ${compromised(e) ? '<span class="flag reused">Compromised</span>' : ''}${e.reused ? '<span class="flag reused">Reused</span>' : ''}${e.weak ? '<span class="flag weak">Weak</span>' : ''}
     </button>`).join('') : '<div class="placeholder">No passwords match.</div>';
   fixIcons($('#list'));
 }
@@ -80,6 +92,7 @@ function renderDetail() {
     <div class="kv"><span>Username</span><span class="val"><span class="text">${esc(e.username || '(no username)')}</span><button class="btn small" data-act="copy-user">Copy</button></span></div>
     <div class="kv"><span>Password</span><span class="val"><span class="text mono">${shown ? esc(revealed.password) : '••••••••••••'}</span><button class="iconbtn" data-act="${shown ? 'hide' : 'reveal'}" title="${shown ? 'Hide' : 'Show'}">${EYE}</button><button class="btn small" data-act="copy">Copy</button></span></div>
     ${shown && revealed.note ? `<div class="kv"><span>Note</span><span class="text" style="white-space:pre-wrap">${esc(revealed.note)}</span></div>` : ''}
+    ${compromised(e) ? `<p class="note err" style="margin:4px 0 0">This password appeared in a data breach. Change it now, on the site and here. <a href="${esc(e.origin)}/.well-known/change-password">Change password</a></p>` : ''}
     ${e.weak || e.reused ? `<p class="note err" style="margin:4px 0 0">${e.reused ? 'This password is used on other sites too. ' : ''}${e.weak ? 'This password is weak. ' : ''}Change it on the site, then update it here.</p>` : ''}
     <p class="note" style="margin:10px 0 0">Last used: ${esc(used)}</p>
     <div class="actions"><button class="btn small" data-act="edit">Edit</button><button class="btn small danger" data-act="delete">Delete</button></div>`;
@@ -88,6 +101,7 @@ function renderDetail() {
 
 async function reload() {
   state = await page.invoke('page:passwords');
+  checkup = await page.invoke('page:password-checkup').catch(() => checkup); // a changed password isn't flagged anymore
   renderList();
   renderDetail();
   renderPasskeys();
@@ -102,7 +116,18 @@ $('#list').addEventListener('click', (e) => {
   renderList();
   renderDetail();
 });
-$('#checkup').addEventListener('click', (e) => {
+$('#checkup').addEventListener('click', async (e) => {
+  if (e.target.closest('[data-check]')) {
+    checking = true;
+    renderList();
+    checkup = await page.invoke('page:password-checkup-run').catch(() => ({ ...checkup, error: 'Couldn’t check your passwords. Try again later.' }));
+    checking = false;
+    if (checkup?.compromised) filter = 'compromised';
+    renderList();
+    renderDetail();
+    $('#checkup [data-check]')?.focus();
+    return;
+  }
   const b = e.target.closest('[data-filter]');
   if (!b) return;
   filter = b.dataset.filter || null;

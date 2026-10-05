@@ -3,6 +3,8 @@ import { icons, markSvg, avatarHtml } from './icons.js';
 import { THEME_COLORS, accentFor, setAccent } from '/assets/theme-colors.js';
 import { initPanel } from './ai-panel.js';
 import { initSidebar } from './sidebar.js';
+import { initPermissionChip } from './permission-chip.js';
+import { initCaptureBar, captureWords } from './capture-bar.js';
 import './keys.js';
 
 const IS_MAC = /Mac/.test(navigator.platform);
@@ -59,7 +61,7 @@ function createTabEl(id) {
   const el = document.createElement('div');
   el.className = 'tab';
   el.setAttribute('role', 'tab');
-  el.innerHTML = '<span class="fav"></span><i class="agent-dot" hidden></i><span class="title"></span><button class="audio" hidden></button><button class="x" aria-label="Close tab"></button>';
+  el.innerHTML = '<span class="fav"></span><i class="agent-dot" hidden></i><span class="title"></span><i class="rec-dot" role="img" hidden></i><button class="audio" hidden></button><button class="x" aria-label="Close tab"></button>';
   el.querySelector('.x').innerHTML = icons.close;
   el.querySelector('.x').addEventListener('click', (e) => { e.stopPropagation(); api.send('tab:close', id); });
   el.querySelector('.audio').addEventListener('click', (e) => { e.stopPropagation(); api.send('tab:mute', id); });
@@ -74,8 +76,13 @@ function updateTabEl(el, t) {
   el.classList.toggle('pinned', !!t.pinned);
   el.classList.toggle('sleeping', !!t.sleeping);
   el.setAttribute('aria-selected', String(t.id === state.activeId));
-  el.title = t.title + (t.url ? '\n' + t.url : '') + (t.sleeping ? '\nSleeping to save memory (Memory Saver)' : '')
-    + (t.agent ? `\n${t.agent.name} is working here: ${t.agent.title}` : '');
+  const capture = captureWords(t.capture);
+  el.title = t.title + (t.url ? '\n' + (t.shown || t.url) : '') + (t.sleeping ? '\nSleeping to save memory (Memory Saver)' : '')
+    + (t.agent ? `\n${t.agent.name} is working here: ${t.agent.title}` : '') + (capture ? `\n${capture}` : '');
+  // Camera, microphone or screen in use (renderer/ui/capture-bar.js).
+  const rec = el.querySelector('.rec-dot');
+  rec.hidden = !capture;
+  if (capture) rec.setAttribute('aria-label', capture);
   // A helper AI is working in this tab: its color, the same as its row in the chat.
   const dot = el.querySelector('.agent-dot');
   dot.hidden = !t.agent;
@@ -171,8 +178,10 @@ function prettyUrl(url) {
 
 function siteIcon(t) {
   const el = $('#site-icon');
-  el.classList.remove('insecure', 'clickable');
+  el.classList.remove('insecure', 'clickable', 'dangerous');
   if (omniFocused || !t || !t.url) { el.innerHTML = icons.search; el.title = ''; return; }
+  // A warning page (main/navigation-guard.js) stands in for the site.
+  if (t.warning) { el.innerHTML = icons.warn; el.classList.add(t.warning === 'unsafe' ? 'dangerous' : 'insecure'); el.title = t.warning === 'unsafe' ? 'Dangerous site' : 'Not secure'; return; }
   if (t.url.startsWith('https:')) { el.innerHTML = icons.lock; el.title = 'Connection is secure · View site information'; el.classList.add('clickable'); }
   else if (t.url.startsWith('http:')) { el.innerHTML = icons.warn; el.classList.add('insecure', 'clickable'); el.title = 'Not secure · View site information'; }
   else { el.innerHTML = icons.globe; el.title = ''; }
@@ -184,13 +193,14 @@ function renderToolbar() {
   $('#forward').disabled = !t?.canGoForward;
   $('#reload').innerHTML = t?.loading ? icons.stop : icons.reload;
   $('#reload').title = t?.loading ? 'Stop loading' : 'Reload (⌘R)';
+  // t.shown: the address with international names in their own letters when they're safe to show (main/lookalike.js).
   if (!omniFocused) {
-    address.value = prettyUrl(t?.url || '');
+    address.value = prettyUrl(t?.shown || t?.url || '');
     address.classList.toggle('url-view', !!t?.url);
-  } else if (!omniEdited && address.value !== (t?.url || '')) {
+  } else if (!omniEdited && address.value !== (t?.shown || t?.url || '')) {
     // The page changed under a focused, untouched address bar (a bookmark,
     // a link, or Lumio navigating): show the new address.
-    address.value = t?.url || '';
+    address.value = t?.shown || t?.url || '';
   }
   const star = $('#star');
   star.hidden = !t?.url || !/^https?:/.test(t.url);
@@ -214,7 +224,7 @@ address.addEventListener('focus', () => {
   omniEdited = false;
   omnibox.classList.add('focused');
   const t = activeTab();
-  address.value = t?.url || '';
+  address.value = t?.shown || t?.url || '';
   address.classList.remove('url-view');
   siteIcon(t);
   requestAnimationFrame(() => address.select());
@@ -249,7 +259,7 @@ address.addEventListener('keydown', (e) => {
   } else if (e.key === 'Escape') {
     e.preventDefault();
     if (overlayKind === 'suggest') { hideOverlay(); return; }
-    address.value = activeTab()?.url || '';
+    address.value = activeTab()?.shown || activeTab()?.url || '';
     address.blur();
     api.send('tab:focus-page');
   }
@@ -380,12 +390,17 @@ function renderDownloads(started) {
   dlBtn.classList.toggle('done', !active.length && items.some((d) => d.state === 'completed'));
   dlBtn.style.setProperty('--p', total ? (got / total).toFixed(3) : active.length ? 0.1 : 0);
   if (started) dlBtn.animate([{ transform: 'translateY(-4px)' }, { transform: 'none' }], { duration: 350, easing: 'cubic-bezier(.22,1,.36,1)' });
-  if (overlayKind === 'downloads') showDownloads();
+  // A risky file waits for Keep or Discard: open the bubble once so the person sees why.
+  const risky = items.filter((d) => d.danger && !warned.has(d.id));
+  risky.forEach((d) => warned.add(d.id));
+  if (risky.length && (!overlayKind || overlayKind === 'downloads')) showDownloads();
+  else if (overlayKind === 'downloads') showDownloads();
 }
+const warned = new Set(); // risky downloads whose bubble already opened by itself
 function showDownloads() {
   const r = dlBtn.getBoundingClientRect();
   const width = 360;
-  const height = Math.min(420, state.downloads.length * 54 + 56) + 26 + 38;
+  const height = Math.min(420, state.downloads.reduce((h, d) => h + (d.danger ? 118 : 54), 0) + 56) + 26 + 38;
   overlayKind = 'downloads';
   api.send('overlay:show', {
     rect: { x: r.right - width + 12, y: r.bottom + 2, width: width + 24, height },
@@ -608,33 +623,22 @@ api.on('update-announce', (u) => { if (!overlayKind) { renderUpdate(u); showUpda
 // ------------------------------------------------------------------ extensions
 $('#ext-btn').addEventListener('click', () => api.send('extensions:manage'));
 
-// ------------------------------------------------------------------ permission bar
-const permQueue = [];
-function renderPerm() {
-  const bar = $('#permbar');
-  const p = permQueue[0];
-  bar.hidden = !p;
-  if (p) {
-    const text = bar.querySelector('.infobar-text');
-    text.textContent = '';
-    const b = document.createElement('b');
-    b.textContent = p.host;
-    text.append(b, ` wants to ${p.label}`);
-  }
-}
-$('#permbar').addEventListener('click', (e) => {
-  const act = e.target.closest('[data-act]')?.dataset.act;
-  const p = permQueue[0];
-  if (!act || !p) return;
-  api.send('permission:respond', { id: p.id, allow: act === 'allow', remember: true });
-  permQueue.shift();
-  renderPerm();
+// ------------------------------------------------------------------ permission chip
+// Site permission questions and blocked notices (renderer/ui/permission-chip.js).
+const permChip = initPermissionChip({
+  api,
+  getActiveTab: activeTab,
+  overlay: {
+    show: (kind, rect, payload) => { overlayKind = kind; api.send('overlay:show', { rect, payload }); },
+    hide: (kind) => { if (overlayKind === kind) hideOverlay(); },
+    picked: () => { overlayKind = null; },
+    kind: () => overlayKind,
+  },
 });
-api.on('permission', (p) => { permQueue.push(p); renderPerm(); });
-api.on('permission-cancel', ({ id }) => {
-  const i = permQueue.findIndex((p) => p.id === id);
-  if (i >= 0) { permQueue.splice(i, 1); renderPerm(); }
-});
+
+// ------------------------------------------------------------------ capture bar
+// "Sharing this tab" / "Sharing your screen" with Stop sharing (renderer/ui/capture-bar.js).
+initCaptureBar({ api });
 
 // ------------------------------------------------------------------ find bar
 const findbar = $('#findbar');
@@ -695,6 +699,7 @@ api.on('tabs', (s) => {
   if (barWanted() !== barVisible) renderBookmarksBar(); // the new tab page shows it even when it's off
   panel.onTabChange(activeTab(), switched);
   if (switched) $('#zoom-badge').hidden = true;
+  permChip.update(switched, s.tabs.map((t) => t.wcId).filter((id) => id != null));
 });
 
 const init = await api.invoke('shell:init');

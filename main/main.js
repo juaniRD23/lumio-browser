@@ -1,6 +1,6 @@
 // Lumio Browser — main process entry.
 const {
-  app, BrowserWindow, ipcMain, session, protocol, Menu, safeStorage, nativeImage, dialog, net, shell, desktopCapturer, webContents, Notification, nativeTheme,
+  app, BrowserWindow, ipcMain, session, protocol, Menu, safeStorage, nativeImage, dialog, net, shell, desktopCapturer, webContents, Notification, nativeTheme, systemPreferences,
 } = require('electron');
 const fs = require('fs');
 const path = require('path');
@@ -23,6 +23,12 @@ const { BrowserWin } = require('./window');
 const { registerUiProtocol, registerPagesProtocol } = require('./protocol');
 const theme = require('./theme');
 const { chromeUserAgent, Downloads, Permissions } = require('./features');
+const { SiteResolver, cookieProbe } = require('./sites');
+const { SiteControls } = require('./site-controls');
+const { SiteData } = require('./site-data');
+const { BrowsingData, CookieClock } = require('./browsing-data');
+const { registerSiteIpc } = require('./site-ipc');
+const { Security } = require('./security');
 const { buildMenu, buildBrowserMenu } = require('./menu');
 const { suggest, topSites } = require('./omnibox');
 const { ChatStore } = require('./ai/chats');
@@ -41,6 +47,7 @@ const { Projects } = require('./projects');
 const { SyncEngine } = require('./sync/engine');
 const syncAdapters = require('./sync/adapters');
 const { CompanionBridge } = require('./sync/companion');
+const { shareableTabs } = require('./capture');
 
 const IS_DEV = !app.isPackaged;
 
@@ -83,6 +90,10 @@ let siteTips = null; // how to get things done on sites (main/site-tips.js)
 let projects = null; // chat projects (main/projects.js)
 let sync = null; // Lumio Sync (main/sync)
 let companion = null; // the phone companion's link to this computer
+let sites = null; // registrable domains (main/sites.js)
+let browsingData = null; // Delete browsing data (main/browsing-data.js)
+let siteData = null; // Site settings › All sites (main/site-data.js)
+let security = null; // security and privacy protections (main/security.js)
 let quitting = false;
 const windows = new Set();
 let lastFocused = null;
@@ -113,8 +124,10 @@ function incognitoProfile() {
   const ses = session.fromPartition(`lumio-incognito-${++incogSeq}`); // in memory only
   setupTabSession(ses, { incognito: true });
   const profile = { incognito: true, session: ses, chats: new ChatStore(null) };
-  profile.downloads = new Downloads(ses, { settings: store, emit: (c, p) => alive().filter((w) => w.profile === profile).forEach((w) => w.emit(c, p)) });
-  profile.permissions = new Permissions(ses, { store, emitFor, persist: false });
+  profile.downloads = new Downloads(ses, { settings: store, emit: (c, p) => alive().filter((w) => w.profile === profile).forEach((w) => w.emit(c, p)), gate: (wc, url) => profile.siteControls.gate(wc, url) });
+  profile.permissions = new Permissions(ses, { store, emitFor, persist: false, parent: normal.permissions.settings });
+  profile.siteControls = siteControlsFor(profile);
+  security.addProfile(profile);
   setupScreenShare(ses);
   incog = profile;
   return profile;
@@ -124,6 +137,8 @@ function endIncognito() {
   const p = incog;
   incog = null;
   if (!p) return;
+  p.siteControls.dispose();
+  security?.removeProfile(p);
   p.session.clearStorageData().catch(() => {});
   p.session.clearCache().catch(() => {});
   p.session.clearAuthCache?.().catch?.(() => {});
@@ -133,6 +148,12 @@ function emitFor(wcId, channel, payload) {
   for (const w of alive()) {
     if (w.tabs.tabs.some((t) => t.view?.webContents.id === wcId)) { w.emit(channel, payload); return; }
   }
+}
+
+// Site settings that act on a profile's pages (main/site-controls.js).
+function siteControlsFor(profile) {
+  const tabs = () => alive().filter((w) => w.profile === profile).flatMap((w) => w.tabs.tabs.map((tab) => ({ w, tab })));
+  return new SiteControls({ profile, sites, emitFor, tabs });
 }
 
 const services = {
@@ -156,6 +177,8 @@ const services = {
     windows.delete(w);
     if (lastFocused === w) lastFocused = null;
     if (w.incognito && !alive().some((x) => x.incognito)) endIncognito();
+    // "Delete data … when you close all windows": on the Mac that's quitting.
+    if (!quitting && process.platform !== 'darwin' && !w.incognito && !alive().some((x) => !x.incognito)) normal.siteControls.clearSessionData();
     saveSession();
   },
   onTabClosed: (w, entry) => {
@@ -170,9 +193,16 @@ const services = {
     menuChanged();
   },
   onSessionChanged: () => saveSession(),
-  onViewCreated: (w, tab) => { if (!w.incognito && tab.view) extensions?.addTab(tab.view.webContents, w.win); },
+  onViewCreated: (w, tab) => {
+    w.profile.siteControls?.attach(tab);
+    security?.attach(w, tab);
+    if (!w.incognito && tab.view) extensions?.addTab(tab.view.webContents, w.win);
+  },
   onPasskeyPromptClosed: (w) => passwords?.passkeyClosed(w),
   onScreenSharePickerClosed: (w) => shareCancel(w),
+  onOverlayClosed: (w, kind) => security?.overlayClosed(w, kind),
+  loadFailed: (w, wc, code, url) => security?.loadFailed(w, wc, code, url),
+  captureOf: (tab) => security?.captureOf(tab),
   onTabActivated: (w, tab) => { if (!w.incognito && tab.view) extensions?.selectTab(tab.view.webContents); },
   savePage: (w, tab) => savePage(w, tab),
   contextMenuExtras: (w, tab, params) => (w.incognito || !tab.view ? [] : extensions?.contextMenuItems(tab.view.webContents, params) || []),
@@ -326,6 +356,7 @@ const cmd = {
   back: () => cur()?.tabs.back(),
   forward: () => cur()?.tabs.forward(),
   history: () => openInternal('lumio://history/'),
+  clearBrowsingData: () => openInternal('lumio://settings/clearBrowserData'),
   downloads: () => openInternal('lumio://downloads/'),
   bookmarksManager: () => openInternal('lumio://bookmarks/'),
   extensions: () => openInternal('lumio://extensions/'),
@@ -530,10 +561,15 @@ async function openCardWindow(w) {
 }
 
 // ---------------------------------------------------------------- screen sharing
-// getDisplayMedia (Google Meet, Zoom, Discord on the web). macOS 15+ shows its
-// own picker (no Screen Recording permission needed); elsewhere Lumio shows
-// the screens and windows to choose from, over the tab that asked.
-const sharePending = new Map(); // id -> { callback, w, audio }
+// getDisplayMedia (Google Meet, Zoom, Discord on the web). Lumio shows the
+// screens, windows and other tabs to choose from, over the tab that asked.
+// Its picker lists screens and windows only when macOS lets Lumio record the
+// screen; without that, macOS 15+ shows its own picker instead (it needs no
+// permission, but can't share a tab). macOS restarts an app whose Screen
+// Recording permission changes, so checking once per session is enough.
+// What's shared is tracked for the capture indicators (main/capture.js).
+const screenRecordingAllowed = () => process.platform !== 'darwin' || systemPreferences.getMediaAccessStatus('screen') === 'granted';
+const sharePending = new Map(); // id -> { callback, w, audio, sources, wcId, host }
 let nextShareId = 1;
 function setupScreenShare(ses) {
   ses.setDisplayMediaRequestHandler(async (request, callback) => {
@@ -544,36 +580,52 @@ function setupScreenShare(ses) {
     let sources = [];
     try { sources = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 320, height: 200 } }); } catch { /* no permission */ }
     sources = sources.filter((s) => !/^Lumio Browser/.test(s.name) || s.id.startsWith('screen:'));
-    if (!sources.length) {
+    // Another tab of this profile, with its sound; tabs need no macOS permission.
+    const tabs = shareableTabs(alive().filter((x) => x.profile === w.profile), wc);
+    if (!sources.length && !tabs.length) {
       w.emit('toast', { text: process.platform === 'darwin' ? 'To share your screen, turn on Lumio Browser in System Settings › Privacy & Security › Screen Recording.' : 'Nothing to share right now.' });
       return callback({});
     }
     shareCancel(w);
     const id = nextShareId++;
-    sharePending.set(id, { callback, w, audio: !!request.audioRequested, sources });
     let host = '';
     try { host = new URL(request.securityOrigin || wc.getURL()).host; } catch { /* keep empty */ }
+    sharePending.set(id, { callback, w, audio: !!request.audioRequested, sources, wcId: wc.id, host });
     const b = tab.view?.getBounds() || { x: 0, y: 90, width: 900, height: 600 };
     const width = Math.min(560, b.width - 24);
     w.showOverlay(
-      { x: b.x + Math.round((b.width - width) / 2), y: b.y + 12, width, height: Math.min(520, b.height - 24) },
+      { x: b.x + Math.round((b.width - width) / 2), y: b.y + 12, width, height: Math.min(560, b.height - 24) },
       {
         kind: 'screenshare',
         share: {
-          id, host,
+          id, host, audio: !!request.audioRequested,
+          // No screens to list on a Mac means Screen Recording is off for Lumio.
+          screensOff: !sources.length && process.platform === 'darwin',
           sources: sources.map((s) => ({ id: s.id, name: s.name, screen: s.id.startsWith('screen:'), thumb: s.thumbnail.isEmpty() ? '' : s.thumbnail.toDataURL() })),
+          tabs: tabs.map((t) => ({ id: t.id, name: t.name, url: t.url, favicon: t.favicon })),
         },
       },
     );
-  }, { useSystemPicker: true });
+  }, { useSystemPicker: !screenRecordingAllowed() });
 }
-function shareAnswer(id, sourceId) {
+// tabAudio: share a tab's sound too (when the site asked for sound).
+function shareAnswer(id, sourceId, { tabAudio = true } = {}) {
   const p = sharePending.get(id);
   if (!p) return;
   sharePending.delete(id);
+  const answer = (streams) => { try { p.callback(streams); return true; } catch { return false; } }; // the page may be gone
+  const target = /^tab:\d+$/.test(sourceId || '') ? webContents.fromId(Number(sourceId.slice(4))) : null;
+  if (target && !target.isDestroyed() && tabOfWc(target)?.w.profile === p.w.profile) {
+    if (answer({ video: target.mainFrame, ...(p.audio && tabAudio ? { audio: target.mainFrame } : {}) })) {
+      security?.capture.shared(p.wcId, { kind: 'tab', title: target.getTitle(), target: target.id, host: p.host });
+    }
+    return;
+  }
   const source = sourceId && p.sources.find((s) => s.id === sourceId);
   // System audio can only be shared on Windows (loopback).
-  p.callback(source ? { video: source, ...(p.audio && process.platform === 'win32' ? { audio: 'loopback' } : {}) } : {});
+  if (answer(source ? { video: source, ...(p.audio && process.platform === 'win32' ? { audio: 'loopback' } : {}) } : {}) && source) {
+    security?.capture.shared(p.wcId, { kind: source.id.startsWith('screen:') ? 'screen' : 'window', title: source.name, host: p.host });
+  }
 }
 function shareCancel(w) {
   for (const [id, p] of sharePending) if (p.w === w) shareAnswer(id, null);
@@ -613,20 +665,10 @@ async function pickProfilePhoto(w) {
   return next;
 }
 
-// Clear browsing data. range: milliseconds back from now, or 0 for all time.
-async function clearData({ range = 0, what = [] } = {}) {
-  const from = range ? Date.now() - range : null;
-  if (what.includes('history')) { if (from) store.deleteHistory({ from }); else store.clearHistory(); }
-  if (what.includes('downloads')) store.clearDownloads({ from });
-  if (what.includes('cookies')) await normal.session.clearStorageData();
-  if (what.includes('cache')) await normal.session.clearCache();
-  if (what.includes('chats')) {
-    alive().filter((w) => !w.incognito).forEach((w) => w.ai.stop());
-    normal.chats.clear();
-  }
-  if (what.includes('permissions')) normal.permissions.clear();
-  if (what.includes('closed')) { recentlyClosed.length = 0; menuChanged(); }
-  return true;
+// Clear browsing data (main/browsing-data.js). range: milliseconds back
+// from now, or 0 for all time.
+function clearData({ range = 0, what = [] } = {}) {
+  return browsingData.clear({ range: Number(range) || 0, what: Array.isArray(what) ? what.map(String) : [] });
 }
 
 // ---------------------------------------------------------------- updates
@@ -768,7 +810,7 @@ function registerIpc() {
   on('overlay:pick', (w, item) => {
     if (item?.kind === 'screenshare') {
       const p = sharePending.get(Number(item.id));
-      if (p?.w === w) shareAnswer(Number(item.id), typeof item.source === 'string' ? item.source : null);
+      if (p?.w === w) shareAnswer(Number(item.id), typeof item.source === 'string' ? item.source : null, { tabAudio: item.audio !== false });
     }
     w.hideOverlay();
     w.emit('overlay-picked', item);
@@ -785,7 +827,6 @@ function registerIpc() {
     if (action === 'all') { w.hideOverlay(); openInternal('lumio://downloads/'); return; }
     w.profile.downloads.action(id, action);
   });
-  on('permission:respond', (w, { id, allow, remember }) => w.profile.permissions.respond(id, allow, remember));
 
   // ---- bookmarks bar ----
   on('bookmarks:open', (w, { url, disposition }) => openUrl(url, disposition || 'current', w));
@@ -807,23 +848,31 @@ function registerIpc() {
 
   // ---- site info (lock icon) ----
   handle('site:info', (w) => siteInfo(w));
-  on('site:set-permission', (w, { permission, value }) => {
-    const info = siteInfo(w);
+  // value: 'allow', 'block', 'session', or 'default' to go back to the default.
+  on('site:set-permission', async (w, { permission, value }) => {
+    const info = await siteInfo(w);
     if (!info) return;
-    w.profile.permissions.set(info.origin, permission, value === 'allow' ? true : value === 'block' ? false : undefined);
-    w.emit('site-info', siteInfo(w));
+    w.profile.permissions.set(info.origin, String(permission), String(value));
+    w.emit('site-info', await siteInfo(w));
+  });
+  on('site:reset-permissions', async (w) => {
+    const info = await siteInfo(w);
+    if (!info) return;
+    w.profile.permissions.settings.resetSite(info.origin);
+    w.emit('site-info', await siteInfo(w));
   });
   on('site:clear-data', async (w) => {
-    const info = siteInfo(w);
+    const info = await siteInfo(w);
     if (!info) return;
     await w.profile.session.clearStorageData({ origin: info.origin });
-    w.profile.permissions.set(info.origin, 'geolocation', undefined);
-    for (const p of ['media', 'notifications', 'clipboard-read', 'midi']) w.profile.permissions.set(info.origin, p, undefined);
     w.emit('toast', { text: `Cleared data for ${info.host}` });
     w.hideOverlay();
     w.tabs.reload(false);
   });
-  on('site:settings', () => openInternal('lumio://settings/#sites'));
+  on('site:settings', async (w) => {
+    const info = await siteInfo(w);
+    openInternal(info && !w.incognito ? `lumio://settings/content/siteDetails?site=${encodeURIComponent(info.origin)}` : 'lumio://settings/content');
+  });
 
   // ---- account button ----
   handle('account:state', () => account.state());
@@ -918,7 +967,12 @@ function registerIpc() {
     tabs: e.kind === 'window' ? e.tabs.map((t) => ({ title: t.title, url: t.url })) : undefined,
   })).reverse());
   internalHandle('page:reopen-closed', ['history'], (_ctx, index) => reopenClosed(index));
-  internalHandle('page:clear-data', ['history', 'settings', 'downloads'], (_ctx, opts) => clearData(opts));
+  internalHandle('page:clear-data', ['history', 'settings', 'downloads'], async ({ w }, opts) => {
+    const done = await clearData(opts);
+    w.emit('toast', { text: 'Browsing data deleted' });
+    return done;
+  });
+  registerSiteIpc({ on, internalHandle, normal: () => normal, store, siteData, browsingData, openInternal });
 
   internalHandle('page:downloads', ['downloads'], ({ w }) => w.profile.downloads.all());
   internalHandle('page:download-action', ['downloads'], ({ w }, id, action) => w.profile.downloads.action(id, action));
@@ -981,7 +1035,6 @@ function registerIpc() {
     update: updater?.state || null,
     isDefault: app.isDefaultProtocolClient('https'),
     importSources: importer.detect(),
-    sitePermissions: Object.entries(normal.permissions.all()).map(([origin, perms]) => ({ origin, perms })),
   }));
   // Lumio Sync (Settings › Sync)
   const syncReply = async (fn) => { try { return { ok: true, ...(await fn()) }; } catch (err) { return { ok: false, error: err.message }; } };
@@ -1043,10 +1096,6 @@ function registerIpc() {
     if (key === 'memorySaver') store.setSetting('memorySaver', !!value);
     if (key === 'memorySaverMinutes' && [15, 30, 60, 120, 240].includes(Number(value))) store.setSetting('memorySaverMinutes', Number(value));
     services.broadcastAIState();
-  });
-  internalHandle('page:set-site-permission', ['settings'], (_ctx, origin, permission, value) => {
-    if (typeof origin !== 'string' || typeof permission !== 'string') return;
-    normal.permissions.set(origin, permission, value === 'allow' ? true : value === 'block' ? false : undefined);
   });
   internalHandle('page:make-default', ['settings', 'welcome'], () => makeDefaultBrowser());
   internalHandle('page:mac-permissions', ['settings'], ({ w }) => w.ai.macPermissions());
@@ -1135,18 +1184,24 @@ function registerIpc() {
   });
 }
 
-function siteInfo(w) {
+async function siteInfo(w) {
   const tab = w.tabs.active;
   const url = tab ? w.tabs.displayUrl(tab) : '';
   let u;
   try { u = new URL(url); } catch { return null; }
   if (!/^https?:$/.test(u.protocol)) return null;
+  // Cookies are kept per site (example.com), whichever page set them.
+  const site = await sites.siteOf(u.hostname);
+  const cookies = await w.profile.session.cookies.get({ domain: site }).catch(() => []);
   return {
     origin: u.origin,
     host: u.host,
     secure: u.protocol === 'https:',
     incognito: w.incognito,
     permissions: w.profile.permissions.forOrigin(u.origin),
+    cookies: cookies.length,
+    trackers: w.profile.security?.extras.blockedOn(tab.view?.webContents.id) || 0, // stopped on this page
+    reload: w.profile.siteControls.needsReload(tab.view?.webContents),
   };
 }
 
@@ -1262,7 +1317,7 @@ app.whenReady().then(async () => {
     session: ses,
     chats: new ChatStore(store.chatsFile),
   };
-  normal.downloads = new Downloads(ses, { store, emit: (c, p) => alive().filter((w) => !w.incognito).forEach((w) => w.emit(c, p)) });
+  normal.downloads = new Downloads(ses, { store, emit: (c, p) => alive().filter((w) => !w.incognito).forEach((w) => w.emit(c, p)), gate: (wc, url) => normal.siteControls?.gate(wc, url) ?? true });
 
   account = new LumioAccount({
     store,
@@ -1375,7 +1430,26 @@ app.whenReady().then(async () => {
   }
   if (lastVersion !== app.getVersion()) store.setSetting('lastVersion', app.getVersion());
   normal.permissions = new Permissions(ses, { store, emitFor, persist: true });
+  sites = new SiteResolver(cookieProbe(session));
+  normal.siteControls = siteControlsFor(normal);
+  normal.siteControls.registerQuit(app);
+  siteData = new SiteData({ profile: normal, store, sites });
+  browsingData = new BrowsingData({
+    store, profile: normal, passwords, recentlyClosed,
+    clock: new CookieClock(app.getPath('userData'), ses),
+    onClosedChanged: menuChanged,
+    stopAI: () => alive().filter((w) => !w.incognito).forEach((w) => w.ai.stop()),
+    siteOf: (host) => sites.siteOf(host),
+  });
   setupScreenShare(ses);
+  security = new Security({
+    store, sites, passwords, updater,
+    extensions: () => extensions,
+    windows: alive,
+    findTab: tabOfWc,
+    userData: app.getPath('userData'),
+  });
+  security.addProfile(normal);
 
   extensions = new ExtensionManager({
     session: ses,
@@ -1405,7 +1479,10 @@ app.whenReady().then(async () => {
   ]);
 
   registerIpc();
+  security.registerIpc({ on, internalHandle });
   Menu.setApplicationMenu(buildMenu(cmd, menuState()));
+  // Site data that should have gone when Lumio last closed (if it couldn't finish).
+  await normal.siteControls.clearSessionData();
 
   const saved = store.settings.startup === 'newtab' ? [] : store.sessionWindows();
   // First launch: the welcome screens (people updating from an older version
@@ -1434,6 +1511,7 @@ app.on('before-quit', () => {
   for (const w of alive()) w.ai.shutdown();
   helper?.stop();
   store?.flushAll();
+  browsingData?.clock.flush();
 });
 
 // Composite screenshot of a window (browser UI + active page) for tests.
@@ -1488,6 +1566,10 @@ global.lumio = {
   get sync() { return sync; },
   get profiles() { return { normal, incognito: incog }; },
   get recentlyClosed() { return recentlyClosed; },
+  get sites() { return sites; },
+  get siteData() { return siteData; },
+  get browsingData() { return browsingData; },
+  get security() { return security; },
   screenAura,
   get updater() { return updater; },
   signIn: (w) => signIn(w || cur()),

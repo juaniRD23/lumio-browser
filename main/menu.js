@@ -108,6 +108,7 @@ function buildMenu(cmd, state = {}) {
         { type: 'separator' },
         { label: 'Show All History', accelerator: MAC ? 'Cmd+Y' : 'Ctrl+H', click: cmd.history },
         { label: 'Downloads', accelerator: MAC ? 'Cmd+Alt+L' : 'Ctrl+Shift+J', click: cmd.downloads },
+        { label: 'Delete Browsing Data…', accelerator: MAC ? 'Cmd+Shift+Backspace' : 'Ctrl+Shift+Delete', click: cmd.clearBrowsingData },
       ],
     },
     {
@@ -148,6 +149,7 @@ function buildBrowserMenu(cmd, state = {}) {
     { label: 'Passwords and autofill', click: cmd.passwords },
     { label: 'History', accelerator: k('Cmd+Y', 'Ctrl+H'), click: cmd.history },
     { label: 'Downloads', accelerator: k('Cmd+Alt+L', 'Ctrl+Shift+J'), click: cmd.downloads },
+    { label: 'Delete browsing data…', accelerator: k('Cmd+Shift+Backspace', 'Ctrl+Shift+Delete'), click: cmd.clearBrowsingData },
     {
       label: 'Bookmarks',
       submenu: [

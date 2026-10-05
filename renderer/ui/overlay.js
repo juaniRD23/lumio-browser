@@ -2,9 +2,14 @@
 // and the site-information popup (lock icon).
 import { icons, markSvg, avatarHtml } from './icons.js';
 import { setAccent } from '/assets/theme-colors.js';
+import { siteIcon } from '/assets/site-icons.js';
+import { permissionBubble } from './overlay-site.js';
+import { securityChoosers } from './overlay-security.js';
 
 const api = window.lumio;
 const card = document.getElementById('card');
+const bubble = permissionBubble({ api, card });
+const choosers = securityChoosers({ api, card, onResize: () => reportSize() });
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const pretty = (u) => String(u || '').replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '');
@@ -24,6 +29,11 @@ function renderSuggest({ items, selected }) {
 
 function renderDownloads({ items }) {
   const rows = items.map((d) => {
+    // A risky file waits for Keep or Discard (main/security.js says why).
+    if (d.danger) {
+      return `<div class="dl danger" role="group" aria-label="${esc(d.danger.title)}: ${esc(d.name)}"><span class="dl-warn">${icons.warn}</span><div class="meta"><div class="name">${esc(d.name)}</div><div class="dl-why"><b>${esc(d.danger.title)}</b> ${esc(d.danger.detail)}</div>
+        <div class="dl-acts"><button class="dl-discard" data-act="discard" data-id="${d.id}">Discard</button><button data-act="keep" data-id="${d.id}">Keep</button></div></div></div>`;
+    }
     const pct = d.total ? Math.round((d.received / d.total) * 100) : 0;
     let sub;
     let actions;
@@ -43,24 +53,31 @@ function renderDownloads({ items }) {
   card.innerHTML = `<div class="head"><span>Downloads</span><button data-act="clear">Clear</button></div>${rows || '<div class="dl"><div class="sub">No downloads</div></div>'}<button class="all" data-act="all">See all downloads</button>`;
 }
 
-const PERM_VALUE = (v) => (v === true ? 'allow' : v === false ? 'block' : 'ask');
+// Each setting: its default, or what this site is set to.
+const VALUE_WORDS = { ask: 'Ask', quiet: 'Ask quietly', allow: 'Allow', block: 'Block', session: 'Clear on exit', 'block-incognito': 'Block in Incognito' };
 function renderSiteInfo({ info }) {
   const secure = info.secure
     ? `<div class="si-status ok">${icons.lock}<div><b>Connection is secure</b><span>Info you send to this site stays private.</span></div></div>`
     : `<div class="si-status bad">${icons.warn}<div><b>Not secure</b><span>Don't enter passwords or payment info on this site.</span></div></div>`;
   const perms = info.permissions.map((p) => `
-    <label class="si-perm"><span>${esc(p.label)}</span>
-      <select data-perm="${esc(p.permission)}">
-        ${['ask', 'allow', 'block'].map((v) => `<option value="${v}" ${PERM_VALUE(p.value) === v ? 'selected' : ''}>${v === 'ask' ? 'Ask (default)' : v === 'allow' ? 'Allow' : 'Block'}</option>`).join('')}
+    <label class="si-perm">${siteIcon(p.permission, { size: 16 })}<span>${esc(p.label)}</span>
+      <select data-perm="${esc(p.permission)}" ${p.reload ? 'data-reload' : ''} aria-label="${esc(p.label)}">
+        <option value="default" ${p.value ? '' : 'selected'}>${VALUE_WORDS[p.default] || 'Default'} (default)</option>
+        ${p.options.map((v) => `<option value="${v}" ${p.value === v ? 'selected' : ''}>${VALUE_WORDS[v]}</option>`).join('')}
       </select>
     </label>`).join('');
+  const custom = info.permissions.some((p) => p.value);
   card.innerHTML = `
     <div class="si-host">${esc(info.host)}${info.incognito ? ' <em>Incognito</em>' : ''}</div>
     ${secure}
     <div class="si-sec">Permissions</div>
     ${perms}
+    <div class="si-reload" ${info.reload ? '' : 'hidden'}><span>Reload this page to use your new settings.</span><button data-si="reload">Reload</button></div>
+    <div class="si-data">${siteIcon('thirdPartyCookies', { size: 16 })}<span>Cookies and site data</span><small>${info.cookies === 1 ? '1 cookie' : `${info.cookies || 0} cookies`}</small></div>
+    ${info.trackers ? `<div class="si-data si-trackers">${siteIcon('trackers', { size: 16 })}<span>Ads and trackers blocked on this page</span><small>${info.trackers}</small></div>` : ''}
     <div class="si-actions">
       <button data-si="clear">Clear cookies and site data</button>
+      ${custom ? '<button data-si="reset">Reset permissions</button>' : ''}
       ${info.incognito ? '' : '<button data-si="settings">Site settings</button>'}
     </div>`;
 }
@@ -149,19 +166,46 @@ function renderPasskey({ prompt }) {
   card.dataset.prompt = String(p.id);
 }
 
-// A site asked to share your screen: pick a whole screen or one window.
+// A site asked to share your screen: pick another tab (with its sound), a
+// whole screen or one window.
 function renderScreenShare({ share: s }) {
   const tile = (x) => `<button class="ss-tile" data-src="${esc(x.id)}" title="${esc(x.name)}">
       <span class="ss-thumb">${x.thumb ? `<img src="${esc(x.thumb)}" alt="">` : ''}</span>
       <span class="ss-name">${esc(x.screen ? (x.name || 'Entire screen') : x.name)}</span></button>`;
+  const tabRow = (t) => `<button class="ss-tab" data-src="${esc(t.id)}" data-tab>
+      ${t.favicon ? `<img src="${esc(t.favicon)}" alt="">` : `<span class="ss-fav">${icons.globe}</span>`}
+      <span class="ss-txt"><b>${esc(t.name)}</b>${t.url ? `<small>${esc(pretty(t.url))}</small>` : ''}</span></button>`;
   const screens = s.sources.filter((x) => x.screen);
   const windows = s.sources.filter((x) => !x.screen);
+  const tabs = s.tabs || [];
   card.innerHTML = `<div class="pk-head">${icons.eye || ''}<span>${esc(s.host)} wants to see your screen</span></div>
     <div class="pk-title">Choose what to share</div>
+    ${tabs.length ? `<div class="ss-label">Tab</div><div class="ss-tabs">${tabs.map(tabRow).join('')}</div>` : ''}
     ${screens.length ? `<div class="ss-label">Entire screen</div><div class="ss-grid">${screens.map(tile).join('')}</div>` : ''}
     ${windows.length ? `<div class="ss-label">Window</div><div class="ss-grid">${windows.map(tile).join('')}</div>` : ''}
-    <div class="pws-actions"><span style="flex:1"></span><button class="acc-btn ghost" data-ss="cancel">Cancel</button><button class="acc-btn primary" data-ss="share" disabled>Share</button></div>`;
+    ${s.screensOff ? '<p class="ss-note">To share your whole screen or another app’s window, turn on Lumio Browser in System Settings › Privacy &amp; Security › Screen Recording.</p>' : ''}
+    <div class="pws-actions">${s.audio ? '<label class="ss-audio" hidden><input type="checkbox" id="ss-audio" checked> Also share tab audio</label>' : ''}<span style="flex:1"></span><button class="acc-btn ghost" data-ss="cancel">Cancel</button><button class="acc-btn primary" data-ss="share" disabled>Share</button></div>`;
   card.dataset.prompt = String(s.id);
+}
+// Choosing in the screen sharing picker, with the mouse or the keyboard.
+function pickShare(e) {
+  const tile = e.target.closest('[data-src]');
+  const send = (source) => api.send('overlay:pick', { kind: 'screenshare', id: Number(card.dataset.prompt), source, audio: card.querySelector('#ss-audio')?.checked !== false });
+  if (tile) {
+    card.querySelectorAll('[data-src].on').forEach((t) => t.classList.remove('on'));
+    tile.classList.add('on');
+    card.querySelector('[data-ss=share]').disabled = false;
+    const audio = card.querySelector('.ss-audio');
+    if (audio) audio.hidden = !('tab' in tile.dataset); // only a tab's sound can be shared
+    if (e.detail >= 2) send(tile.dataset.src); // double-click shares
+    return;
+  }
+  const act = e.target.closest('[data-ss]')?.dataset.ss;
+  if (!act) return;
+  e.preventDefault();
+  const chosen = card.querySelector('[data-src].on')?.dataset.src || null;
+  if (act === 'share' && !chosen) return;
+  send(act === 'share' ? chosen : null);
 }
 
 // What's new in an update, from the release notes (a little Markdown).
@@ -217,6 +261,9 @@ let kind = null;
 api.on('overlay-data', (payload) => {
   kind = payload.kind;
   if (payload.accent) setAccent(document.documentElement, payload.accent); // { dark, light } from the shell
+  if (kind === 'permission') { bubble.show(payload); reportSize(); return; }
+  bubble.hide();
+  if (choosers.show(payload)) { reportSize(); return; }
   if (kind === 'suggest') renderSuggest(payload);
   else if (kind === 'downloads') renderDownloads(payload);
   else if (kind === 'siteinfo') { renderSiteInfo(payload); reportSize(); }
@@ -230,25 +277,24 @@ api.on('overlay-data', (payload) => {
 
 card.addEventListener('change', (e) => {
   const sel = e.target.closest('select[data-perm]');
-  if (kind === 'siteinfo' && sel) api.send('site:set-permission', { permission: sel.dataset.perm, value: sel.value });
+  if (kind !== 'siteinfo' || !sel) return;
+  api.send('site:set-permission', { permission: sel.dataset.perm, value: sel.value });
+  // JavaScript, images and insecure content apply when the page loads again.
+  if ('reload' in sel.dataset) { card.querySelector('.si-reload').hidden = false; reportSize(); }
+});
+
+// The screen sharing picker with the keyboard: Enter or Space on a choice, Esc to cancel.
+card.addEventListener('click', (e) => { if (kind === 'screenshare' && e.detail === 0) pickShare(e); });
+card.addEventListener('keydown', (e) => {
+  if (kind !== 'screenshare' || e.key !== 'Escape') return;
+  e.preventDefault();
+  api.send('overlay:pick', { kind, id: Number(card.dataset.prompt), source: null });
 });
 
 card.addEventListener('mousedown', async (e) => {
+  if (kind === 'permission' || choosers.owns(kind)) return; // overlay-site.js and overlay-security.js handle their own clicks
   if (kind === 'screenshare') {
-    const tile = e.target.closest('[data-src]');
-    if (tile) {
-      card.querySelectorAll('.ss-tile.on').forEach((t) => t.classList.remove('on'));
-      tile.classList.add('on');
-      card.querySelector('[data-ss=share]').disabled = false;
-      if (e.detail >= 2) api.send('overlay:pick', { kind, id: Number(card.dataset.prompt), source: tile.dataset.src }); // double-click shares
-      return;
-    }
-    const act = e.target.closest('[data-ss]')?.dataset.ss;
-    if (!act) return;
-    e.preventDefault();
-    const chosen = card.querySelector('.ss-tile.on')?.dataset.src || null;
-    if (act === 'share' && !chosen) return;
-    api.send('overlay:pick', { kind, id: Number(card.dataset.prompt), source: act === 'share' ? chosen : null });
+    if (!e.target.closest('#ss-audio, .ss-audio')) pickShare(e);
     return;
   }
   if (kind === 'update') {
@@ -313,6 +359,8 @@ card.addEventListener('mousedown', async (e) => {
   if (kind === 'siteinfo') {
     const act = e.target.closest('[data-si]')?.dataset.si;
     if (act === 'clear') api.send('site:clear-data');
+    if (act === 'reset') api.send('site:reset-permissions');
+    if (act === 'reload') { api.send('tab:reload'); api.send('overlay:pick', { kind }); }
     if (act === 'settings') { api.send('site:settings'); api.send('overlay:pick', { kind }); }
     return; // let <select> menus open normally
   }

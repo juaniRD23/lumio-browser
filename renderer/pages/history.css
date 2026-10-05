@@ -48,16 +48,6 @@ mark { background: var(--highlight); color: inherit; border-radius: 2px; }
 .closed-item .ico { width: 30px; height: 30px; border-radius: 8px; background: var(--card2); display: grid; place-items: center; flex: none; }
 .closed-item .ico img { width: 16px; height: 16px; }
 
-dialog { background: var(--card); color: var(--text); border: 1px solid var(--line2); border-radius: 18px; padding: 22px 24px 18px; width: 460px; box-shadow: var(--shadow-dialog); }
-dialog::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
-.dlg-title { font-size: 17px; font-weight: 650; letter-spacing: -.3px; text-transform: none; color: var(--text); margin: 0 0 14px; }
-.range { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; color: var(--dim); }
-.range select { width: 180px; }
-.chk { display: flex; gap: 12px; align-items: flex-start; padding: 9px 2px; cursor: pointer; }
-.chk input { margin-top: 3px; accent-color: var(--accent); }
-.chk span { display: flex; flex-direction: column; }
-.chk small { color: var(--label); font-size: 12px; }
-.dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .dev-head { display: flex; align-items: baseline; gap: 10px; margin: 22px 12px 6px; font: 600 13px var(--sans); color: var(--text); }
 .dev-head small { font-weight: 400; color: var(--label); font-size: 12px; }
 #devices .dev-head:first-child { margin-top: 6px; }

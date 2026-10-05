@@ -358,37 +358,12 @@ $('#offer-pw').addEventListener('change', (e) => page.invoke('page:set-setting',
 $('#autofill-pw').addEventListener('change', (e) => page.invoke('page:set-setting', 'autofillPasswords', e.target.checked));
 
 // ------------------------------------------------------------ privacy
-$('#clear').addEventListener('click', async () => {
-  const what = [...document.querySelectorAll('.checks input[value]:checked')].map((i) => i.value);
-  if (!what.length) return;
-  $('#clear').disabled = true;
-  await page.invoke('page:clear-data', { range: 0, what });
-  $('#clear').disabled = false;
-  $('#clear-status').textContent = 'Cleared.';
-});
-
-const PERM_NAMES = { geolocation: 'Location', media: 'Camera and microphone', notifications: 'Notifications', 'clipboard-read': 'Clipboard', midi: 'MIDI devices', midiSysex: 'MIDI devices', 'display-capture': 'Screen sharing', 'idle-detection': 'Idle detection' };
-function renderSites() {
-  const list = s.sitePermissions.filter((x) => Object.keys(x.perms).length);
-  if (!list.length) {
-    $('#site-list').innerHTML = '<div class="row"><div class="desc">When you allow or block a site from using your camera, location or notifications, it shows up here.</div></div>';
-    return;
-  }
-  $('#site-list').innerHTML = list.map((site) => `
-    <div class="row site" data-origin="${esc(site.origin)}">
-      <div class="grow"><div class="title">${esc(site.origin.replace(/^https?:\/\//, ''))}</div>
-        <div class="desc">${Object.entries(site.perms).map(([p, v]) => `${esc(PERM_NAMES[p] || p)}: <b style="color:${v ? 'var(--ok)' : 'var(--danger)'}">${v ? 'Allowed' : 'Blocked'}</b>`).join(' · ')}</div></div>
-      <button class="btn" data-reset>Reset</button>
-    </div>`).join('');
-}
-$('#site-list').addEventListener('click', async (e) => {
-  const row = e.target.closest('[data-reset]')?.closest('.site');
-  if (!row) return;
-  const site = s.sitePermissions.find((x) => x.origin === row.dataset.origin);
-  for (const p of Object.keys(site?.perms || {})) await page.invoke('page:set-site-permission', site.origin, p, 'ask');
-  s = await page.invoke('page:settings');
-  renderSites();
-});
+// The rows open their own pages; these show what's set.
+if (s.platform !== 'darwin') $('#clear-keys').textContent = 'Ctrl+Shift+Delete';
+page.invoke('page:site-settings').then((ss) => {
+  const tpc = ss?.categories.find((c) => c.id === 'thirdPartyCookies');
+  if (tpc) $('#tpc-desc').textContent = tpc.text[tpc.value];
+}).catch(() => {});
 
 // ------------------------------------------------------------ appearance, search, downloads, startup, default
 // Theme: System, Light or Dark. It can also change from the View menu or another device.
@@ -490,7 +465,6 @@ const spy = new IntersectionObserver((entries) => {
 document.querySelectorAll('main section').forEach((sec) => spy.observe(sec));
 
 renderProfile();
-renderSites();
 perms();
 if (location.hash) document.querySelector(location.hash)?.scrollIntoView();
 

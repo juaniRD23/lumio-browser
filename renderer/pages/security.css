@@ -1,0 +1,15 @@
+/* Settings › Security and Tracking protection (renderer/pages/security.js).
+   Layout, rows and radios come from settings.css and site-settings.css. */
+.switch-row { cursor: pointer; }
+.switch-row .switch { margin-left: 4px; }
+.switch-row:has(input:focus-visible) { outline: 2px solid var(--focus-ring); outline-offset: -2px; border-radius: 12px; }
+.row .desc.status { margin-top: 4px; color: var(--label); }
+.dns-row { padding-top: 0; border-top: 0 !important; }
+.dns-row .grow { display: flex; flex-direction: column; gap: 8px; }
+.dns-label { color: var(--label); font-size: 12px; }
+.dns-row select.field { max-width: 340px; }
+.dns-custom { display: flex; gap: 8px; }
+.dns-custom .field { flex: 1; min-width: 0; }
+.dns-custom[hidden] { display: none; }
+.desc.err { color: var(--danger-text); }
+.btn svg { vertical-align: -2px; margin-left: 2px; }

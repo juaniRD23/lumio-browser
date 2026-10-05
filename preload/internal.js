@@ -9,6 +9,11 @@
 //  - Passkeys: navigator.credentials.create()/get() for public keys go to
 //    Lumio (main/password-manager.js), which asks the person, confirms it's
 //    them and answers as the authenticator. The page only gets the result.
+//  - Security (main/security.js): a secure page sending a form to an http
+//    address is reported, so Lumio can ask first; pages see
+//    navigator.globalPrivacyControl when that's on; and the page's camera,
+//    microphone and screen tracks are counted for the tab's capture
+//    indicators, with "Stop sharing" ending its screen tracks.
 const { contextBridge, ipcRenderer } = require('electron');
 
 if (window.location.protocol === 'lumio:') {
@@ -21,6 +26,7 @@ if (window.location.protocol === 'lumio:') {
 
 if (/^https?:$/.test(window.location.protocol) && window === window.top) {
   passwordHelper();
+  securityHelper();
   try {
     contextBridge.executeInMainWorld({
       func: installPasskeys,
@@ -116,6 +122,88 @@ function installPasskeys(bridge) {
       passkeyPlatformAuthenticator: true, userVerifyingPlatformAuthenticator: true,
     }));
   }
+}
+
+function securityHelper() {
+  if (window.location.protocol === 'https:') {
+    document.addEventListener('submit', (e) => {
+      // A button's formaction reads as the page's own address when it has none.
+      const action = e.submitter?.hasAttribute?.('formaction') ? e.submitter.formAction : e.target?.action;
+      if (typeof action === 'string' && /^http:/i.test(action)) ipcRenderer.send('sec:form', action);
+    }, true);
+  }
+  let flags = {};
+  try { flags = ipcRenderer.sendSync('sec:flags') || {}; } catch { /* keep the defaults */ }
+  try {
+    contextBridge.executeInMainWorld({
+      func: installPageWatch,
+      args: [{ gpc: !!flags.gpc }, {
+        report: (counts) => ipcRenderer.send('capture:report', counts),
+        onStop: (fn) => ipcRenderer.on('capture:stop', () => fn()),
+      }],
+    });
+  } catch { /* the page keeps its own media functions */ }
+}
+
+// Runs in the page's own world before its scripts (self-contained, like
+// installPasskeys). The counts are only a hint: Lumio turns an indicator off
+// only when they account for every capture it allowed (main/capture.js).
+function installPageWatch(flags, bridge) {
+  if (flags.gpc && !('globalPrivacyControl' in Navigator.prototype)) {
+    Object.defineProperty(Navigator.prototype, 'globalPrivacyControl', { get() { return true; }, configurable: true, enumerable: true });
+  }
+  const md = window.navigator.mediaDevices;
+  const Track = window.MediaStreamTrack;
+  if (!md || !Track) return;
+  const tracks = new Map(); // track -> 'camera' | 'microphone' | 'display'
+  const settled = { camera: 0, microphone: 0, display: 0 }; // finished requests, allowed or not
+  let timer = 0;
+  const send = () => {
+    timer = 0;
+    const live = { camera: 0, microphone: 0, display: 0 };
+    for (const [t, kind] of tracks) { if (t.readyState === 'live') live[kind]++; else tracks.delete(t); }
+    bridge.report({ settled: { ...settled }, live });
+  };
+  const report = () => { if (!timer) timer = setTimeout(send, 60); };
+  const watch = (t, kind) => { if (tracks.has(t)) return; tracks.set(t, kind); t.addEventListener('ended', report); };
+  const native = (name, f) => {
+    Object.defineProperty(f, 'name', { value: name });
+    Object.defineProperty(f, 'toString', { value: () => `function ${name}() { [native code] }` });
+    return f;
+  };
+  const nativeStop = Track.prototype.stop;
+  const nativeClone = Track.prototype.clone;
+  Track.prototype.stop = native('stop', function stop() { nativeStop.call(this); if (tracks.has(this)) report(); });
+  Track.prototype.clone = native('clone', function clone() {
+    const copy = nativeClone.call(this);
+    if (tracks.has(this)) { watch(copy, tracks.get(this)); report(); }
+    return copy;
+  });
+  const wrap = (name, kindOf, asked) => {
+    const original = md[name];
+    if (typeof original !== 'function') return;
+    md[name] = native(name, async function (...args) {
+      try {
+        const stream = await original.apply(md, args);
+        for (const t of stream.getTracks()) watch(t, kindOf(t));
+        return stream;
+      } finally {
+        for (const k of asked(args[0] || {})) settled[k]++;
+        report();
+      }
+    });
+  };
+  wrap('getUserMedia', (t) => (t.kind === 'video' ? 'camera' : 'microphone'), (c) => [...(c.video ? ['camera'] : []), ...(c.audio ? ['microphone'] : [])]);
+  wrap('getDisplayMedia', () => 'display', () => ['display']);
+  // "Stop sharing": the screen tracks end as if the person stopped them in the browser.
+  bridge.onStop(() => {
+    for (const [t, kind] of tracks) {
+      if (kind !== 'display' || t.readyState !== 'live') continue;
+      nativeStop.call(t);
+      t.dispatchEvent(new Event('ended'));
+    }
+    report();
+  });
 }
 
 function passwordHelper() {

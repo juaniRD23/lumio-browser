@@ -155,3 +155,24 @@ select.field { appearance: none; padding-right: 30px; background: var(--field) v
 .dev-ic { width: 28px; display: grid; place-items: center; color: var(--dim); flex: none; }
 .btn.danger { color: var(--danger-text); border-color: color-mix(in srgb, var(--danger-fill) 25%, transparent); }
 .btn.danger:hover { background: color-mix(in srgb, var(--danger-fill) 8%, transparent); }
+
+/* Privacy and security: rows that open a page of their own */
+.card:has(> a.row.sub-link) { overflow: hidden; }
+a.row.sub-link { color: var(--text); text-decoration: none; transition: background .15s; }
+a.row.sub-link:hover { background: var(--overlay-2); }
+a.row.sub-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+a.row.sub-link .chev { color: var(--label); font-size: 20px; line-height: 1; }
+
+/* Safety check (renderer/pages/settings-safety.js) */
+.sc-ic { flex: none; width: 22px; display: grid; place-items: center; color: var(--dim); }
+.sc-item.ok .sc-ic { color: var(--ok); }
+.sc-item.warn .sc-ic { color: var(--warn); }
+.sc-item.bad .sc-ic { color: var(--danger); }
+.sc-item.bad .title { color: var(--danger-text); }
+.sc-head .sc-ic { color: var(--accent); }
+.sc-sub .title { font-size: 13px; }
+.sc-site { padding-left: 34px; }
+.sc-spin { display: inline-block; width: 12px; height: 12px; margin-right: 7px; vertical-align: -1px; border-radius: 50%; border: 2px solid color-mix(in srgb, currentColor 30%, transparent); border-top-color: currentColor; animation: sc-spin .8s linear infinite; }
+@keyframes sc-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .sc-spin { animation-duration: 2.4s; } }
+a.btn { display: inline-flex; align-items: center; text-decoration: none; }

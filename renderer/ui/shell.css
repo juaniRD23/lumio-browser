@@ -152,6 +152,7 @@ body.windows #tabstrip { padding-right: 146px; }
 }
 #site-icon.clickable:hover { background: var(--active); color: var(--text); }
 #site-icon.insecure { color: var(--warn); }
+#site-icon.dangerous { color: var(--danger); }
 #address {
   flex: 1; min-width: 0; height: 100%;
   background: none; border: 0; outline: none;
@@ -292,14 +293,6 @@ body.agent-running #slot {
   50% { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent2) 80%, transparent), 0 0 22px 5px color-mix(in srgb, var(--accent2) 33%, transparent); }
 }
 
-.infobar {
-  display: flex; align-items: center; gap: 8px;
-  min-height: 38px; padding: 5px 6px 5px 14px;
-  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
-  animation: pop .2s var(--ease);
-}
-.infobar-text { color: var(--text); }
-.infobar-text b { font-weight: 600; }
 #findbar {
   display: flex; align-items: center; gap: 2px; flex: none;
   height: 34px; padding: 0 4px 0 4px; margin-right: 4px;

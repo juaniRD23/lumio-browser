@@ -19,6 +19,7 @@
       <a href="#site-tips">Site tips</a>
       <a href="#scheduled">Scheduled tasks</a>
       <a href="#autofill">Passwords and autofill</a>
+      <a href="#safety">Safety check</a>
       <a href="#privacy">Privacy and security</a>
       <a href="#appearance">Appearance</a>
       <a href="#performance">Performance</a>
@@ -244,22 +245,33 @@
         </div>
       </section>
 
+      <!-- Safety check (renderer/pages/settings-safety.js) -->
+      <section id="safety">
+        <h2>Safety check</h2>
+        <div class="card" id="safety-card" aria-busy="true"></div>
+      </section>
+
       <!-- Privacy -->
       <section id="privacy">
         <h2>Privacy and security</h2>
+        <!-- Each opens its own page (renderer/pages/clear-data.*, site-settings.*). -->
         <div class="card">
-          <div class="row checks">
-            <label><input type="checkbox" value="history" checked /> History</label>
-            <label><input type="checkbox" value="downloads" /> Download history</label>
-            <label><input type="checkbox" value="cookies" /> Cookies and site data</label>
-            <label><input type="checkbox" value="cache" checked /> Cached files</label>
-            <label><input type="checkbox" value="chats" /> AI chats</label>
-            <label><input type="checkbox" value="permissions" /> Site permissions</label>
-          </div>
-          <div class="row"><div class="grow desc" id="clear-status">Clears everything, from all time. For a time range, use Clear browsing data on the History page. Cookies and site data will sign you out of websites.</div><button class="btn danger" id="clear">Clear data</button></div>
+          <a class="row sub-link" href="/clearBrowserData">
+            <div class="grow"><div class="title">Delete browsing data</div><div class="desc">Delete history, cookies, cache and more (<span id="clear-keys">⌘⇧⌫</span>)</div></div><span class="chev" aria-hidden="true">›</span>
+          </a>
+          <a class="row sub-link" href="/cookies">
+            <div class="grow"><div class="title">Third-party cookies</div><div class="desc" id="tpc-desc">Block third-party cookies in Incognito</div></div><span class="chev" aria-hidden="true">›</span>
+          </a>
+          <a class="row sub-link" href="/security">
+            <div class="grow"><div class="title">Security</div><div class="desc" id="security-desc">Safe Browsing (protection from dangerous sites) and other security settings</div></div><span class="chev" aria-hidden="true">›</span>
+          </a>
+          <a class="row sub-link" href="/trackingProtection">
+            <div class="grow"><div class="title">Tracking protection</div><div class="desc" id="tracking-desc">Ads and trackers, Global Privacy Control and Do Not Track</div></div><span class="chev" aria-hidden="true">›</span>
+          </a>
+          <a class="row sub-link" href="/content" id="sites">
+            <div class="grow"><div class="title">Site settings</div><div class="desc">What sites can use and show: location, camera, pop-ups, JavaScript and more</div></div><span class="chev" aria-hidden="true">›</span>
+          </a>
         </div>
-        <h3 id="sites">Site settings</h3>
-        <div class="card" id="site-list"></div>
       </section>
 
       <!-- Appearance -->
@@ -390,5 +402,6 @@
     </main>
   </div>
   <script type="module" src="settings.js"></script>
+  <script type="module" src="settings-safety.js"></script>
 </body>
 </html>

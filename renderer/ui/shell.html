@@ -4,6 +4,8 @@
   <meta charset="utf-8" />
   <title>Lumio Browser</title>
   <link rel="stylesheet" href="shell.css" />
+  <link rel="stylesheet" href="permission-chip.css" />
+  <link rel="stylesheet" href="capture-bar.css" />
 </head>
 <body class="no-anim">
   <aside id="sidebar" aria-label="Sidebar"></aside>
@@ -22,6 +24,8 @@
     <button id="reload" class="icon-btn" title="Reload (⌘R)" aria-label="Reload"></button>
     <div id="omnibox">
       <button id="site-icon" aria-label="View site information"></button>
+      <button id="perm-chip" class="perm-chip" aria-haspopup="dialog" aria-expanded="false" hidden></button>
+      <span id="perm-live" class="sr-only" aria-live="polite"></span>
       <input id="address" type="text" spellcheck="false" autocomplete="off" placeholder="Search or type a URL" aria-label="Address and search bar" />
       <span id="toast" hidden></span>
       <button id="zoom-badge" hidden title="Reset zoom"></button>
@@ -53,12 +57,7 @@
 
   <main id="workspace">
     <section id="pagecol">
-      <div id="permbar" class="infobar" hidden>
-        <span class="infobar-text"></span>
-        <span class="spacer"></span>
-        <button class="btn ghost" data-act="block">Block</button>
-        <button class="btn primary" data-act="allow">Allow</button>
-      </div>
+      <div id="capture-bar" role="status" hidden></div>
       <div id="slot"></div>
     </section>
     <div id="resizer" title="Drag to resize"></div>

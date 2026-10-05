@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Delete browsing data</title>
+  <!-- Served at lumio://settings/clearBrowserData: links start at the host. -->
+  <link rel="stylesheet" href="/pages.css" />
+  <link rel="stylesheet" href="/settings.css" />
+  <link rel="stylesheet" href="/clear-data.css" />
+</head>
+<body>
+  <section class="cd" role="dialog" aria-modal="true" aria-labelledby="cd-title">
+    <h1 class="cd-title" id="cd-title">Delete browsing data</h1>
+    <div class="cd-tabs" role="tablist" aria-label="Choices">
+      <button type="button" role="tab" id="tab-basic" data-tab="basic" aria-controls="cd-panel" aria-selected="true">Basic</button>
+      <button type="button" role="tab" id="tab-advanced" data-tab="advanced" aria-controls="cd-panel" aria-selected="false" tabindex="-1">Advanced</button>
+    </div>
+    <div id="cd-panel" role="tabpanel" aria-labelledby="tab-basic">
+      <label class="cd-range"><span>Time range</span>
+        <select id="range" class="field">
+          <option value="900000">Last 15 minutes</option>
+          <option value="3600000" selected>Last hour</option>
+          <option value="86400000">Last 24 hours</option>
+          <option value="604800000">Last 7 days</option>
+          <option value="2419200000">Last 4 weeks</option>
+          <option value="0">All time</option>
+        </select>
+      </label>
+      <div id="cd-list" class="cd-list"></div>
+    </div>
+    <p class="cd-status" id="cd-status" role="status"></p>
+    <div class="cd-actions">
+      <button type="button" class="btn" id="cancel">Cancel</button>
+      <button type="button" class="btn primary" id="go">Delete data</button>
+    </div>
+  </section>
+  <script type="module" src="/clear-data.js"></script>
+</body>
+</html>

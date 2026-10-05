@@ -94,6 +94,9 @@ class BrowserWin {
         onViewCreated: (tab) => { this.indicator.raise(); app.onViewCreated(this, tab); },
         onAdopted: (tab) => app.onViewCreated(this, tab),
         onViewDestroyed: (wc) => profile.permissions.dropFor(wc.id),
+        allowInsecure: (url) => !!profile.siteControls?.insecureAllowed(url),
+        loadFailed: (wc, code, url) => !!app.loadFailed?.(this, wc, code, url),
+        captureOf: (tab) => app.captureOf?.(tab),
         openInNewWindow: (url, inc) => app.createWindow({ incognito: inc, urls: [url] }),
         savePage: (tab) => app.savePage(this, tab),
         contextMenuExtras: (tab, params) => app.contextMenuExtras(this, tab, params),
@@ -169,6 +172,8 @@ class BrowserWin {
   }
 
   showOverlay(rect, payload) {
+    // Another dropdown takes the place of a chooser: the chooser's question is cancelled.
+    if (this.overlayKind && this.overlayKind !== payload?.kind) this.app.onOverlayClosed?.(this, this.overlayKind);
     const [w, h] = this.win.getContentSize();
     const x = Math.max(0, Math.min(Math.round(rect.x), w - 40));
     const y = Math.max(0, Math.round(rect.y));
@@ -183,6 +188,7 @@ class BrowserWin {
     this.overlayKind = null;
     if (kind === 'passkey') this.app.onPasskeyPromptClosed?.(this);
     if (kind === 'screenshare') this.app.onScreenSharePickerClosed?.(this);
+    if (kind) this.app.onOverlayClosed?.(this, kind);
     if (!this.win.isDestroyed() && this.win.contentView.children.includes(this.overlay)) {
       this.win.contentView.removeChildView(this.overlay);
     }

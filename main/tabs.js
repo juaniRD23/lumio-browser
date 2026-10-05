@@ -7,6 +7,7 @@ const { WebContentsView, Menu, clipboard, shell, app } = require('electron');
 const { isSynthetic } = require('./synthetic-input');
 const path = require('path');
 const { parseInput, displayUrl } = require('./omnibox');
+const { displayUrl: lookalikeSafeUrl } = require('./lookalike');
 const { SEARCH_ENGINES } = require('./store');
 const theme = require('./theme');
 
@@ -76,6 +77,8 @@ class TabManager {
 
   ensureView(tab) {
     if (tab.view) return tab.view;
+    // Site settings that only apply when a page is made (main/site-controls.js).
+    const insecure = !!this.hooks.allowInsecure?.(tab.pendingUrl || tab.url);
     const view = new WebContentsView({
       webPreferences: {
         session: this.session,
@@ -85,8 +88,11 @@ class TabManager {
         preload: INTERNAL_PRELOAD,
         spellcheck: true,
         plugins: true, // built-in PDF viewer
+        allowRunningInsecureContent: insecure,
+        autoplayPolicy: this.store.settings.contentDefaults?.autoplay === 'allow' ? 'no-user-gesture-required' : 'document-user-activation-required',
       },
     });
+    view.lumioInsecure = insecure;
     tab.view = view;
     if (typeof view.setBorderRadius === 'function') view.setBorderRadius(10);
     view.setBackgroundColor(this.pageBackground(tab.url));
@@ -130,6 +136,29 @@ class TabManager {
     wc.close();
     this.changed();
     return true;
+  }
+
+  // Make a tab's page again, with its history, going to `url` (a site
+  // setting that's fixed when a page is made changed: main/site-controls.js).
+  rebuild(id, url) {
+    const tab = this.get(id);
+    if (!tab?.view) return;
+    const wc = tab.view.webContents;
+    const h = wc.navigationHistory;
+    const entries = h.getAllEntries();
+    let index = h.getActiveIndex();
+    // Back, forward or reload keep the list; a new address follows the current page.
+    if (entries[index - 1]?.url === url) index -= 1;
+    else if (entries[index + 1]?.url === url) index += 1;
+    else if (entries[index]?.url !== url) { entries.splice(index + 1, Infinity, { url, title: '' }); index += 1; }
+    tab.savedHistory = { entries, index };
+    tab.pendingUrl = url;
+    this.win.contentView.removeChildView(tab.view);
+    tab.view = null;
+    wc.close();
+    this.ensureView(tab);
+    if (tab.id === this.activeId) this.activate(tab.id);
+    this.changed();
   }
 
   // Tabs not looked at for `minutes` (and not pinned to anything playing).
@@ -177,6 +206,8 @@ class TabManager {
     });
     wc.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
       if (!isMainFrame || code === -3 || url.startsWith('lumio://error')) return;
+      // A page Lumio stopped (a dangerous site, HTTPS-First…) gets a warning page instead (main/navigation-guard.js).
+      if (M().hooks.loadFailed?.(wc, code, url)) return;
       const q = new URLSearchParams({ code: String(code), desc, url });
       wc.loadURL('lumio://error/?' + q).catch(() => {});
     });
@@ -499,10 +530,17 @@ class TabManager {
   displayUrl(tab) {
     const url = tab.pendingUrl || tab.url || '';
     if (url.startsWith(NEWTAB)) return '';
-    if (url.startsWith('lumio://error')) {
+    if (url.startsWith('lumio://error') || url.startsWith('lumio://interstitial')) {
       try { return new URL(url).searchParams.get('url') || url; } catch { return url; }
     }
     return url;
+  }
+
+  // What a warning page (lumio://interstitial) is about, for the address bar's icon.
+  warningOf(tab) {
+    const url = tab.pendingUrl || tab.url || '';
+    if (!url.startsWith('lumio://interstitial')) return null;
+    try { return new URL(url).searchParams.get('type') || 'unsafe'; } catch { return 'unsafe'; }
   }
 
   state() {
@@ -513,6 +551,10 @@ class TabManager {
         wcId: t.view ? t.view.webContents.id : null,
         title: t.title,
         url: this.displayUrl(t),
+        // International addresses in their own letters, unless they could pass for another site (main/lookalike.js).
+        shown: lookalikeSafeUrl(this.displayUrl(t)),
+        warning: this.warningOf(t),
+        capture: this.hooks.captureOf?.(t) || null, // camera, microphone or screen in use (main/capture.js)
         internal: (t.pendingUrl || t.url || '').startsWith('lumio:'),
         favicon: t.favicon,
         loading: t.loading,

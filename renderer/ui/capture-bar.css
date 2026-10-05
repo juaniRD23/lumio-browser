@@ -1,0 +1,25 @@
+/* Capture indicators (renderer/ui/capture-bar.js): the red dot on a tab
+   using your camera, microphone or screen, and the sharing bar above the page. */
+.tab .rec-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--rec); box-shadow: 0 0 0 2px color-mix(in srgb, var(--rec) 22%, transparent); animation: rec-pulse 2s ease-in-out infinite; }
+.tab.pinned .rec-dot { position: absolute; left: 3px; top: 3px; width: 7px; height: 7px; }
+@keyframes rec-pulse { 50% { opacity: .5; } }
+
+#capture-bar {
+  display: flex; align-items: center; gap: 10px; flex: none;
+  min-height: 38px; padding: 4px 5px 4px 14px; border-radius: 10px;
+  background: color-mix(in srgb, var(--rec) 9%, var(--chrome)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--rec) 30%, transparent);
+  color: var(--text); font-size: 12.5px;
+  animation: cb-in .25s var(--ease);
+}
+#capture-bar[hidden] { display: none; }
+#capture-bar .cb-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--rec); animation: rec-pulse 2s ease-in-out infinite; }
+#capture-bar .cb-t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#capture-bar .cb-t b { font-weight: 600; }
+#capture-bar .cb-stop { flex: none; height: 28px; padding: 0 14px; border: 0; border-radius: 999px; background: var(--danger-fill); color: var(--on-danger); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+#capture-bar .cb-stop:hover { background: color-mix(in srgb, var(--danger-fill) 88%, var(--text-strong)); }
+#capture-bar .cb-stop:disabled { opacity: .6; cursor: default; }
+#capture-bar .cb-stop:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+@keyframes cb-in { from { opacity: 0; transform: translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) {
+  .tab .rec-dot, #capture-bar, #capture-bar .cb-dot { animation: none; }
+}

@@ -1,7 +1,7 @@
 // lumio:// serves the browser's own UI and internal pages from disk.
 //   lumio://shell/, overlay/, aura/           -> renderer/ui   (default session only)
 //   lumio://newtab/, settings, history, downloads, bookmarks, extensions,
-//   error, welcome                                     -> renderer/pages (tab sessions)
+//   error, welcome, interstitial (warning pages)        -> renderer/pages (tab sessions)
 //   */assets/*  -> renderer/assets,  */vendor/* -> whitelisted node_modules files
 //   shell/ai-files/* -> pictures Lumio made (userData/ai-files)
 //   shell/web/*      -> Lumio Chat's file code (docmaker, attach) and its libraries, copied at build
@@ -18,7 +18,10 @@ const VENDOR = {
 };
 
 const UI_HOSTS = new Set(['shell', 'overlay', 'aura']);
-const PAGE_HOSTS = new Set(['newtab', 'settings', 'history', 'downloads', 'bookmarks', 'extensions', 'passwords', 'error', 'welcome']);
+const PAGE_HOSTS = new Set(['newtab', 'settings', 'history', 'downloads', 'bookmarks', 'extensions', 'passwords', 'error', 'welcome', 'interstitial']);
+// Settings' sub-pages are pages of their own under the same host, like
+// chrome://settings/content/… and chrome://settings/clearBrowserData.
+const SETTINGS_PAGES = { content: 'site-settings.html', cookies: 'site-settings.html', clearBrowserData: 'clear-data.html', security: 'security.html', trackingProtection: 'security.html' };
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -66,6 +69,8 @@ function resolveFile(url, hosts) {
   }
   const base = UI_HOSTS.has(host) ? UI_DIR : PAGES_DIR;
   if (pathname === '/' || pathname === '') return path.join(base, host + '.html');
+  const sub = host === 'settings' && !path.extname(pathname) && SETTINGS_PAGES[pathname.split('/')[1]];
+  if (sub) return path.join(PAGES_DIR, sub);
   const f = path.join(base, pathname.slice(1));
   return inside(base, f) ? f : null;
 }
