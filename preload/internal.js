@@ -9,6 +9,12 @@
 //  - Passkeys: navigator.credentials.create()/get() for public keys go to
 //    Lumio (main/password-manager.js), which asks the person, confirms it's
 //    them and answers as the authenticator. The page only gets the result.
+//  - alert(), confirm() and prompt() are answered in Lumio's own dialog in the
+//    tab (main/page-dialogs.js) instead of Electron's app-wide boxes (it has
+//    no prompt() at all).
+//  - It tells Lumio about a click in a frame from another site, which lets
+//    the page open a pop-up, and about a form the person sends, which leaves
+//    the page without "Leave site?" (main/tabs.js).
 const { contextBridge, ipcRenderer } = require('electron');
 
 if (window.location.protocol === 'lumio:') {
@@ -16,6 +22,51 @@ if (window.location.protocol === 'lumio:') {
   contextBridge.exposeInMainWorld('lumioPage', {
     invoke: (channel, ...args) => (/^page:/.test(channel) ? ipcRenderer.invoke(channel, ...args) : Promise.reject(new Error('blocked'))),
     on: (channel, fn) => { if (EVENTS.has(channel)) ipcRenderer.on(channel, (_e, payload) => fn(payload)); },
+  });
+}
+
+// Every page in a tab, Lumio's own too (Settings asks before deleting).
+// Frames don't get them: main/tabs.js turns Electron's off, so theirs return
+// at once, like a blocked dialog.
+if (/^(https?|file|lumio|chrome-extension):$/.test(window.location.protocol) && window === window.top) {
+  try {
+    contextBridge.executeInMainWorld({
+      func: installDialogs,
+      // Synchronous, so the page waits for the answer like with the real ones.
+      args: [(kind, message, value) => ipcRenderer.sendSync('js-dialog', { kind, message, value })],
+    });
+  } catch { /* the page keeps none: Electron's are off */ }
+}
+
+// A click in a frame from another site (a "Sign in with…" or "Pay with…"
+// button, a link in an embedded video) never reaches Lumio as a click on the
+// page. But the page shares the frame's activation, and a page can't fake
+// that. So while focus is in a frame, look at it often (between a click's
+// mouse-down and mouse-up), and tell Lumio: the click counts for opening a
+// pop-up (main/tabs.js).
+if (/^(https?|file):$/.test(window.location.protocol) && window === window.top) {
+  const inFrame = () => document.activeElement?.tagName === 'IFRAME';
+  let timer = 0;
+  let was = false;
+  const look = () => {
+    if (!inFrame()) { clearInterval(timer); timer = 0; was = false; return; }
+    // Once per click: activation stays on for a few seconds after it, which
+    // mustn't count as many clicks.
+    const now = !!navigator.userActivation?.isActive;
+    if (now && !was) ipcRenderer.send('user-activation');
+    was = now;
+  };
+  // Focus went into a frame (the page itself gets no more events): watch until it's back.
+  window.addEventListener('blur', () => setTimeout(() => {
+    look();
+    if (inFrame() && !timer) timer = setInterval(look, 50);
+  }, 0));
+
+  // A form the person sends (a click, or Enter) leaves the page without
+  // "Leave site?", so its data still goes (main/tabs.js). Only a real one:
+  // a page can't fake the activation, and a form it stops itself doesn't count.
+  window.addEventListener('submit', (e) => {
+    if (!e.defaultPrevented && navigator.userActivation?.isActive) ipcRenderer.send('form-sent');
   });
 }
 
@@ -30,6 +81,27 @@ if (/^https?:$/.test(window.location.protocol) && window === window.top) {
       }],
     });
   } catch { /* the page keeps its own navigator.credentials */ }
+}
+
+// Runs in the page's own world (before its scripts), so it must be
+// self-contained. `ask` reaches Lumio, which names the site itself (the page
+// only gives the text). Like Chrome, no dialogs while the page is unloading.
+function installDialogs(ask) {
+  const currentEvent = Object.getOwnPropertyDescriptor(window, 'event')?.get;
+  const unloading = () => /^(beforeunload|pagehide|unload)$/.test(currentEvent?.call(window)?.type || '');
+  const text = (v) => (v === undefined ? '' : String(v));
+  const native = (name, fn) => {
+    const f = { [name](...args) { return fn(...args); } }[name];
+    Object.defineProperty(f, 'toString', { value: () => `function ${name}() { [native code] }` });
+    return f;
+  };
+  window.alert = native('alert', (message) => { if (!unloading()) ask('alert', text(message)); });
+  window.confirm = native('confirm', (message) => !unloading() && ask('confirm', text(message)) === true);
+  window.prompt = native('prompt', (message, value) => {
+    if (unloading()) return null;
+    const answer = ask('prompt', text(message), text(value));
+    return typeof answer === 'string' ? answer : null;
+  });
 }
 
 // Runs in the page's own world (before its scripts), so it must be

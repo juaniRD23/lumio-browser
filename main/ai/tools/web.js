@@ -28,7 +28,8 @@ async function withHiddenPage(ses, url, read, { signal } = {}) {
   await slot();
   const win = new BrowserWindow({
     show: false, width: 1280, height: 900,
-    webPreferences: { session: ses || session.fromPartition('persist:lumio'), sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, spellcheck: false },
+    // disableDialogs: a page nobody sees can't stop everything with an alert().
+    webPreferences: { session: ses || session.fromPartition('persist:lumio'), sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, spellcheck: false, disableDialogs: true },
   });
   const wc = win.webContents;
   hidden.add(wc);

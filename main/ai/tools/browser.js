@@ -7,9 +7,38 @@ const { markSynthetic } = require('../../synthetic-input');
 const WORLD = 1001;
 const TAB_ID = { type: 'integer', description: 'Tab id (defaults to the active tab)' };
 
+// A dialog a page raises in its tab (alert(), "Leave site?", sign-in…) is the
+// person's to answer: Lumio AI can't see or press it. It's told instead, and
+// never waits on a page stopped by its own alert() or that hung.
+const DIALOGS = {
+  js: 'a message from the page',
+  leave: '"Leave site?" (the page has unsaved changes)',
+  auth: 'a sign-in prompt',
+  external: 'a prompt to open another app',
+  unresponsive: '"Page unresponsive"',
+};
+const pageTabs = new WeakMap(); // a tab's webContents -> the tab (tabFor, pageContext)
+// A page stops on its own alert, or on one in another tab or pop-up that
+// shares its process (an alert() there stops this page too).
+const sharedStop = (tab) => { const wc = tab?.view?.webContents; return !!(wc && !wc.isDestroyed?.() && tab.owner?.hooks?.dialogInProcess?.(wc)); };
+const stopped = (tab) => !!tab?.dialogs?.some((d) => d.spec.kind === 'js' || d.spec.kind === 'unresponsive') || sharedStop(tab);
+function dialogNote(tab) {
+  const kind = tab?.dialogs?.[0]?.spec.kind;
+  if (kind) return `Tab ${tab.id} is showing ${DIALOGS[kind] || 'a dialog'}, which only the user can answer. Ask them to answer it, then go on.`;
+  return sharedStop(tab) ? `Tab ${tab.id} is waiting on a dialog in another tab or pop-up, which only the user can answer. Ask them to answer it, then go on.` : '';
+}
+
 function inPage(wc, fn, arg = {}) {
   const code = `(${fn.toString()})(${JSON.stringify(arg)})`;
-  return wc.executeJavaScriptInIsolatedWorld(WORLD, [{ code }]);
+  const run = wc.executeJavaScriptInIsolatedWorld(WORLD, [{ code }]);
+  const tab = pageTabs.get(wc);
+  if (!tab) return run;
+  // The page may stop on a dialog meanwhile (it answers a click with
+  // confirm()): it can't finish this until the person answers, so don't wait.
+  return new Promise((resolve, reject) => {
+    const timer = setInterval(() => { if (stopped(tab)) { clearInterval(timer); reject(new Error(dialogNote(tab))); } }, 100);
+    run.then(resolve, reject).finally(() => clearInterval(timer));
+  });
 }
 
 function wait(ms) { return new Promise((r) => setTimeout(r, ms)); }
@@ -46,12 +75,18 @@ function tabFor(ctx, id, { activate = false } = {}) {
   const wc = tab.view.webContents;
   const url = wc.getURL() || tab.url || '';
   if (url.startsWith('lumio://settings')) throw new Error("Lumio can't read or operate its own Settings page. Ask the user to change settings themselves.");
+  // Going past a security warning is the person's call alone.
+  if (url.startsWith('lumio://error/cert')) throw new Error("This tab shows a security warning (the site's certificate isn't valid). Lumio can't continue past it: ask the user what to do.");
+  const note = dialogNote(tab);
+  if (note) throw new Error(note);
+  pageTabs.set(wc, tab);
   ctx.onPage?.(wc); // the page glows while Lumio works on it
   return { tab, wc, url };
 }
 
 function pageLine(wc) {
-  return `Page is now: "${wc.getTitle()}" — ${wc.getURL()}`;
+  const note = dialogNote(pageTabs.get(wc));
+  return `Page is now: "${wc.getTitle()}" — ${wc.getURL()}${note ? `\n${note}` : ''}`;
 }
 
 function refName(ctx, tabId, ref) {
@@ -402,10 +437,11 @@ const tools = [
     parameters: { type: 'object', properties: { forward: { type: 'boolean' }, tab_id: TAB_ID } },
     label: (a) => (a.forward ? 'Go forward' : 'Go back'),
     async run(a, ctx) {
-      const { wc } = tabFor(ctx, a.tab_id, { activate: true });
+      const { tab, wc } = tabFor(ctx, a.tab_id, { activate: true });
       const h = wc.navigationHistory;
       if (a.forward ? !h.canGoForward() : !h.canGoBack()) return `Can't go ${a.forward ? 'forward' : 'back'}. ${pageLine(wc)}`;
-      if (a.forward) h.goForward(); else h.goBack();
+      // Through the tabs, so a page with unsaved changes asks the person first.
+      if (a.forward) ctx.tabs.forward(tab.id); else ctx.tabs.back(tab.id);
       await settle(wc);
       return pageLine(wc);
     },
@@ -502,10 +538,15 @@ const tools = [
     description: 'Close a tab by id.',
     parameters: { type: 'object', properties: { tab_id: { type: 'integer' } }, required: ['tab_id'] },
     label: (a, ctx) => `Close “${(ctx.tabs.get(a.tab_id)?.title || 'tab ' + a.tab_id).slice(0, 40)}”`,
-    run(a, ctx) {
+    async run(a, ctx) {
       if (!ctx.tabs.get(a.tab_id)) throw new Error(`There is no tab ${a.tab_id}.`);
       ctx.tabs.close(a.tab_id);
-      return `Closed tab ${a.tab_id}.`;
+      // A page you've used runs its beforeunload first and may ask "Leave site?".
+      // Wait for its page to close, or for the question, whichever comes first.
+      const asking = () => !!ctx.tabs.get(a.tab_id)?.dialogs?.some((d) => d.spec.kind === 'leave');
+      for (let t = 0; t < 1500 && ctx.tabs.get(a.tab_id) && !asking(); t += 100) await wait(100);
+      if (!ctx.tabs.get(a.tab_id)) return `Closed tab ${a.tab_id}.`;
+      return asking() ? `Tab ${a.tab_id} is asking the user to confirm leaving the page; it closes if they agree.` : `Tab ${a.tab_id} is still closing.`;
     },
   },
   {
@@ -555,6 +596,9 @@ async function pageContext(tabs, tab = tabs.active, { maxText = 12000 } = {}) {
   const wc = tab.view.webContents;
   const url = wc.getURL();
   if (!/^https?:/.test(url)) return null;
+  // A page waiting on its own alert() can't be read until the person answers it.
+  if (stopped(tab)) return { tabId: tab.id, title: wc.getTitle(), url, text: '', favicon: tab.favicon };
+  pageTabs.set(wc, tab);
   if (YOUTUBE_VIDEO.test(url)) {
     try {
       const v = await inPage(wc, scripts.youtube, { max: Math.max(maxText, 60000) });

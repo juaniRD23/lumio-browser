@@ -1,12 +1,14 @@
 // lumio:// serves the browser's own UI and internal pages from disk.
-//   lumio://shell/, overlay/, aura/           -> renderer/ui   (default session only)
+//   lumio://shell/, overlay/, aura/, dialog/, popup/, notice/  -> renderer/ui   (default session only)
 //   lumio://newtab/, settings, history, downloads, bookmarks, extensions,
-//   error, welcome                                     -> renderer/pages (tab sessions)
+//   error, welcome, credits                                    -> renderer/pages (tab sessions)
 //   */assets/*  -> renderer/assets,  */vendor/* -> whitelisted node_modules files
 //   shell/ai-files/* -> pictures Lumio made (userData/ai-files)
 //   shell/web/*      -> Lumio Chat's file code (docmaker, attach) and its libraries, copied at build
+//   credits/chromium.html -> Chromium's license notices, as Electron ships them
 const fs = require('fs');
 const path = require('path');
+const { electronFile, chromiumCreditsHtml } = require('./credits');
 
 const ROOT = path.join(__dirname, '..');
 const UI_DIR = path.join(ROOT, 'renderer', 'ui');
@@ -17,8 +19,9 @@ const VENDOR = {
   'purify.js': path.join(ROOT, 'node_modules', 'dompurify', 'dist', 'purify.es.mjs'),
 };
 
-const UI_HOSTS = new Set(['shell', 'overlay', 'aura']);
-const PAGE_HOSTS = new Set(['newtab', 'settings', 'history', 'downloads', 'bookmarks', 'extensions', 'passwords', 'error', 'welcome']);
+const UI_HOSTS = new Set(['shell', 'overlay', 'aura', 'dialog', 'popup', 'notice']);
+const PAGE_HOSTS = new Set(['newtab', 'settings', 'history', 'downloads', 'bookmarks', 'extensions', 'passwords', 'error', 'welcome', 'credits']);
+const CHROMIUM_CREDITS = 'LICENSES.chromium.html';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -58,6 +61,7 @@ function resolveFile(url, hosts) {
     return inside(ASSETS_DIR, f) ? f : null;
   }
   if (pathname.startsWith('/vendor/')) return VENDOR[pathname.slice(8)] || null;
+  if (host === 'credits' && pathname === '/chromium.html') return electronFile(CHROMIUM_CREDITS);
   // Pictures Lumio made in a chat (the panel only).
   if (pathname.startsWith('/ai-files/') && UI_HOSTS.has(host)) {
     const dir = path.join(require('electron').app.getPath('userData'), 'ai-files');
@@ -80,6 +84,7 @@ function makeHandler(hosts, { dark = false } = {}) {
     if (!file) return new Response('Not found', { status: 404 });
     try {
       let body = await fs.promises.readFile(file);
+      if (path.basename(file) === CHROMIUM_CREDITS) body = chromiumCreditsHtml(body);
       // Marked in the HTML itself, so the page is dark from its first paint
       // (the CSP allows no inline script to do it).
       if (path.extname(file) === '.html' && (dark || url.searchParams.get('appearance') === 'dark')) {

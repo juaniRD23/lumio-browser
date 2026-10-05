@@ -26,7 +26,7 @@ function buildMenu(cmd, state = {}) {
         { role: 'hideOthers' },
         { role: 'unhide' },
         { type: 'separator' },
-        { role: 'quit' },
+        { role: 'quit' }, // every way to quit asks first about downloads and pages (main.js before-quit)
       ],
     }] : []),
     {
@@ -133,6 +133,14 @@ function buildMenu(cmd, state = {}) {
         ...(MAC ? [{ type: 'separator' }, { role: 'front' }] : []),
       ],
     },
+    {
+      role: 'help', // the Mac adds its menu search here
+      submenu: [
+        { label: 'Terms of Service', click: cmd.terms },
+        { label: 'Privacy Policy', click: cmd.privacy },
+        { label: 'Open-Source Licenses', click: cmd.credits },
+      ],
+    },
   ];
   return Menu.buildFromTemplate(template);
 }
@@ -168,7 +176,16 @@ function buildBrowserMenu(cmd, state = {}) {
     { label: 'Developer tools', accelerator: k('Cmd+Alt+I', 'Ctrl+Shift+I'), click: cmd.devtools },
     { type: 'separator' },
     { label: 'Settings', click: cmd.settings },
-    { label: 'About Lumio Browser', click: cmd.about },
+    {
+      label: 'Help',
+      submenu: [
+        { label: 'About Lumio Browser', click: cmd.about },
+        { type: 'separator' },
+        { label: 'Terms of Service', click: cmd.terms },
+        { label: 'Privacy Policy', click: cmd.privacy },
+        { label: 'Open-source licenses', click: cmd.credits },
+      ],
+    },
     { type: 'separator' },
     { role: 'quit', label: MAC ? 'Quit Lumio Browser' : 'Exit' },
   ]);

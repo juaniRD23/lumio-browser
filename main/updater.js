@@ -103,12 +103,14 @@ function run(file, args, opts = {}) {
 
 class Updater {
   // fetchImpl: fetch-compatible (Electron's net.fetch in the app).
-  // quit(): closes Lumio so the swap can happen. installTarget: override for tests.
+  // quit(): closes Lumio so the swap can happen. confirmQuit(): resolves true
+  // once the person agrees to quit (downloads it would cancel, pages that ask
+  // "Leave site?"); the swap only starts then. installTarget: override for tests.
   constructor({ currentVersion, fetchImpl, workDir, onChange = () => {}, platform = process.platform, arch = process.arch,
-    exePath = process.execPath, quit = () => {}, openPath = () => {}, api = LATEST, fakeExit = false, installTarget = null,
+    exePath = process.execPath, quit = () => {}, confirmQuit = async () => true, stayed = () => {}, openPath = () => {}, api = LATEST, fakeExit = false, installTarget = null,
     windowsSetup = platform === 'win32' && installedBySetup(exePath), store = false,
     beta = false, appName = 'Lumio Browser', bundleId = 'online.lumio-usa.browser', assetPrefix = 'Lumio-Browser' } = {}) {
-    Object.assign(this, { currentVersion, fetchImpl, workDir, onChange, platform, arch, exePath, quit, openPath, api, fakeExit, installTarget, windowsSetup, store, beta, appName, bundleId, assetPrefix });
+    Object.assign(this, { currentVersion, fetchImpl, workDir, onChange, platform, arch, exePath, quit, confirmQuit, stayed, openPath, api, fakeExit, installTarget, windowsSetup, store, beta, appName, bundleId, assetPrefix });
     this.release = null; // { version, url, size, digest, notesUrl, name }
     this.file = null; // the downloaded, verified installer
     this.busy = null;
@@ -218,12 +220,16 @@ class Updater {
       this.openPath(file);
       return this.set({ status: 'manual', error: null });
     }
+    // Ask before the swap is set up: it waits for Lumio to quit, so staying
+    // (Cancel) must leave nothing waiting to replace the running app.
+    if (!(await this.confirmQuit())) return this.state;
     this.set({ status: 'installing', error: null });
     try {
       if (this.platform === 'darwin') await this.installMac(file, target);
       else if (this.platform === 'win32') await (this.windowsSetup ? this.installWindowsSetup(file) : this.installWindows(file, target));
       else throw new Error('Updating isn’t supported on this system.');
     } catch (err) {
+      this.stayed(); // the pages that agreed to leave come back
       this.set({ status: 'ready', error: `Couldn't install the update: ${err.message}` });
       throw err;
     }

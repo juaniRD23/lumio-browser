@@ -48,6 +48,9 @@ svg { display: block; }
 .si-status svg { margin-top: 2px; flex: none; }
 .si-status.ok svg { color: var(--ok); }
 .si-status.bad svg { color: var(--warn); }
+.si-status.danger svg, .si-status.danger b { color: var(--danger-text); }
+.si-status button { display: block; margin-top: 8px; font: inherit; font-size: 12px; color: var(--text-soft); background: var(--active); border: 0; border-radius: 7px; height: 26px; padding: 0 10px; }
+.si-status button:hover { background: var(--active-hover); color: var(--text-strong); }
 .si-status b { display: block; font-weight: 600; }
 .si-status span { color: var(--muted); font-size: 12px; }
 .si-sec { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; padding: 8px 10px 4px; }
@@ -154,3 +157,20 @@ svg { display: block; }
 .ss-thumb img { width: 100%; height: 100%; object-fit: contain; }
 .ss-name { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .acc-btn:disabled { opacity: .45; }
+
+/* Blocked pop-ups */
+.pb-title { font-weight: 650; font-size: 14px; padding: 8px 8px 6px; }
+.pb-list { display: flex; flex-direction: column; gap: 2px; padding: 0 2px 8px; max-height: 210px; overflow-y: auto; }
+.pb-item {
+  display: block; width: 100%; height: 32px; padding: 0 8px; border: 0; border-radius: 8px;
+  background: none; color: var(--text); font: inherit; font-size: 12.5px; text-align: left;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--overlay-7);
+}
+.pb-item:hover { background: var(--overlay-3); text-decoration-color: currentColor; }
+.pb-choices { display: flex; flex-direction: column; gap: 2px; padding: 8px 2px 2px; border-top: 1px solid var(--line); }
+.pb-choice { display: flex; align-items: flex-start; gap: 8px; padding: 6px; border-radius: 8px; font-size: 12.5px; color: var(--text); }
+.pb-choice:hover { background: var(--overlay-2); }
+.pb-choice input { margin: 2px 0 0; flex: none; accent-color: var(--accent); }
+.pb-choice b { font-weight: 600; overflow-wrap: anywhere; }
+.pb-choice input:focus-visible, .acc-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pb-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; } /* inside the list, which scrolls */

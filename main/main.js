@@ -20,9 +20,13 @@ protocol.registerSchemesAsPrivileged([
 const { Store, SEARCH_ENGINES } = require('./store');
 const { NEWTAB } = require('./tabs');
 const { BrowserWin } = require('./window');
+const { PopupWin } = require('./popup-window');
+const external = require('./external-protocols');
 const { registerUiProtocol, registerPagesProtocol } = require('./protocol');
 const theme = require('./theme');
-const { chromeUserAgent, Downloads, Permissions } = require('./features');
+const { chromeUserAgent, Downloads, Permissions, closingCancels, downloadsWarning } = require('./features');
+const { fileUrl, launchTargets } = require('./open-files');
+const { credits } = require('./credits');
 const { buildMenu, buildBrowserMenu } = require('./menu');
 const { suggest, topSites } = require('./omnibox');
 const { ChatStore } = require('./ai/chats');
@@ -38,6 +42,8 @@ const { Schedules, describe: describeSchedule } = require('./schedules');
 const { Workflows } = require('./workflows');
 const { SiteTips } = require('./site-tips');
 const { Projects } = require('./projects');
+const certErrors = require('./cert-errors');
+const pageDialogs = require('./page-dialogs');
 const { SyncEngine } = require('./sync/engine');
 const syncAdapters = require('./sync/adapters');
 const { CompanionBridge } = require('./sync/companion');
@@ -55,19 +61,6 @@ if (!process.env.LUMIO_TEST && !app.requestSingleInstanceLock()) app.quit();
 const WIN_APP_ID = 'online.lumio-usa.browser';
 if (process.platform === 'win32' && !process.windowsStore) app.setAppUserModelId(WIN_APP_ID);
 
-// What Lumio was asked to open: web addresses, and web pages or PDFs on disk
-// ("Open with Lumio Browser" on Windows).
-function launchTargets(argv) {
-  const out = [];
-  for (const a of argv) {
-    if (/^https?:\/\//i.test(a)) out.push(a);
-    else if (/\.(html?|xhtml|pdf|svg|webp)$/i.test(a) && !a.startsWith('-')) {
-      try { if (fs.statSync(a).isFile()) out.push(require('url').pathToFileURL(path.resolve(a)).href); } catch { /* not a file */ }
-    }
-  }
-  return out;
-}
-
 let store = null;
 let helper = null;
 let normal = null; // the normal profile: { session, downloads, permissions, chats }
@@ -84,19 +77,27 @@ let projects = null; // chat projects (main/projects.js)
 let sync = null; // Lumio Sync (main/sync)
 let companion = null; // the phone companion's link to this computer
 let quitting = false;
+let launched = false; // the first windows are open: links and files from other apps open right away
 const windows = new Set();
+const popups = new Set(); // pop-up windows pages opened (main/popup-window.js)
 let lastFocused = null;
 const recentlyClosed = []; // newest last: { kind: 'tab' | 'window', ... }
-const pendingUrls = [];
+const pendingUrls = []; // links and files other apps asked Lumio to open before it was ready
 
 // ---------------------------------------------------------------- windows
 const alive = () => [...windows].filter((w) => !w.closed && !w.closing);
+const alivePopups = () => [...popups].filter((p) => !p.closed);
+// Browser windows and pop-ups: what has tabs (a pop-up has one).
+const tabHolders = () => [...alive(), ...alivePopups()];
 const cur = () => (lastFocused && !lastFocused.closed && !lastFocused.closing ? lastFocused : alive().at(-1)) || null;
 const normalWin = () => { const c = cur(); return c && !c.incognito ? c : alive().reverse().find((w) => !w.incognito) || null; };
 const ensureWin = () => cur() || createWindow();
-const windowOfWc = (wc) => alive().find((w) => w.win.webContents === wc || w.overlay.webContents === wc || w.indicator?.bar?.webContents === wc) || null;
+// The pop-up you're in: page commands (close, reload, print…) are for it.
+const focusedPopup = () => alivePopups().find((p) => p.win.isFocused()) || null;
+const pageWin = () => focusedPopup() || cur();
+const windowOfWc = (wc) => tabHolders().find((w) => w.win.webContents === wc || w.overlay.webContents === wc || w.indicator?.bar?.webContents === wc || w.dialogs?.view?.webContents === wc || w.notice?.view?.webContents === wc) || null;
 const tabOfWc = (wc) => {
-  for (const w of alive()) {
+  for (const w of tabHolders()) {
     const tab = w.tabs.byWebContents(wc);
     if (tab) return { w, tab };
   }
@@ -114,7 +115,7 @@ function incognitoProfile() {
   setupTabSession(ses, { incognito: true });
   const profile = { incognito: true, session: ses, chats: new ChatStore(null) };
   profile.downloads = new Downloads(ses, { settings: store, emit: (c, p) => alive().filter((w) => w.profile === profile).forEach((w) => w.emit(c, p)) });
-  profile.permissions = new Permissions(ses, { store, emitFor, persist: false });
+  profile.permissions = new Permissions(ses, { store, emitFor, persist: false, openExternal: externalRequest, onPointerLock: pointerLocked });
   setupScreenShare(ses);
   incog = profile;
   return profile;
@@ -124,13 +125,14 @@ function endIncognito() {
   const p = incog;
   incog = null;
   if (!p) return;
+  p.downloads.cancelAll(); // closing the last Incognito window asked first (confirmDownloads)
   p.session.clearStorageData().catch(() => {});
   p.session.clearCache().catch(() => {});
   p.session.clearAuthCache?.().catch?.(() => {});
 }
 
 function emitFor(wcId, channel, payload) {
-  for (const w of alive()) {
+  for (const w of tabHolders()) {
     if (w.tabs.tabs.some((t) => t.view?.webContents.id === wcId)) { w.emit(channel, payload); return; }
   }
 }
@@ -155,7 +157,7 @@ const services = {
   onClosed: (w) => {
     windows.delete(w);
     if (lastFocused === w) lastFocused = null;
-    if (w.incognito && !alive().some((x) => x.incognito)) endIncognito();
+    if (w.incognito && !tabHolders().some((x) => x.incognito)) endIncognito(); // its pop-ups too
     saveSession();
   },
   onTabClosed: (w, entry) => {
@@ -170,6 +172,11 @@ const services = {
     menuChanged();
   },
   onSessionChanged: () => saveSession(),
+  // Closing a window may cancel downloads: what, and asking first.
+  downloadsAtRisk: (holder) => downloadsAtRisk(holder),
+  // A window stopped a quit to ask "Leave site?": the app keeps running.
+  quitCancelled: () => { quitting = false; },
+  confirmDownloads: (holder) => confirmDownloads(downloadsAtRisk(holder), holder.win),
   onViewCreated: (w, tab) => { if (!w.incognito && tab.view) extensions?.addTab(tab.view.webContents, w.win); },
   onPasskeyPromptClosed: (w) => passwords?.passkeyClosed(w),
   onScreenSharePickerClosed: (w) => shareCancel(w),
@@ -177,7 +184,44 @@ const services = {
   savePage: (w, tab) => savePage(w, tab),
   contextMenuExtras: (w, tab, params) => (w.incognito || !tab.view ? [] : extensions?.contextMenuItems(tab.view.webContents, params) || []),
   broadcastAIState: () => alive().forEach((w) => w.ai.emitState()),
+  openExternal: (w, tab, req) => openExternalLink(w, tab, req),
+  // Is a page in this page's process waiting on its alert()/confirm()/prompt()?
+  dialogInProcess: (wc) => {
+    const pid = wc.getProcessId();
+    return tabHolders().some((h) => h.tabs.tabs.some((t) => {
+      const other = t.view?.webContents;
+      return other && other !== wc && !other.isDestroyed() && other.getProcessId() === pid && t.dialogs?.some((d) => d.spec.kind === 'js');
+    }));
+  },
+  // window.open() with a size: a pop-up window. Returns its page.
+  openPopup: (w, _tab, { webContents, url, features }) => {
+    const p = new PopupWin(services, w.profile, { incognito: w.incognito, opener: w, webContents, url, features });
+    popups.add(p);
+    return webContents || p.tabs.wc();
+  },
+  onPopupClosed: (p) => {
+    popups.delete(p);
+    if (p.incognito && !tabHolders().some((x) => x.incognito)) endIncognito();
+  },
+  openFromPopup: (p, url) => {
+    const home = popupHome(p);
+    const w = home || createWindow({ incognito: p.incognito, urls: [url] });
+    const tab = home ? w.tabs.create(url) : w.tabs.active;
+    w.focus();
+    return tab;
+  },
+  adoptFromPopup: (p, tab) => {
+    const home = popupHome(p);
+    if (home) home.tabs.adopt(tab);
+    (home || createWindow({ incognito: p.incognito, adopt: tab })).focus();
+  },
 };
+
+// The browser window a pop-up's tabs go to: the one it came from, else one
+// of the same kind (normal or incognito); null when there's none left.
+function popupHome(p) {
+  return p.home && !p.home.closed && !p.home.closing ? p.home : alive().find((w) => w.profile === p.profile) || null;
+}
 
 // Windows: the Start menu shortcut carries Lumio's app ID (notifications need
 // it). The setup program makes the shortcut; copies from the zip get one here.
@@ -307,30 +351,33 @@ const cmd = {
   newTab: () => { const w = ensureWin(); w.tabs.create(NEWTAB); w.focus(); setTimeout(() => w.focusOmnibox(), 30); },
   newWindow: () => createWindow(),
   newIncognito: () => createWindow({ incognito: true }),
-  closeTab: () => { const w = cur(); if (w) w.tabs.close(w.tabs.activeId); },
-  closeWindow: () => cur()?.close(),
+  closeTab: () => { const p = focusedPopup(); const w = cur(); if (p) p.close(); else if (w) w.tabs.close(w.tabs.activeId); },
+  closeWindow: () => pageWin()?.close(),
   reopenTab: () => reopenClosed(),
   reopenClosed: (index) => reopenClosed(index),
   focusOmnibox: () => cur()?.focusOmnibox(),
-  print: () => cur()?.tabs.wc()?.print(),
-  savePage: () => { const w = cur(); if (w) savePage(w, w.tabs.active); },
-  find: () => { const w = cur(); if (!w) return; w.win.webContents.focus(); w.emit('find-open'); },
+  print: () => pageWin()?.tabs.wc()?.print(),
+  savePage: () => { const w = pageWin(); if (w) savePage(w, w.tabs.active); },
+  find: () => { const w = cur(); if (!w || focusedPopup()) return; w.win.webContents.focus(); w.emit('find-open'); },
   findStep: (forward) => cur()?.emit('find-step', { forward }),
-  reload: (hard) => cur()?.tabs.reload(hard),
-  zoom: (step) => cur()?.tabs.zoom(step),
+  reload: (hard) => pageWin()?.tabs.reload(hard),
+  zoom: (step) => pageWin()?.tabs.zoom(step),
   togglePanel: () => cur()?.emit('panel-toggle'),
   toggleSidebar: () => cur()?.emit('sidebar-toggle'),
   focusAI: () => { const w = cur(); if (!w) return; w.win.webContents.focus(); w.emit('ai-focus'); },
-  devtools: () => cur()?.tabs.wc()?.openDevTools({ mode: 'detach' }),
+  devtools: () => pageWin()?.tabs.wc()?.openDevTools({ mode: 'detach' }),
   shellDevtools: () => cur()?.win.webContents.openDevTools({ mode: 'detach' }),
-  back: () => cur()?.tabs.back(),
-  forward: () => cur()?.tabs.forward(),
+  back: () => pageWin()?.tabs.back(),
+  forward: () => pageWin()?.tabs.forward(),
   history: () => openInternal('lumio://history/'),
   downloads: () => openInternal('lumio://downloads/'),
   bookmarksManager: () => openInternal('lumio://bookmarks/'),
   extensions: () => openInternal('lumio://extensions/'),
   passwords: () => openInternal('lumio://passwords/'),
   about: () => openInternal('lumio://settings/#about'),
+  terms: () => openLegal('terms'),
+  privacy: () => openLegal('privacy'),
+  credits: () => openInternal('lumio://credits/'),
   settings: () => openInternal('lumio://settings/'),
   bookmark: () => toggleBookmark(cur()),
   toggleBookmarksBar: () => setBookmarksBar(!store.settings.showBookmarksBar),
@@ -349,6 +396,17 @@ function openInternal(url) {
   const existing = w.tabs.tabs.find((t) => (t.pendingUrl || t.url || '').startsWith(url));
   if (existing) w.tabs.activate(existing.id);
   else w.tabs.create(url);
+  w.focus();
+}
+
+// Lumio's Terms of Service and Privacy Policy, on the Lumio website (its
+// address follows main/account.js), in a normal window like Lumio's pages.
+const LEGAL = { terms: '/terms', privacy: '/privacy' };
+function openLegal(which) {
+  const url = account.url(LEGAL[which]);
+  const w = normalWin();
+  if (!w) { createWindow({ urls: [url] }); return; }
+  w.tabs.create(url);
   w.focus();
 }
 
@@ -389,6 +447,8 @@ function toggleBookmark(w) {
 }
 
 function openUrl(url, disposition = 'tab', from = cur()) {
+  // A mailto: bookmark opens the mail app (asking first), from the tab you're on.
+  if (external.classify(url) === 'external') { (from && !from.closed ? from : ensureWin()).tabs.navigate(url); return; }
   if (!/^(https?|file|lumio|chrome-extension):/i.test(url)) return;
   if (disposition === 'window') createWindow({ urls: [url] });
   else if (disposition === 'incognito') createWindow({ incognito: true, urls: [url] });
@@ -697,7 +757,7 @@ function internalHandle(channel, hosts, fn) {
   });
 }
 
-const ALL_PAGES = ['newtab', 'error', 'history', 'settings', 'downloads', 'bookmarks', 'extensions', 'passwords', 'welcome'];
+const ALL_PAGES = ['newtab', 'error', 'history', 'settings', 'downloads', 'bookmarks', 'extensions', 'passwords', 'welcome', 'credits'];
 
 function registerIpc() {
   handle('shell:init', (w) => ({
@@ -765,12 +825,26 @@ function registerIpc() {
     const max = w.win.getContentSize()[1] - b.y - 8;
     w.overlay.setBounds({ ...b, height: Math.max(60, Math.min(Math.round(height), max)) });
   });
+  // A page's dialog in its tab was answered: only by the dialog view itself
+  // (main/dialog-view.js), not the window's other views.
+  ipcMain.on('dialog:answer', (e, answer) => {
+    const w = windowOfWc(e.sender);
+    if (w && e.sender === w.dialogs?.view?.webContents) w.dialogs.answer(answer || {});
+  });
+  // "Press Esc to exit full screen" measured itself (main/access-notice.js).
+  on('notice:size', (w, size) => w.notice.resize(size || {}));
+  // A pop-up window's bar (renderer/ui/popup.html).
+  handle('popup:init', (w) => (w instanceof PopupWin ? { tabs: w.tabs.state(), incognito: w.incognito, platform: process.platform } : null));
+  on('popup:open-in-tab', (w) => { if (w instanceof PopupWin) w.openInTab(); });
   on('overlay:pick', (w, item) => {
     if (item?.kind === 'screenshare') {
       const p = sharePending.get(Number(item.id));
       if (p?.w === w) shareAnswer(Number(item.id), typeof item.source === 'string' ? item.source : null);
     }
+    // The blocked pop-ups list took the keyboard (payload.focus): it goes back to the bar.
+    const giveBack = item?.kind === 'popups' && w.overlay.webContents.isFocused();
     w.hideOverlay();
+    if (giveBack) w.win.webContents.focus();
     w.emit('overlay-picked', item);
   });
 
@@ -824,6 +898,33 @@ function registerIpc() {
     w.tabs.reload(false);
   });
   on('site:settings', () => openInternal('lumio://settings/#sites'));
+  // Pop-ups the page tried to open on its own (the address bar's icon).
+  handle('site:popups', (w) => {
+    const tab = w.tabs.active;
+    if (!tab?.blockedPopups?.length) return null;
+    const info = siteInfo(w); // only a website can be always allowed
+    w.popupsSite = info?.origin || null; // what "Always allow" is about
+    return {
+      host: info?.host || null,
+      allowed: !!info && w.profile.permissions.allowsPopups(info.origin),
+      items: tab.blockedPopups.map(({ id, url }) => ({ id, url })),
+    };
+  });
+  on('site:popup-open', (w, id) => { const tab = w.tabs.active; if (tab) w.tabs.openBlockedPopup(tab, Number(id)); });
+  on('site:popups-allow', (w, allow) => {
+    const info = siteInfo(w);
+    // Only the site the list was shown for: the page may have moved on since.
+    if (info && info.origin === w.popupsSite) w.profile.permissions.set(info.origin, 'popups', allow ? true : undefined);
+  });
+  // "Turn on warnings": forget the certificate you went past for this site.
+  on('site:cert-revoke', async (w) => {
+    const info = siteInfo(w);
+    if (!info?.certBypass) return;
+    certErrors.revoke(w.profile.session, info.host);
+    await w.profile.session.closeAllConnections?.().catch(() => {}); // connections that already trust it
+    w.hideOverlay();
+    w.tabs.reload(false);
+  });
 
   // ---- account button ----
   handle('account:state', () => account.state());
@@ -836,7 +937,7 @@ function registerIpc() {
     const pages = { passwords: 'lumio://passwords/', settings: 'lumio://settings/', profile: 'lumio://settings/#profile', plan: 'lumio://settings/#plan' };
     if (pages[which]) openInternal(pages[which]);
   });
-  on('account:close-incognito', () => alive().filter((x) => x.incognito).forEach((x) => x.close()));
+  on('account:close-incognito', () => tabHolders().filter((x) => x.incognito).forEach((x) => x.close()));
 
   // ---- passwords (dropdown under sign-in fields, save prompt) ----
   on('passwords:fill', (w, choice) => passwords.fill(w, choice || {}));
@@ -903,6 +1004,33 @@ function registerIpc() {
   internalHandle('page:navigate', ALL_PAGES, ({ w, tab }, input) => w.tabs.navigate(input, tab.id));
   internalHandle('page:open', ALL_PAGES, ({ w }, url, disposition) => openUrl(String(url || ''), disposition, w));
   internalHandle('page:ask-ai', ['newtab'], ({ w }, text) => w.askAI(String(text || ''), { includePage: false, full: true }));
+
+  // "Your connection is not private" (renderer/pages/cert.html, under the
+  // error host). The page only shows details: Proceed uses what Lumio itself
+  // recorded for the tab when the certificate failed, never the page's word.
+  const certFor = (sender, tab) => {
+    let failed = '';
+    try { failed = new URL(sender.getURL()).searchParams.get('url') || ''; } catch { /* no address */ }
+    return tab.certError && tab.certError.url === failed ? tab.certError : null;
+  };
+  internalHandle('page:cert-info', ['error'], async ({ sender, tab }) => {
+    const rec = certFor(sender, tab);
+    if (!rec) return null;
+    const hsts = rec.overridable && await certErrors.usesHsts(sender.session, rec.host);
+    return { host: rec.host, code: rec.code, reason: rec.reason, cert: rec.cert, hsts, canProceed: rec.overridable && !hsts };
+  });
+  internalHandle('page:cert-proceed', ['error'], async ({ sender, w, tab }) => {
+    const rec = certFor(sender, tab);
+    if (!rec?.overridable || await certErrors.usesHsts(sender.session, rec.host)) return false;
+    certErrors.allow(sender.session, rec.host, rec.fingerprint);
+    tab.certError = null;
+    w.tabs.navigate(rec.url, tab.id);
+    return true;
+  });
+  internalHandle('page:cert-back', ['error'], ({ w, tab }) => w.tabs.backToSafety(tab.id));
+
+  // Open-source licenses (renderer/pages/credits.html).
+  internalHandle('page:credits', ['credits'], () => ({ ...credits(), terms: account.url(LEGAL.terms), privacy: account.url(LEGAL.privacy) }));
 
   internalHandle('page:history', ['history'], () => store.history().slice().reverse());
   internalHandle('page:history-delete', ['history'], (_ctx, what) => store.deleteHistory(what || {}));
@@ -980,6 +1108,7 @@ function registerIpc() {
     version: app.getVersion(),
     update: updater?.state || null,
     isDefault: app.isDefaultProtocolClient('https'),
+    legal: { terms: account.url(LEGAL.terms), privacy: account.url(LEGAL.privacy) },
     importSources: importer.detect(),
     sitePermissions: Object.entries(normal.permissions.all()).map(([origin, perms]) => ({ origin, perms })),
   }));
@@ -1141,10 +1270,15 @@ function siteInfo(w) {
   let u;
   try { u = new URL(url); } catch { return null; }
   if (!/^https?:$/.test(u.protocol)) return null;
+  // On the certificate warning, or past one: not private.
+  const certError = (tab.pendingUrl || tab.url || '').startsWith('lumio://error/cert');
+  const certBypass = !certError && certErrors.bypassed(w.profile.session, url);
   return {
     origin: u.origin,
     host: u.host,
-    secure: u.protocol === 'https:',
+    secure: u.protocol === 'https:' && !certError && !certBypass,
+    certError,
+    certBypass,
     incognito: w.incognito,
     permissions: w.profile.permissions.forOrigin(u.origin),
   };
@@ -1217,17 +1351,136 @@ function barContextMenu(w) {
 }
 
 // ---------------------------------------------------------------- app
+// Each in a new tab, like Chrome (opening the same file again too).
 function openExternalUrls(urls) {
   if (!urls.length) return;
-  const w = normalWin() || createWindow({ urls });
-  if (w.tabs.tabs.some((t) => urls.includes(t.url))) { w.focus(); return; }
+  const w = normalWin();
+  if (!w) { createWindow({ urls }); return; }
   urls.forEach((u) => w.tabs.create(u));
   w.focus();
 }
 
+// Links and files other apps hand to Lumio. They can come before Lumio is
+// ready (they launched it): those wait for the first windows.
+function openFromSystem(url) {
+  if (launched) openExternalUrls([url]); else pendingUrls.push(url);
+}
+
 app.on('open-url', (e, url) => {
   e.preventDefault();
-  if (store && windows.size) openExternalUrls([url]); else pendingUrls.push(url);
+  openFromSystem(url);
+});
+
+// macOS: a file opened with Lumio from Finder ("Open With", a double-click
+// when Lumio is the default) or dropped on its Dock icon. Kinds it can't show
+// are left to macOS, which says it can't open them.
+app.on('open-file', (e, file) => {
+  const url = fileUrl(file);
+  if (!url) return;
+  e.preventDefault();
+  openFromSystem(url);
+});
+
+// ---------------------------------------------------------------- links to other apps
+// mailto:, zoommtg:, slack:… (the rules are in main/external-protocols.js):
+// open the app, after asking in the tab, or do nothing. typed: from the
+// address bar or a bookmark. requestingUrl and isMainFrame: the frame that
+// asked, when a page did.
+async function openExternalLink(w, tab, { url, typed = false, requestingUrl = '', isMainFrame = true }) {
+  const wc = tab.view?.webContents;
+  if (!url || !wc || wc.isDestroyed() || tab.agent) return; // a helper AI's tab has nobody to ask
+  if (tab.dialogs?.some((d) => d.spec.kind === 'external')) return; // one prompt at a time
+  const origin = typed ? null : external.originOf(requestingUrl || wc.getURL());
+  const topOrigin = external.originOf(wc.getURL());
+  const key = external.permissionKey(url);
+  const verdict = external.decide({
+    url,
+    typed,
+    origin,
+    isMainFrame,
+    topOrigin,
+    // A frame from another site needs a click inside a frame, not on the page.
+    activated: tab.owner.recentlyActivated(tab, { frame: !isMainFrame && origin !== topOrigin }),
+    locked: !!tab.externalLock,
+    remembered: !!origin && w.profile.permissions.remembered(origin, key) === true,
+  });
+  if (verdict === 'deny') return;
+  tab.externalLock = true; // the next one waits for another click in the page
+  const target = external.escapeUrl(url);
+  const name = target && external.appLabel(app.getApplicationNameForProtocol(target));
+  if (!name) return; // no app on this computer opens it
+  if (verdict === 'ask') {
+    const answer = await tab.owner.ask(tab, external.askSpec({ app: name, origin, incognito: w.incognito }));
+    if (answer.button !== 'open') return;
+    if (answer.checked && origin) w.profile.permissions.set(origin, key, true);
+  }
+  shell.openExternal(target).catch(() => {});
+}
+
+// Chromium asked to open another app for a page (a link, a frame, a redirect).
+function externalRequest(wc, details) {
+  const found = tabOfWc(wc);
+  if (found) openExternalLink(found.w, found.tab, { url: details.externalURL, requestingUrl: details.requestingUrl, isMainFrame: details.isMainFrame !== false });
+}
+
+// A click in a frame from another site on a tab's page (preload/internal.js
+// sees the page get the person's activation while focus is in that frame):
+// it counts like a click on the page, so a "Sign in with…" button there can
+// open its pop-up.
+ipcMain.on('user-activation', (e) => {
+  const found = e.senderFrame === e.sender.mainFrame && tabOfWc(e.sender);
+  if (found) found.tab.owner.noteActivation(found.tab, { frame: true });
+});
+
+// The person sent a form on a tab's page (preload/internal.js): it may leave
+// without "Leave site?", so the form's data isn't lost (main/tabs.js).
+ipcMain.on('form-sent', (e) => {
+  const found = e.senderFrame === e.sender.mainFrame && tabOfWc(e.sender);
+  if (found) found.tab.sentForm = Date.now();
+});
+
+// A page hid the pointer (pointer lock): "Press Esc to show your cursor".
+function pointerLocked(wc) {
+  const found = tabOfWc(wc);
+  if (found) found.w.notice.pointerLock(found.tab);
+}
+
+// ---------------------------------------------------------------- page dialogs and safety
+// alert(), confirm() and prompt() from a tab's page (preload/internal.js).
+// The page waits on this synchronous message until the person answers in
+// its tab (main/page-dialogs.js).
+ipcMain.on('js-dialog', (e, req) => {
+  const reply = (value) => { try { e.returnValue = value ?? null; } catch { /* the page is gone */ } };
+  const kind = ['alert', 'confirm', 'prompt'].includes(req?.kind) ? req.kind : null;
+  const found = kind && tabOfWc(e.sender);
+  const frame = e.senderFrame;
+  if (!found || !frame || frame !== e.sender.mainFrame) { reply(pageDialogs.blankAnswer(kind)); return; }
+  pageDialogs.jsDialog(found.tab, { kind, message: req.message, value: req.value, url: frame.url })
+    .then(reply, () => reply(pageDialogs.blankAnswer(kind)));
+});
+
+// HTTP sign-in (Basic, Digest, proxies) for a tab or a pop-up's page: "Sign
+// in to access this site" over it. Anything else (Lumio's own requests, its
+// hidden pages) is cancelled, as Electron does by default.
+app.on('login', (event, wc, details, authInfo, callback) => {
+  const found = wc && tabOfWc(wc);
+  if (!found) return;
+  event.preventDefault();
+  pageDialogs.signIn(found.tab, { details, authInfo })
+    .then((creds) => (creds ? callback(creds.username, creds.password) : callback()), () => callback());
+});
+
+// A certificate Chromium doesn't trust. Only one you chose to go past (on the
+// "Your connection is not private" page) is let through, for this session;
+// for a tab's page, what failed is kept for that page to show.
+app.on('certificate-error', (event, wc, url, error, cert, callback, isMainFrame) => {
+  event.preventDefault();
+  const host = (() => { try { return new URL(url).host; } catch { return ''; } })();
+  // (Only for an error you could have gone past: a certificate since revoked isn't.)
+  const ok = !!wc && certErrors.OVERRIDABLE.has(certErrors.errorName(error)) && certErrors.isAllowed(wc.session, host, cert?.fingerprint);
+  const found = !ok && isMainFrame && wc && tabOfWc(wc);
+  if (found) found.tab.certError = certErrors.record(url, error, cert);
+  callback(ok);
 });
 
 app.on('second-instance', (_e, argv) => {
@@ -1236,6 +1489,9 @@ app.on('second-instance', (_e, argv) => {
 });
 
 app.whenReady().then(async () => {
+  // Logging out, restarting or shutting down the computer quits without
+  // "Leave site?" (like Chrome), or macOS would say Lumio stopped the log out.
+  require('electron').powerMonitor.on('shutdown', () => { quitAsked = true; });
   store = new Store(app.getPath('userData'), safeStorage);
   store.onBookmarkIcons = () => bookmarksChanged();
   // Light or dark, before any window opens; changes then apply live.
@@ -1357,7 +1613,13 @@ app.whenReady().then(async () => {
     fetchImpl: (url, opts) => net.fetch(url, opts),
     workDir: path.join(app.getPath('temp'), `${FLAVOR.name} Update`),
     onChange: (state) => { alive().forEach((w) => w.emit('update', state)); announceUpdate(state); },
+    // Restarting to update asks first, like quitting, before it sets anything up.
+    // It doesn't ride on a quit question someone else is already answering.
+    confirmQuit: () => (confirmingQuit ? Promise.resolve(false) : askToQuit()),
+    // Through the normal quit, which asks again about anything new since
+    // (a download, a page used during the install).
     quit: process.env.LUMIO_UPDATE_TARGET && process.env.LUMIO_TEST ? () => {} : () => app.quit(),
+    stayed: () => wakeActiveTabs(),
     openPath: (file) => shell.openPath(file),
     api: testUpdates ? process.env.LUMIO_UPDATE_API : FLAVOR.beta ? BETAS : LATEST,
     beta: FLAVOR.beta, appName: FLAVOR.name, bundleId: FLAVOR.bundleId, assetPrefix: FLAVOR.assetPrefix,
@@ -1374,7 +1636,7 @@ app.whenReady().then(async () => {
     setTimeout(() => { const w = lastFocused && !lastFocused.win.isDestroyed() ? lastFocused : alive()[0]; w?.emit('toast', { text: `Updated to Lumio Browser ${app.getVersion()}` }); }, 2500);
   }
   if (lastVersion !== app.getVersion()) store.setSetting('lastVersion', app.getVersion());
-  normal.permissions = new Permissions(ses, { store, emitFor, persist: true });
+  normal.permissions = new Permissions(ses, { store, emitFor, persist: true, openExternal: externalRequest, onPointerLock: pointerLocked });
   setupScreenShare(ses);
 
   extensions = new ExtensionManager({
@@ -1420,15 +1682,91 @@ app.whenReady().then(async () => {
   if (process.platform !== 'darwin' && !process.env.LUMIO_TEST) pendingUrls.push(...launchTargets(process.argv.slice(1)));
   if (process.platform === 'win32' && app.isPackaged && !process.windowsStore) startMenuShortcut();
   if (pendingUrls.length) openExternalUrls(pendingUrls.splice(0));
+  launched = true;
 
   app.on('activate', () => { if (!alive().length) createWindow(); });
 });
 
+// Closing the last window quits on Windows and Linux, like Chrome. Closing it
+// already asked about its downloads and pages (BrowserWin.confirmClose), so
+// quitting doesn't ask again. The Mac keeps running without windows; the Dock
+// icon opens a new one.
 app.on('window-all-closed', () => {
-  if (process.env.LUMIO_TEST) app.quit();
+  if (process.platform === 'darwin' && !process.env.LUMIO_TEST) return;
+  quitNow();
 });
 
-app.on('before-quit', () => {
+// ---------------------------------------------------------------- quitting
+const downloading = (profile) => profile?.downloads.inProgress() || 0;
+
+// Downloads closing this window (or pop-up) would cancel: { kind, count } or
+// null. Quitting asks for itself, so nothing while it's under way.
+function downloadsAtRisk(holder) {
+  if (quitting) return null;
+  const others = tabHolders().filter((x) => x !== holder);
+  return closingCancels({
+    platform: process.platform,
+    lastWindow: !others.length,
+    lastIncognito: holder.incognito && !others.some((x) => x.incognito),
+    total: downloading(normal) + downloading(incog),
+    incognito: downloading(incog),
+  });
+}
+
+// "2 downloads are in progress. Quit anyway?" before they're canceled, over
+// the window (parent) when there is one. Resolves true to go on. Tests answer
+// it themselves (global.lumio.answerDownloads).
+let answerDownloads = null;
+async function confirmDownloads(risk, parent) {
+  if (!risk?.count) return true;
+  const box = downloadsWarning({ ...risk, platform: process.platform });
+  if (answerDownloads) return (await answerDownloads(box)) === 0;
+  const { response } = parent && !parent.isDestroyed() ? await dialog.showMessageBox(parent, box) : await dialog.showMessageBox(box);
+  return response === 0;
+}
+
+// Quitting, from any menu, the keyboard or the Dock, asks first: about
+// downloads it would cancel, then pages you've used ("Leave site?", window by
+// window: TabManager.confirmLeaveAll), pop-ups too; it goes on once you agree.
+let confirmingQuit = null;
+let quitAsked = false; // the next quit already asked (confirmQuit, or the last window closing)
+// Resolves true once the person agrees to quit (nothing quits yet).
+function askToQuit() {
+  confirmingQuit ||= (async () => {
+    const count = downloading(normal) + downloading(incog);
+    if (!(await confirmDownloads({ kind: 'quit', count }, cur()?.win))) return false;
+    for (const w of tabHolders()) {
+      if (await w.tabs.confirmLeaveAll()) continue;
+      wakeActiveTabs();
+      return false;
+    }
+    return true;
+  })().finally(() => { confirmingQuit = null; });
+  return confirmingQuit;
+}
+// You stayed (or an update failed to install): a window whose pages already
+// agreed shows its tab again (they went to sleep, like Memory Saver's).
+function wakeActiveTabs() {
+  for (const h of tabHolders()) { const t = h.tabs.active; if (t && !t.view) h.tabs.activate(t.id); }
+}
+async function confirmQuit() {
+  if (confirmingQuit) return;
+  if (await askToQuit()) quitNow();
+}
+// Quits without asking again (the person already agreed).
+function quitNow() {
+  quitAsked = true;
+  app.quit();
+}
+
+app.on('before-quit', (e) => {
+  const asked = quitAsked;
+  quitAsked = false;
+  if (!asked && (downloading(normal) + downloading(incog) || tabHolders().some((w) => w.tabs.anyMayAsk()))) {
+    e.preventDefault();
+    confirmQuit();
+    return;
+  }
   saveSession();
   quitting = true;
   for (const w of alive()) w.ai.shutdown();
@@ -1478,6 +1816,7 @@ global.lumio = {
   get win() { return cur()?.win; },
   get current() { return cur(); },
   get windows() { return alive(); },
+  get popups() { return alivePopups(); },
   get store() { return store; },
   get extensions() { return extensions; },
   get account() { return account; },
@@ -1488,7 +1827,9 @@ global.lumio = {
   get sync() { return sync; },
   get profiles() { return { normal, incognito: incog }; },
   get recentlyClosed() { return recentlyClosed; },
+  certErrors,
   screenAura,
+  set answerDownloads(fn) { answerDownloads = fn; },
   get updater() { return updater; },
   signIn: (w) => signIn(w || cur()),
   focus: (w) => { lastFocused = w; },

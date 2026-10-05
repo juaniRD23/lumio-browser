@@ -18,6 +18,7 @@ import { sign as osxSign } from '@electron/osx-sign';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { MAC_DOCUMENT_TYPES } from './mac-documents.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
@@ -67,6 +68,11 @@ const common = {
   ],
 };
 
+// Electron's and Chromium's license notices. Packaging leaves them next to the
+// .app, outside it (Windows keeps them beside the .exe), so the Mac app
+// carries its own copies in Contents/Resources, for lumio://credits.
+const ELECTRON_NOTICES = ['LICENSE', 'LICENSES.chromium.html'].map((f) => path.join(root, 'node_modules', 'electron', 'dist', f));
+
 // macOS: the Swift helper for that chip ships in Contents/Resources.
 function macOptions(arch, helper) {
   return {
@@ -76,7 +82,7 @@ function macOptions(arch, helper) {
     icon: path.join(root, 'build', BETA ? 'icon-beta.icns' : 'icon.icns'),
     appBundleId: BETA ? 'online.lumio-usa.browser.beta' : 'online.lumio-usa.browser',
     appCategoryType: 'public.app-category.productivity',
-    extraResource: [helper],
+    extraResource: [helper, ...ELECTRON_NOTICES],
     protocols: [{ name: 'Web page', schemes: ['http', 'https'] }],
     extendInfo: {
       LSMinimumSystemVersion: '14.0',
@@ -84,9 +90,7 @@ function macOptions(arch, helper) {
       NSCameraUsageDescription: 'Websites you allow can use your camera.',
       NSMicrophoneUsageDescription: 'Lumio’s voice mode and websites you allow can use your microphone.',
       NSLocationWhenInUseUsageDescription: 'Websites you allow can see your location.',
-      CFBundleDocumentTypes: [
-        { CFBundleTypeName: 'HTML document', CFBundleTypeRole: 'Viewer', LSItemContentTypes: ['public.html', 'public.xhtml'] },
-      ],
+      CFBundleDocumentTypes: MAC_DOCUMENT_TYPES,
     },
   };
 }

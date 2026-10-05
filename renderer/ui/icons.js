@@ -44,6 +44,8 @@ export const icons = {
   eye: s('<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>', 'width="14" height="14"'),
   terminal: s('<rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M7 9.5l3 2.5-3 2.5M12.5 15H17"/>', 'width="14" height="14"'),
   tabs: s('<rect x="3" y="6" width="18" height="14" rx="2"/><path d="M3 10h18M8 6V4h8v2"/>', 'width="14" height="14"'),
+  // A window with a "no" sign: pop-ups were blocked.
+  popupBlocked: s('<path d="M13 18H5a1.5 1.5 0 0 1-1.5-1.5v-10A1.5 1.5 0 0 1 5 5h12a1.5 1.5 0 0 1 1.5 1.5V11M3.5 9h15"/><circle cx="17.5" cy="17" r="3.5"/><path d="M15 19.5l5-5"/>', 'width="16" height="16"'),
   mac: s('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M9 20h6M12 16v4"/>', 'width="14" height="14"'),
   scroll: s('<path d="M12 4v16M8 8l4-4 4 4M8 16l4 4 4-4"/>', 'width="14" height="14"'),
   app: s('<rect x="4" y="4" width="16" height="16" rx="4"/>', 'width="14" height="14"'),

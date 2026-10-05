@@ -1,0 +1,30 @@
+@import url('/assets/fonts/fonts.css');
+@import url('/assets/theme.css'); /* colors and type */
+* { box-sizing: border-box; }
+/* The view is just big enough for the bubble and its shadow (main/access-notice.js
+   PAD): the bubble sits 16px down, and its shadow ends inside the view. */
+html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+body { font: 13px/1.4 var(--font); color: var(--text); -webkit-font-smoothing: antialiased; cursor: default; user-select: none; }
+[hidden] { display: none !important; }
+
+#bubble {
+  position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px; width: max-content; max-width: min(860px, calc(100vw - 48px));
+  padding: 9px 18px; white-space: nowrap;
+  background: var(--popover); border: 1px solid var(--line-strong); border-radius: 999px; box-shadow: var(--shadow-lift);
+  /* It shows for four seconds, then fades; main takes the view away after. */
+  animation: in .2s var(--ease), out .4s ease-in 4s forwards;
+}
+/* In a narrow pop-up the site's name shortens, never the way out. */
+#n-title { min-width: 0; max-width: 360px; overflow: hidden; text-overflow: ellipsis; font-weight: 600; color: var(--text-strong); }
+#n-title:empty { display: none; }
+#n-title:not(:empty) + #n-action::before { content: '·'; margin-right: 10px; color: var(--muted); }
+#n-action { flex: none; color: var(--text-soft); }
+kbd {
+  display: inline-block; margin: 0 2px; padding: 1px 7px;
+  font: 600 12px/1.4 var(--font); color: var(--text-strong);
+  background: var(--overlay-3); border: 1px solid var(--line-strong); border-radius: 6px;
+}
+@keyframes in { from { opacity: 0; transform: translate(-50%, -6px); } }
+@keyframes out { to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { #bubble { animation: none; } }

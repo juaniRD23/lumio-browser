@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Dialog</title>
+  <link rel="stylesheet" href="dialog.css" />
+</head>
+<body>
+  <!-- A page's dialog, over its tab (main/dialog-view.js). Everything in it
+       is set as text: messages come from websites. -->
+  <div id="card" role="dialog" aria-modal="true" aria-labelledby="d-title" aria-describedby="d-message" hidden>
+    <h2 id="d-title"></h2>
+    <p id="d-message"></p>
+    <p id="d-note" class="line warn" hidden></p>
+    <div id="d-fields"></div>
+    <p id="d-error" class="line bad" role="alert" hidden></p>
+    <label id="d-check" hidden><input type="checkbox" /><span></span></label>
+    <div id="d-buttons"></div>
+  </div>
+  <script type="module" src="dialog.js"></script>
+</body>
+</html>

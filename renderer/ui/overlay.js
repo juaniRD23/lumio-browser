@@ -1,5 +1,5 @@
-// Floating dropdowns drawn above the page: omnibox suggestions, downloads
-// and the site-information popup (lock icon).
+// Floating dropdowns drawn above the page: omnibox suggestions, downloads,
+// the site-information popup (lock icon) and blocked pop-ups.
 import { icons, markSvg, avatarHtml } from './icons.js';
 import { setAccent } from '/assets/theme-colors.js';
 
@@ -43,15 +43,21 @@ function renderDownloads({ items }) {
   card.innerHTML = `<div class="head"><span>Downloads</span><button data-act="clear">Clear</button></div>${rows || '<div class="dl"><div class="sub">No downloads</div></div>'}<button class="all" data-act="all">See all downloads</button>`;
 }
 
-const PERM_VALUE = (v) => (v === true ? 'allow' : v === false ? 'block' : 'ask');
+// A permission's choices; the first is what it does unless set (most ask,
+// pop-ups are blocked).
+const CHOICE_LABELS = { ask: 'Ask', allow: 'Allow', block: 'Block' };
+const permChoices = (p) => p.choices || ['ask', 'allow', 'block'];
+const permValue = (p) => (p.value === true ? 'allow' : p.value === false ? 'block' : permChoices(p)[0]);
 function renderSiteInfo({ info }) {
-  const secure = info.secure
-    ? `<div class="si-status ok">${icons.lock}<div><b>Connection is secure</b><span>Info you send to this site stays private.</span></div></div>`
-    : `<div class="si-status bad">${icons.warn}<div><b>Not secure</b><span>Don't enter passwords or payment info on this site.</span></div></div>`;
+  const secure = info.certError || info.certBypass
+    ? `<div class="si-status danger">${icons.warn}<div><b>Your connection to this site isn't private</b><span>${info.certBypass ? "You chose to visit it although its security certificate isn't valid. Don't enter passwords or payment info here." : "Its security certificate isn't valid."}</span>${info.certBypass ? '<button data-si="cert-revoke">Turn on warnings</button>' : ''}</div></div>`
+    : info.secure
+      ? `<div class="si-status ok">${icons.lock}<div><b>Connection is secure</b><span>Info you send to this site stays private.</span></div></div>`
+      : `<div class="si-status bad">${icons.warn}<div><b>Not secure</b><span>Don't enter passwords or payment info on this site.</span></div></div>`;
   const perms = info.permissions.map((p) => `
     <label class="si-perm"><span>${esc(p.label)}</span>
       <select data-perm="${esc(p.permission)}">
-        ${['ask', 'allow', 'block'].map((v) => `<option value="${v}" ${PERM_VALUE(p.value) === v ? 'selected' : ''}>${v === 'ask' ? 'Ask (default)' : v === 'allow' ? 'Allow' : 'Block'}</option>`).join('')}
+        ${permChoices(p).map((v, i) => `<option value="${v}" ${permValue(p) === v ? 'selected' : ''}>${CHOICE_LABELS[v]}${i ? '' : ' (default)'}</option>`).join('')}
       </select>
     </label>`).join('');
   card.innerHTML = `
@@ -164,6 +170,29 @@ function renderScreenShare({ share: s }) {
   card.dataset.prompt = String(s.id);
 }
 
+// Pop-ups the page tried to open by itself: open one (it opens as if the
+// page had, after a click), or always allow the site. Keyboard: the first
+// one has focus, Tab moves, Enter picks, Esc closes.
+function renderPopups({ host, allowed, items }) {
+  const list = items.map((p) => `<button class="pb-item" data-pb="${p.id}" title="${esc(p.url)}">${esc(pretty(p.url) || p.url)}</button>`).join('');
+  // Only a website can be always allowed (not a file on this computer).
+  const choices = host ? `
+    <div class="pb-choices" role="radiogroup" aria-label="Pop-ups on this site">
+      <label class="pb-choice"><input type="radio" name="pb" value="allow" ${allowed ? 'checked' : ''}><span>Always allow pop-ups and redirects from <b>${esc(host)}</b></span></label>
+      <label class="pb-choice"><input type="radio" name="pb" value="block" ${allowed ? '' : 'checked'}><span>Continue blocking</span></label>
+    </div>` : '';
+  card.innerHTML = `
+    <div class="pb-title" id="pb-title">Pop-ups blocked:</div>
+    <div class="pb-list" role="group" aria-labelledby="pb-title">${list}</div>
+    ${choices}
+    <div class="pws-actions">
+      ${host ? '<button class="acc-btn ghost" data-pb-act="manage">Manage</button>' : ''}
+      <span style="flex:1"></span>
+      <button class="acc-btn primary" data-pb-act="done">Done</button>
+    </div>`;
+  card.querySelector('.pb-item')?.focus();
+}
+
 // What's new in an update, from the release notes (a little Markdown).
 function notesHtml(md) {
   const inline = (t) => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
@@ -226,14 +255,34 @@ api.on('overlay-data', (payload) => {
   else if (kind === 'passkey') { renderPasskey(payload); reportSize(); }
   else if (kind === 'update') { renderUpdateCard(payload); reportSize(); }
   else if (kind === 'screenshare') renderScreenShare(payload);
+  else if (kind === 'popups') { renderPopups(payload); reportSize(); }
+});
+
+// Blocked pop-ups: clicks (and Enter on a button) pick; Esc closes.
+card.addEventListener('click', (e) => {
+  if (kind !== 'popups') return;
+  const item = e.target.closest('[data-pb]');
+  const act = e.target.closest('[data-pb-act]')?.dataset.pbAct;
+  if (item) api.send('site:popup-open', Number(item.dataset.pb));
+  else if (act === 'manage') api.send('site:settings');
+  else if (act === 'done') {
+    const choice = card.querySelector('input[name=pb]:checked')?.value;
+    if (choice) api.send('site:popups-allow', choice === 'allow');
+  } else return;
+  api.send('overlay:pick', { kind });
+});
+document.addEventListener('keydown', (e) => {
+  if (kind === 'popups' && e.key === 'Escape') { e.preventDefault(); api.send('overlay:pick', { kind }); }
 });
 
 card.addEventListener('change', (e) => {
   const sel = e.target.closest('select[data-perm]');
-  if (kind === 'siteinfo' && sel) api.send('site:set-permission', { permission: sel.dataset.perm, value: sel.value });
+  // The first choice is the default: picking it clears the site's setting.
+  if (kind === 'siteinfo' && sel) api.send('site:set-permission', { permission: sel.dataset.perm, value: sel.selectedIndex === 0 ? 'ask' : sel.value });
 });
 
 card.addEventListener('mousedown', async (e) => {
+  if (kind === 'popups') return; // its buttons and choices work like normal ones (see above)
   if (kind === 'screenshare') {
     const tile = e.target.closest('[data-src]');
     if (tile) {
@@ -313,6 +362,7 @@ card.addEventListener('mousedown', async (e) => {
   if (kind === 'siteinfo') {
     const act = e.target.closest('[data-si]')?.dataset.si;
     if (act === 'clear') api.send('site:clear-data');
+    if (act === 'cert-revoke') api.send('site:cert-revoke');
     if (act === 'settings') { api.send('site:settings'); api.send('overlay:pick', { kind }); }
     return; // let <select> menus open normally
   }

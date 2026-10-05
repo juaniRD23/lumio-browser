@@ -26,6 +26,7 @@ const ANSWERS = {
     engines: [{ id: 'google', name: 'Google' }, { id: 'bing', name: 'Bing' }], approvalMode: 'ask', showBookmarksBar: false, appearance: 'system',
     ai: { reasoning: 'medium', macAvailable: true }, version: '0.6.3', update: null, isDefault: false,
     importSources: [{ id: 'chrome', name: 'Chrome', passwords: true }], sitePermissions: [{ origin: 'https://meet.google.com', perms: { media: true } }],
+    legal: { terms: 'https://lumio.test/terms', privacy: 'https://lumio.test/privacy' },
   },
   'page:account': ACCOUNT,
   'page:billing': { ok: true, plan: 'plus', planName: 'Plus', subscription: { status: 'active', price: 20, periodEnd: now + 20 * DAY, card: { brand: 'visa', last4: '4242' } }, allPlans: [{ id: 'plus', name: 'Plus', price: 20 }], reasons: [] },
@@ -42,8 +43,15 @@ const ANSWERS = {
   'page:downloads': [{ id: 'a', name: 'report.pdf', url: 'https://example.com/report.pdf', state: 'progressing', received: 4e6, total: 1e7, time: now }, { id: 'b', name: 'photo.png', url: 'https://example.com/p.png', state: 'completed', total: 2e6, exists: true, time: now - 60e3 }],
   'page:bookmarks': [{ url: 'https://example.com/', title: 'Example' }, { url: 'https://github.com/', title: 'GitHub' }],
   'page:bookmarks-bar': false,
+  'page:credits': {
+    version: '0.6.3', license: 'GPL-3.0-or-later', source: 'https://github.com/juaniRD23/lumio-browser', licenseText: 'GNU GENERAL PUBLIC LICENSE',
+    chromium: { version: '150.0.0.0', available: true }, electron: { version: '43.7.7', license: 'MIT', url: 'https://www.electronjs.org/', text: 'MIT' },
+    packages: [{ name: 'marked', version: '16.4.2', license: 'MIT', url: 'https://marked.js.org', text: 'MIT License' }],
+    bundled: [{ name: 'PDF.js', license: 'Apache-2.0', url: 'https://mozilla.github.io/pdf.js/' }],
+    terms: 'https://lumio.test/terms', privacy: 'https://lumio.test/privacy',
+  },
 };
-const PAGES = ['settings', 'newtab', 'history', 'downloads', 'bookmarks'];
+const PAGES = ['settings', 'newtab', 'history', 'downloads', 'bookmarks', 'credits'];
 
 let server, browser, base;
 before(async () => {

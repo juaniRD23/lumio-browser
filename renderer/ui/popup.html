@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Pop-up</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <!-- A pop-up window's bar (main/popup-window.js). Its page is a view laid
+       over #slot, under the bar and the permission bar. -->
+  <header id="bar">
+    <div id="where">
+      <button id="site-icon" aria-label="View site information"></button>
+      <input id="address" type="text" readonly spellcheck="false" aria-label="Address of this pop-up" />
+    </div>
+    <span id="toast" role="status" hidden></span>
+    <button id="pw-key" class="icon-btn" title="Save password" aria-label="Save password" hidden></button>
+    <button id="popups-btn" class="popups-btn" hidden></button>
+    <button id="open-tab" class="tab-btn" title="Show this pop-up as a tab in the browser window" aria-label="Open in tab"><span class="ic"></span><span>Open in tab</span></button>
+  </header>
+  <div id="permbar" class="infobar" hidden>
+    <span class="infobar-text"></span>
+    <span class="spacer"></span>
+    <button class="btn ghost" data-act="block">Block</button>
+    <button class="btn primary" data-act="allow">Allow</button>
+  </div>
+  <div id="slot"></div>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

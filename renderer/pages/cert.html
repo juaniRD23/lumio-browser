@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Privacy error</title>
+  <link rel="stylesheet" href="pages.css" />
+  <link rel="stylesheet" href="cert.css" />
+</head>
+<body>
+  <main class="box">
+    <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l9.5 16.5h-19z"/><path d="M12 10v4.5M12 17.5h.01"/></svg></div>
+    <h1>Your connection is not private</h1>
+    <p>Attackers might be trying to steal your information from <b id="host"></b> (for example, passwords, messages, or credit cards).</p>
+    <p class="code" id="code"></p>
+    <div class="actions">
+      <button class="btn" id="advanced" type="button" aria-expanded="false" aria-controls="details">Advanced</button>
+      <button class="btn primary" id="back" type="button">Back to safety</button>
+    </div>
+    <section id="details" hidden aria-label="Details">
+      <p id="reason"></p>
+      <dl id="cert" hidden>
+        <dt>Issued to</dt><dd id="c-subject"></dd>
+        <dt>Issued by</dt><dd id="c-issuer"></dd>
+        <dt>Valid from</dt><dd id="c-from"></dd>
+        <dt>Valid until</dt><dd id="c-to"></dd>
+        <dt>Fingerprint</dt><dd id="c-fp" class="mono"></dd>
+      </dl>
+      <p id="hsts" hidden>You can't visit <b class="h"></b> right now because the website uses HSTS. Network errors and attacks are usually temporary, so this page will probably work later.</p>
+      <p id="fatal" hidden>You can't visit this site right now: this certificate error can't be skipped.</p>
+      <button class="btn" id="retry" type="button" hidden>Try again</button>
+      <button class="link danger" id="proceed" type="button" hidden>Proceed to <span class="h"></span> (unsafe)</button>
+    </section>
+  </main>
+  <script type="module" src="cert.js"></script>
+</body>
+</html>

@@ -33,9 +33,11 @@ class Downloads {
     this.emit = emit;
     this.store = store;
     this.settings = settings || store;
+    this.saveAsUrls = new Map(); // url -> when "Save … As…" asked for it
     tabSession.on('will-download', (_e, item, wc) => {
       if (isHidden(wc)) { item.cancel(); return; } // Lumio AI reading a page out of sight
       const prefs = this.settings?.settings || {};
+      const saveAs = this.takeSaveAs(item.getURLChain()[0] || item.getURL());
       let dir = app.getPath('downloads');
       try { if (prefs.downloadDir && fs.statSync(prefs.downloadDir).isDirectory()) dir = prefs.downloadDir; } catch { /* folder gone */ }
       const entry = {
@@ -50,7 +52,7 @@ class Downloads {
         paused: false,
         time: Date.now(),
       };
-      if (prefs.askDownload) {
+      if (prefs.askDownload || saveAs) {
         // Electron shows the Save dialog; record where the file really went.
         item.setSaveDialogOptions({ defaultPath: entry.path });
         item.once('updated', () => { const p = item.getSavePath(); if (p) { entry.path = p; entry.name = path.basename(p); } });
@@ -79,6 +81,19 @@ class Downloads {
     });
   }
 
+  // "Save Link As…", "Save Image As…", "Save Video As…": always ask where,
+  // like Chrome, even when downloads normally go straight to the folder.
+  saveAs(wc, url) {
+    this.saveAsUrls.set(url, Date.now());
+    wc.downloadURL(url);
+  }
+
+  // Was this download one of those? Each counts once, and only for a minute.
+  takeSaveAs(url) {
+    for (const [u, t] of this.saveAsUrls) if (Date.now() - t > 60_000) this.saveAsUrls.delete(u);
+    return this.saveAsUrls.delete(url);
+  }
+
   plain(d) {
     const { id, name, path: p, url, total, received, state, paused, time } = d;
     return { id, name, path: p, url, total, received, state, paused, time };
@@ -88,6 +103,9 @@ class Downloads {
 
   // Recent downloads for the toolbar dropdown.
   list() { return this.items.map((d) => this.plain(d)); }
+
+  // Downloads not finished yet (paused ones too): quitting would cancel them.
+  inProgress() { return this.items.filter((d) => d.state === 'progressing').length; }
 
   // Everything for the downloads page: live items plus saved history.
   all() {
@@ -131,17 +149,52 @@ class Downloads {
     this.store?.clearDownloads();
     this.push(true);
   }
+
+  // Incognito ended: its unfinished downloads end with it, like Chrome (the
+  // in-memory session itself lives on until Lumio quits).
+  cancelAll() {
+    for (const d of this.items) if (d.state === 'progressing') d.item.cancel();
+  }
 }
 
-// Permissions a page may ask for; everything else is denied.
-const ASKABLE = new Set(['media', 'geolocation', 'notifications', 'midi', 'midiSysex', 'clipboard-read', 'display-capture', 'idle-detection']);
-const ALWAYS = new Set(['fullscreen', 'pointerLock', 'clipboard-sanitized-write', 'window-management']);
+// What closing a window would cancel, like Chrome: on Windows and Linux,
+// closing the last window quits (every download); closing the last Incognito
+// window ends Incognito (its downloads). On the Mac Lumio keeps running when
+// the last window closes, so normal downloads go on. Returns { kind, count }
+// or null when there's nothing to ask.
+function closingCancels({ platform, lastWindow, lastIncognito, total, incognito }) {
+  if (platform !== 'darwin' && lastWindow && total) return { kind: 'quit', count: total };
+  if (lastIncognito && incognito) return { kind: 'incognito', count: incognito };
+  return null;
+}
+
+// The question before downloads are canceled (a native message box). Cancel
+// is the default, so Enter never throws downloads away.
+function downloadsWarning({ kind, count, platform }) {
+  const what = count === 1 ? '1 download is' : `${count} downloads are`;
+  const them = count === 1 ? 'it' : 'them';
+  const quit = platform === 'darwin' ? 'Quit' : 'Exit'; // what the menus call it
+  const ask = kind === 'quit'
+    ? { message: `${what} in progress. ${quit} anyway?`, detail: `${quit === 'Quit' ? 'Quitting' : 'Exiting'} will cancel ${them}.`, go: quit }
+    : { message: `${what} in progress. Close Incognito anyway?`, detail: `Closing the last Incognito window will cancel ${them}.`, go: 'Close' };
+  return { type: 'warning', message: ask.message, detail: ask.detail, buttons: [ask.go, 'Cancel'], defaultId: 1, cancelId: 1, noLink: true };
+}
+
+// Permissions a page may ask for; everything else is denied. Window
+// management (getScreenDetails: every display's layout and name) asks, like
+// Chrome, instead of telling every site.
+// Full screen and pointer lock come with "Press Esc to …" (main/access-notice.js);
+// keyboardLock, which would keep Esc from the browser, is refused.
+const ASKABLE = new Set(['media', 'geolocation', 'notifications', 'midi', 'midiSysex', 'clipboard-read', 'display-capture', 'idle-detection', 'window-management']);
+const ALWAYS = new Set(['fullscreen', 'pointerLock', 'clipboard-sanitized-write']);
 const SITE_LABELS = {
   geolocation: 'Location',
   media: 'Camera and microphone',
   notifications: 'Notifications',
   'clipboard-read': 'Clipboard',
   midi: 'MIDI devices',
+  popups: 'Pop-ups and redirects',
+  'window-management': 'Window management',
 };
 const LABELS = {
   media: 'use your camera or microphone',
@@ -152,15 +205,20 @@ const LABELS = {
   'clipboard-read': 'see text and images copied to the clipboard',
   'display-capture': 'see your screen',
   'idle-detection': 'know when you are away',
+  'window-management': 'manage windows on all your displays',
 };
 
 // Site permissions for one session. Normal windows remember choices in
 // settings; incognito keeps them in memory only.
 class Permissions {
-  constructor(tabSession, { store, emitFor, persist = true }) {
+  // openExternal: (wc, details) for a link to another app (main.js asks in the tab).
+  // onPointerLock: (wc) when a page hides the pointer (main.js says how to get it back).
+  constructor(tabSession, { store, emitFor, persist = true, openExternal = null, onPointerLock = null }) {
     this.store = store;
     this.emitFor = emitFor; // (wcId, channel, payload) -> the window showing that tab
     this.persist = persist;
+    this.openExternal = openExternal;
+    this.onPointerLock = onPointerLock;
     this.memory = {};
     this.pending = new Map();
     let nextId = 1;
@@ -173,6 +231,10 @@ class Permissions {
 
     tabSession.setPermissionRequestHandler((wc, permission, callback, details) => {
       if (isHidden(wc)) return callback(false);
+      // A link to another app: Lumio asks in the tab and opens the app itself,
+      // so Electron never does.
+      if (permission === 'openExternal') { callback(false); this.openExternal?.(wc, details); return; }
+      if (permission === 'pointerLock') this.onPointerLock?.(wc);
       if (ALWAYS.has(permission)) return callback(true);
       if (!ASKABLE.has(permission)) return callback(false);
       let origin;
@@ -197,6 +259,11 @@ class Permissions {
     return this.all()[origin]?.[permission];
   }
 
+  // The page's site may open pop-ups any time ("Always allow" in the address bar).
+  allowsPopups(pageUrl) {
+    try { return this.remembered(new URL(pageUrl).origin, 'popups') === true; } catch { return false; }
+  }
+
   // value: true (allow), false (block) or undefined (ask again).
   set(origin, permission, value) {
     const all = { ...this.all() };
@@ -206,11 +273,12 @@ class Permissions {
     if (this.persist) this.store.setSetting('sitePermissions', all); else this.memory = all;
   }
 
-  // What the site-info popup shows for an origin.
+  // What the site-info popup shows for an origin. Pop-ups are blocked unless
+  // allowed (there's no asking); window management only once it's been set.
   forOrigin(origin) {
     const saved = this.all()[origin] || {};
-    const perms = ['geolocation', 'media', 'notifications', 'clipboard-read', 'midi'];
-    return perms.map((p) => ({ permission: p, label: SITE_LABELS[p], value: saved[p] }));
+    const perms = ['geolocation', 'media', 'notifications', 'clipboard-read', 'midi', 'popups', ...(saved['window-management'] !== undefined ? ['window-management'] : [])];
+    return perms.map((p) => ({ permission: p, label: SITE_LABELS[p], value: saved[p], ...(p === 'popups' ? { choices: ['block', 'allow'] } : {}) }));
   }
 
   respond(id, allow, remember = true) {
@@ -233,4 +301,4 @@ class Permissions {
   }
 }
 
-module.exports = { chromeUserAgent, Downloads, Permissions, uniquePath };
+module.exports = { chromeUserAgent, Downloads, Permissions, uniquePath, closingCancels, downloadsWarning };
