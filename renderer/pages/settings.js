@@ -480,14 +480,52 @@ document.querySelectorAll('[data-import-file]').forEach((b) => b.addEventListene
 }));
 
 // ------------------------------------------------------------ sidebar highlight
+// The highlight slides to the section you're reading (scroll-spy). A click
+// scrolls there smoothly and the highlight goes straight to it.
 const links = [...document.querySelectorAll('.side a')];
-const spy = new IntersectionObserver((entries) => {
-  for (const e of entries) {
-    if (!e.isIntersecting) continue;
-    links.forEach((a) => a.classList.toggle('on', a.getAttribute('href') === '#' + e.target.id));
-  }
-}, { rootMargin: '-10% 0px -80% 0px' });
-document.querySelectorAll('main section').forEach((sec) => spy.observe(sec));
+const sections = links.map((a) => document.querySelector(a.getAttribute('href'))).filter(Boolean);
+const ind = document.createElement('span');
+ind.className = 'side-ind';
+ind.setAttribute('aria-hidden', 'true');
+document.querySelector('.side').prepend(ind);
+let current = null;
+let heading = null; // the section a click is scrolling to
+function highlight(id) {
+  if (id === current) return;
+  current = id;
+  const a = links.find((x) => x.getAttribute('href') === '#' + id);
+  links.forEach((x) => { x.classList.toggle('on', x === a); if (x === a) x.setAttribute('aria-current', 'true'); else x.removeAttribute('aria-current'); });
+  if (!a) return;
+  ind.style.height = a.offsetHeight + 'px';
+  ind.style.transform = `translateY(${a.offsetTop}px)`;
+  ind.classList.add('shown');
+}
+function spy() {
+  if (heading) return;
+  const line = innerHeight * 0.3;
+  const atEnd = innerHeight + scrollY >= document.documentElement.scrollHeight - 4;
+  let at = sections[0];
+  for (const sec of sections) if (sec.getBoundingClientRect().top <= line) at = sec;
+  highlight(atEnd ? sections.at(-1).id : at?.id);
+}
+let spyFrame = 0;
+addEventListener('scroll', () => { spyFrame ||= requestAnimationFrame(() => { spyFrame = 0; spy(); }); }, { passive: true });
+addEventListener('scrollend', () => { heading = null; spy(); });
+links.forEach((a) => a.addEventListener('click', (e) => {
+  const sec = document.querySelector(a.getAttribute('href'));
+  if (!sec) return;
+  e.preventDefault();
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches || document.documentElement.hasAttribute('data-reduce-motion');
+  highlight(sec.id);
+  heading = sec.id;
+  history.replaceState(null, '', '#' + sec.id);
+  sec.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+  // Already there (no scroll happens): stop waiting for scrollend.
+  setTimeout(() => { if (heading === sec.id && Math.abs(sec.getBoundingClientRect().top - 24) < 2) heading = null; }, 50);
+  sec.querySelector('h2')?.focus({ preventScroll: true });
+}));
+sections.forEach((sec) => { const h = sec.querySelector('h2'); if (h) h.tabIndex = -1; });
+requestAnimationFrame(spy);
 
 renderProfile();
 renderSites();

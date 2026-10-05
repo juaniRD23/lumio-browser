@@ -5,7 +5,6 @@
 .grow { flex: 1; }
 #search { width: 260px; }
 .day { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; color: var(--label); margin: 24px 12px 8px; }
-.empty { color: var(--label); padding: 50px 0; text-align: center; }
 .btn.small { height: 28px; padding: 0 11px; font-size: 12.5px; }
 .btn.ghost { background: transparent; }
 .iconbtn { width: 30px; height: 30px; border-radius: 8px; border: 0; background: none; color: var(--label); cursor: pointer; display: inline-grid; place-items: center; }
@@ -19,7 +18,7 @@
 .dl.gone .name, .dl.failed .name { color: var(--dim); text-decoration: line-through; }
 .dl .sub { color: var(--label); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dl .bar { height: 4px; border-radius: 4px; background: var(--overlay-4); margin-top: 7px; overflow: hidden; }
-.dl .bar i { display: block; height: 100%; background: var(--accent); border-radius: 4px; transition: width .3s; }
+.dl .bar i { display: block; height: 100%; background: var(--accent); border-radius: 4px; transform: scaleX(var(--p, 0)); transform-origin: left; transition: transform var(--dur-4) var(--ease-out); }
 .dl .acts { display: flex; gap: 6px; flex: none; }
 
 /* bookmarks */

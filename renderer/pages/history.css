@@ -38,7 +38,6 @@
 .item .acts button:hover { background: var(--overlay-3); color: var(--text); }
 mark { background: var(--highlight); color: inherit; border-radius: 2px; }
 .more { color: var(--label); text-align: center; padding: 18px; font-size: 12.5px; }
-.empty { color: var(--label); padding: 50px 0; text-align: center; }
 
 .closed-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; }
 .closed-item:hover { background: var(--card); }

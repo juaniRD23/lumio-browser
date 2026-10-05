@@ -70,6 +70,14 @@
   --box-shadow: 0 18px 50px light-dark(#00000024, #0007);
   --switch-off: light-dark(#c4c4ca, #3a3a3e); /* a toggle's track when off */
   --highlight: light-dark(#ffd54f80, #ffd47933); /* text that matches a search */
+  /* New Tab backgrounds (Customize Lumio): two soft colors each, pale on light, deep on dark. */
+  --ntbg-aurora-1: light-dark(#bfeedd, #0e4a42);
+  --ntbg-aurora-2: light-dark(#d8d0ff, #2b1f66);
+  --ntbg-dusk-1: light-dark(#ffd3bd, #5a1f33);
+  --ntbg-dusk-2: light-dark(#e6d1ff, #1f1b48);
+  --ntbg-meadow-1: light-dark(#ddf3c0, #1f4420);
+  --ntbg-meadow-2: light-dark(#c3e3f6, #10314a);
+  --sheet-scrim: light-dark(#0000001f, #0006); /* behind a side sheet */
 
   /* Menus and popups (renderer/ui/overlay.css) */
   --text-strong: light-dark(#000000, #ffffff); /* emphasis, and a label under the pointer */

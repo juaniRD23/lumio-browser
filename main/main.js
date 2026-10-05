@@ -924,6 +924,7 @@ function registerIpc() {
     chats: w.incognito ? [] : w.ai.listChats().slice(0, 3),
   }));
   internalHandle('page:open-chat', ['newtab'], ({ w }, id) => w.openChat(String(id || '')));
+  require('./customize').register({ internalHandle, store, dir: app.getPath('userData'), dialog, nativeImage, theme, setProfile });
   internalHandle('page:navigate', ALL_PAGES, ({ w, tab }, input) => w.tabs.navigate(input, tab.id));
   internalHandle('page:open', ALL_PAGES, ({ w }, url, disposition) => openUrl(String(url || ''), disposition, w));
   internalHandle('page:ask-ai', ['newtab'], ({ w }, text) => w.askAI(String(text || ''), { includePage: false, full: true }));

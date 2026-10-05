@@ -1,4 +1,5 @@
 import './keys.js';
+import { initCustomize } from './newtab-customize.js';
 const page = window.lumioPage;
 const $ = (s) => document.querySelector(s);
 // The Lumio mark in the text color, with an accent dot.
@@ -51,6 +52,7 @@ q.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.
 
 data = await page.invoke('page:newtab-data').catch(() => ({ topSites: [], bookmarks: [], engine: 'Google', chats: [] }));
 greet(data.incognito ? null : data.name);
+if (!data.incognito) initCustomize();
 if (data.incognito) {
   document.body.classList.add('incognito');
   $('#incog').hidden = false;

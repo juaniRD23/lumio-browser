@@ -1,4 +1,5 @@
 import './keys.js';
+import { leave } from './page-motion.js';
 const page = window.lumioPage;
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -101,7 +102,16 @@ async function remove(keys) {
   const gone = new Set(keys);
   all = all.filter((h) => !gone.has(keyOf(h)));
   keys.forEach((k) => selected.delete(k));
-  render();
+  // The rows fade away and the rest slide up; a day left empty goes too.
+  const rows = [...$('#list').querySelectorAll('.item')].filter((el) => gone.has(el.dataset.k));
+  if (rows.length > 30 || !filtered().length) { render(); return; }
+  visible = filtered();
+  renderSelection();
+  await Promise.all(rows.map((el) => leave(el)));
+  for (const day of $('#list').querySelectorAll('.day')) {
+    const next = day.nextElementSibling;
+    if (!next || !next.classList.contains('item')) leave(day);
+  }
 }
 
 $('#list').addEventListener('click', async (e) => {

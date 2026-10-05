@@ -34,3 +34,30 @@ h2 { font: 500 11.5px var(--mono); text-transform: uppercase; letter-spacing: .1
 .pill.ok { background: color-mix(in srgb, var(--ok) 10%, transparent); color: var(--ok); }
 .pill.bad { background: color-mix(in srgb, var(--danger-fill) 10%, transparent); color: var(--danger); }
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+@keyframes fade-out { to { opacity: 0; } }
+@keyframes leave { to { opacity: 0; transform: scale(.98); } }
+
+/* Every page rises in once when it opens. */
+.wrap, .layout { animation: rise var(--dur-5) var(--ease-out); }
+
+/* Rows that arrive rise in; removed ones fade away (renderer/pages/page-motion.js). */
+.enter { animation: rise var(--dur-3) var(--ease-out); }
+.leaving { animation: leave var(--dur-2) var(--ease-in) forwards; pointer-events: none; }
+
+/* Empty and loading states look the same on every page. */
+.empty { color: var(--label); padding: 50px 0; text-align: center; animation: fade-in var(--dur-3) var(--ease-out); }
+.loading { color: var(--label); padding: 50px 0; text-align: center; animation: fade-in var(--dur-3) var(--ease-out) var(--dur-3) backwards; }
+@keyframes fade-in { from { opacity: 0; } }
+
+/* Dialogs (Clear browsing data…) rise in over a scrim and drop away when closed. */
+dialog {
+  opacity: 0; transform: translateY(8px) scale(.97);
+  transition: opacity var(--dur-2) var(--ease-in), transform var(--dur-2) var(--ease-in), overlay var(--dur-2) allow-discrete, display var(--dur-2) allow-discrete;
+}
+dialog[open] { opacity: 1; transform: none; transition-duration: var(--dur-4); transition-timing-function: var(--ease-out); }
+dialog::backdrop { opacity: 0; transition: opacity var(--dur-2) var(--ease-in), overlay var(--dur-2) allow-discrete, display var(--dur-2) allow-discrete; }
+dialog[open]::backdrop { opacity: 1; transition-duration: var(--dur-4); }
+@starting-style {
+  dialog[open] { opacity: 0; transform: translateY(8px) scale(.97); }
+  dialog[open]::backdrop { opacity: 0; }
+}
