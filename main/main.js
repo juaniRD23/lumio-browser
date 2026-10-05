@@ -252,7 +252,7 @@ function runDueSchedules() {
 }
 function runDueFor(p) {
   const { schedules, account } = p;
-  if (!schedules || !account.state().signedIn) return;
+  if (!schedules || deleting.has(p.id) || !account.state().signedIn) return;
   for (const task of schedules.due()) {
     if (runningSchedules.has(task.id)) continue;
     const normalWins = alive().filter((x) => !x.incognito && x.profile === p);
@@ -1531,7 +1531,7 @@ async function startProfile(p, { restore = false } = {}) {
 // by a second click: its windows would come back twice.
 const starting = new Map(); // id -> startProfile promise
 async function switchToProfile(id) {
-  if (!profiles.get(id)) return false;
+  if (!profiles.get(id) || deleting.has(id)) return false;
   const p = openProfile(id);
   const w = normalWin(p);
   if (w) w.focus();
@@ -1588,8 +1588,16 @@ function endGuest() {
 
 // Deletes a profile (never the first one): closes its windows, signs it out
 // of Lumio, and removes its files and session.
+// Profiles being deleted: nothing opens them again meanwhile (a click in a
+// menu, a scheduled task), or their folder would go out from under them.
+const deleting = new Set();
 async function deleteProfile(id) {
-  if (id === DEFAULT_PROFILE || !profiles.get(id)) return false;
+  if (id === DEFAULT_PROFILE || !profiles.get(id) || deleting.has(id)) return false;
+  deleting.add(id);
+  try { await removeProfile(id); } finally { deleting.delete(id); }
+  return true;
+}
+async function removeProfile(id) {
   const p = loaded.get(id);
   if (p) {
     // A page that holds its window open gets 3 seconds before the window goes anyway.
@@ -1612,7 +1620,6 @@ async function deleteProfile(id) {
   for (let i = recentlyClosed.length - 1; i >= 0; i--) if (recentlyClosed[i].profileId === id) recentlyClosed.splice(i, 1);
   profiles.remove(id);
   profilesChanged();
-  return true;
 }
 
 // What the picker and the account menus show, with open profiles' live names.
