@@ -40,6 +40,16 @@ const DEFAULTS = {
 const TEST = process.env.LUMIO_TEST ? process.env : {};
 if (TEST.LUMIO_HOST_RULES) app.commandLine.appendSwitch('host-resolver-rules', TEST.LUMIO_HOST_RULES);
 const testJson = (v) => { try { return JSON.parse(v); } catch { return null; } };
+// Tests trust their own self-signed certificate, made when they run: only
+// the one whose SHA-256 fingerprint (base64, of the DER) they name.
+if (TEST.LUMIO_TEST_TRUST_CERT) {
+  const crypto = require('crypto');
+  app.on('certificate-error', (event, _wc, _url, _error, cert, callback) => {
+    let fp = '';
+    try { fp = crypto.createHash('sha256').update(new crypto.X509Certificate(cert.data).raw).digest('base64'); } catch { /* not a certificate */ }
+    if (fp && fp === TEST.LUMIO_TEST_TRUST_CERT) { event.preventDefault(); callback(true); }
+  });
+}
 
 // The settings in use, with defaults filled in. Lookalike warnings come with Safe Browsing.
 function readSettings(store) {

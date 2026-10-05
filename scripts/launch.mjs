@@ -21,13 +21,14 @@ const timed = (promise, what, ms = 30_000) => {
 const brief = (x) => String(x).replace(/\s+/g, ' ').slice(0, 100);
 
 // executablePath: run a packaged build (e.g. the installed app) instead of the source.
-export async function launch({ profile, env = {}, executablePath } = {}) {
+// args: extra Chromium switches (e.g. fake camera devices for tests).
+export async function launch({ profile, env = {}, executablePath, args = [] } = {}) {
   built ??= buildPreload();
   await built;
   const temp = !profile;
   const userData = profile || fs.mkdtempSync(path.join(os.tmpdir(), 'lumio-profile-'));
   const app = await electron.launch({
-    ...(executablePath ? { executablePath, args: [] } : { args: [root] }),
+    ...(executablePath ? { executablePath, args: [...args] } : { args: [root, ...args] }),
     cwd: root,
     env: { ...process.env, LUMIO_USER_DATA: userData, LUMIO_TEST: '1', ...env },
     // Playwright pretends every page prefers light unless told not to; Lumio's
