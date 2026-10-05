@@ -401,6 +401,12 @@ test('lumio://extensions/shortcuts: type a shortcut, clear one, Esc cancels', { 
   const { page, errors } = await openPage('shortcuts', { colorScheme: 'dark', answers: { 'page:extension-shortcuts': SHORTCUTS, 'page:extension-set-shortcut': { ok: true } } });
   await page.waitForSelector('.sc-box');
   assert.equal(await page.title(), 'Keyboard shortcuts');
+  // chrome://extensions/shortcuts/ (a trailing slash) still finds the page's styles and script.
+  const slash = await openPage('shortcuts/', { colorScheme: 'dark', answers: { 'page:extension-shortcuts': SHORTCUTS } });
+  await slash.page.waitForSelector('.sc-box');
+  assert.ok(await slash.page.evaluate(() => document.styleSheets.length === 3 && [...document.styleSheets].every((x) => x.cssRules.length > 0)), 'styles loaded');
+  assert.deepEqual(slash.errors, []);
+  await slash.page.close();
   assert.match(await page.innerText('#sc-list'), /Dark Reader\s+Activate the extension[\s\S]*Toggle for this site\s+Its suggested shortcut is turned off or changed\.\s+Not set/);
   if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'extension-shortcuts.png') });
   const box = '.sc-box[data-name="toggle"]';

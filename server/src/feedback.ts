@@ -3,7 +3,8 @@
 // include: what happened, and if they ticked it, an email to reply to, the
 // page's address, a screenshot and system info (versions and OS). Senders are
 // limited to a few reports an hour (by account, or by a hash of their network
-// address). The owner reads them on /admin; they're deleted after 180 days.
+// address, forgotten after that hour). The owner reads them on /admin; they're
+// deleted after 180 days.
 import type { User } from './auth.ts';
 import { type Env, json, randomHex, sha256 } from './util.ts';
 
@@ -30,8 +31,10 @@ function cleanSystem(v: unknown) {
 
 // POST /api/feedback
 export async function postFeedback(request: Request, env: Env, user: User | null, now = Date.now()) {
+  const tooBig = () => bad('That report is too big. Leave out the screenshot and try again.', 413, 'too_large');
+  if (Number(request.headers.get('content-length') || 0) > MAX_SHOT + 60_000) return tooBig(); // before reading it
   const raw = await request.text();
-  if (raw.length > MAX_SHOT + 60_000) return bad('That report is too big. Leave out the screenshot and try again.', 413, 'too_large');
+  if (raw.length > MAX_SHOT + 60_000) return tooBig();
   let body: Body;
   try { body = JSON.parse(raw); } catch { return bad('That report couldn’t be read.'); }
   if (!body || typeof body !== 'object') return bad('That report couldn’t be read.');
@@ -104,7 +107,9 @@ export async function deleteFeedback(env: Env, user: User, id: string) {
   return json({ ok: !!r.meta.changes });
 }
 
-// Cron: reports older than 180 days go.
+// Cron: reports older than 180 days go, and once the hourly limit is past,
+// the network address hash goes too (an account's id stays with its report).
 export async function feedbackCleanup(env: Env, now = Date.now()) {
   await env.DB.prepare('DELETE FROM feedback WHERE created_at < ?1').bind(now - FEEDBACK_DAYS * 24 * HOUR).run();
+  await env.DB.prepare("UPDATE feedback SET sender = '' WHERE sender LIKE 'ip:%' AND created_at < ?1").bind(now - HOUR).run();
 }

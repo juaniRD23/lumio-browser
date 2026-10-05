@@ -145,4 +145,8 @@ test('reports older than 180 days are deleted', async () => {
   sql.prepare("UPDATE feedback SET created_at = ? WHERE description = 'old one'").run(Date.now() - (FEEDBACK_DAYS + 1) * 86400e3);
   await feedbackCleanup(env);
   assert.deepEqual(sql.prepare('SELECT description FROM feedback').all().map((r) => r.description), ['new one']);
+  // The network address hash is only kept for the hourly limit.
+  assert.match(sql.prepare('SELECT sender FROM feedback').get().sender, /^ip:/);
+  await feedbackCleanup(env, Date.now() + 2 * 3600e3);
+  assert.equal(sql.prepare('SELECT sender FROM feedback').get().sender, '');
 });
