@@ -22,13 +22,13 @@ body {
 .row .u { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--label); flex: 1 1 0; min-width: 0; }
 .row .u::before { content: '— '; }
 .row .hint { color: var(--accent); font-size: 11.5px; flex: none; }
-.row.search .hint { color: var(--label); }
+.row.search .hint { color: var(--muted); }
 .row.ai .t { color: var(--text-strong); }
 .dl { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; height: 54px; }
 .dl:hover { background: var(--overlay-3); }
 .dl .meta { flex: 1; min-width: 0; }
 .dl .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dl .sub { color: var(--label); font-size: 11.5px; }
+.dl .sub { color: var(--muted); font-size: 11.5px; }
 .dl .bar { height: 3px; border-radius: 3px; background: var(--overlay-4); margin-top: 5px; overflow: hidden; }
 .dl .bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
 .dl button { font: inherit; font-size: 12px; color: var(--text-soft); background: var(--active); border: 0; border-radius: 7px; height: 26px; padding: 0 9px; }
@@ -99,7 +99,7 @@ svg { display: block; }
 .af-user { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .af-dots { color: var(--label); font-size: 12px; letter-spacing: 1px; }
 .af-pw { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; color: var(--accent); margin-top: 2px; }
-.af-note { color: var(--label); font-size: 11.5px; margin-top: 2px; }
+.af-note { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
 .af-gen { border-bottom: 1px solid var(--line); border-radius: 8px 8px 0 0; margin-bottom: 2px; }
 .af-manage { display: block; width: 100%; height: 34px; margin-top: 2px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--accent); font: inherit; font-size: 12.5px; text-align: left; padding: 0 10px; }
 .af-manage:hover { background: var(--overlay-3); }

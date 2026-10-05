@@ -48,7 +48,7 @@ select.field.small, .field.small { height: 32px; font-size: 13px; border-radius:
 .toolbar { display: flex; gap: 8px; align-items: center; margin: 6px 0 14px; flex-wrap: wrap; }
 .toolbar input { flex: 1; min-width: 200px; }
 .row.setting { cursor: default; }
-.row.setting select { width: 200px; }
+.row.setting select { width: 220px; } /* fits "Block in Incognito (default)" */
 
 /* keyboard focus */
 :is(.row.link, .row.expander, .back, .btn, a.title):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }

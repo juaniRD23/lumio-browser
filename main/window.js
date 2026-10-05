@@ -172,8 +172,12 @@ class BrowserWin {
   }
 
   showOverlay(rect, payload) {
-    // Another dropdown takes the place of a chooser: the chooser's question is cancelled.
-    if (this.overlayKind && this.overlayKind !== payload?.kind) this.app.onOverlayClosed?.(this, this.overlayKind);
+    // Another dropdown takes the place of a chooser or the screen sharing
+    // picker: its question is cancelled, so the page isn't left waiting.
+    if (this.overlayKind && this.overlayKind !== payload?.kind) {
+      if (this.overlayKind === 'screenshare') this.app.onScreenSharePickerClosed?.(this);
+      this.app.onOverlayClosed?.(this, this.overlayKind);
+    }
     const [w, h] = this.win.getContentSize();
     const x = Math.max(0, Math.min(Math.round(rect.x), w - 40));
     const y = Math.max(0, Math.round(rect.y));

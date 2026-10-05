@@ -57,7 +57,7 @@ function renderList() {
     <button class="pw-item ${selected === e.id ? 'sel' : ''}" data-id="${esc(e.id)}" role="listitem">
       ${icon(e.origin)}
       <span class="meta"><span class="site" style="display:block">${esc(e.site)}</span><span class="user" style="display:block">${esc(e.username || '(no username)')}</span></span>
-      ${compromised(e) ? '<span class="flag reused">Compromised</span>' : ''}${e.reused ? '<span class="flag reused">Reused</span>' : ''}${e.weak ? '<span class="flag weak">Weak</span>' : ''}
+      ${compromised(e) ? '<span class="flag compromised">Compromised</span>' : ''}${e.reused ? '<span class="flag reused">Reused</span>' : ''}${e.weak ? '<span class="flag weak">Weak</span>' : ''}
     </button>`).join('') : '<div class="placeholder">No passwords match.</div>';
   fixIcons($('#list'));
 }

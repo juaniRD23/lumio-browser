@@ -268,6 +268,9 @@ class NavigationGuard {
       setImmediate(() => { if (!wc.isDestroyed()) this.tidy(wc, url); });
       if (!url.startsWith(INTERSTITIAL)) this.shown.delete(id);
     });
+    // A new navigation (not a redirect) isn't the https site sending us back:
+    // an upgrade the person stopped mustn't make the next visit a warning.
+    wc.on('did-start-navigation', (d) => { if (d?.isMainFrame && !d.isSameDocument) this.upgrades.delete(id); });
     wc.once('destroyed', () => { for (const m of [this.blocked, this.shown, this.upgrades, this.formHints, this.formPass]) m.delete(id); });
   }
 

@@ -40,7 +40,8 @@ export function initCaptureBar({ api }) {
     const html = barText(t);
     bar.hidden = !html;
     shownFor = html ? t.wcId : null;
-    if (!html) { bar.innerHTML = ''; return; }
+    // Forget what was drawn, so the bar is drawn again when it comes back.
+    if (!html) { bar.innerHTML = ''; delete bar.dataset.key; return; }
     const key = `${t.wcId}|${html}`;
     if (bar.dataset.key === key) return; // keep the button (and its focus) as it is
     bar.dataset.key = key;
@@ -48,7 +49,10 @@ export function initCaptureBar({ api }) {
   });
   bar.addEventListener('click', (e) => {
     if (!e.target.closest('.cb-stop') || shownFor == null) return;
-    e.target.closest('.cb-stop').disabled = true; // until the capture really ends
+    const btn = e.target.closest('.cb-stop');
+    btn.disabled = true; // until the capture really ends
     api.send('capture:stop', shownFor);
+    // Still sharing a while later (the page didn't stop): let the person try again.
+    setTimeout(() => { if (btn.isConnected) btn.disabled = false; }, 5000);
   });
 }

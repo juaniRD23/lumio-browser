@@ -272,7 +272,7 @@ api.on('overlay-data', (payload) => {
   else if (kind === 'pwsave') { renderPwSave(payload); reportSize(); }
   else if (kind === 'passkey') { renderPasskey(payload); reportSize(); }
   else if (kind === 'update') { renderUpdateCard(payload); reportSize(); }
-  else if (kind === 'screenshare') renderScreenShare(payload);
+  else if (kind === 'screenshare') { renderScreenShare(payload); reportSize(); }
 });
 
 card.addEventListener('change', (e) => {
@@ -284,7 +284,11 @@ card.addEventListener('change', (e) => {
 });
 
 // The screen sharing picker with the keyboard: Enter or Space on a choice, Esc to cancel.
-card.addEventListener('click', (e) => { if (kind === 'screenshare' && e.detail === 0) pickShare(e); });
+card.addEventListener('click', (e) => {
+  if (kind === 'screenshare' && e.detail === 0) pickShare(e);
+  // Keep or Discard a risky download with the keyboard too (the mouse acts on mousedown below).
+  if (kind === 'downloads' && e.detail === 0) downloadAct(e);
+});
 card.addEventListener('keydown', (e) => {
   if (kind !== 'screenshare' || e.key !== 'Escape') return;
   e.preventDefault();
@@ -368,10 +372,12 @@ card.addEventListener('mousedown', async (e) => {
   if (kind === 'suggest') {
     const row = e.target.closest('.row');
     if (row) api.send('overlay:pick', { kind, index: Number(row.dataset.i) });
-  } else if (kind === 'downloads') {
-    const btn = e.target.closest('button[data-act]');
-    if (!btn) return;
-    api.send('download:action', { id: btn.dataset.id, action: btn.dataset.act });
-    if (['open', 'show', 'all'].includes(btn.dataset.act)) api.send('overlay:pick', { kind });
-  }
+  } else if (kind === 'downloads') downloadAct(e);
 });
+
+function downloadAct(e) {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  api.send('download:action', { id: btn.dataset.id, action: btn.dataset.act });
+  if (['open', 'show', 'all'].includes(btn.dataset.act)) api.send('overlay:pick', { kind });
+}

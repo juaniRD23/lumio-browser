@@ -547,6 +547,10 @@ for (const scheme of ['light', 'dark']) {
     assert.deepEqual((await sent('download:action')).at(-1), { id: 'd1', action: 'keep' });
     await page.click('[data-act=discard]');
     assert.deepEqual((await sent('download:action')).at(-1), { id: 'd1', action: 'discard' });
+    const clicks = (await sent('download:action')).length;
+    await page.focus('[data-act=keep]');
+    await page.keyboard.press('Enter');
+    assert.deepEqual((await sent('download:action')).slice(clicks), [{ id: 'd1', action: 'keep' }], 'the keyboard works too, once');
     assert.equal((await sent('overlay:pick')).length, 0, 'the bubble stays open');
 
     // Screen sharing: a tab, a screen or a window.
@@ -609,6 +613,9 @@ for (const scheme of ['light', 'dark']) {
     await emit('tabs', { activeId: 2, tabs: TABS.tabs });
     assert.equal(await page.isVisible('#capture-bar'), false);
     assert.deepEqual(await page.$$eval('.tab .rec-dot', (els) => els.map((e) => e.hidden)), [true, true]);
+    // The same sharing again (back to that tab): the bar is drawn again, not left empty.
+    await emit('tabs', { activeId: 2, tabs: [{ ...TABS.tabs[0] }, { ...TABS.tabs[1], capture: { sharedTo: 'meet.example.com' } }] });
+    assert.equal(await page.textContent('#capture-bar .cb-t'), 'Sharing this tab with meet.example.com');
     await page.close();
     assert.deepEqual(errors, []);
   });

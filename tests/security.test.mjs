@@ -222,6 +222,32 @@ test('guard: HTTPS-First upgrades http pages, warns when https fails or sends yo
   assert.equal(httpsUrlFor('http://a.test:8080/x'), null);
 });
 
+test('guard: HTTPS-First forgets an upgrade when a new navigation starts, so a stopped one never turns into a warning', async () => {
+  const { guard, wc, nav } = guardSetup({ settings: { httpsFirst: true } });
+  const events = new EventEmitter();
+  wc.on = events.on.bind(events);
+  wc.once = events.once.bind(events);
+  guard.attach({ view: { webContents: wc } });
+  assert.deepEqual(await nav('http://slow.example.org/'), { redirectURL: 'https://slow.example.org/' });
+  // The person stops it (no load failure reaches the guard), then types it again.
+  events.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false, url: 'http://slow.example.org/' });
+  assert.deepEqual(await nav('http://slow.example.org/'), { redirectURL: 'https://slow.example.org/' }, 'tried over https again, not warned');
+  // A redirect inside the same navigation still counts as being sent back.
+  assert.deepEqual(await nav('http://slow.example.org/'), { cancel: true });
+});
+
+test('AI: Lumio AI can leave a security warning but never read, click or open one', async () => {
+  const { tools } = require('../main/ai/tools/browser.js');
+  const wc = { getURL: () => 'lumio://interstitial/?type=unsafe&url=https%3A%2F%2Fevil.example%2F', getTitle: () => 'Dangerous site', navigationHistory: { canGoBack: () => false } };
+  const tab = { id: 1, url: wc.getURL(), view: { webContents: wc } };
+  const ctx = { tabs: { active: tab, activeId: 1, get: () => tab, ensureView: () => {}, activate: () => {}, searchTemplate: () => 'https://s.example/?q=%s', navigate: () => {} } };
+  const tool = (name) => tools.find((t) => t.name === name);
+  await assert.rejects(tool('read_page').run({}, ctx), /security warning/);
+  await assert.rejects(tool('click').run({ ref: 1 }, ctx), /security warning/);
+  await assert.rejects(tool('navigate').run({ url: 'lumio://interstitial/?type=unsafe&url=https%3A%2F%2Fevil.example%2F' }, ctx), /only open web pages/);
+  assert.match(await tool('go_back').run({}, ctx), /Can't go back/, 'going back is fine');
+});
+
 test('guard: a lookalike of a well-known site asks "Did you mean …?"; visited sites and Ignore are left alone', async () => {
   const { guard, wc, loads, nav } = guardSetup({ visited: ['rnicrosoft.com'] });
   assert.deepEqual(await nav('https://paypa1.com/signin'), { cancel: true });
