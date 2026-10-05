@@ -3,10 +3,16 @@
 // Windows the menu bar is hidden: the same menu still provides the shortcuts,
 // and the ⋮ button opens buildBrowserMenu() instead.
 const { Menu } = require('electron');
+const shortcuts = require('./shortcuts');
 
 const MAC = process.platform === 'darwin';
 
+// state.shortcuts: the shortcuts the person picked (main/shortcuts.js).
 function buildMenu(cmd, state = {}) {
+  return Menu.buildFromTemplate(shortcuts.apply(menuTemplate(cmd, state), state.shortcuts));
+}
+
+function menuTemplate(cmd, state = {}) {
   const hidden = (accelerator, click) => ({ label: accelerator, accelerator, click, visible: false, acceleratorWorksWhenHidden: true });
   const tabKeys = Array.from({ length: 9 }, (_, i) => hidden(`CmdOrCtrl+${i + 1}`, () => cmd.tabIndex(i + 1)));
 
@@ -82,12 +88,14 @@ function buildMenu(cmd, state = {}) {
         {
           label: 'Appearance',
           submenu: [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']]
-            .map(([id, label]) => ({ label, type: 'radio', checked: state.appearance === id, click: () => cmd.setAppearance(id) })),
+            // Force dark mode keeps Lumio dark until it's off (main/force-dark.js).
+            .map(([id, label]) => ({ label, type: 'radio', checked: state.appearance === id, enabled: !state.darkForced, click: () => cmd.setAppearance(id) })),
         },
         { label: 'Always Show Bookmarks Bar', type: 'checkbox', checked: !!state.bookmarksBar, accelerator: 'CmdOrCtrl+Shift+B', click: cmd.toggleBookmarksBar },
         { label: 'Show/Hide Sidebar', accelerator: 'CmdOrCtrl+Shift+S', click: cmd.toggleSidebar },
         { label: 'Show/Hide Lumio AI', accelerator: 'CmdOrCtrl+Shift+L', click: cmd.togglePanel },
         { label: 'Ask Lumio', accelerator: 'CmdOrCtrl+J', click: cmd.focusAI },
+        { label: 'Caret Browsing', type: 'checkbox', checked: !!state.caretBrowsing, accelerator: 'F7', click: cmd.toggleCaretBrowsing },
         { type: 'separator' },
         { label: 'Developer Tools', accelerator: MAC ? 'Cmd+Alt+I' : 'Ctrl+Shift+I', click: cmd.devtools },
         ...(MAC ? [] : [hidden('F12', cmd.devtools)]),
@@ -119,10 +127,13 @@ function buildMenu(cmd, state = {}) {
     },
     {
       label: 'Window',
+      ...(MAC ? { role: 'windowMenu' } : {}), // macOS lists the open windows here, by title (or name)
       submenu: [
         ...(MAC ? [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }] : []),
-        { label: 'Pin/Unpin Tab', click: cmd.pinTab },
-        { label: 'Move Tab to New Window', click: cmd.moveTabToNewWindow },
+        // An id lists a command without a shortcut in Settings › Keyboard shortcuts (main/shortcuts.js).
+        { id: 'name-window', label: 'Name Window…', click: cmd.nameWindow },
+        { id: 'pin-unpin-tab', label: 'Pin/Unpin Tab', click: cmd.pinTab },
+        { id: 'move-tab-to-new-window', label: 'Move Tab to New Window', click: cmd.moveTabToNewWindow },
         { type: 'separator' },
         { label: 'Show Next Tab', accelerator: MAC ? 'Cmd+Shift+]' : 'Ctrl+PageDown', click: () => cmd.cycle(1) },
         { label: 'Show Previous Tab', accelerator: MAC ? 'Cmd+Shift+[' : 'Ctrl+PageUp', click: () => cmd.cycle(-1) },
@@ -134,13 +145,14 @@ function buildMenu(cmd, state = {}) {
       ],
     },
   ];
-  return Menu.buildFromTemplate(template);
+  return template;
 }
 
 // The ⋮ menu (Windows), laid out like Chrome's.
 function buildBrowserMenu(cmd, state = {}) {
   const k = (mac, win) => (MAC ? mac : win);
-  return Menu.buildFromTemplate([
+  // Shows the shortcuts as the person set them (main/shortcuts.js).
+  return Menu.buildFromTemplate(shortcuts.follow(menuTemplate(cmd, state), state.shortcuts, [
     { label: 'New tab', accelerator: 'CmdOrCtrl+T', click: cmd.newTab },
     { label: 'New window', accelerator: 'CmdOrCtrl+N', click: cmd.newWindow },
     { label: 'New Incognito window', accelerator: 'CmdOrCtrl+Shift+N', click: cmd.newIncognito },
@@ -171,7 +183,7 @@ function buildBrowserMenu(cmd, state = {}) {
     { label: 'About Lumio Browser', click: cmd.about },
     { type: 'separator' },
     { role: 'quit', label: MAC ? 'Quit Lumio Browser' : 'Exit' },
-  ]);
+  ]));
 }
 
-module.exports = { buildMenu, buildBrowserMenu };
+module.exports = { buildMenu, buildBrowserMenu, menuTemplate };

@@ -12,6 +12,8 @@ if (process.env.LUMIO_USER_DATA) app.setPath('userData', process.env.LUMIO_USER_
 else if (FLAVOR.beta) app.setPath('userData', path.join(app.getPath('appData'), FLAVOR.name));
 if (process.env.LUMIO_DOWNLOADS) app.setPath('downloads', process.env.LUMIO_DOWNLOADS); // tests
 app.setName(FLAVOR.name);
+// Force dark mode for web contents is a startup switch (main/force-dark.js).
+require('./force-dark').applyAtStartup(app);
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'lumio', privileges: { standard: true, secure: true, supportFetchAPI: true, codeCache: true } },
@@ -23,7 +25,7 @@ const { BrowserWin } = require('./window');
 const { registerUiProtocol, registerPagesProtocol } = require('./protocol');
 const theme = require('./theme');
 const { chromeUserAgent, Downloads, Permissions } = require('./features');
-const { buildMenu, buildBrowserMenu } = require('./menu');
+const { buildMenu, buildBrowserMenu, menuTemplate } = require('./menu');
 const { suggest, topSites } = require('./omnibox');
 const { ChatStore } = require('./ai/chats');
 const { MacHelper } = require('./mac/helper');
@@ -41,6 +43,8 @@ const { Projects } = require('./projects');
 const { SyncEngine } = require('./sync/engine');
 const syncAdapters = require('./sync/adapters');
 const { CompanionBridge } = require('./sync/companion');
+const tabLayout = require('./tab-layout');
+const powerUser = require('./power-user');
 
 const IS_DEV = !app.isPackaged;
 
@@ -148,7 +152,7 @@ const services = {
   onFocus: (w) => { lastFocused = w; },
   onClose: (w) => {
     if (quitting || w.incognito || !w.tabs.tabs.length) return;
-    recentlyClosed.push({ kind: 'window', ...w.session(), title: w.tabs.active?.title || 'Window', time: Date.now() });
+    recentlyClosed.push({ kind: 'window', ...w.session(), title: w.name || w.tabs.active?.title || 'Window', time: Date.now() });
     if (recentlyClosed.length > 25) recentlyClosed.shift();
     menuChanged();
   },
@@ -248,6 +252,7 @@ function menuState() {
   return {
     bookmarksBar: !!store.settings.showBookmarksBar,
     appearance: theme.appearance(),
+    ...powerUser.menuState(store), // Caret Browsing's checkmark, the shortcuts people picked
     recentlyClosed: recentlyClosed.slice(-10).reverse().map((e, i) => ({
       label: e.kind === 'window' ? `${e.tabs.length} Tab${e.tabs.length === 1 ? '' : 's'} (${e.title})` : e.title || e.url,
       index: recentlyClosed.length - 1 - i,
@@ -265,7 +270,7 @@ function reopenClosed(index = recentlyClosed.length - 1) {
   const [e] = recentlyClosed.splice(index, 1);
   if (!e) return;
   menuChanged();
-  if (e.kind === 'window') { createWindow({ tabs: e.tabs, active: e.active, bounds: e.bounds }); return; }
+  if (e.kind === 'window') { createWindow({ tabs: e.tabs, active: e.active, bounds: e.bounds, layout: e.layout, name: e.name }); return; }
   const target = alive().find((x) => x.id === e.windowId) || normalWin();
   if (!target) { createWindow({ urls: [e.url] }); return; }
   target.tabs.create(e.url, { index: e.index, title: e.title, pinned: e.pinned });
@@ -340,6 +345,8 @@ const cmd = {
   cycle: (dir) => cur()?.tabs.cycle(dir),
   tabIndex: (n) => cur()?.tabs.activateIndex(n),
   makeDefault: () => makeDefaultBrowser(),
+  nameWindow: () => powerUser.nameWindow(cur()),
+  toggleCaretBrowsing: () => powerUser.toggleCaretBrowsing(cur()),
   webStore: () => { const w = normalWin() || createWindow(); w.tabs.create('https://chromewebstore.google.com/'); w.focus(); },
 };
 
@@ -705,6 +712,7 @@ function registerIpc() {
     downloads: w.profile.downloads.list(),
     panel: { open: store.settings.panelOpen, width: store.settings.panelWidth },
     sidebar: { open: store.settings.sidebarOpen !== false, getStarted: store.settings.getStartedDone !== true },
+    tabLayout: w.tabLayout, // tabs at the top or to the side (main/tab-layout.js)
     ai: w.ai.state(),
     bookmarks: bookmarksPayload(),
     account: account.state(),
@@ -743,6 +751,15 @@ function registerIpc() {
   on('tab:bookmark', (w) => toggleBookmark(w));
   on('tab:focus-page', (w) => w.tabs.wc()?.focus());
   on('tab:context', (w, id) => tabContextMenu(w, id));
+  on('tab:strip-context', (w) => stripContextMenu(w));
+  // Tabs to the side (main/tab-layout.js) and split view (main/split-view.js).
+  on('layout:tabs', (w, patch) => tabLayout.set(w, patch || {}, store));
+  on('layout:split', (w, rects) => w.tabs.split.setRects(rects));
+  on('layout:split-preview', (w, rect) => w.tabs.split.setPreview(rect));
+  on('tab:split', (w, { id, base, side } = {}) => w.tabs.split.dropOnEdge(id, { base, side }));
+  on('tab:split-ratio', (w, { id, ratio } = {}) => w.tabs.split.setRatio(id, ratio));
+  on('tab:split-swap', (w, id) => w.tabs.split.swap(id));
+  on('tab:split-separate', (w, id) => w.tabs.split.separate(id));
   on('window:new', () => createWindow());
   on('app:menu', (w, { x, y }) => {
     buildBrowserMenu(cmd, menuState()).popup({ window: w.win, x: Math.max(0, Math.round(x) - 290), y: Math.round(y) });
@@ -976,6 +993,7 @@ function registerIpc() {
     approvalMode: store.settings.approvalMode,
     showBookmarksBar: !!store.settings.showBookmarksBar,
     appearance: theme.appearance(),
+    verticalTabs: !!store.settings.verticalTabs,
     ai: w.ai.state(),
     version: app.getVersion(),
     update: updater?.state || null,
@@ -1035,6 +1053,7 @@ function registerIpc() {
     if (key === 'approvalMode') w.ai.setMode(value);
     if (key === 'reasoning') w.ai.setReasoning(value);
     if (key === 'showBookmarksBar') setBookmarksBar(!!value);
+    if (key === 'verticalTabs') { store.setSetting('verticalTabs', !!value); alive().forEach((x) => tabLayout.set(x, { vertical: !!value }, store)); }
     if (key === 'appearance' && theme.APPEARANCES.includes(value)) store.setSetting('appearance', value);
     if (key === 'startup' && ['restore', 'newtab'].includes(value)) store.setSetting('startup', value);
     if (key === 'askDownload') store.setSetting('askDownload', !!value);
@@ -1176,12 +1195,27 @@ function tabContextMenu(w, id) {
     { label: tab.pinned ? 'Unpin Tab' : 'Pin Tab', click: () => tabs.setPinned(id, !tab.pinned) },
     { label: tab.muted ? 'Unmute Site' : 'Mute Site', click: () => tabs.toggleMute(id) },
     { label: 'Move Tab to New Window', enabled: tabs.tabs.length > 1, click: () => moveTabToNewWindow(w, id) },
+    ...tabs.split.menuItems(tab),
     { type: 'separator' },
     { label: 'Close Tab', click: () => tabs.close(id) },
     { label: 'Close Other Tabs', enabled: tabs.tabs.length > 1, click: () => tabs.tabs.filter((t) => t.id !== id && !t.pinned).forEach((t) => tabs.close(t.id)) },
     { label: 'Close Tabs to the Right', enabled: i < tabs.tabs.length - 1, click: () => tabs.tabs.slice(i + 1).forEach((t) => tabs.close(t.id)) },
     { type: 'separator' },
     { label: 'Reopen Closed Tab', enabled: closedCount > 0, click: () => reopenClosed() },
+    { type: 'separator' },
+    ...tabLayout.menuItems(w, store),
+  ]).popup({ window: w.win });
+}
+
+// Right-click on the tab strip (or the tabs column) away from a tab.
+function stripContextMenu(w) {
+  const closedCount = w.incognito ? w.closedTabs.length : recentlyClosed.length;
+  Menu.buildFromTemplate([
+    { label: 'New Tab', click: () => { w.tabs.create(NEWTAB); setTimeout(() => w.focusOmnibox(), 30); } },
+    { label: 'Reopen Closed Tab', enabled: closedCount > 0, click: () => reopenClosed() },
+    { label: 'Name Window…', click: () => powerUser.nameWindow(w) },
+    { type: 'separator' },
+    ...tabLayout.menuItems(w, store),
   ]).popup({ window: w.win });
 }
 
@@ -1405,16 +1439,18 @@ app.whenReady().then(async () => {
   ]);
 
   registerIpc();
+  // Window names, shortcuts, caret browsing, force dark, protocol handlers.
+  powerUser.setup({ store, on, handle, internalHandle, windows: alive, tabOf: tabOfWc, menuChanged, menuTemplate: () => menuTemplate(cmd, menuState()) });
   Menu.setApplicationMenu(buildMenu(cmd, menuState()));
 
-  const saved = store.settings.startup === 'newtab' ? [] : store.sessionWindows();
+  const saved = store.settings.startup === 'newtab' && !powerUser.restoreAfterRelaunch() ? [] : store.sessionWindows();
   // First launch: the welcome screens (people updating from an older version
   // already have history, bookmarks or tabs, and skip them).
   if (store.settings.onboarded !== true && (saved.length || store.history().length || store.bookmarks().length)) store.setSetting('onboarded', true);
   if (store.settings.onboarded !== true && (!process.env.LUMIO_TEST || process.env.LUMIO_TEST_WELCOME)) {
     store.setSetting('panelOpen', false);
     createWindow({ tabs: [{ url: 'lumio://welcome/', title: 'Welcome to Lumio Browser' }], active: 0 });
-  } else if (saved.length) saved.forEach((s) => createWindow({ tabs: s.tabs, active: s.active, bounds: s.bounds }));
+  } else if (saved.length) saved.forEach((s) => createWindow({ tabs: s.tabs, active: s.active, bounds: s.bounds, layout: s.layout, name: s.name }));
   else createWindow();
   // Windows passes links to open on the command line.
   if (process.platform !== 'darwin' && !process.env.LUMIO_TEST) pendingUrls.push(...launchTargets(process.argv.slice(1)));
@@ -1463,7 +1499,7 @@ async function snapshot(w = cur()) {
       }
     }
   };
-  if (tabs.active?.view) await paste(tabs.active.view);
+  for (const t of tabs.tabs) if (t.view && tabs.split.isShown(t.id)) await paste(t.view); // both sides of a split view
   const bar = w.indicator?.bar;
   if (bar && win.contentView.children.includes(bar)) await paste(bar);
   if (win.contentView.children.includes(overlay)) await paste(overlay);

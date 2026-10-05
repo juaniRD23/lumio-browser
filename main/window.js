@@ -8,6 +8,8 @@ const { TabManager, NEWTAB } = require('./tabs');
 const { AIController } = require('./ai/controller');
 const { PageIndicator } = require('./ai/indicators');
 const theme = require('./theme');
+const tabLayout = require('./tab-layout');
+const windowName = require('./window-name');
 
 // Bundled by scripts/build-preload.mjs (it includes the extension toolbar code).
 const SHELL_PRELOAD = path.join(__dirname, '..', 'preload', 'dist', 'shell.js');
@@ -40,13 +42,14 @@ function visibleBounds(b) {
 
 class BrowserWin {
   // app: services from main.js. profile: { session, downloads, permissions, chats }.
-  constructor(app, profile, { incognito = false, tabs = null, active = 0, bounds = null, urls = [], adopt = null, near = null } = {}) {
+  constructor(app, profile, { incognito = false, tabs = null, active = 0, bounds = null, urls = [], adopt = null, near = null, layout = null, name = null } = {}) {
     this.app = app;
     this.profile = profile;
     this.id = nextWindowId++;
     this.incognito = incognito;
     this.closedTabs = []; // incognito only; normal windows use the app-wide list
     this.closing = false;
+    this.tabLayout = tabLayout.initial(app.store, layout); // tabs at the top or to the side (main/tab-layout.js)
 
     const colors = theme.colors(theme.isDark(incognito), incognito);
     this.win = new BrowserWindow({
@@ -58,12 +61,13 @@ class BrowserWin {
         ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 15 } }
         // Windows: our tab strip is the title bar; Windows draws its own
         // minimize / maximize / close buttons at its right end.
-        : { titleBarStyle: 'hidden', titleBarOverlay: { color: colors.frame, symbolColor: colors.symbol, height: 40 }, autoHideMenuBar: true }),
+        : { titleBarStyle: 'hidden', titleBarOverlay: { color: colors.frame, symbolColor: colors.symbol, height: tabLayout.captionHeight(this.tabLayout) }, autoHideMenuBar: true }),
       backgroundColor: colors.frame,
       show: false,
       webPreferences: { preload: SHELL_PRELOAD, contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: true },
     });
     if (process.platform !== 'darwin') this.win.setMenuBarVisibility(false);
+    windowName.init(this, name); // Name Window… (main/window-name.js)
     // Incognito is always dark: its UI is served already dark (main/protocol.js).
     const query = incognito ? '?appearance=dark' : '';
     this.win.loadURL('lumio://shell/' + query);
@@ -96,6 +100,7 @@ class BrowserWin {
         onViewDestroyed: (wc) => profile.permissions.dropFor(wc.id),
         openInNewWindow: (url, inc) => app.createWindow({ incognito: inc, urls: [url] }),
         savePage: (tab) => app.savePage(this, tab),
+        focusOmnibox: () => this.focusOmnibox(),
         contextMenuExtras: (tab, params) => app.contextMenuExtras(this, tab, params),
       },
     });
@@ -169,13 +174,18 @@ class BrowserWin {
   }
 
   showOverlay(rect, payload) {
+    // The tabs flyout (hovering collapsed tabs) never covers a dropdown that's open.
+    if (payload?.kind === 'vtabs' && this.overlayKind && this.overlayKind !== 'vtabs') { this.emit('overlay-picked', { kind: 'vtabs' }); return; }
     const [w, h] = this.win.getContentSize();
     const x = Math.max(0, Math.min(Math.round(rect.x), w - 40));
     const y = Math.max(0, Math.round(rect.y));
     this.overlay.setBounds({ x, y, width: Math.min(Math.round(rect.width), w - x), height: Math.min(Math.round(rect.height), h - y) });
-    this.win.contentView.addChildView(this.overlay);
+    // Re-adding a view detaches it for a moment: only when it isn't on top already (a dropdown refreshing, like the tabs flyout).
+    if (this.win.contentView.children.at(-1) !== this.overlay) this.win.contentView.addChildView(this.overlay);
+    if (this.overlayKind === 'vtabs' && payload?.kind !== 'vtabs') this.emit('overlay-picked', { kind: 'vtabs' }); // replaced: the shell stops updating it
     this.overlayKind = payload?.kind || null;
     this.overlay.webContents.send('overlay-data', payload);
+    if (this.overlayKind === 'vtabs') tabLayout.watchFlyout(this);
   }
 
   hideOverlay() {
@@ -183,6 +193,7 @@ class BrowserWin {
     this.overlayKind = null;
     if (kind === 'passkey') this.app.onPasskeyPromptClosed?.(this);
     if (kind === 'screenshare') this.app.onScreenSharePickerClosed?.(this);
+    if (kind === 'vtabs') this.emit('overlay-picked', { kind }); // the tabs flyout closed
     if (!this.win.isDestroyed() && this.win.contentView.children.includes(this.overlay)) {
       this.win.contentView.removeChildView(this.overlay);
     }
@@ -206,7 +217,7 @@ class BrowserWin {
   }
 
   session() {
-    return { tabs: this.tabs.sessionTabs(), active: Math.max(0, this.tabs.tabs.findIndex((t) => t.id === this.tabs.activeId)), bounds: this.win.getBounds() };
+    return { tabs: this.tabs.sessionTabs(), active: Math.max(0, this.tabs.tabs.findIndex((t) => t.id === this.tabs.activeId)), bounds: this.win.getBounds(), layout: this.tabLayout, ...windowName.sessionField(this) };
   }
 }
 

@@ -12,6 +12,7 @@ const EVENTS = new Set([
   'overlay-picked', 'toast', 'zoom', 'fullscreen', 'agent-state', 'bookmarks', 'site-info', 'extensions-changed',
   'account', 'profile', 'passwords-prompt', 'passwords-changed', 'aura', 'update', 'update-announce', 'ai-build-doc', 'ai-open-chat',
   'ai-workflow', 'workflows-changed', 'sync-state', 'sync-pair-request', 'sidebar-changed', 'sidebar-toggle',
+  'tab-layout', 'shortcut-hints',
 ]);
 
 contextBridge.exposeInMainWorld('lumio', {

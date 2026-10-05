@@ -21,6 +21,7 @@
       <a href="#autofill">Passwords and autofill</a>
       <a href="#privacy">Privacy and security</a>
       <a href="#appearance">Appearance</a>
+      <a href="#keyboard">Keyboard</a>
       <a href="#performance">Performance</a>
       <a href="#search">Search engine</a>
       <a href="#downloads">Downloads</a>
@@ -260,6 +261,8 @@
         </div>
         <h3 id="sites">Site settings</h3>
         <div class="card" id="site-list"></div>
+        <h3 id="protocol-handlers">Protocol handlers</h3>
+        <div class="card" id="handler-list"></div>
       </section>
 
       <!-- Appearance -->
@@ -267,7 +270,7 @@
         <h2>Appearance</h2>
         <div class="card">
           <div class="row">
-            <div class="grow"><div class="title">Theme</div><div class="desc">System follows your computer’s light or dark setting. Incognito windows are always dark.</div></div>
+            <div class="grow"><div class="title">Theme</div><div class="desc">System follows your computer’s light or dark setting. Incognito windows are always dark.<span id="theme-forced" hidden> Force dark mode is on, so Lumio stays dark.</span></div></div>
             <div class="modes seg" role="radiogroup" aria-label="Theme">
               <label><input type="radio" name="appearance" value="system" />System</label>
               <label><input type="radio" name="appearance" value="light" />Light</label>
@@ -278,10 +281,37 @@
             <div class="grow"><div class="title">Show bookmarks bar</div><div class="desc">Your bookmarks under the address bar (<span class="kbd-mod">⌘</span>⇧B).</div></div>
             <span class="switch"><input type="checkbox" id="bm-bar"><i></i></span>
           </label>
+          <label class="row" style="cursor:pointer">
+            <div class="grow"><div class="title">Show tabs to the side</div><div class="desc">Tabs in a column next to the page instead of across the top. Right-click a tab to switch one window; each window remembers its own.</div></div>
+            <span class="switch"><input type="checkbox" id="vertical-tabs"><i></i></span>
+          </label>
           <div class="row">
             <div class="grow"><div class="title">Theme color</div><div class="desc">Change it under Customize profile.</div></div>
             <a class="btn" href="#profile" style="display:inline-flex;align-items:center">Customize</a>
           </div>
+          <label class="row" style="cursor:pointer">
+            <div class="grow"><div class="title">Force dark mode for web contents <span class="pill" style="margin-left:6px">Experimental</span></div><div class="desc">Shows light websites in dark colors. Sites with a dark theme of their own use it, and Lumio is dark too while this is on. Some pictures and colors may look off.</div></div>
+            <span class="switch"><input type="checkbox" id="force-dark" aria-label="Force dark mode for web contents"><i></i></span>
+          </label>
+          <div class="row" id="fd-relaunch" hidden>
+            <div class="grow"><div class="desc">Relaunch Lumio Browser to apply this. Your windows and tabs come back.</div></div>
+            <button class="btn primary" type="button" id="fd-relaunch-btn">Relaunch</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Keyboard (renderer/pages/settings-power.js) -->
+      <section id="keyboard">
+        <h2>Keyboard</h2>
+        <div class="card">
+          <div class="row">
+            <div class="grow"><div class="title">Keyboard shortcuts</div><div class="desc">Change the keys for Lumio’s commands, like New Tab or Ask Lumio.</div></div>
+            <a class="btn" href="/shortcuts" style="display:inline-flex;align-items:center">Customize</a>
+          </div>
+          <label class="row" style="cursor:pointer">
+            <div class="grow"><div class="title">Navigate pages with a text cursor</div><div class="desc">Caret browsing: move through pages with the arrow keys, and hold Shift to select text.<span id="caret-key-note"></span></div></div>
+            <span class="switch"><input type="checkbox" id="caret-browsing" aria-label="Navigate pages with a text cursor"><i></i></span>
+          </label>
         </div>
       </section>
 
@@ -390,5 +420,6 @@
     </main>
   </div>
   <script type="module" src="settings.js"></script>
+  <script type="module" src="settings-power.js"></script>
 </body>
 </html>

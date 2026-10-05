@@ -2,6 +2,7 @@
 //   lumio://shell/, overlay/, aura/           -> renderer/ui   (default session only)
 //   lumio://newtab/, settings, history, downloads, bookmarks, extensions,
 //   error, welcome                                     -> renderer/pages (tab sessions)
+//   lumio://settings/shortcuts                         -> renderer/pages/shortcuts.html
 //   */assets/*  -> renderer/assets,  */vendor/* -> whitelisted node_modules files
 //   shell/ai-files/* -> pictures Lumio made (userData/ai-files)
 //   shell/web/*      -> Lumio Chat's file code (docmaker, attach) and its libraries, copied at build
@@ -66,6 +67,7 @@ function resolveFile(url, hosts) {
   }
   const base = UI_HOSTS.has(host) ? UI_DIR : PAGES_DIR;
   if (pathname === '/' || pathname === '') return path.join(base, host + '.html');
+  if (host === 'settings' && pathname === '/shortcuts') return path.join(PAGES_DIR, 'shortcuts.html'); // Settings › Keyboard shortcuts
   const f = path.join(base, pathname.slice(1));
   return inside(base, f) ? f : null;
 }

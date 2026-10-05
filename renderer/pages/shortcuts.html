@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Keyboard shortcuts</title>
+  <link rel="stylesheet" href="pages.css" />
+  <link rel="stylesheet" href="shortcuts.css" />
+</head>
+<body>
+  <main class="wrap sc">
+    <a class="sc-back" href="/#keyboard">‹ Settings</a>
+    <h1>Keyboard shortcuts</h1>
+    <p class="sub">Click a shortcut, then press the keys you want. Esc cancels. Backspace removes the shortcut.</p>
+    <div class="sc-tools">
+      <input id="sc-q" class="field" type="search" placeholder="Search commands" aria-label="Search commands" autocomplete="off" spellcheck="false" />
+      <button type="button" class="btn" id="sc-reset-all" hidden>Reset all</button>
+    </div>
+    <div id="sc-list"></div>
+    <p class="sc-foot">Shortcuts work in every window. Some keys belong to your computer or to editing (like copy and paste), so Lumio can’t use them.</p>
+    <div id="sc-status" class="sc-sr" role="status" aria-live="polite"></div>
+  </main>
+  <script type="module" src="shortcuts.js"></script>
+</body>
+</html>

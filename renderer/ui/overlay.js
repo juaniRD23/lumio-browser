@@ -2,6 +2,8 @@
 // and the site-information popup (lock icon).
 import { icons, markSvg, avatarHtml } from './icons.js';
 import { setAccent } from '/assets/theme-colors.js';
+import './tab-flyout.js'; // the collapsed tabs column's flyout (kind 'vtabs')
+import './name-window.js'; // Name Window… (kind 'namewindow')
 
 const api = window.lumio;
 const card = document.getElementById('card');

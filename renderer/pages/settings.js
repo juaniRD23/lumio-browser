@@ -401,6 +401,10 @@ page.on('appearance', showAppearance);
 $('#bm-bar').checked = s.showBookmarksBar;
 $('#bm-bar').addEventListener('change', (e) => page.invoke('page:set-setting', 'showBookmarksBar', e.target.checked));
 
+// Tabs to the side: all windows now, and new ones (main/tab-layout.js).
+$('#vertical-tabs').checked = !!s.verticalTabs;
+$('#vertical-tabs').addEventListener('change', (e) => page.invoke('page:set-setting', 'verticalTabs', e.target.checked));
+
 $('#engine').innerHTML = s.engines.map((e) => `<option value="${e.id}">${esc(e.name)}</option>`).join('');
 $('#engine').value = s.searchEngine;
 $('#engine').addEventListener('change', (e) => page.invoke('page:set-setting', 'searchEngine', e.target.value));
