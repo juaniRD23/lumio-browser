@@ -213,8 +213,11 @@ class ExtensionsUI {
     return !!o && String(url || '').split(/[?#]/)[0] === o.url;
   }
 
-  askNtp(w, o) {
-    if (w.closed || this.ntpAsked.has(o.id) || (w.overlayKind && w.overlayKind !== 'suggest')) return;
+  askNtp(w, o, tries = 0) {
+    if (w.closed || this.ntpAsked.has(o.id)) return;
+    // Another popup is up (address suggestions while typing, a dialog): ask a
+    // little later rather than replace it.
+    if (w.overlayKind) { if (tries < 20) setTimeout(() => this.askNtp(w, o, tries + 1), 3000); return; }
     // A window that just opened (at launch) may still be loading its overlay page.
     const ov = w.overlay.webContents;
     if (ov.isLoading()) { ov.once('did-finish-load', () => this.askNtp(w, o)); return; }
@@ -222,8 +225,9 @@ class ExtensionsUI {
     const b = w.tabs.active?.view?.getBounds() || { x: 0, y: 84, width: w.win.getContentSize()[0], height: 600 };
     const width = Math.min(420, b.width - 24);
     w.ntpPrompt = o;
+    // It doesn't take the keyboard: the person is likely typing an address
+    // in the new tab, and a stray Enter mustn't turn the extension off.
     w.showOverlay({ x: b.x + b.width - width - 12, y: b.y + 8, width: width + 24, height: 230 }, { kind: 'ntp-override', name: o.name });
-    w.overlay.webContents.focus();
   }
 
   async ntpDecide(w, decision) {

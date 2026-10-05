@@ -82,7 +82,8 @@ function renderNtp({ name }, card) {
         <button class="acc-btn primary" data-ntp="revert">Change it back</button>
       </div>
     </div>`;
-  card.querySelector('[data-ntp=revert]').focus({ preventScroll: true });
+  // Keep it is the safe default if the card gets the keyboard (a click, Tab).
+  card.querySelector('[data-ntp=keep]').focus({ preventScroll: true });
   measure(card);
 }
 

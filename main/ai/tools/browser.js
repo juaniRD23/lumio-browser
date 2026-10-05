@@ -38,6 +38,10 @@ function hostOf(url) {
   try { return new URL(url).host || url; } catch { return url; }
 }
 
+// Lumio's own pages that change its settings, extensions, experiments or
+// saved passwords, or show its profile path: the person uses them, never Lumio.
+const PRIVATE_PAGE = /^lumio:\/\/(settings|extensions|flags-lite|passwords|version)(?![\w-])/i;
+
 function tabFor(ctx, id, { activate = false } = {}) {
   const tab = id ? ctx.tabs.get(id) : ctx.tabs.active;
   if (!tab) throw new Error(id ? `There is no tab ${id}. Use list_tabs.` : 'No tab is open.');
@@ -45,7 +49,7 @@ function tabFor(ctx, id, { activate = false } = {}) {
   if (activate && ctx.tabs.activeId !== tab.id) ctx.tabs.activate(tab.id);
   const wc = tab.view.webContents;
   const url = wc.getURL() || tab.url || '';
-  if (url.startsWith('lumio://settings')) throw new Error("Lumio can't read or operate its own Settings page. Ask the user to change settings themselves.");
+  if (PRIVATE_PAGE.test(url)) throw new Error("Lumio can't read or operate its own Settings, Extensions, Passwords, Version or Experiments pages. Ask the user to change these themselves.");
   ctx.onPage?.(wc); // the page glows while Lumio works on it
   return { tab, wc, url };
 }
@@ -70,7 +74,7 @@ function safeUrl(ctx, input) {
   const parsed = parseInput(input, ctx.tabs.searchTemplate());
   if (!parsed) throw new Error('Empty URL.');
   if (/^(file|view-source|data|javascript):/i.test(parsed.url)) throw new Error('Lumio can only open web pages (http/https).');
-  if (/^lumio:\/\/settings/i.test(parsed.url)) throw new Error("Lumio can't open its own Settings page.");
+  if (PRIVATE_PAGE.test(parsed.url)) throw new Error("Lumio can't open its own Settings, Extensions, Passwords, Version or Experiments pages.");
   return parsed.url;
 }
 
@@ -622,4 +626,4 @@ async function tabPdf(tabs, tabId) {
   }
 }
 
-module.exports = { tools, clearCursors, pageContext, allTabsContext, tabPdf, YOUTUBE_VIDEO, videoText, pressKey, inPage, settle };
+module.exports = { tools, clearCursors, pageContext, allTabsContext, tabPdf, YOUTUBE_VIDEO, videoText, pressKey, inPage, settle, PRIVATE_PAGE };

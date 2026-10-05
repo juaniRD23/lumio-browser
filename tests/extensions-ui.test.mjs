@@ -160,14 +160,13 @@ for (const scheme of ['light', 'dark']) {
   });
 }
 
-test('“Change back to Lumio’s new tab page?”: Change it back has the focus; Keep it and Esc work', { skip }, async () => {
+test('“Change back to Lumio’s new tab page?”: Keep it has the focus (never a stray Enter turning it off); Esc and Change it back work', { skip }, async () => {
   const { page, errors } = await openOverlay('dark');
   await page.evaluate(() => window.__show({ kind: 'ntp-override', name: 'Momentum' }));
   assert.equal(await page.$eval('.xn', (e) => e.getAttribute('role')), 'alertdialog');
   assert.match(await page.innerText('#card'), /Change back to Lumio’s new tab page\?\s+“Momentum” changed what you see when you open a new tab\.\s+Keep it\s+Change it back/);
-  assert.deepEqual(await focused(page), ['revert', '']);
+  assert.deepEqual(await focused(page), ['keep', '']);
   if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'extensions-ntp-prompt.png') });
-  await page.keyboard.press('Shift+Tab');
   await page.keyboard.press('Enter');
   await page.keyboard.press('Escape');
   await page.click('[data-ntp=revert]');
