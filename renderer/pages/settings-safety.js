@@ -34,7 +34,7 @@ function passwordsItem(p) {
   if (p.error && !p.checked) return item('key', 'warn', 'Lumio couldn’t check your passwords', esc(p.error), '<button class="btn" data-act="recheck">Try again</button>');
   if (!p.total) return item('key', 'ok', 'No saved passwords', 'When you save passwords, Lumio checks them for you.');
   const review = '<a class="btn" href="lumio://passwords/">Review</a>';
-  if (p.compromised) return item('key', 'bad', `${plural(p.compromised, 'compromised password')}`, 'Change them now: they appeared in a data breach.', review);
+  if (p.compromised) return item('key', 'bad', `${plural(p.compromised, 'compromised password')}`, p.compromised === 1 ? 'Change it now: it appeared in a data breach.' : 'Change them now: they appeared in a data breach.', review);
   const issues = [p.reused && plural(p.reused, 'reused password'), p.weak && plural(p.weak, 'weak password')].filter(Boolean);
   if (issues.length) return item('key', 'warn', 'No compromised passwords', `But you have ${issues.join(' and ')}.`, review);
   return item('key', 'ok', 'No compromised passwords', `Lumio checked ${plural(p.total, 'password')} against known data breaches.`);

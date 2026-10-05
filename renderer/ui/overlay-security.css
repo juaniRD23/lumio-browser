@@ -1,4 +1,5 @@
 /* Device and certificate choosers (renderer/ui/overlay-security.js). */
+/* Small lines use --muted: --label is too faint on a dark popover. */
 .sc { padding: 6px 6px 4px; display: flex; flex-direction: column; min-height: 100%; }
 .sc-t { font-size: 14px; padding: 4px 4px 8px; color: var(--text); line-height: 1.4; }
 .sc-t b { font-weight: 650; }
@@ -11,7 +12,7 @@
 .sc-ic { flex: none; width: 20px; display: grid; place-items: center; color: var(--muted); }
 .sc-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .sc-txt b { font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sc-txt small { color: var(--label); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-txt small { color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sc-empty { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 100px; color: var(--muted); font-size: 12.5px; }
 .sc-spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--overlay-6); border-top-color: var(--accent); animation: sc-spin .8s linear infinite; }
 @keyframes sc-spin { to { transform: rotate(360deg); } }
@@ -20,7 +21,7 @@
 .sc-link:disabled { color: var(--label); cursor: default; }
 .sc-details { margin: 4px 2px 0; padding: 8px 10px; border-radius: 10px; background: var(--overlay-2); }
 .sc-dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; font-size: 12px; }
-.sc-dl dt { color: var(--label); }
+.sc-dl dt { color: var(--muted); }
 .sc-dl dd { margin: 0; color: var(--text); overflow-wrap: anywhere; user-select: text; }
 .sc-dl code { font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
 .sc-acts { display: flex; justify-content: flex-end; gap: 6px; padding: 12px 2px 2px; }
@@ -35,7 +36,7 @@
 .ss-tab img, .ss-tab .ss-fav { width: 16px; height: 16px; flex: none; border-radius: 4px; color: var(--muted); display: grid; place-items: center; }
 .ss-tab .ss-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .ss-tab .ss-txt b { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ss-tab .ss-txt small { color: var(--label); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ss-tab .ss-txt small { color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ss-note { margin: 0 8px 10px; padding: 8px 10px; border-radius: 10px; background: var(--overlay-2); color: var(--dim); font-size: 12px; line-height: 1.45; }
 .ss-audio { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); font-size: 12.5px; }
 .ss-audio[hidden] { display: none; }
