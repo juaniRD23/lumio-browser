@@ -14,7 +14,14 @@ CREATE TABLE IF NOT EXISTS crashes (
   signature TEXT NOT NULL,               -- groups the same crash: "EXC_BAD_ACCESS in Electron Framework+0x2a3f10"
   message TEXT,                          -- JavaScript errors: the scrubbed message
   stack TEXT,                            -- JavaScript errors: the stack, with Lumio's own file paths only
-  ip_hash TEXT
+  ip_hash TEXT,
+  dump_bytes INTEGER NOT NULL DEFAULT 0  -- for the daily storage budget
 );
 CREATE INDEX IF NOT EXISTS crashes_created ON crashes (created_at);
 CREATE INDEX IF NOT EXISTS crashes_ip ON crashes (ip_hash, created_at);
+-- Every POST /api/crash, kept or refused, for the per-IP limit (cleared after a day).
+CREATE TABLE IF NOT EXISTS crash_attempts (
+  ip_hash TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS crash_attempts_ip ON crash_attempts (ip_hash, created_at);

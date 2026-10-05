@@ -9,7 +9,7 @@ import zlib from 'node:zlib';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import worker from '../src/index.ts';
-import { crashCleanup, readMinidump, scrub, jsSignature } from '../src/crashes.ts';
+import { crashCleanup, readMinidump, scrub, scrubHosts, jsSignature, ipKey } from '../src/crashes.ts';
 
 const SITE = 'https://lumio.test';
 const HOUR = 3600_000;
@@ -122,7 +122,7 @@ test('a gzipped Crashpad upload is stored: the dump in R2, a row with what crash
   const [row] = rows();
   assert.deepEqual({ ...row, created_at: 0, ip_hash: !!row.ip_hash }, {
     id, created_at: 0, version: '0.6.8', platform: 'darwin', arch: 'arm64', channel: 'stable', process_type: 'renderer',
-    reason: 'EXC_BAD_ACCESS', has_dump: 1, signature: 'EXC_BAD_ACCESS in Electron Framework+0x2a3f10', message: null, stack: null, ip_hash: true,
+    reason: 'EXC_BAD_ACCESS', has_dump: 1, signature: 'EXC_BAD_ACCESS in Electron Framework+0x2a3f10', message: null, stack: null, ip_hash: true, dump_bytes: dump.length,
   });
   const key = `crashes/${new Date(row.created_at).toISOString().slice(0, 10)}/${id}.dmp`;
   assert.deepEqual([...r2.store.keys()], [key]);
@@ -250,6 +250,10 @@ test('scrub and signatures', () => {
   assert.equal(scrub('open ~/Library/Application Support/Lumio Browser/x', 200), 'open <path>', 'folders with spaces in their names too');
   assert.equal(scrub("at C:\\Users\\Jo Smith\\app.js:1:2 and 'C:\\Users\\Jo Smith\\b.txt'", 200), "at <path>:1:2 and '<path>'");
   assert.equal(scrub('x'.repeat(50), 10), 'xxxxxxxxx…');
+  assert.equal(scrubHosts('getaddrinfo ENOTFOUND mybank.example.com'), 'getaddrinfo ENOTFOUND <host>', 'hosts without a scheme');
+  assert.equal(scrubHosts('connect ECONNREFUSED 10.0.0.5:443 and 2001:db8:0:0:1:0:0:1'), 'connect ECONNREFUSED <ip>:443 and <ip>');
+  assert.equal(scrubHosts('Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9 failed'), 'Bearer <token> failed');
+  assert.equal(scrubHosts('Cannot find module main/tabs.js at 12:30:45'), 'Cannot find module main/tabs.js at 12:30:45', 'Lumio’s files and times stay');
   assert.equal(jsSignature('Error', 'Error: x\n    at <path>:1:2'), 'Error', 'no Lumio frame');
   assert.equal(jsSignature('RangeError', 'RangeError: x\n    at async Promise.all (index 0)\n    at main/ai/run.js:10:3'), 'RangeError at main/ai/run.js:10');
 });
@@ -261,8 +265,42 @@ test('each IP gets 20 reports an hour; others aren’t affected', async () => {
   assert.equal((await report(gone)).status, 429);
   assert.equal((await upload({})).status, 429, 'dumps count too');
   assert.equal((await report(gone, { ip: '198.51.100.2' })).status, 200);
-  sql.prepare('UPDATE crashes SET created_at = created_at - ?').run(HOUR);
+  sql.prepare('UPDATE crash_attempts SET created_at = created_at - ?').run(HOUR);
   assert.equal((await report(gone)).status, 200, 'an hour later');
+});
+
+test('refused reports count against the limit too, and an IPv6 /64 counts as one IP', async () => {
+  for (let i = 0; i < 20; i++) assert.equal((await report('not json')).status, 400);
+  assert.equal((await report({ ...META, type: 'gone', process: 'renderer', reason: 'crashed' })).status, 429);
+  const gone = { ...META, type: 'gone', process: 'renderer', reason: 'crashed' };
+  for (let i = 0; i < 20; i++) assert.equal((await report(gone, { ip: `2001:db8:1:2::${(i + 1).toString(16)}` })).status, 200);
+  assert.equal((await report(gone, { ip: '2001:db8:1:2:ffff:ffff:ffff:ffff' })).status, 429, 'same /64');
+  assert.equal((await report(gone, { ip: '2001:db8:1:3::1' })).status, 200, 'another /64');
+  assert.equal(await crashCleanup(env, Date.now() + DAY + 1000), 0);
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM crash_attempts').get().n, 0, 'attempts are cleared after a day');
+});
+
+test('ipKey', () => {
+  assert.equal(ipKey('198.51.100.7'), '198.51.100.7');
+  assert.equal(ipKey('2001:DB8:0001:0002:aaaa::1'), '2001:db8:1:2::/64');
+  assert.equal(ipKey('2001:db8::1'), '2001:db8:0:0::/64');
+  assert.equal(ipKey('::1'), '0:0:0:0::/64');
+  assert.equal(ipKey(null), 'unknown');
+});
+
+test('one IP keeps at most 5 dumps a day; past that the report is still counted', async () => {
+  for (let i = 0; i < 5; i++) assert.equal((await upload({})).status, 200);
+  assert.equal((await upload({})).status, 200);
+  assert.deepEqual(rows().map((r) => r.has_dump).sort(), [0, 1, 1, 1, 1, 1]);
+  assert.equal(r2.store.size, 5);
+  assert.equal((await upload({ ip: '198.51.100.9' })).status, 200);
+  assert.equal(r2.store.size, 6, 'others aren’t affected');
+});
+
+test('past 1 GB of dumps a day from everyone, dumps aren’t kept', async () => {
+  sql.prepare("INSERT INTO crashes (id, created_at, has_dump, signature, dump_bytes) VALUES ('cr_big', ?, 1, 'x', ?)").run(Date.now() - 1000, 1024 * 1024 * 1024 - 100);
+  assert.equal((await upload({})).status, 200);
+  assert.equal(r2.store.size, 0);
 });
 
 test('past 1000 dumps a day from everyone, reports are still counted but dumps aren’t kept', async () => {

@@ -138,6 +138,12 @@ test('rejections with things that aren’t errors say only what kind of value it
   assert.equal(errorReport('Fetch failed for "secret words" at https://x.example', 'unhandledRejection', meta).message, 'Fetch failed for … at <url>');
   assert.equal(cleanMessage("Unexpected token 'H', \"Hello my password is\"... is not valid JSON"), 'Unexpected token …, …... is not valid JSON');
   assert.equal(cleanMessage('x'.repeat(400)).length, 300);
+  // Sites, IPs and tokens without a scheme (an uncaught fetch failure) go too.
+  assert.equal(cleanMessage('getaddrinfo ENOTFOUND mybank.example.com'), 'getaddrinfo ENOTFOUND <host>');
+  assert.equal(cleanMessage('net::ERR_CERT_AUTHORITY_INVALID at secret.example.org'), 'net::ERR_CERT_AUTHORITY_INVALID at <host>');
+  assert.equal(cleanMessage('connect ECONNREFUSED 10.0.0.5:443 via 2001:db8:0:0:1:0:0:1'), 'connect ECONNREFUSED <ip>:443 via <ip>');
+  assert.equal(cleanMessage('auth eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9 refused'), 'auth <token> refused');
+  assert.equal(cleanMessage('Cannot find module main/tabs.js'), 'Cannot find module main/tabs.js', 'Lumio’s own files stay');
 });
 
 test('stack paths on Windows, in any letter case, become app-relative too', () => {

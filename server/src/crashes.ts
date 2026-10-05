@@ -7,10 +7,11 @@
 //   - Lumio's own JSON report: a JavaScript error in its main process, or a
 //     page or helper process that died.
 // There's no account and no cookie, so anyone can send one. That's why each
-// IP gets a few an hour (stored as a hash that changes every day and is
-// cleared after a day), a dump must be a real minidump under the size limit,
-// and Crashpad's install ID (`guid`) is never kept, not even inside the dump.
-// Text is scrubbed of web addresses, emails and file paths again here, in
+// IP (an IPv6 /64) gets a few tries an hour (stored as a hash that changes
+// every day and is cleared after a day), a dump must be a real minidump under
+// the size limit, each IP and everyone together get a daily dump budget, and
+// Crashpad's install ID (`guid`) is never kept, not even inside the dump.
+// Text is scrubbed of web addresses, hosts, emails and file paths again here, in
 // case an old or odd client sends some. Dumps go to R2 at
 // crashes/<date>/<id>.dmp. A row in `crashes`
 // holds what the owner's /admin page shows (GET /api/admin/crashes), grouped
@@ -18,11 +19,14 @@
 import type { User } from './auth.ts';
 import { type Env, fail, json, randomHex, sameOrigin, sha256 } from './util.ts';
 
-const MAX_UPLOAD = 5 * 1024 * 1024; // what Crashpad sends (usually gzipped)
-const MAX_DUMP = 16 * 1024 * 1024; // the minidump once unzipped
+const MAX_UPLOAD = 4 * 1024 * 1024; // what Crashpad sends (usually gzipped)
+const MAX_DUMP = 8 * 1024 * 1024; // the minidump once unzipped (a Mac Crashpad dump is usually well under 1 MB)
 const MAX_JSON = 64 * 1024;
-const PER_IP_HOUR = 20;
-const DUMPS_PER_DAY = 1000; // from everyone together: past this, keep the row and drop the dump
+const PER_IP_HOUR = 20; // attempts, kept or refused, so junk can't keep the Worker busy either
+// Past these, keep the row and drop the dump, so junk can't fill R2 or crowd out real dumps.
+const DUMPS_PER_IP_DAY = 5;
+const DUMPS_PER_DAY = 1000; // from everyone together
+const DUMP_BYTES_PER_DAY = 1024 * 1024 * 1024;
 const KEEP_DAYS = 90;
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
@@ -52,6 +56,26 @@ export function scrub(text: unknown, max: number) {
     .replace(/(?<![\w.~-])(?:[A-Za-z]:|~)?(?:[\\/][^\\/'"():<>\r\n]+){2,}/g, '<path>');
   return s.length > max ? s.slice(0, max - 1) + '…' : s;
 }
+// Messages can also name a site without its scheme ("getaddrinfo ENOTFOUND
+// mybank.example.com"), an IP address or a token (main/crash-reports.js does
+// the same). Anything shaped like a host goes, even when it's really code; the
+// stack still says where the bug is. Lumio's own file names (tabs.js) stay.
+const CODE_FILES = /^(?:c?js|mjs|ts|json|node|html|css|map|asar|wasm|pak|plist|dylib|so|dll|exe|app|framework)$/i;
+export function scrubHosts(text: string) {
+  return text
+    .replace(/(?<![\w:])(?:[0-9a-f]{1,4}:){3,7}[0-9a-f]{1,4}(?![\w:])|(?<![\w:])[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){0,6}::[0-9a-f:]*[0-9a-f](?![\w:])/gi, '<ip>')
+    .replace(/(?<![\w.])\d{1,3}(?:\.\d{1,3}){3}(?![\w.])/g, '<ip>')
+    .replace(/(?<![\w$@.\/-])(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+([a-z][a-z0-9-]*[a-z0-9])\.?(?![\w$-]|\.\w)/gi, (m, last) => (CODE_FILES.test(last) && !/\..*\./.test(m) ? m : '<host>'))
+    .replace(/(?<![\w+\/=-])(?=[\w+\/=-]*\d)(?=[\w+\/=-]*[A-Za-z])[\w+\/=-]{24,}/g, '<token>');
+}
+// In a stack, "at fn (where)" frames keep their function names, which look
+// like hosts (emitter.emit); only where they ran is scrubbed.
+const scrubText = (text: unknown, max: number) => scrub(scrubHosts(scrub(text, Infinity)), max);
+const scrubLine = (line: string) => {
+  const m = /^(\s*at (?:.+? \()?)(.*?)(\)?)$/.exec(line);
+  return m ? m[1] + scrubHosts(m[2]) + m[3] : scrubHosts(line);
+};
+const scrubStack = (text: unknown, max: number) => scrub(scrub(text, Infinity).split('\n').map(scrubLine).join('\n'), max);
 
 // "TypeError at main/tabs.js:183 in update": the error and the first of
 // Lumio's own frames, so the same bug groups together.
@@ -208,8 +232,8 @@ async function fromJson(request: Request): Promise<Crash | Response> {
   if (!reason) return invalid('The crash report needs a reason.');
   if (r.type === 'js') {
     const name = (typeof r.name === 'string' && /^[\w$.]{1,40}$/.test(r.name) && r.name) || 'Error';
-    const stack = scrub(r.stack, 4000) || null;
-    return { ...base, reason, signature: jsSignature(name, stack || ''), message: scrub(`${name}: ${r.message ?? ''}`, 300), stack };
+    const stack = scrubStack(r.stack, 4000) || null;
+    return { ...base, reason, signature: jsSignature(name, stack || ''), message: scrubText(`${name}: ${r.message ?? ''}`, 300), stack };
   }
   if (r.type === 'gone') {
     const where = oneOf(r.where, WHERE);
@@ -221,16 +245,28 @@ async function fromJson(request: Request): Promise<Crash | Response> {
   return invalid('Unknown kind of crash report.');
 }
 
+// One IPv6 user usually has a whole /64 to pick addresses from, so that's what counts.
+export function ipKey(ip: string | null) {
+  if (!ip) return 'unknown';
+  if (!ip.includes(':')) return ip;
+  const [head, tail = ''] = ip.toLowerCase().split('::');
+  const a = head ? head.split(':') : [];
+  const b = ip.includes('::') && tail ? tail.split(':') : [];
+  const groups = ip.includes('::') ? [...a, ...Array(Math.max(0, 8 - a.length - b.length)).fill('0'), ...b] : a;
+  return groups.slice(0, 4).map((g) => g.replace(/^0+(?=.)/, '')).join(':') + '::/64';
+}
+
 const dumpKey = (id: string, at: number) => `crashes/${new Date(at).toISOString().slice(0, 10)}/${id}.dmp`;
 
 // POST /api/crash (no account).
 export async function receiveCrash(request: Request, env: Env, now = Date.now()) {
   // Lumio Browser and Crashpad never send an Origin; a web page always would.
   if (!sameOrigin(request)) return fail('Not allowed.', 403, 'forbidden');
-  const ip = request.headers.get('cf-connecting-ip') || 'unknown';
-  const ipHash = (await sha256(`lumio-crash|${new Date(now).toISOString().slice(0, 10)}|${ip}`)).slice(0, 32);
-  const recent = await env.DB.prepare('SELECT COUNT(*) AS n FROM crashes WHERE ip_hash = ?1 AND created_at >= ?2').bind(ipHash, now - HOUR).first<{ n: number }>();
-  if ((recent?.n ?? 0) >= PER_IP_HOUR) return fail('Too many crash reports. Try again later.', 429, 'rate_limited');
+  const ipHash = (await sha256(`lumio-crash|${new Date(now).toISOString().slice(0, 10)}|${ipKey(request.headers.get('cf-connecting-ip'))}`)).slice(0, 32);
+  // Counted before anything else, and recorded first so parallel requests see each other.
+  await env.DB.prepare('INSERT INTO crash_attempts (ip_hash, created_at) VALUES (?1, ?2)').bind(ipHash, now).run();
+  const recent = await env.DB.prepare('SELECT COUNT(*) AS n FROM crash_attempts WHERE ip_hash = ?1 AND created_at > ?2').bind(ipHash, now - HOUR).first<{ n: number }>();
+  if ((recent?.n ?? 0) > PER_IP_HOUR) return fail('Too many crash reports. Try again later.', 429, 'rate_limited');
 
   const type = request.headers.get('content-type') || '';
   const crashpad = /^multipart\/form-data/i.test(type);
@@ -241,15 +277,16 @@ export async function receiveCrash(request: Request, env: Env, now = Date.now())
   const id = 'cr_' + randomHex(12);
   let hasDump = 0;
   if (crash.dump && env.FILES) {
-    const today = await env.DB.prepare('SELECT COUNT(*) AS n FROM crashes WHERE has_dump = 1 AND created_at >= ?1').bind(now - DAY).first<{ n: number }>();
-    if ((today?.n ?? 0) < DUMPS_PER_DAY) {
+    const today = await env.DB.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(dump_bytes), 0) AS bytes, COALESCE(SUM(ip_hash = ?2), 0) AS mine FROM crashes WHERE has_dump = 1 AND created_at >= ?1')
+      .bind(now - DAY, ipHash).first<{ n: number; bytes: number; mine: number }>();
+    if ((today?.n ?? 0) < DUMPS_PER_DAY && (today?.mine ?? 0) < DUMPS_PER_IP_DAY && (today?.bytes ?? 0) + crash.dump.byteLength <= DUMP_BYTES_PER_DAY) {
       await env.FILES.put(dumpKey(id, now), crash.dump, { httpMetadata: { contentType: 'application/octet-stream' } });
       hasDump = 1;
     }
   }
-  await env.DB.prepare(`INSERT INTO crashes (id, created_at, version, platform, arch, channel, process_type, reason, has_dump, signature, message, stack, ip_hash)
-    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)`)
-    .bind(id, now, crash.version, crash.platform, crash.arch, crash.channel, crash.process_type, crash.reason, hasDump, crash.signature, crash.message, crash.stack, ipHash).run();
+  await env.DB.prepare(`INSERT INTO crashes (id, created_at, version, platform, arch, channel, process_type, reason, has_dump, signature, message, stack, ip_hash, dump_bytes)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)`)
+    .bind(id, now, crash.version, crash.platform, crash.arch, crash.channel, crash.process_type, crash.reason, hasDump, crash.signature, crash.message, crash.stack, ipHash, hasDump ? crash.dump!.byteLength : 0).run();
   // Crashpad keeps the answer as the report's ID, as plain text.
   return crashpad ? new Response(id, { headers: { 'content-type': 'text/plain', 'cache-control': 'no-store' } }) : json({ ok: true, id });
 }
@@ -299,6 +336,7 @@ export async function crashDump(env: Env, user: User, id: string) {
 // Every few minutes (cron): forget IP hashes after a day and reports after 90 days.
 export async function crashCleanup(env: Env, now = Date.now()) {
   await env.DB.prepare('UPDATE crashes SET ip_hash = NULL WHERE ip_hash IS NOT NULL AND created_at < ?1').bind(now - DAY).run();
+  await env.DB.prepare('DELETE FROM crash_attempts WHERE created_at < ?1').bind(now - DAY).run();
   const { results } = await env.DB.prepare('SELECT id, created_at, has_dump FROM crashes WHERE created_at < ?1 ORDER BY created_at LIMIT 500')
     .bind(now - KEEP_DAYS * DAY).all<{ id: string; created_at: number; has_dump: number }>();
   if (!results.length) return 0;

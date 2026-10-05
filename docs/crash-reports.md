@@ -15,9 +15,9 @@ The setting is read from `settings.json` before the app is ready, because Crashp
 
 `POST /api/crash` (`server/src/crashes.ts`) needs no account. It accepts Crashpad's multipart upload (gzipped or not) and the JSON reports, with these limits:
 
-- 5 MB per upload as sent, 16 MB once unzipped.
-- 20 reports per IP per hour. The IP is stored as a hash salted with the day and cleared after a day.
-- 1000 kept dumps a day across all users. Past that, the report is counted but its dump isn't stored.
+- 4 MB per upload as sent, 8 MB once unzipped.
+- 20 tries per IP per hour, counting refused ones (an IPv6 address counts as its /64). The IP is stored as a hash salted with the day and cleared after a day.
+- Kept dumps: 5 a day per IP, and 1000 (1 GB) a day across all users. Past that, the report is counted but its dump isn't stored.
 - Crashpad's `guid` (the install's ID) is never stored. Crashpad also writes it into the minidump, so the server zeroes that copy before the dump goes to R2.
 
 Dumps go to R2 (`FILES`) at `crashes/<date>/<id>.dmp`. A row goes in the D1 table `crashes`. Everything is deleted after 90 days by the cron job. The owner's `/admin` page has a **Crashes** section that groups reports by version and signature, lists the latest ones and links each minidump (`GET /api/admin/crashes/:id/dump`).

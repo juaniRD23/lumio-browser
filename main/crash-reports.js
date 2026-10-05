@@ -36,12 +36,24 @@ function scrub(text, max) {
     .replace(/(?<![\w.~-])(?:[A-Za-z]:|~)?(?:[\\/][^\\/'"():<>\r\n]+){2,}/g, '<path>');
   return s.length > max ? s.slice(0, max - 1) + '…' : s;
 }
+// Messages can also name a site without its scheme ("getaddrinfo ENOTFOUND
+// mybank.example.com"), an IP address or a token. Anything shaped like a host
+// goes, even when it's really code ("tab.view is not a function"): the stack
+// still says where the bug is. Lumio's own file names (tabs.js) stay.
+const CODE_FILES = /^(?:c?js|mjs|ts|json|node|html|css|map|asar|wasm|pak|plist|dylib|so|dll|exe|app|framework)$/i;
+function scrubHosts(text) {
+  return String(text)
+    .replace(/(?<![\w:])(?:[0-9a-f]{1,4}:){3,7}[0-9a-f]{1,4}(?![\w:])|(?<![\w:])[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){0,6}::[0-9a-f:]*[0-9a-f](?![\w:])/gi, '<ip>')
+    .replace(/(?<![\w.])\d{1,3}(?:\.\d{1,3}){3}(?![\w.])/g, '<ip>')
+    .replace(/(?<![\w$@.\/-])(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+([a-z][a-z0-9-]*[a-z0-9])\.?(?![\w$-]|\.\w)/gi, (m, last) => (CODE_FILES.test(last) && !/\..*\./.test(m) ? m : '<host>'))
+    .replace(/(?<![\w+\/=-])(?=[\w+\/=-]*\d)(?=[\w+\/=-]*[A-Za-z])[\w+\/=-]{24,}/g, '<token>');
+}
 // Quoted text in a message could be anything from a page, so only property
 // names in V8's "(reading 'x')" stay.
 function cleanMessage(text) {
   const keep = [];
   const marked = String(text ?? '').replace(/\((reading|setting) '([\w$]{1,40})'\)/g, (_m, verb, prop) => `(${verb} \u0000${keep.push(prop) - 1}\u0000)`);
-  const out = scrub(marked.replace(/(['"`])(?:(?!\1)[^\r\n])*\1/g, '…'), 300);
+  const out = scrub(scrubHosts(scrub(marked.replace(/(['"`])(?:(?!\1)[^\r\n])*\1/g, '…'), Infinity)), 300);
   return out.replace(/\u0000(\d+)\u0000/g, (_m, i) => `'${keep[i]}'`);
 }
 
