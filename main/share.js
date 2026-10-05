@@ -20,6 +20,7 @@ const fs = require('fs');
 const path = require('path');
 const { app, clipboard, dialog, ipcMain, nativeImage, Notification, ShareMenu } = require('electron');
 
+const WORLD = 1005; // page tools' isolated world (see main/page-menu.js)
 const DEVICES_FRESH = 2 * 60_000;
 const hostOf = (url) => { try { return new URL(url).host.replace(/^www\./, ''); } catch { return ''; } };
 const web = (url) => /^https?:/i.test(url || '');
@@ -140,7 +141,7 @@ class ShareTools {
       done(asked && !asked.url ? 'Copied' : 'Link copied');
     } else if (action === 'send') {
       const device = (this.cache?.list || []).find((d) => d.id === deviceId);
-      if (!device || !web(link)) return;
+      if (!device || !web(link) || w.incognito) return;
       try {
         await this.companion.sendTab(device.id, { url: link, title: String(asked?.title || title || tab?.title || '').slice(0, 300) });
         done(`Sent to ${device.name}`);
@@ -206,6 +207,9 @@ class ShareTools {
     const found = this.tabOfWc(e.sender);
     const aw = found ? null : this.apps?.windowFor?.(e.sender);
     if ((!found && !aw) || e.senderFrame !== e.sender.mainFrame || !web(e.sender.getURL())) return { error: 'NotAllowedError', message: 'Sharing isn’t allowed here.' };
+    // The click is checked again in Lumio's own world: the page's world can fake navigator.userActivation.
+    const clicked = await e.sender.executeJavaScriptInIsolatedWorld(WORLD, [{ code: 'navigator.userActivation.isActive' }]).catch(() => false);
+    if (clicked !== true) return { error: 'NotAllowedError', message: 'Must be handling a user gesture to perform a share request.' };
     if (aw) return this.appShare(aw, e, data);
     const { w, tab } = found;
     if (w.tabs.activeId !== tab.id || !w.win.isFocused()) return { error: 'NotAllowedError', message: 'The tab isn’t in front.' };

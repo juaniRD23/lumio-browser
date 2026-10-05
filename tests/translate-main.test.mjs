@@ -131,6 +131,12 @@ test('Always translate runs by itself, except in incognito; Never and Never this
   assert.equal(always.tab.translate.status, 'offer');
   assert.equal(prompts(always).length, 0, 'and no bubble either');
 
+  const local = setup({ prefs: { always: ['fr'] }, url: 'file:///Users/me/lettre.html' });
+  await local.probe();
+  await tick();
+  assert.equal(local.requests.length, 0, 'a file on this computer is only sent when asked');
+  assert.equal(prompts(local).length, 1);
+
   const incognito = setup({ prefs: { always: ['fr'] }, incognito: true });
   await incognito.probe();
   await tick();

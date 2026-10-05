@@ -123,6 +123,15 @@ test('the address bar button opens the article in its own column, sanitized, and
   await page.close();
 });
 
+test('in incognito the article’s pictures are left out (the view’s session isn’t the incognito one)', { skip }, async () => {
+  const { page, errors } = await openShell({ 'reader:article': { value: { ...ARTICLE, incognito: true } } });
+  await open(page);
+  assert.equal(await page.$$eval('.rd-body img, .rd-body picture, .rd-body source', (els) => els.length), 0);
+  assert.match(await page.textContent('.rd-body'), /Keepers trimmed wicks/);
+  assert.deepEqual(errors, []);
+  await page.close();
+});
+
 test('text settings: font, size, spacing and theme, by mouse and arrow keys, saved for next time', { skip }, async () => {
   const { page, errors } = await openShell();
   await open(page);

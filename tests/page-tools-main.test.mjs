@@ -37,6 +37,7 @@ const E = {
   shared: [],
   emoji: 0,
   handlers: {},
+  views: [],
 };
 const electron = {
   app: { isPackaged: false, getPath: () => os.tmpdir(), getAppPath: () => '/src/lumio', isEmojiPanelSupported: () => true, showEmojiPanel: () => { E.emoji++; } },
@@ -58,7 +59,13 @@ const electron = {
   Menu: { buildFromTemplate: (t) => t, setApplicationMenu() {} },
   shell: {},
   BrowserWindow: { getFocusedWindow: () => null },
-  WebContentsView: class {},
+  WebContentsView: class {
+    constructor() {
+      E.views.push(this);
+      this.webContents = { once() {}, loadURL: async () => {}, isDestroyed: () => false, close() {}, send() {}, focus() {} };
+    }
+    setBounds() {}
+  },
 };
 const electronPath = require.resolve('electron');
 require.cache[electronPath] = { id: electronPath, filename: electronPath, loaded: true, exports: electron };
@@ -67,7 +74,7 @@ const { ShareTools, cleanShareData } = require('../main/share.js');
 const { MediaHub, bestArtwork } = require('../main/media.js');
 const { PageMenu } = require('../main/page-menu.js');
 const { fullPageSize, Screenshots } = require('../main/screenshot.js');
-const { Apps, appDetails } = require('../main/apps.js');
+const { Apps, appDetails, isLocal } = require('../main/apps.js');
 const launchers = require('../main/app-launchers.js');
 const { CompanionBridge } = require('../main/sync/companion.js');
 const C = require('../main/sync/crypto.js');
@@ -89,6 +96,8 @@ function makeTab(id, url, { title = `Tab ${id}`, favicon = null, wc = {} } = {})
     once(ev, fn) { (handlers[ev] ||= []).push(fn); },
     send(c, p) { this.sent.push([c, p]); },
     getZoomFactor: () => 1,
+    clicked: true, // navigator.userActivation.isActive, for websites' Share buttons
+    async executeJavaScriptInIsolatedWorld(_world, [{ code }]) { return code === 'navigator.userActivation.isActive' ? this.clicked : null; },
     mainFrame: { framesInSubtree: [] },
     ...wc,
   };
@@ -254,7 +263,13 @@ test('a website’s Share button: the front tab’s page only; shared or cancele
   assert.equal((await s.share.webShare(fromPage(s.tab), { url: 'data:text/html,hi' })).error, 'DataError');
 
   // Shared: the popover shows what the site asked, Copy answers the page.
+  // Without a click (the page can fake its own navigator.userActivation, not Lumio's world).
+  s.tab.view.webContents.clicked = false;
+  assert.equal((await s.share.webShare(fromPage(s.tab), { url: '/' })).error, 'NotAllowedError');
+  assert.deepEqual(emitted(s.w, 'share-open'), []);
+  s.tab.view.webContents.clicked = true;
   let answer = s.share.webShare(fromPage(s.tab), { title: 'Read this', text: 'So good', url: '/next' });
+  await tick();
   assert.deepEqual(emitted(s.w, 'share-open').at(-1), { tabId: 1, view: 'main' });
   s.w.overlayKind = 'share';
   const p = await s.share.info(s.w, { tabId: 1 });
@@ -268,6 +283,7 @@ test('a website’s Share button: the front tab’s page only; shared or cancele
 
   // Text only: Copy copies the text.
   answer = s.share.webShare(fromPage(s.tab), { title: 'Quote', text: 'To be or not' });
+  await tick();
   s.w.overlayKind = 'share';
   await s.share.act(s.w, { action: 'copy', tabId: 1 });
   assert.deepEqual(await answer, { ok: true });
@@ -275,15 +291,18 @@ test('a website’s Share button: the front tab’s page only; shared or cancele
 
   // Closing the popover (or another tab coming up) cancels it.
   answer = s.share.webShare(fromPage(s.tab), { url: '/x' });
+  await tick();
   s.w.overlayKind = 'share';
   s.share.overlayClosed(s.w, 'share');
   assert.equal((await answer).error, 'AbortError');
   answer = s.share.webShare(fromPage(s.tab), { url: '/x' });
+  await tick();
   s.share.tabChanged(s.w, s.other);
   assert.equal((await answer).error, 'AbortError');
   // A popover that never came up doesn't leave the page waiting.
   s.w.overlayKind = null;
   answer = s.share.webShare(fromPage(s.tab), { url: '/x' });
+  await tick();
   assert.equal((await answer).error, 'AbortError');
 });
 
@@ -403,6 +422,9 @@ test('the popover’s rows: what’s playing, its artwork, length and controls',
     canSeek: true, pip: false, canPip: false, current: true,
   });
   assert.equal(bestArtwork('nope'), null);
+  // Incognito: no artwork (the popover's own session would fetch it outside incognito).
+  s.w.incognito = true;
+  assert.equal((await s.hub.list(s.w))[0].artwork, null);
 });
 
 test('an embedded player’s answer is kept to plain numbers and yes/no', async () => {
@@ -636,6 +658,25 @@ test('the whole page comes from the DevTools protocol, which is let go afterward
   assert.ok(!calls.some(([n]) => n === 'detach'));
 });
 
+test('Screenshot started twice while the first is capturing: one view over the page, not two', async () => {
+  let release;
+  const captured = new Promise((r) => { release = r; });
+  const tab = makeTab(1, 'https://a.example/', { wc: { capturePage: () => captured } });
+  const w = makeWindow([tab]);
+  const children = [];
+  Object.assign(w.win, { on() {}, once() {}, off() {}, contentView: { children, addChildView: (v) => children.push(v), removeChildView: (v) => children.splice(children.indexOf(v), 1) } });
+  const shots = new Screenshots();
+  const before = E.views.length;
+  const a = shots.start(w);
+  const b = shots.start(w);
+  release(image(800, 600));
+  await Promise.all([a, b]);
+  assert.equal(E.views.length - before, 1);
+  assert.equal(children.length, 1);
+  shots.cancel(w, false);
+  assert.equal(children.length, 0);
+});
+
 // ---------------------------------------------------------------- installed apps
 test('an app’s details come from its manifest, on the site’s own origin', () => {
   const page = { name: '', title: 'Inbox (3) – Mail', icons: [{ src: 'https://mail.example/fav.ico', sizes: '' }, { src: 'https://mail.example/touch.png', sizes: '180x180', touch: true }] };
@@ -687,6 +728,24 @@ test('Mac launchers: a tiny app that asks Lumio to open the web app', () => {
   assert.deepEqual([path.basename(a), path.basename(b)], ['Mail.app', 'Mail 2.app']);
   assert.match(fs.readFileSync(path.join(a, 'Contents/MacOS/launch'), 'utf8'), /--lumio-app=0123456789abcdef/);
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('installing: a public page’s icons never come from this computer or the local network, and big ones are cut off', async () => {
+  for (const u of ['http://localhost:3000/a.png', 'http://127.0.0.1/', 'http://10.0.0.2/', 'http://192.168.1.1/x', 'http://172.20.0.1/', 'http://[::1]/', 'http://printer.local/']) assert.equal(isLocal(u), true, u);
+  for (const u of ['https://example.com/', 'http://172.32.0.1/', 'data:image/png;base64,AA==']) assert.equal(isLocal(u), false, u);
+  const fetched = [];
+  const big = new Response(new ReadableStream({ pull(c) { c.enqueue(new Uint8Array(1024 * 1024)); } })); // never ends, no size given
+  const apps = new Apps({
+    dir: fs.mkdtempSync(path.join(os.tmpdir(), 'lumio-apps-')),
+    session: () => ({ fetch: async (u) => { fetched.push(u); return u.includes('big') ? big : new Response('', { status: 404 }); } }),
+    permissions: () => null,
+    openUrl: () => {},
+  });
+  assert.equal(await apps.fetchBytes('https://site.example/big.png', 3 * 1024 * 1024), null);
+  const tab = makeTab(1, 'https://site.example/', { wc: { executeJavaScriptInIsolatedWorld: async () => ({ manifest: 'http://192.168.1.1/manifest.json', icons: [{ src: 'http://127.0.0.1/i.png', sizes: '512x512' }], title: 'Site' }) } });
+  fetched.length = 0;
+  await apps.prepare(tab);
+  assert.deepEqual(fetched, ['https://site.example/apple-touch-icon.png']);
 });
 
 test('installing an app: its record, icon and launcher; removing it takes them away', async () => {

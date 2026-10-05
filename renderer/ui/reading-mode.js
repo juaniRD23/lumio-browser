@@ -21,6 +21,8 @@ const PURIFY = {
   ALLOWED_ATTR: ['href', 'src', 'srcset', 'sizes', 'alt', 'title', 'width', 'height', 'colspan', 'rowspan', 'lang', 'dir', 'datetime', 'cite', 'start', 'reversed'],
   ALLOW_DATA_ATTR: false,
 };
+// Incognito: the view's session isn't the incognito one, so its pictures would be fetched (and cached) outside it.
+const NO_IMAGES = { ...PURIFY, FORBID_TAGS: ['img', 'picture', 'source'] };
 // Where sentences live: text is split into sentences inside each of these.
 const BLOCKS = 'p, li, h1, h2, h3, h4, h5, h6, blockquote, figcaption, td, th, dd, dt, caption, summary, div, section, article, header, footer, figure';
 
@@ -337,7 +339,7 @@ export function createReaderView({ api, onClose = () => {} }) {
     article.lang = a.lang || '';
     article.dir = a.dir === 'rtl' ? 'rtl' : 'auto';
     article.innerHTML = `<header class="rd-top"><p class="rd-site">${esc(meta)}</p><h1 class="rd-title">${esc(a.title)}</h1>${a.byline ? `<p class="rd-by">${esc(a.byline)}</p>` : ''}</header>
-      <div class="rd-body">${DOMPurify.sanitize(a.content, PURIFY)}</div>`;
+      <div class="rd-body">${DOMPurify.sanitize(a.content, res.incognito ? NO_IMAGES : PURIFY)}</div>`;
     article.querySelectorAll('img').forEach((img) => {
       img.loading = 'lazy';
       img.decoding = 'async';

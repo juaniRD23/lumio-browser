@@ -29,6 +29,13 @@ const MAX_ICON = 3 * 1024 * 1024;
 const MAX_MANIFEST = 256 * 1024;
 const web = (url) => /^https?:/i.test(url || '');
 const hostOf = (url) => { try { return new URL(url).host.replace(/^www\./, ''); } catch { return ''; } };
+// This computer or the local network: a public page's manifest and icons are never fetched from there.
+function isLocal(url) {
+  let h;
+  try { h = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, ''); } catch { return false; }
+  return h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h === '::1' || h === '0.0.0.0' || /^(127|10)\./.test(h)
+    || /^192\.168\./.test(h) || /^169\.254\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h) || /^f[cd][0-9a-f]{2}:/.test(h) || /^fe80:/.test(h);
+}
 
 // Runs in the page: where its manifest is, the icons it lists and its names.
 function pageAppInfo() {
@@ -106,9 +113,19 @@ class Apps {
       return m ? (m[1] ? Buffer.from(m[2], 'base64') : Buffer.from(decodeURIComponent(m[2]))) : null;
     }
     const res = await this.session().fetch(url, { signal: AbortSignal.timeout(8000) });
-    if (!res.ok || Number(res.headers.get('content-length') || 0) > max) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
-    return buf.length <= max ? buf : null;
+    if (!res.ok || Number(res.headers.get('content-length') || 0) > max || !res.body) return null;
+    // Read with a cap: a server that doesn't say the size can't fill memory.
+    const reader = res.body.getReader();
+    const parts = [];
+    let size = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > max) { reader.cancel().catch(() => {}); return null; }
+      parts.push(value);
+    }
+    return Buffer.concat(parts);
   }
 
   // The first icon that decodes and is big enough, as a 256-pixel PNG.
@@ -130,8 +147,9 @@ class Apps {
     const pageUrl = wc?.getURL() || '';
     if (!wc || !web(pageUrl)) return null;
     const page = await wc.executeJavaScriptInIsolatedWorld(WORLD, [{ code: `(${pageAppInfo})()` }]).catch(() => ({}));
+    const reachable = (u) => !isLocal(u) || isLocal(pageUrl);
     let manifest = null;
-    if (page?.manifest && web(page.manifest)) {
+    if (page?.manifest && web(page.manifest) && reachable(page.manifest)) {
       try {
         const buf = await this.fetchBytes(page.manifest, MAX_MANIFEST);
         manifest = buf ? JSON.parse(buf.toString('utf8')) : null;
@@ -140,7 +158,7 @@ class Apps {
     const d = appDetails(pageUrl, page || {}, manifest, page?.manifest);
     // Create shortcut opens the page you're on; Install opens the app's start page.
     if (shortcut) { d.startUrl = pageUrl; d.name = String(page?.title || d.name).trim().slice(0, 60) || d.name; }
-    return { ...d, host: hostOf(pageUrl), iconPng: await this.pickIcon(d.icons, tab.favicon) };
+    return { ...d, host: hostOf(pageUrl), iconPng: await this.pickIcon(d.icons.filter((i) => reachable(i.src)), reachable(tab.favicon || '') ? tab.favicon : null) };
   }
 
   // Shows the Install app / Create shortcut dialog over the page.
@@ -245,7 +263,7 @@ class Apps {
     const r = this.get(rec.id);
     if (!r) return;
     r.bounds = bounds;
-    this.file.save();
+    this.file.save(true); // the window closing may be Lumio quitting
   }
 
   // The focused app window's menu (the Mac shows one menu bar for all windows).
@@ -266,9 +284,9 @@ class Apps {
     const aw = [...this.windows].find((x) => x.view.webContents.id === wcId);
     if (!aw) return false;
     dialog.showMessageBox(aw.win, {
-      type: 'question', buttons: ['Allow', 'Block'], defaultId: 1, cancelId: 1,
+      type: 'question', buttons: ['Allow', 'Block', 'Not now'], defaultId: 2, cancelId: 2,
       message: `${payload.host} wants to ${payload.label}`,
-    }).then(({ response }) => this.permissions().respond(payload.id, response === 0, true)).catch(() => {});
+    }).then(({ response }) => this.permissions().respond(payload.id, response === 0, response !== 2)).catch(() => {}); // Not now (or Esc) isn't remembered
     return true;
   }
 
@@ -576,4 +594,4 @@ class AppWindow {
   }
 }
 
-module.exports = { Apps, AppWindow, appDetails, pageAppInfo };
+module.exports = { Apps, AppWindow, appDetails, pageAppInfo, isLocal };

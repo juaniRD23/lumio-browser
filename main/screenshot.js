@@ -34,6 +34,7 @@ class Screenshots {
   constructor({ toast = () => {} } = {}) {
     this.toast = toast;
     this.sessions = new Map(); // window -> { view, tab }
+    this.starts = new WeakMap(); // window -> its latest start (an earlier one still capturing gives way)
   }
 
   sessionOf(wc) {
@@ -46,13 +47,15 @@ class Screenshots {
     const wc = tab?.view?.webContents;
     if (!wc || wc.isDestroyed()) return;
     this.cancel(w, false);
+    const run = {};
+    this.starts.set(w, run);
     const open = w.overlayKind; // a popover over the page closes first, and the shell hears so
     w.hideOverlay();
     if (open) w.emit('overlay-picked', { kind: open });
     let img;
     try { img = await wc.capturePage(); } catch { img = null; }
     if (!img || img.isEmpty()) { this.toast(w, 'Couldn’t take a screenshot of this page'); return; }
-    if (w.closed || w.tabs.active !== tab) return;
+    if (w.closed || w.tabs.active !== tab || this.starts.get(w) !== run) return;
     const bounds = tab.view.getBounds();
     const view = new WebContentsView({ webPreferences: { preload: SHELL_PRELOAD, contextIsolation: true, sandbox: true, nodeIntegration: false } });
     if (typeof view.setBorderRadius === 'function') view.setBorderRadius(10);

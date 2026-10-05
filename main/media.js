@@ -149,7 +149,7 @@ class MediaHub {
         artist: String(info.artist || ''),
         host: (() => { try { return new URL(x.tabs.displayUrl(tab)).host.replace(/^www\./, ''); } catch { return ''; } })(),
         favicon: tab.favicon || null,
-        artwork: bestArtwork(info.artwork),
+        artwork: x.incognito ? null : bestArtwork(info.artwork), // the popover's session would fetch it outside incognito
         playing: el ? !el.paused : info.state === 'playing' || !!tab.media.playing,
         canPrev: acts.has('previoustrack'),
         canNext: acts.has('nexttrack'),

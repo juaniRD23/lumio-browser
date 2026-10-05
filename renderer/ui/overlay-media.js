@@ -63,14 +63,14 @@ export function initMediaHub(card, api, isOpen, reportSize) {
 
   function draw() {
     // Redrawn every second: keep the keyboard where it was.
-    const had = card.contains(document.activeElement) ? { tab: document.activeElement.closest('[data-tab]')?.dataset.tab, act: document.activeElement.dataset.act || (document.activeElement.type === 'range' ? 'seek' : null) } : null;
+    const had = card.contains(document.activeElement) ? { tab: document.activeElement.closest('[data-tab]')?.dataset.tab, act: document.activeElement.dataset.act || (document.activeElement.type === 'range' ? 'seek' : null), go: document.activeElement.classList.contains('mh-go') } : null;
     card.innerHTML = `<div class="mh" role="dialog" aria-labelledby="mh-title">
       <div class="mh-head"><b id="mh-title">Media</b><span class="spacer"></span><button type="button" class="mh-x" data-act="close" title="Close (Esc)" aria-label="Close">${I.x}</button></div>
       ${items.length ? items.map(item).join('') : '<p class="mh-empty">Nothing is playing.</p>'}
     </div>`;
     card.querySelectorAll('.mh-art img').forEach((img) => { img.onerror = () => { img.outerHTML = I.note; }; });
     if (had?.tab) {
-      const sel = had.act === 'seek' ? 'input[type=range]' : had.act === 'play' || had.act === 'pause' ? '.mh-play' : `[data-act="${had.act}"]`;
+      const sel = had.act === 'seek' ? 'input[type=range]' : had.act === 'play' || had.act === 'pause' ? '.mh-play' : had.go ? '.mh-go' : `[data-act="${had.act}"]`; // two "goto"s: the title and Go to tab
       card.querySelector(`[data-tab="${had.tab}"]`)?.querySelector(sel)?.focus();
     }
     const now = items.map((it) => `${it.tabId}:${!!it.duration}:${!!it.artist}`).join(',');

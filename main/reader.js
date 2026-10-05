@@ -82,7 +82,7 @@ class Reader {
   // The article on a tab, for the view.
   async article(w, tab) {
     const url = tab ? w.tabs.displayUrl(tab) : '';
-    const base = { tabId: tab?.id ?? null, url, prefs: this.prefs() };
+    const base = { tabId: tab?.id ?? null, url, prefs: this.prefs(), incognito: !!w.incognito };
     const wc = tab?.view?.webContents;
     if (!wc || wc.isDestroyed() || !readable(wc.getURL())) return { ...base, ok: false, reason: 'Reading mode works on articles and other web pages.' };
     if (tab.pdf) return { ...base, ok: false, reason: 'Reading mode doesn’t work on PDFs.' };

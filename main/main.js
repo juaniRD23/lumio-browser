@@ -219,6 +219,8 @@ function startMenuShortcut() {
 }
 
 function createWindow(opts = {}) {
+  // Started for an installed app: the browser's last windows come back with the first browser window.
+  if (waitingSession) { const waiting = waitingSession; waitingSession = null; waiting.forEach((s) => createWindow({ tabs: s.tabs, active: s.active, bounds: s.bounds, focus: false })); }
   const incognito = !!opts.incognito;
   const w = new BrowserWin(services, incognito ? incognitoProfile() : normal, { ...opts, near: cur()?.win });
   windows.add(w);

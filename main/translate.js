@@ -118,7 +118,7 @@ class Translator {
     if (tab.translate.status !== 'offer') return;
     const p = this.prefs();
     // Always translate: every time the page loads, unless the person chose Show original on it.
-    const auto = p.always.includes(lang) && !tab.owner.incognito && this.account.token() && !tab.translateHold;
+    const auto = p.always.includes(lang) && !tab.owner.incognito && /^https?:/i.test(url) && this.account.token() && !tab.translateHold; // local files only on request
     if (!auto && tab.translateSeen) return;
     tab.translateSeen = true; // the bubble offers itself once per page
     if (auto) this.start(tab);
