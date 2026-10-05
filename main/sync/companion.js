@@ -12,13 +12,15 @@ const IDLE_POLL = 15_000;
 const WATCHED_POLL = 3_000; // someone has the phone app open
 const STATUS_EVERY = 60_000; // also keeps this computer "online" on the phone
 const MAX_AGE = 3 * 60_000; // commands older than this are ignored
+const TAB_MAX_AGE = 24 * 3600_000; // a tab sent from another device waits a day (as long as the relay keeps it)
 
 class CompanionBridge {
-  constructor({ sync, windows, pickWindow, openChat }) {
+  constructor({ sync, windows, pickWindow, openChat, onTab = () => {} }) {
     this.sync = sync;
     this.windows = windows; // () => this computer's normal windows
     this.pickWindow = pickWindow; // () => the window to work in (opening one if needed)
     this.openChat = openChat; // (w, chatId) => show that chat in the panel
+    this.onTab = onTab; // ({ url, title, from }) => a tab sent here from another computer (main/share.js)
     this.watching = false;
     this.fromPhone = new Set(); // chats the phone started: their end and approvals notify it
     this.live = { running: false, chatId: null, title: '', label: '', reply: '', approvals: [] };
@@ -51,7 +53,7 @@ class CompanionBridge {
       for (const m of res.messages) {
         let cmd;
         try { cmd = await C.open(this.sync.keys, 'companion', 'msg', m.data); } catch { continue; }
-        if (!cmd || Date.now() - (cmd.at || 0) > MAX_AGE) continue;
+        if (!cmd || Date.now() - (cmd.at || 0) > (cmd.type === 'tab' ? TAB_MAX_AGE : MAX_AGE)) continue;
         await this.handle(cmd).catch((err) => this.notice({ title: 'Lumio couldn’t do that', body: String(err.message || err).slice(0, 200) }));
       }
     }
@@ -61,6 +63,10 @@ class CompanionBridge {
   }
 
   async handle(cmd) {
+    if (cmd.type === 'tab') {
+      if (/^https?:\/\//i.test(String(cmd.url || '')) && String(cmd.url).length <= 4096) this.onTab({ url: String(cmd.url), title: String(cmd.title || '').slice(0, 300), from: String(cmd.from || '').slice(0, 60) });
+      return;
+    }
     if (cmd.type === 'approve') {
       for (const w of this.windows()) w.ai.approve(String(cmd.callId), cmd.decision === 'deny' ? 'deny' : 'once');
       return;
@@ -140,6 +146,15 @@ class CompanionBridge {
     const l = this.live;
     const status = { at: Date.now(), running: l.running, chatId: l.chatId, title: l.title, label: l.label, reply: l.reply.slice(-1500), approvals: l.approvals };
     await this.sync.api('/api/companion/status', { method: 'PUT', body: { device: this.sync.deviceId, data: await this.seal(status, 'status') } });
+  }
+
+  // Sends a tab to another of the person's computers (Share › Send to your
+  // devices): an encrypted command for that computer only, which shows it
+  // as a "Tab from …" notification.
+  async sendTab(target, { url, title }) {
+    if (!this.ready()) throw new Error('Turn on Lumio Sync to send tabs to your devices.');
+    const data = await this.seal({ type: 'tab', url, title, from: this.sync.deviceName, at: Date.now() });
+    await this.sync.api('/api/companion/messages', { method: 'POST', body: { kind: 'command', device: this.sync.deviceId, target, data } });
   }
 
   // A notification for the phone(s).

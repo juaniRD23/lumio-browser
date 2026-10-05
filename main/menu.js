@@ -6,6 +6,25 @@ const { Menu } = require('electron');
 
 const MAC = process.platform === 'darwin';
 
+// Save and share (main/share.js, main/screenshot.js, main/apps.js). The menu
+// bar says it in Title Case and the ⋮ menu in sentence case, like Chrome.
+function saveAndShare(cmd, menuBar) {
+  const l = (title, sentence) => (menuBar ? title : sentence);
+  return [
+    { label: 'Share…', click: () => cmd.share('open') },
+    { label: l('Copy Link', 'Copy link'), click: () => cmd.share('copy') },
+    { label: l('Send to Your Devices…', 'Send to your devices…'), click: () => cmd.share('send') },
+    { label: l('Create QR Code…', 'Create QR code…'), click: () => cmd.share('qr') },
+    { label: l('Take Screenshot…', 'Screenshot…'), click: () => cmd.share('screenshot') },
+    ...(MAC ? [{ label: l('More Share Options…', 'More share options…'), click: () => cmd.share('native') }] : []),
+    { type: 'separator' },
+    { label: l('Save Page As…', 'Save page as…'), click: cmd.savePage },
+    { label: l('Install Page as App…', 'Install page as app…'), click: () => cmd.share('install') },
+    { label: l('Create Shortcut…', 'Create shortcut…'), click: () => cmd.share('shortcut') },
+    { label: l('Installed Apps', 'Installed apps'), click: cmd.apps },
+  ];
+}
+
 function buildMenu(cmd, state = {}) {
   const hidden = (accelerator, click) => ({ label: accelerator, accelerator, click, visible: false, acceleratorWorksWhenHidden: true });
   const tabKeys = Array.from({ length: 9 }, (_, i) => hidden(`CmdOrCtrl+${i + 1}`, () => cmd.tabIndex(i + 1)));
@@ -44,6 +63,7 @@ function buildMenu(cmd, state = {}) {
         { label: 'Close Window', accelerator: 'CmdOrCtrl+Shift+W', click: cmd.closeWindow },
         { type: 'separator' },
         { label: 'Save Page As…', accelerator: 'CmdOrCtrl+S', click: cmd.savePage },
+        { label: 'Save and Share', submenu: saveAndShare(cmd, true) },
         { label: 'Print…', accelerator: 'CmdOrCtrl+P', click: cmd.print },
         ...(MAC ? [] : [{ type: 'separator' }, { label: 'Settings', accelerator: 'Ctrl+,', click: cmd.settings }, { role: 'quit', label: 'Exit' }]),
       ],
@@ -88,6 +108,8 @@ function buildMenu(cmd, state = {}) {
         { label: 'Show/Hide Sidebar', accelerator: 'CmdOrCtrl+Shift+S', click: cmd.toggleSidebar },
         { label: 'Show/Hide Lumio AI', accelerator: 'CmdOrCtrl+Shift+L', click: cmd.togglePanel },
         { label: 'Ask Lumio', accelerator: 'CmdOrCtrl+J', click: cmd.focusAI },
+        { label: 'Reading Mode', click: cmd.readingMode },
+        { label: 'Translate Page…', click: cmd.translatePage },
         { type: 'separator' },
         { label: 'Developer Tools', accelerator: MAC ? 'Cmd+Alt+I' : 'Ctrl+Shift+I', click: cmd.devtools },
         ...(MAC ? [] : [hidden('F12', cmd.devtools)]),
@@ -165,6 +187,7 @@ function buildBrowserMenu(cmd, state = {}) {
     { label: 'Print…', accelerator: 'CmdOrCtrl+P', click: cmd.print },
     { label: 'Find…', accelerator: 'CmdOrCtrl+F', click: cmd.find },
     { label: 'Save page as…', accelerator: 'CmdOrCtrl+S', click: cmd.savePage },
+    { label: 'Save and share', submenu: saveAndShare(cmd, false) },
     { label: 'Developer tools', accelerator: k('Cmd+Alt+I', 'Ctrl+Shift+I'), click: cmd.devtools },
     { type: 'separator' },
     { label: 'Settings', click: cmd.settings },

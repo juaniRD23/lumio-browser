@@ -2,6 +2,9 @@
 // and the site-information popup (lock icon).
 import { icons, markSvg, avatarHtml } from './icons.js';
 import { setAccent } from '/assets/theme-colors.js';
+import { initTranslateBubble } from './overlay-translate.js';
+import { initShareBubble, initInstallDialog } from './overlay-share.js';
+import { initMediaHub } from './overlay-media.js';
 
 const api = window.lumio;
 const card = document.getElementById('card');
@@ -214,6 +217,10 @@ function reportSize() {
 }
 
 let kind = null;
+const translateBubble = initTranslateBubble(card, api, () => kind === 'translate');
+// Page tools: Share, Install app and media controls (they handle their own clicks and keys).
+const isOpen = (k) => kind === k;
+const pageTools = { share: initShareBubble(card, api, isOpen, reportSize), install: initInstallDialog(card, api, isOpen, reportSize), media: initMediaHub(card, api, isOpen, reportSize) };
 api.on('overlay-data', (payload) => {
   kind = payload.kind;
   if (payload.accent) setAccent(document.documentElement, payload.accent); // { dark, light } from the shell
@@ -226,6 +233,8 @@ api.on('overlay-data', (payload) => {
   else if (kind === 'passkey') { renderPasskey(payload); reportSize(); }
   else if (kind === 'update') { renderUpdateCard(payload); reportSize(); }
   else if (kind === 'screenshare') renderScreenShare(payload);
+  else if (kind === 'translate') { translateBubble.render(payload); reportSize(); }
+  else if (pageTools[kind]) pageTools[kind].render(payload);
 });
 
 card.addEventListener('change', (e) => {
@@ -234,6 +243,7 @@ card.addEventListener('change', (e) => {
 });
 
 card.addEventListener('mousedown', async (e) => {
+  if (kind === 'translate' || pageTools[kind]) return; // their buttons, boxes and lists work normally (overlay-translate.js, overlay-share.js, overlay-media.js)
   if (kind === 'screenshare') {
     const tile = e.target.closest('[data-src]');
     if (tile) {

@@ -97,6 +97,7 @@ class BrowserWin {
         openInNewWindow: (url, inc) => app.createWindow({ incognito: inc, urls: [url] }),
         savePage: (tab) => app.savePage(this, tab),
         contextMenuExtras: (tab, params) => app.contextMenuExtras(this, tab, params),
+        pageMenu: (section, tab, params) => app.pageMenu?.(this, section, tab, params),
       },
     });
     this.indicator = new PageIndicator(this);
@@ -174,6 +175,7 @@ class BrowserWin {
     const y = Math.max(0, Math.round(rect.y));
     this.overlay.setBounds({ x, y, width: Math.min(Math.round(rect.width), w - x), height: Math.min(Math.round(rect.height), h - y) });
     this.win.contentView.addChildView(this.overlay);
+    if (this.overlayKind && this.overlayKind !== payload?.kind) this.app.onOverlayClosed?.(this, this.overlayKind); // replaced by another one
     this.overlayKind = payload?.kind || null;
     this.overlay.webContents.send('overlay-data', payload);
   }
@@ -183,6 +185,7 @@ class BrowserWin {
     this.overlayKind = null;
     if (kind === 'passkey') this.app.onPasskeyPromptClosed?.(this);
     if (kind === 'screenshare') this.app.onScreenSharePickerClosed?.(this);
+    if (kind) this.app.onOverlayClosed?.(this, kind);
     if (!this.win.isDestroyed() && this.win.contentView.children.includes(this.overlay)) {
       this.win.contentView.removeChildView(this.overlay);
     }

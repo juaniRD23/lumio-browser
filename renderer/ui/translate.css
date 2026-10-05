@@ -1,0 +1,8 @@
+/* The address bar's Translate button (renderer/ui/translate.js): the accent
+   while the page is translated, a pulse while it's translating. */
+#translate-btn { color: var(--label); }
+#translate-btn.on { color: var(--accent); }
+#translate-btn.err { color: var(--warn); }
+#translate-btn.busy svg { animation: tr-pulse 1.2s ease-in-out infinite; }
+@keyframes tr-pulse { 50% { opacity: .4; } }
+@media (prefers-reduced-motion: reduce) { #translate-btn.busy svg { animation: none; } }

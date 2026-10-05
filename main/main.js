@@ -41,6 +41,14 @@ const { Projects } = require('./projects');
 const { SyncEngine } = require('./sync/engine');
 const syncAdapters = require('./sync/adapters');
 const { CompanionBridge } = require('./sync/companion');
+const { Translator } = require('./translate');
+const { Reader } = require('./reader');
+const { MediaHub } = require('./media');
+const { ShareTools } = require('./share');
+const { Screenshots } = require('./screenshot');
+const { Apps } = require('./apps');
+const { appIdFromArgv } = require('./app-launchers');
+const { PageMenu } = require('./page-menu');
 
 const IS_DEV = !app.isPackaged;
 
@@ -83,6 +91,14 @@ let siteTips = null; // how to get things done on sites (main/site-tips.js)
 let projects = null; // chat projects (main/projects.js)
 let sync = null; // Lumio Sync (main/sync)
 let companion = null; // the phone companion's link to this computer
+let translator = null; // translating pages (main/translate.js)
+let reader = null; // reading mode (main/reader.js)
+let media = null; // the toolbar's media controls (main/media.js)
+let shareTools = null; // Share, QR codes, Send to your devices (main/share.js)
+let screenshots = null; // the screenshot tool (main/screenshot.js)
+let apps = null; // installed web apps (main/apps.js)
+let pageMenu = null; // the page tools' right-click items (main/page-menu.js)
+let waitingSession = null; // started for an installed app: the browser's last windows, kept until it's opened
 let quitting = false;
 const windows = new Set();
 let lastFocused = null;
@@ -133,6 +149,7 @@ function emitFor(wcId, channel, payload) {
   for (const w of alive()) {
     if (w.tabs.tabs.some((t) => t.view?.webContents.id === wcId)) { w.emit(channel, payload); return; }
   }
+  apps?.emitFor(wcId, channel, payload); // a site in an installed app's window
 }
 
 const services = {
@@ -170,12 +187,22 @@ const services = {
     menuChanged();
   },
   onSessionChanged: () => saveSession(),
-  onViewCreated: (w, tab) => { if (!w.incognito && tab.view) extensions?.addTab(tab.view.webContents, w.win); },
+  onViewCreated: (w, tab) => { translator?.wire(tab); reader?.wire(tab); media?.wire(tab); shareTools?.wire(tab); if (!w.incognito && tab.view) extensions?.addTab(tab.view.webContents, w.win); },
   onPasskeyPromptClosed: (w) => passwords?.passkeyClosed(w),
   onScreenSharePickerClosed: (w) => shareCancel(w),
-  onTabActivated: (w, tab) => { if (!w.incognito && tab.view) extensions?.selectTab(tab.view.webContents); },
+  onTabActivated: (w, tab) => {
+    shareTools?.tabChanged(w, tab);
+    screenshots?.cancel(w, false);
+    if (!w.incognito && tab.view) extensions?.selectTab(tab.view.webContents);
+  },
+  onOverlayClosed: (w, kind) => shareTools?.overlayClosed(w, kind),
+  pageMenu: (w, section, tab, params) => pageMenu?.items(w, section, tab, params) || [],
   savePage: (w, tab) => savePage(w, tab),
-  contextMenuExtras: (w, tab, params) => (w.incognito || !tab.view ? [] : extensions?.contextMenuItems(tab.view.webContents, params) || []),
+  contextMenuExtras: (w, tab, params) => {
+    const tools = [...(reader?.menuItems(w, tab, params) || []), ...(translator?.menuItems(w, tab, params) || [])];
+    const ext = w.incognito || !tab.view ? [] : extensions?.contextMenuItems(tab.view.webContents, params) || [];
+    return tools.length && ext.length ? [...tools, { type: 'separator' }, ...ext] : [...tools, ...ext];
+  },
   broadcastAIState: () => alive().forEach((w) => w.ai.emitState()),
 };
 
@@ -235,14 +262,14 @@ function runDueSchedules() {
 // one closes (without quitting) the file keeps it, like Chrome on the Mac.
 function saveSession() {
   if (quitting || !store) return;
-  const list = alive().filter((w) => !w.incognito).map((w) => w.session()).filter((s) => s.tabs.length);
+  const list = [...(waitingSession || []), ...alive().filter((w) => !w.incognito).map((w) => w.session()).filter((s) => s.tabs.length)];
   if (list.length) store.saveSession(list);
 }
 
 let menuTimer = null;
 function menuChanged() {
   clearTimeout(menuTimer);
-  menuTimer = setTimeout(() => Menu.setApplicationMenu(buildMenu(cmd, menuState())), 50);
+  menuTimer = setTimeout(() => Menu.setApplicationMenu(apps?.focusedMenu() || buildMenu(cmd, menuState())), 50); // an app window in front keeps its own
 }
 function menuState() {
   return {
@@ -341,6 +368,11 @@ const cmd = {
   tabIndex: (n) => cur()?.tabs.activateIndex(n),
   makeDefault: () => makeDefaultBrowser(),
   webStore: () => { const w = normalWin() || createWindow(); w.tabs.create('https://chromewebstore.google.com/'); w.focus(); },
+  readingMode: () => { const w = cur(); if (!w) return; w.win.webContents.focus(); w.emit('reader-open', { toggle: true }); },
+  translatePage: () => { const w = cur(); if (w?.tabs.active) w.emit('translate-prompt', { tabId: w.tabs.activeId, force: true }); },
+  // Save and share: copy, qr, send, open (the Share popover), screenshot, save, install, shortcut, native (main/share.js).
+  share: (what) => { const w = cur(); if (w) shareTools.command(w, what); },
+  apps: () => openInternal('lumio://apps/'),
 };
 
 function openInternal(url) {
@@ -374,6 +406,7 @@ function setBookmarksBar(show) {
 // and the payment window, and the View menu shows the choice.
 function appearanceChanged() {
   for (const w of alive()) w.applyAppearance();
+  apps?.applyAppearance();
   if (checkoutWin && !checkoutWin.isDestroyed()) checkoutWin.setBackgroundColor(theme.colors(theme.isDark()).frame);
   menuChanged();
 }
@@ -717,7 +750,7 @@ function registerIpc() {
     update: updater?.state || null,
   }));
 
-  on('layout:slot', (w, rect) => { w.tabs.setSlot(rect); w.indicator.place(); });
+  on('layout:slot', (w, rect) => { w.tabs.setSlot(rect); w.indicator.place(); screenshots.place(w); });
   on('aura:size', (w, size) => { if (w.indicator.bar?.webContents) w.indicator.resize(size); });
   on('panel:full', (w, { on: covered, slot } = {}) => w.tabs.setCovered(!!covered, slot && Number.isFinite(slot.width) ? slot : null));
   on('sidebar:set', (_w, { open, getStarted } = {}) => {
@@ -887,6 +920,15 @@ function registerIpc() {
   on('ai:mac-permissions-open', (w, which) => w.ai.openMacPermissionSettings(which));
   handle('ai:mac-permissions', (w) => w.ai.macPermissions());
   on('open-url', (w, url) => w.tabs.create(url));
+
+  // ---- translate pages and reading mode (main/translate.js, main/reader.js)
+  translator.register({ handle, on });
+  reader.register({ handle, on });
+  // ---- media controls, Share, screenshots and installed apps
+  media.register({ handle, on, tabOfWc });
+  shareTools.register({ handle, on });
+  screenshots.register();
+  apps.register({ on, internalHandle });
 
   // ---- internal pages ----
   internalHandle('page:newtab-data', ['newtab'], ({ w }) => ({
@@ -1231,6 +1273,7 @@ app.on('open-url', (e, url) => {
 });
 
 app.on('second-instance', (_e, argv) => {
+  if (apps?.launch(argv)) return; // an installed app's launcher (main/app-launchers.js)
   const urls = launchTargets(argv.slice(1));
   if (urls.length) openExternalUrls(urls); else ensureWin().focus();
 });
@@ -1270,6 +1313,8 @@ app.whenReady().then(async () => {
   });
   account.refresh();
   watchLumioCookie();
+  translator = new Translator({ store, account, windowOf: (tab) => alive().find((w) => w.tabs === tab.owner) || null });
+  reader = new Reader({ store });
   setInterval(() => { if (account.token()) account.refresh(); }, 10 * 60 * 1000).unref?.();
   workflows = new Workflows(app.getPath('userData'));
   siteTips = new SiteTips(app.getPath('userData'));
@@ -1345,6 +1390,7 @@ app.whenReady().then(async () => {
     windows: () => alive().filter((w) => !w.incognito),
     pickWindow: () => (lastFocused && !lastFocused.incognito && windows.has(lastFocused) ? lastFocused : alive().find((w) => !w.incognito) || createWindow({ focus: false })),
     openChat: (w, id) => w.openChat(id, { full: false }),
+    onTab: (t) => shareTools?.receiveTab(t), // Send to your devices, from another computer
   });
   companion.start();
   passwords.register();
@@ -1377,6 +1423,32 @@ app.whenReady().then(async () => {
   normal.permissions = new Permissions(ses, { store, emitFor, persist: true });
   setupScreenShare(ses);
 
+  // Page tools: media controls, Share, screenshots, installed apps and their right-click items.
+  const toast = (w, text) => w.emit('toast', { text });
+  media = new MediaHub({ windows: alive });
+  screenshots = new Screenshots({ toast });
+  apps = new Apps({
+    dir: app.getPath('userData'),
+    session: () => normal.session,
+    permissions: () => normal.permissions,
+    openUrl: (url) => openExternalUrls([url]),
+    cmd,
+    restoreMenu: () => Menu.setApplicationMenu(buildMenu(cmd, menuState())),
+    toast,
+    ...(process.env.LUMIO_TEST ? { launcherDir: path.join(app.getPath('userData'), 'Lumio Apps') } : {}), // tests keep ~/Applications clean
+  });
+  shareTools = new ShareTools({
+    sync,
+    companion,
+    savePage,
+    openUrl: (url) => openExternalUrls([url]),
+    screenshots,
+    apps,
+    tabOfWc,
+    windowOf: (tab) => alive().find((w) => w.tabs === tab.owner) || null,
+  });
+  pageMenu = new PageMenu({ share: shareTools, toast });
+
   extensions = new ExtensionManager({
     session: ses,
     store,
@@ -1407,6 +1479,8 @@ app.whenReady().then(async () => {
   registerIpc();
   Menu.setApplicationMenu(buildMenu(cmd, menuState()));
 
+  // Started by an installed app's launcher: just that app, like Chrome.
+  const launchedApp = appIdFromArgv(process.argv);
   const saved = store.settings.startup === 'newtab' ? [] : store.sessionWindows();
   // First launch: the welcome screens (people updating from an older version
   // already have history, bookmarks or tabs, and skip them).
@@ -1414,14 +1488,23 @@ app.whenReady().then(async () => {
   if (store.settings.onboarded !== true && (!process.env.LUMIO_TEST || process.env.LUMIO_TEST_WELCOME)) {
     store.setSetting('panelOpen', false);
     createWindow({ tabs: [{ url: 'lumio://welcome/', title: 'Welcome to Lumio Browser' }], active: 0 });
+  } else if (launchedApp && apps.get(launchedApp)?.window && apps.open(launchedApp)) {
+    waitingSession = saved; // the browser's windows come back when it's opened (below), and are never lost
   } else if (saved.length) saved.forEach((s) => createWindow({ tabs: s.tabs, active: s.active, bounds: s.bounds }));
   else createWindow();
+  if (launchedApp && apps.get(launchedApp)?.window === false) apps.open(launchedApp); // a shortcut that opens in a tab
   // Windows passes links to open on the command line.
   if (process.platform !== 'darwin' && !process.env.LUMIO_TEST) pendingUrls.push(...launchTargets(process.argv.slice(1)));
   if (process.platform === 'win32' && app.isPackaged && !process.windowsStore) startMenuShortcut();
   if (pendingUrls.length) openExternalUrls(pendingUrls.splice(0));
 
-  app.on('activate', () => { if (!alive().length) createWindow(); });
+  app.on('activate', () => {
+    if (alive().length) return;
+    const waiting = waitingSession || [];
+    waitingSession = null;
+    if (waiting.length) waiting.forEach((s) => createWindow({ tabs: s.tabs, active: s.active, bounds: s.bounds }));
+    else createWindow();
+  });
 });
 
 app.on('window-all-closed', () => {
@@ -1488,6 +1571,7 @@ global.lumio = {
   get sync() { return sync; },
   get profiles() { return { normal, incognito: incog }; },
   get recentlyClosed() { return recentlyClosed; },
+  get pageTools() { return { media, share: shareTools, screenshots, apps, pageMenu }; },
   screenAura,
   get updater() { return updater; },
   signIn: (w) => signIn(w || cur()),

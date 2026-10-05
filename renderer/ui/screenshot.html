@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Screenshot</title>
+  <link rel="stylesheet" href="screenshot.css" />
+</head>
+<body>
+  <main id="pick" aria-label="Take a screenshot" hidden>
+    <img id="frozen" alt="" draggable="false" />
+    <div id="dim"></div>
+    <div id="sel" hidden></div>
+    <div class="bar pick-bar" role="toolbar" aria-label="Screenshot">
+      <span class="hint" id="hint" aria-live="polite">Drag to select an area</span>
+      <button type="button" class="pill" data-act="visible">Visible area</button>
+      <button type="button" class="pill" data-act="full">Full page</button>
+      <button type="button" class="round" data-act="close" title="Cancel (Esc)" aria-label="Cancel"></button>
+    </div>
+  </main>
+  <main id="edit" aria-label="Edit screenshot" hidden>
+    <div class="bar edit-bar" role="toolbar" aria-label="Edit screenshot">
+      <div class="group" role="radiogroup" aria-label="Markup">
+        <button type="button" class="tool" role="radio" data-tool="pen" title="Pen (P)" aria-label="Pen"></button>
+        <button type="button" class="tool" role="radio" data-tool="marker" title="Highlighter (H)" aria-label="Highlighter"></button>
+        <button type="button" class="tool" role="radio" data-tool="arrow" title="Arrow (A)" aria-label="Arrow"></button>
+        <button type="button" class="tool" role="radio" data-tool="text" title="Text (T)" aria-label="Text"></button>
+      </div>
+      <div class="group colors" role="radiogroup" aria-label="Color"></div>
+      <button type="button" class="tool" data-act="undo" title="Undo (⌘Z)" aria-label="Undo" disabled></button>
+      <span class="status" id="status" aria-live="polite"></span>
+      <button type="button" class="pill" data-act="ask">Ask Lumio</button>
+      <button type="button" class="pill" data-act="save">Download</button>
+      <button type="button" class="pill primary" data-act="copy">Copy</button>
+      <button type="button" class="round" data-act="close" title="Done (Esc)" aria-label="Done"></button>
+    </div>
+    <div class="stage" id="stage"><canvas id="canvas" aria-label="Screenshot"></canvas></div>
+  </main>
+  <script type="module" src="screenshot.js"></script>
+</body>
+</html>

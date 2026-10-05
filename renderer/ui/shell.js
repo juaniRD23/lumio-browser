@@ -3,6 +3,10 @@ import { icons, markSvg, avatarHtml } from './icons.js';
 import { THEME_COLORS, accentFor, setAccent } from '/assets/theme-colors.js';
 import { initPanel } from './ai-panel.js';
 import { initSidebar } from './sidebar.js';
+import { initTranslate } from './translate.js';
+import { initReadingMode } from './reading-mode.js';
+import { initShare } from './share.js';
+import { initMedia } from './media.js';
 import './keys.js';
 
 const IS_MAC = /Mac/.test(navigator.platform);
@@ -685,6 +689,22 @@ const panel = initPanel({
 
 api.on('fullscreen', (on) => document.body.classList.toggle('fullscreen', on));
 
+// ------------------------------------------------------------------ page tools
+// Translate, Reading mode and Share sit in the address bar, media controls in
+// the toolbar (renderer/ui/translate.js, reading-mode.js, share.js, media.js).
+// Their popovers hang over the page, in the overlay view.
+const pageOverlay = {
+  get kind() { return overlayKind; },
+  open: (kind, rect, payload) => { overlayKind = kind; api.send('overlay:show', { rect, payload }); },
+  close: hideOverlay,
+  picked: () => { overlayKind = null; },
+};
+const translate = initTranslate({ api, activeTab, isTyping: () => omniFocused, getAccent: () => accent(), overlay: pageOverlay });
+const readingMode = initReadingMode({ api, activeTab, onLayout: reportSlot });
+const share = initShare({ api, activeTab, overlay: pageOverlay, getAccent: () => accent() });
+const media = initMedia({ api, activeTab, overlay: pageOverlay, getAccent: () => accent() });
+const renderPageTools = () => { translate.render(); readingMode.onTabs(); share.render(); media.render(); };
+
 // ------------------------------------------------------------------ state
 api.on('tabs', (s) => {
   const switched = s.activeId !== state.activeId;
@@ -694,6 +714,7 @@ api.on('tabs', (s) => {
   renderToolbar();
   if (barWanted() !== barVisible) renderBookmarksBar(); // the new tab page shows it even when it's off
   panel.onTabChange(activeTab(), switched);
+  renderPageTools();
   if (switched) $('#zoom-badge').hidden = true;
 });
 
@@ -718,6 +739,7 @@ $('#beta-badge').hidden = !init.beta; // Lumio Beta (main/flavor.js)
 $('#ext-area').hidden = !init.extensions;
 renderTabs();
 renderToolbar();
+renderPageTools();
 renderDownloads(false);
 renderBookmarksBar();
 renderAccount();
