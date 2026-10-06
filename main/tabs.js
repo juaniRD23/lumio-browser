@@ -1191,7 +1191,8 @@ class TabManager {
     const index = this.tabs.indexOf(tab) + 1;
     const engine = searchEngines.defaultEngine(this.store.settings);
     const ai = !!this.hooks.askAI; // a pop-up has no Lumio AI
-    const more = (section) => this.hooks.pageMenu?.(section, tab, params) || []; // page tools' items (main/page-menu.js)
+    // Page tools' items (main/page-menu.js); a pop-up has no Lumio AI to ask.
+    const more = (section) => (this.hooks.pageMenu?.(section, tab, params) || []).filter((i) => ai || !i.needsAI).map(({ needsAI: _ai, ...i }) => i);
 
     if (params.misspelledWord) {
       const suggestions = (params.dictionarySuggestions || []).slice(0, 5);

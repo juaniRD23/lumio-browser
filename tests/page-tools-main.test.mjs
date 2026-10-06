@@ -597,6 +597,19 @@ test('the page’s right-click menu (main/tabs.js) puts the page tools’ items 
     assert.ok(menu({ selectionText: 'some words' }).includes('Copy Link to Highlight'));
     assert.ok(menu({ isEditable: true }).includes(MAC ? 'Emoji & Symbols' : 'Emoji'));
     assert.ok(menu({}).includes('Create QR Code for This Page'));
+    // Seam: with every batch's items (batch 5's reading list, 7c's Look Up and
+    // Speech on the Mac, 7b's page tools), nothing shows twice.
+    const { contextMenuItems: macItems } = require('../main/mac-integration.js');
+    tm.hooks.readingList = () => {};
+    tm.hooks.contextMenuExtras = (tab, params, existing) => macItems(tab.view.webContents, params, existing, { mac: true });
+    for (const params of [{ linkURL: 'https://a.example/x', linkText: 'Read more' }, { mediaType: 'image', srcURL: 'https://a.example/i.png' }, { mediaType: 'video', srcURL: 'https://a.example/v.mp4' },
+      { selectionText: 'some words' }, { isEditable: true, selectionText: 'typed' }, {}]) {
+      const all = menu(params).filter((l) => l && l !== '—'); // (separators aside)
+      assert.deepEqual(all.filter((l, i) => all.indexOf(l) !== i), [], `no duplicates: ${JSON.stringify(params)}`);
+    }
+    // A pop-up has no Lumio AI: no "Ask Lumio" items from the page tools either.
+    delete tm.hooks.askAI;
+    assert.ok(!menu({ mediaType: 'image', srcURL: 'https://a.example/i.png' }).some((l) => /Ask Lumio/.test(l)));
   } finally {
     electron.Menu.buildFromTemplate = original;
   }

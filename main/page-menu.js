@@ -86,7 +86,7 @@ class PageMenu {
       if (text) out.push({ label: 'Copy Link Text', click: () => clipboard.writeText(text) });
       if (web(params.linkURL)) qr('Create QR Code for This Link', params.linkURL, text);
     } else if (section === 'image') {
-      if (web(params.srcURL) || /^data:image\//i.test(params.srcURL)) out.push({ label: 'Ask Lumio About This Image', click: () => this.askAboutImage(w, tab, params.srcURL) });
+      if (web(params.srcURL) || /^data:image\//i.test(params.srcURL)) out.push({ label: 'Ask Lumio About This Image', needsAI: true, click: () => this.askAboutImage(w, tab, params.srcURL) });
       if (web(params.srcURL)) qr('Create QR Code for This Image', params.srcURL, params.altText || params.titleText || '');
     } else if (section === 'media') {
       const f = params.mediaFlags || {};
