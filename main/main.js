@@ -293,7 +293,12 @@ const services = {
     w.profile.base.reader?.wire(tab);
     media?.wire(tab);
     shareTools?.wire(tab);
-    if (!w.incognito && tab.view) w.profile.extensions?.addTab(tab.view.webContents, w.win);
+    if (!w.incognito && tab.view) {
+      w.profile.extensions?.addTab(tab.view.webContents, w.win);
+      // A tab already in the strip that isn't the one shown (opened in the background).
+      const shown = w.tabs.active?.view?.webContents;
+      if (shown && w.tabs.tabs.includes(tab) && tab.id !== w.tabs.activeId) w.profile.extensions?.selectTab(shown);
+    }
     if (!w.incognito && tab.view) w.profile.omnibox?.watchTab(tab.view.webContents); // sites' OpenSearch engines
   },
   onPasskeyPromptClosed: (w) => w.profile.passwords?.passkeyClosed(w),
