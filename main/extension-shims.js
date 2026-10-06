@@ -235,7 +235,7 @@ function register(manager) {
   const openPanel = (id) => {
     const p = panelOf(id);
     if (!p.path || !p.enabled) return false;
-    manager.hooks.createTab({ url: `chrome-extension://${id}/${String(p.path).replace(/^\//, '')}`, active: true });
+    Promise.resolve(manager.hooks.createTab({ url: `chrome-extension://${id}/${String(p.path).replace(/^\//, '')}`, active: true })).catch(() => {});
     return true;
   };
   handle('sidePanel.setOptions', (id, opts = {}) => {
