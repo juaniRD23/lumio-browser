@@ -586,10 +586,9 @@ class ExtensionManager {
   // chrome.commands.onCommand in the extension.
   runCommand(id, name, wc) {
     if (commands.ACTION_COMMANDS.has(name)) { this.hooks.activate?.(id); return; }
-    try {
-      const tab = wc && !wc.isDestroyed() ? this.ece.api.tabs.getTabDetails(wc) : undefined;
-      this.ece.ctx.router.sendEvent(id, 'commands.onCommand', name, tab);
-    } catch { /* the extension isn't listening */ }
+    let tab;
+    try { tab = wc && !wc.isDestroyed() ? this.ece.api.tabs.getTabDetails(wc) : undefined; } catch { /* not a tab the library knows */ }
+    try { shims.sendEvent(this, id, 'commands.onCommand', name, tab); } catch { /* the extension isn't listening */ }
   }
 
   // ---------------------------------------------------------------- new tab page
