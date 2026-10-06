@@ -173,8 +173,8 @@ class TabManager {
       // If the history didn't take, the address alone. (A page that just
       // failed to load keeps its history: its error page shows.)
       const fallback = () => {
-        const wc = view.webContents;
-        if (!wc.isDestroyed() && !wc.navigationHistory.length()) wc.loadURL(url).catch(() => {});
+        const wc = view.webContents; // (none once the tab closed meanwhile)
+        if (wc && !wc.isDestroyed() && !wc.navigationHistory.length()) wc.loadURL(url).catch(() => {});
       };
       try { view.webContents.navigationHistory.restore(saved).catch(fallback); } catch { fallback(); }
     } else {

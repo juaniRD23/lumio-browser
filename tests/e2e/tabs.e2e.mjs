@@ -193,14 +193,16 @@ test('many tabs: the strip scrolls, the tab you’re on stays in view and + stay
   await reset();
   await L.main(() => { for (let i = 0; i < 40; i++) global.lumio.tabs.create('lumio://newtab/', { active: false }); return true; });
   await L.main(() => { const m = global.lumio.tabs; m.activate(m.tabs.at(-1).id); return true; });
-  const state = await until(() => L.shell(`(() => {
+  // (The strip scrolls to the tab you're on smoothly, after it starts to scroll.)
+  let state = null;
+  await until(async () => (state = await L.shell(`(() => {
     const tabs = document.getElementById('tabs');
     if (!tabs.classList.contains('scrolls')) return null;
     const box = tabs.getBoundingClientRect();
     const a = tabs.querySelector('.tab.active').getBoundingClientRect();
     const plus = document.getElementById('newtab').getBoundingClientRect();
     return { inView: a.left >= box.left - 1 && a.right <= box.right + 1, plus: plus.width > 0 && plus.right <= innerWidth, fade: tabs.classList.contains('fade-start') };
-  })()`));
+  })()`)) && state.inView && state.plus && state.fade);
   assert.ok(state, 'the strip scrolls');
   assert.ok(state.inView, 'the tab you’re on is in view');
   assert.ok(state.plus, 'the new tab button is visible');
@@ -319,9 +321,10 @@ test('several tabs at once: Shift-click a range, then close, pin or move them to
   await L.main((_e, b) => { for (const n of ['s1', 's2', 's3', 's4']) global.lumio.tabs.create(`${b}/${n}`, { active: false }); return true; }, base);
   // Shift-click from the 2nd tab to the 4th, in the strip itself.
   await L.main(() => { const m = global.lumio.tabs; m.activate(m.tabs[1].id); return true; });
-  await L.wait(300);
+  // The strip shows the five tabs (the ones reset() closed may still be folding away).
+  assert.ok(await until(() => L.shell(`document.querySelectorAll('#tabs > .tab:not(.closing)').length === 5 && document.querySelectorAll('#tabs > .tab.closing').length === 0`)));
   const clicked = await L.shell(`(() => {
-    const tabs = [...document.querySelectorAll('#tabs > .tab')];
+    const tabs = [...document.querySelectorAll('#tabs > .tab:not(.closing)')];
     const r = tabs[3].getBoundingClientRect();
     tabs[3].dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, shiftKey: true, clientX: r.left + 10, clientY: r.top + 10, pointerId: 1 }));
     return true;
