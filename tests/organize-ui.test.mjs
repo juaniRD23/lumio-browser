@@ -243,8 +243,8 @@ test('saved groups sit at the bookmarks bar’s left end and open in one click',
 test('side panel: the switcher shares the panel with Lumio AI; reading list, bookmarks and history views', { skip }, async () => {
   for (const colorScheme of ['light', 'dark']) {
     const { page, errors } = await openShell({ colorScheme });
-    // The switcher: Lumio AI selected, the reading list shows its unread count; no Reading mode until the page tools add it.
-    assert.deepEqual(await page.$$eval('.ss-tab', (els) => els.map((e) => e.dataset.view)), ['ai', 'reading', 'bookmarks', 'history']);
+    // The switcher: Lumio AI selected, the reading list shows its unread count; Reading mode comes with the page tools (batch 7b).
+    assert.deepEqual(await page.$$eval('.ss-tab', (els) => els.map((e) => e.dataset.view)), ['ai', 'reading', 'bookmarks', 'history', 'reader']);
     assert.equal(await page.getAttribute('.ss-tab[data-view="ai"]', 'aria-selected'), 'true');
     assert.equal(await page.getAttribute('.ss-tab[data-view="reading"]', 'aria-label'), 'Reading list, 2 unread');
     assert.equal(await page.isVisible('#messages'), true);
@@ -359,4 +359,28 @@ test('the star’s bubble offers Add to reading list (not when editing from the 
   assert.equal((await lastSent(page, 'overlay:pick')).kind, 'bm-edit', 'and the bubble closes');
   assert.deepEqual(errors, []);
   await page.close();
+});
+
+// Seam: batch 7b's reading mode in batch 5's side panel switcher.
+test('side panel: Reading mode shows the tab you’re on, in the panel, and leaves the toolbar’s own column closed', { skip }, async () => {
+  const article = { ok: true, tabId: 1, url: 'https://mail.example/', prefs: { font: 'sans', size: 17, spacing: 'normal', theme: 'auto', speed: 1 }, article: { title: 'A calm article', byline: 'By Ana', siteName: 'Mail', lang: 'en', dir: 'ltr', length: 400, content: '<p>First paragraph of the article.</p><p>Second one.</p>' } };
+  const { page, errors } = await openShell({ answers: { 'shell:init': INIT, 'ai:state': AI, 'ai:chats': [], 'ai:connections': { apps: [] }, 'side:data': SIDE, 'reader:article': article } });
+  await page.click('.ss-tab[data-view="reader"]');
+  await page.waitForSelector('#side-view .rd-side .rd-article p');
+  assert.match(await page.textContent('#side-view .rd-article'), /First paragraph of the article/);
+  assert.deepEqual(await lastSent(page, 'side:set'), { view: 'reader' });
+  assert.equal(await page.isVisible('#messages'), false, 'the chat steps aside');
+  assert.equal(await page.$eval('#reader', (el) => el.classList.contains('closed')), true, 'the toolbar’s reading column stays closed');
+  // Another tab: the view follows it.
+  const calls = () => page.evaluate(() => window.__calls.filter(([c]) => c === 'reader:article').length);
+  const before = await calls();
+  await page.evaluate((t) => window.__emit('tabs', { ...t, activeId: 4 }), TABS);
+  await page.waitForFunction((n) => window.__calls.filter(([c]) => c === 'reader:article').length > n, before);
+  // Back to the reading list: the reading view goes.
+  await page.click('.ss-tab[data-view="reading"]');
+  await page.waitForSelector('.sv-row[data-rid="r1"]');
+  assert.equal(await page.$('#side-view .rd-side'), null);
+  await shot(page, 'side-panel-reader');
+  await page.close();
+  assert.deepEqual(errors, []);
 });

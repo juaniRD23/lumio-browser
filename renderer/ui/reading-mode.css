@@ -139,3 +139,10 @@ body:is(.resizing, .no-anim) #reader { transition: none; }
   .rd-settings, .rd-skel i, .rd-play.busy .rd-pi svg { animation: none; }
   .rs, .rd-btn { transition: none; }
 }
+
+/* ---------------------------------------------------------------- in the side panel */
+/* Reading mode as a side panel view (side-panel.js): the view fills the
+   panel's column under its switcher, and the switcher's × closes it. */
+#side-view:has(> .rd-side) { padding: 0; overflow: hidden; display: flex; }
+#side-view > .rd.rd-side { width: 100%; flex: 1 1 auto; }
+#side-view > .rd-side [data-rd="close"] { display: none; }

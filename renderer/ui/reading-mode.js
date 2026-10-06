@@ -494,3 +494,53 @@ export function initReadingMode({ api, activeTab, onLayout = () => {} }) {
     },
   };
 }
+
+// The side panel's Reading mode view (renderer/ui/side-panel.js, batch 5's
+// switcher): the same reading view, for the tab you're on, in the panel's
+// column. register: side-panel.js registerSideView. The toolbar's button keeps
+// its own column; reading aloud stops when the view leaves the panel.
+export function registerReaderSideView(register, { api, activeTab }) {
+  let view = null;
+  let wanted = null;
+  let timer = null;
+  let watch = null;
+  const shown = () => !!view?.el.isConnected;
+  async function refresh(force = false) {
+    const t = activeTab();
+    if (!shown() || !t) return;
+    if (t.loading) { view.loading(); wanted = null; return; }
+    if (!force && wanted?.tabId === t.id && stripHash(wanted.url) === stripHash(t.url)) return;
+    const ask = { tabId: t.id, url: t.url };
+    wanted = ask;
+    view.loading();
+    const res = await api.invoke('reader:article', t.id).catch(() => null);
+    if (!shown() || wanted !== ask) return;
+    view.show(res || { ok: false, url: t.url, tabId: t.id });
+  }
+  function make() {
+    view = createReaderView({ api, onClose: () => document.querySelector('#side-switch .ss-close')?.click() });
+    view.el.classList.add('rd-side');
+    api.invoke('reader:prefs').then((p) => { if (p) view.setPrefs(p); }).catch(() => {});
+    view.el.addEventListener('reader-retry', () => refresh(true));
+    api.on('tabs', () => {
+      if (!shown()) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => refresh(), 200);
+    });
+  }
+  register('reader', {
+    label: 'Reading mode',
+    render(el) {
+      if (!view) make();
+      if (view.el.parentNode !== el) {
+        el.replaceChildren(view.el);
+        wanted = null;
+        // Another view takes the panel: reading aloud stops.
+        watch?.disconnect();
+        watch = new MutationObserver(() => { if (!shown()) { view.stop(); wanted = null; watch.disconnect(); } });
+        watch.observe(el, { childList: true });
+      }
+      refresh();
+    },
+  });
+}

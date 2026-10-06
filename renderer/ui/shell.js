@@ -12,12 +12,12 @@ import { initInfobars } from './infobars.js';
 import { initOmnibox } from './omnibox.js';
 import { initBookmarksBar } from './bookmarks-bar.js';
 import { initTabGroups } from './tab-groups.js';
-import { initSidePanel } from './side-panel.js';
+import { initSidePanel, registerSideView } from './side-panel.js';
 import { initPermissionChip } from './permission-chip.js';
 import { initCaptureBar, captureWords } from './capture-bar.js';
 import { initPerf } from './perf.js';
 import { initTranslate } from './translate.js';
-import { initReadingMode } from './reading-mode.js';
+import { initReadingMode, registerReaderSideView } from './reading-mode.js';
 import { initShare } from './share.js';
 import { initMedia } from './media.js';
 import { initExtensionsBar } from './extensions-bar.js';
@@ -1254,6 +1254,8 @@ panel.init(init);
 // The side panel's views share the panel's column (renderer/ui/side-panel.js).
 const sidePanel = initSidePanel({ api, panel, modKey, activeTab });
 sidePanel.init(init);
+// Reading mode (batch 7b) in the switcher's Reading mode slot; the address bar's button keeps its own column.
+registerReaderSideView(registerSideView, { api, activeTab });
 // Split view in the page slot, and tabs to the side (each in its own file).
 splitDrop = initSplitView({ api, init });
 // The strip measures its tabs again when it comes back (hidden, they all measured narrow).
