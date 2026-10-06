@@ -45,7 +45,7 @@ const go = async (url, expectTitle) => {
   if (expectTitle) assert.ok(await until(async () => (await title()).includes(expectTitle)), `page "${expectTitle}" loaded`);
 };
 const overlay = (code) => L.main((_e, c) => global.lumio.current.overlay.webContents.executeJavaScript(c), code);
-const overlayKind = () => L.main(() => global.lumio.current.overlayKind || null);
+const overlayKind = () => L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current));
 const tabUrls = () => L.main(() => global.lumio.tabs.tabs.map((t) => t.pendingUrl || t.url));
 const pinnedButtons = () => L.shell(`document.querySelectorAll('#ext-actions .ext-action').length`);
 const menuItem = (id) => L.main(({ Menu }, i) => { const it = Menu.getApplicationMenu().getMenuItemById(i); return it ? { label: it.label, accelerator: it.accelerator || null } : null; }, id);
@@ -260,10 +260,14 @@ test('lumio://version and lumio://flags-lite', async () => {
   assert.match(info, /Profile path\s+\S+/);
   await shot('ext-07-version');
   await go('chrome://flags', 'Experiments');
-  await until(() => L.page(`!!document.querySelector('[data-flag=forceDark]')`));
-  await L.page(`document.querySelector('[data-flag=forceDark]').click(); true`);
-  assert.ok(await until(() => L.main(() => global.lumio.store.settings.flags?.forceDark === true)));
+  await until(() => L.page(`!!document.querySelector('[data-flag=smoothScrolling]')`));
+  // Dark mode for all websites isn't here any more: it's Settings › Appearance (main/force-dark.js).
+  assert.equal(await L.page(`!!document.querySelector('[data-flag=forceDark]')`), false, 'no force-dark flag');
+  assert.match(await L.page(`document.getElementById('force-dark-note').innerText`), /Settings › Appearance/);
+  await L.page(`document.querySelector('[data-flag=smoothScrolling]').click(); true`);
+  assert.ok(await until(() => L.main(() => global.lumio.store.settings.flags?.smoothScrolling === false)));
   assert.ok(await until(() => L.page(`!document.getElementById('restart').hidden`)), 'a restart applies it');
+  // (Its Restart button is the same page:relaunch as Settings', main/system.js; not pressed here.)
   await L.page(`document.getElementById('reset').click(); true`);
   assert.ok(await until(() => L.main(() => JSON.stringify(global.lumio.store.settings.flags) === '{}')));
 });
@@ -273,7 +277,12 @@ test('the menu bar: Help, View › Developer, History, and the Mac’s own menus
   const menus = () => L.main(({ Menu }) => Menu.getApplicationMenu().items.map((m) => ({ label: m.label, role: m.role, items: m.submenu?.items.map((i) => i.label) })));
   const top = await menus();
   const help = top.find((m) => m.role === 'help');
-  assert.ok(help.items.some((l) => /Report an (I|i)ssue/.test(l)) && help.items.includes('Version Info'));
+  assert.deepEqual(help.items.filter(Boolean), MAC
+    ? ['Lumio Browser Help', 'Report an Issue…', 'What’s New', 'Version Info', 'Experiments', 'Terms of Service', 'Privacy Policy', 'Open-Source Licenses']
+    : ['Help center', 'Report an issue…', 'What’s new', 'Version Info', 'Experiments', 'Terms of Service', 'Privacy Policy', 'Open-Source Licenses']);
+  const win = top.find((m) => m.label === 'Window');
+  for (const l of ['Name Window…', 'Task Manager', 'Search Tabs…']) assert.ok(win.items.includes(l), `Window › ${l}`);
+  if (MAC) assert.match(String(win.role), /^window$/i, 'the Mac lists its windows there');
   const view = top.find((m) => m.label === 'View');
   assert.ok(view.items.includes('Developer') && view.items.includes('Stop'));
   if (MAC) {

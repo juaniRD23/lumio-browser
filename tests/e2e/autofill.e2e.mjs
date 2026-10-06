@@ -60,7 +60,7 @@ const key = (keyCode, modifiers = []) => L.main((_e, k) => {
   wc.sendInputEvent({ type: 'keyUp', keyCode: k.keyCode, modifiers: k.modifiers });
   return true;
 }, { keyCode, modifiers });
-const overlayKind = () => L.main(() => global.lumio.current.overlayKind);
+const overlayKind = () => L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current));
 const overlayText = () => L.main(() => global.lumio.current.overlay.webContents.executeJavaScript('document.body.innerText'));
 // The dropdown answers mousedown (the page keeps the focus); the bubble's buttons answer clicks.
 const overlayPress = (sel) => L.main((_e, s) => global.lumio.current.overlay.webContents.executeJavaScript(`document.querySelector(${JSON.stringify(s)}).dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); true`), sel);

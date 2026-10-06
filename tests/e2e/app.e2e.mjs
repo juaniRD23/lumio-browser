@@ -142,9 +142,9 @@ test('bookmarks and history are recorded', async () => {
   const marks = await L.main(() => global.lumio.store.bookmarks());
   assert.ok(marks.some((b) => b.title.includes('Lighthouses')));
   // The star's bubble opened over the page; Done closes it.
-  assert.ok(await until(() => L.main(() => global.lumio.current.overlayKind === 'bm-edit')));
+  assert.ok(await until(() => L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current) === 'bm-edit')));
   await L.main(() => global.lumio.current.overlay.webContents.executeJavaScript(`document.querySelector('[data-act=done]').click(); true`));
-  assert.ok(await until(() => L.main(() => global.lumio.current.overlayKind === null)));
+  assert.ok(await until(() => L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current) === null)));
   const hist = await L.main(() => global.lumio.store.history());
   assert.ok(hist.length >= 2);
 });
@@ -432,6 +432,9 @@ test('workflows: Lumio saves one, / runs it with its blank filled in, and Settin
 });
 
 test('multi-step tasks show a Task progress checklist', async () => {
+  // The last test left Settings open, which Lumio can't read (main/ai/tools/browser.js PRIVATE_PAGE): a web page for its read_page.
+  await L.main((_e, u) => global.lumio.tabs.navigate(u), siteUrl + '/');
+  await until(async () => (await L.main(() => global.lumio.tabs.wc().getTitle())).includes('Lighthouse'));
   await L.main(() => global.lumio.ai.setMode('auto'));
   await ask('plan a trip to Lisbon');
   assert.ok(await until(() => L.shell(`!document.getElementById('plan').hidden && document.querySelectorAll('.plan-step').length === 3`)));

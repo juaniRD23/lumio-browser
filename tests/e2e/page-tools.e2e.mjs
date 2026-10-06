@@ -61,7 +61,7 @@ test('a page in French: the Translate button and bubble, translated in place, an
   assert.ok(await until(() => L.main(() => global.lumio.tabs.active?.translate?.status === 'offer')), 'French is noticed');
   assert.ok(await until(() => L.shell(`!document.getElementById('translate-btn').hidden`)));
   // The bubble offers it by itself.
-  assert.ok(await until(() => L.main(() => global.lumio.current.overlayKind === 'translate')));
+  assert.ok(await until(() => L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current) === 'translate')));
   assert.ok(await until(() => overlay(`document.querySelector('.tb-title')?.textContent === 'Translate this page?'`)));
   await shot('translate-offer');
   await overlay(`document.querySelector('[data-act="translate"]').click(); true`);

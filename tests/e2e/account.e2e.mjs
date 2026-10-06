@@ -57,7 +57,7 @@ const clickEl = async (sel) => {
   return true;
 };
 const typeText = (t) => L.main((_e, text) => { global.lumio.tabs.wc().insertText(text); return true; }, t);
-const overlayKind = () => L.main(() => global.lumio.current.overlayKind);
+const overlayKind = () => L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current));
 const overlayClick = (sel) => L.main((_e, s) => global.lumio.current.overlay.webContents.executeJavaScript(`document.querySelector(${JSON.stringify(s)}).dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); true`), sel);
 const saved = () => L.main(() => global.lumio.passwords.store.list());
 

@@ -96,7 +96,7 @@ test('tabs to the side: the collapsed column’s flyout closes when the pointer 
   await send('overlay:show', { rect, payload: { kind: 'vtabs', tabs: [], activeId: null } });
   // The flyout was shown (the overlay page drew it), then closed by itself.
   assert.ok(await until(() => L.main(() => global.lumio.current.overlay.webContents.executeJavaScript(`document.body.classList.contains('vtabs-flyout')`)), 3000), 'the overlay drew the flyout');
-  assert.ok(await until(() => L.main(() => global.lumio.current.overlayKind === null), 3000), 'closed by itself');
+  assert.ok(await until(() => L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current) === null), 3000), 'closed by itself');
   // Back to the strip across the top.
   await send('layout:tabs', { vertical: false });
   assert.ok(await until(() => L.shell(`!document.body.classList.contains('vtabs') && getComputedStyle(document.getElementById('tabstrip')).display !== 'none'`)));
@@ -166,4 +166,55 @@ test('split view: closing one side leaves the other with the whole page area; se
   await send('tab:split-separate', third);
   assert.ok(await until(() => L.main(() => !global.lumio.tabs.split.state())));
   assert.equal(await L.main(() => global.lumio.tabs.active.url), 'lumio://newtab/');
+});
+
+// Real mouse input to the window's own UI (the shell keeps the pointer while
+// a tab is held, even over the page).
+const mouse = (steps) => L.main(async (_e, list) => {
+  const wc = global.lumio.win.webContents;
+  for (const s of list) {
+    const ev = { type: s.type, x: Math.round(s.x), y: Math.round(s.y), button: 'left', clickCount: 1 };
+    if (s.type === 'mouseMove') ev.modifiers = ['leftButtonDown'];
+    wc.sendInputEvent(ev);
+    await new Promise((r) => setTimeout(r, 40));
+  }
+  return true;
+}, steps);
+
+test('split view: a tab dragged along the strip, then down onto the page’s right edge, opens beside the tab you were on', async () => {
+  assert.equal(await L.main(() => global.lumio.tabs.split.state()), null, 'no pair yet');
+  await open('drag-a');
+  await open('drag-b');
+  const [a, b] = await L.main(() => global.lumio.tabs.tabs.slice(-2).map((t) => t.id));
+  await L.main((_e, id) => global.lumio.tabs.activate(id), a);
+  // Where the dragged tab and the page's area are, in the window.
+  const at = await until(() => L.shell(`(() => {
+    const el = document.querySelector('#tabs > .tab[data-id="${b}"]');
+    const active = document.querySelector('#tabs > .tab.active');
+    if (!el || !active || active.dataset.id !== '${a}') return null;
+    const t = el.getBoundingClientRect();
+    const s = document.getElementById('slot').getBoundingClientRect();
+    return { x: t.left + t.width / 2, y: t.top + t.height / 2, right: s.right, top: s.top, height: s.height };
+  })()`));
+  assert.ok(at, 'the strip shows both tabs');
+  const edgeX = at.right - 30; // inside the right 15% of the page (renderer/ui/split-view.js EDGE)
+  // Along the strip first, then down at the page's edge (the middle of the page would tear it off).
+  await mouse([
+    { type: 'mouseDown', x: at.x, y: at.y },
+    { type: 'mouseMove', x: at.x + 8, y: at.y },
+    { type: 'mouseMove', x: at.x + 40, y: at.y },
+    { type: 'mouseMove', x: edgeX, y: at.y },
+    { type: 'mouseMove', x: edgeX, y: at.top - 4 },
+    { type: 'mouseMove', x: edgeX, y: at.top + at.height / 3 },
+  ]);
+  assert.ok(await until(() => L.shell(`document.getElementById('split')?.classList.contains('preview') && !document.getElementById('split').hidden`)), 'the split is previewed');
+  assert.equal(await L.main(() => global.lumio.windows.length), 1, 'not torn off into a window');
+  await shot('layout-03-split-drag-preview');
+  await mouse([{ type: 'mouseUp', x: edgeX, y: at.top + at.height / 3 }]);
+  const pair = await until(() => L.main(() => global.lumio.tabs.split.state()));
+  assert.ok(pair, 'a pair');
+  assert.deepEqual([pair.left, pair.right], [a, b], 'the dragged tab on the right, beside the one you were on');
+  assert.equal(await L.main(() => global.lumio.tabs.activeId), b);
+  await send('tab:split-separate', b);
+  assert.ok(await until(() => L.main(() => !global.lumio.tabs.split.state())));
 });

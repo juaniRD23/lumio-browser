@@ -36,9 +36,9 @@ const go = async (url, expectTitle) => {
 const windows = () => L.main(() => global.lumio.windows.map((w) => ({ id: w.id, incognito: w.incognito, tabs: w.tabs.tabs.map((t) => t.pendingUrl || t.url) })));
 // The star's bubble, drawn in the overlay above the page: wait for it, then Done.
 const closeBubble = async () => {
-  assert.ok(await until(() => L.main(() => global.lumio.current.overlayKind === 'bm-edit')), 'the bubble opened');
+  assert.ok(await until(() => L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current) === 'bm-edit')), 'the bubble opened');
   await L.main(() => global.lumio.current.overlay.webContents.executeJavaScript(`document.querySelector('[data-act=done]').click(); true`));
-  assert.ok(await until(() => L.main(() => global.lumio.current.overlayKind === null)), 'Done closed it');
+  assert.ok(await until(() => L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current) === null)), 'Done closed it');
 };
 
 // A tiny PDF with one page of text.
@@ -501,7 +501,7 @@ test('hover cards: a tab’s title, its site and a picture of its page, drawn ov
   // A click on the window closes whatever menu an earlier test left open (menus come before cards).
   await L.shell(`document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); true`);
   await hover('pointerenter');
-  assert.ok(await until(async () => (await L.main(() => global.lumio.current.overlayKind)) === 'hovercard'), 'the card opened');
+  assert.ok(await until(async () => (await L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current))) === 'hovercard'), 'the card opened');
   // The tab you're on is pictured as you hover it.
   const card = await until(() => overlay(`document.querySelector('.hc-shot img')?.src.startsWith('data:image/jpeg') ? document.getElementById('card').innerText : ''`));
   assert.match(card, /Page hover-card[\s\S]*127\.0\.0\.1/);
@@ -515,7 +515,7 @@ test('the ⋮ menu: Chrome’s menu drawn over the page on every platform, with 
   await L.main(() => global.lumio.cmd.newTab());
   await go(`${base}/menu`, 'Page menu');
   const overlay = (js) => L.main((_e, code) => global.lumio.current.overlay.webContents.executeJavaScript(code), js);
-  const kind = () => L.main(() => global.lumio.current.overlayKind);
+  const kind = () => L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current));
   const attached = () => L.main(() => global.lumio.win.contentView.children.includes(global.lumio.current.overlay));
   assert.equal(await L.shell(`document.getElementById('menu-btn').offsetWidth > 0`), true, 'the ⋮ button shows (the Mac too)');
   await L.shell(`document.getElementById('menu-btn').click(); true`);

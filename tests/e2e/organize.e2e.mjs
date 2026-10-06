@@ -78,7 +78,7 @@ test('tab groups: a chip in the strip, collapse, the editor, and the session kee
   assert.equal(await groupOf(a), groupId);
   assert.equal(await groupOf(b), groupId);
   // The editor opens for a new group; naming it shows on the chip.
-  assert.ok(await until(async () => (await L.main(() => global.lumio.current.overlayKind)) === 'tab-group'), 'the editor opened');
+  assert.ok(await until(async () => (await L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current))) === 'tab-group'), 'the editor opened');
   await L.main(() => global.lumio.current.overlay.webContents.executeJavaScript(`(() => { const i = document.getElementById('tg-name'); i.value = 'Research'; i.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('.tg-color[data-color="green"]').click(); document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); return true; })()`));
   assert.ok(await until(() => L.shell(`document.querySelector('.tab-group-chip')?.textContent === 'Research'`)), 'the chip shows the name');
   assert.equal(await L.main((_e, g) => global.lumio.tabs.groups.get(g).color, groupId), 'green');

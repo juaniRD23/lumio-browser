@@ -35,7 +35,7 @@ const go = async (url) => {
 };
 // Runs JS in the window's dropdown view (the popovers).
 const overlay = (code) => L.main((_e, c) => global.lumio.current.overlay.webContents.executeJavaScript(c), code);
-const overlayKind = () => L.main(() => global.lumio.current.overlayKind);
+const overlayKind = () => L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current));
 // Runs JS in the page as if the person clicked (user activation).
 const click = (code) => L.main((_e, c) => global.lumio.tabs.wc().executeJavaScript(c, true), code);
 
@@ -221,11 +221,12 @@ test('Install page as app: the dialog, its own window and title bar, lumio://app
   assert.equal(await overlay(`document.querySelector('img.ins-icon')?.src.startsWith('data:image/png')`), true, 'with the manifest’s icon');
   await shot('install-dialog');
   await overlay(`document.querySelector('[data-act="install"]').click(); true`);
-  const apps = () => L.main(() => global.lumio.pageTools.apps.list().map((a) => ({ id: a.id, name: a.name, url: a.url, launchers: a.launchers })));
+  const apps = () => L.main(() => global.lumio.pageTools.apps.list().map((a) => ({ id: a.id, name: a.name, url: a.url, launchers: a.launchers, profile: a.profile || null })));
   assert.ok(await until(async () => (await apps()).length === 1));
   const [rec] = await apps();
   assert.equal(rec.name, 'Fixture Radio App');
   assert.equal(rec.url, `${siteUrl}/media-share.html?app`, 'it opens the manifest’s start page');
+  assert.equal(rec.profile, await L.main(() => global.lumio.current.profile.base.id), 'it remembers the profile it was installed from (batch 7a/7b)');
   if (MAC) {
     assert.equal(rec.launchers.length, 1);
     assert.ok(fs.existsSync(path.join(rec.launchers[0], 'Contents', 'MacOS', 'launch')), 'a launcher in Lumio Apps');

@@ -94,14 +94,16 @@ test('a new profile opens in its own window, with its own session, files and tit
   // Bookmarks are the profile's own too.
   await L.main(() => global.lumio.cmd.bookmark());
   await L.main(() => { global.lumio.store.flushAll(); global.lumio.store.bookmarksFile.flush(); });
-  const marks = JSON.parse(fs.readFileSync(path.join(L.userData, 'Profiles', work.id, 'bookmarks.json'), 'utf8'));
-  assert.deepEqual(marks.map((b) => b.url), [`${base}/work-page`]);
+  // (Saved as a tree since batch 5: bookmark-tree.json, main/store.js.)
+  const file = path.join(L.userData, 'Profiles', work.id, 'bookmark-tree.json');
+  assert.ok(await until(() => Promise.resolve(fs.existsSync(file) && fs.readFileSync(file, 'utf8').includes(`${base}/work-page`))), 'in Work’s own folder');
+  assert.deepEqual(await L.main((_e, id) => global.lumio.profiles.loaded.get(id).store.bookmarks().map((b) => b.url), work.id), [`${base}/work-page`]);
   assert.equal(await L.main(() => global.lumio.profiles.loaded.get('default').store.bookmarks().length), 0);
 });
 
 test('the account menu offers the other profiles, Add, Guest and Manage', async () => {
   await L.shell(`document.getElementById('account-btn').click(); true`);
-  const text = await until(() => L.main(() => global.lumio.current.overlayKind === 'account' && global.lumio.current.overlay.webContents.executeJavaScript('document.body.innerText')));
+  const text = await until(() => L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current) === 'account' && global.lumio.current.overlay.webContents.executeJavaScript('document.body.innerText')));
   assert.match(text, /Other profiles[\s\S]*Person 1/i, 'the first profile, still unnamed');
   assert.match(text, /Add[\s\S]*Guest[\s\S]*Manage/);
   await L.shell(`document.getElementById('account-btn').click(); true`);
@@ -136,6 +138,14 @@ test('Guest keeps nothing: no history, and its files are gone when it closes', a
   await L.main((_e, u) => global.lumio.tabs.navigate(u), `${base}/guest-page`);
   assert.ok(await until(async () => (await L.main(() => global.lumio.tabs.wc().getTitle())) === 'Page /guest-page'));
   assert.deepEqual(await L.main(() => global.lumio.current.profile.store.history()), [], 'no history');
+  // Guest can't install apps (main/apps.js prompt): no Install dialog.
+  const asked = await L.main(async () => {
+    const apps = global.lumio.pageTools.apps;
+    apps.prompts.clear();
+    await apps.prompt(global.lumio.current, global.lumio.tabs.active);
+    return apps.prompts.size;
+  });
+  assert.equal(asked, 0, 'no Install app dialog in Guest');
   await L.main(() => global.lumio.current.close());
   assert.ok(await until(async () => !(await windows()).some((x) => x.guest)));
   assert.ok(await until(async () => !fs.existsSync(dir), 5000), 'Guest’s folder is deleted');

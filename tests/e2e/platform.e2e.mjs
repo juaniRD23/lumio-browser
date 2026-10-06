@@ -119,7 +119,7 @@ test('Settings › System and Reset settings: acceleration waits for a restart; 
     const { store } = global.lumio.current.profile;
     const engine = store.settings.searchEngine;
     store.setSetting('searchEngine', 'bing');
-    store.addBookmarkAt(u, 'Kept', 0);
+    store.marks.add('bar', 0, { url: u, title: 'Kept' }); // (the bookmarks tree, batch 5: main/bookmarks.js)
     return engine;
   }, `${base}/kept`);
   try {
@@ -133,7 +133,7 @@ test('Settings › System and Reset settings: acceleration waits for a restart; 
   } finally {
     await L.main((_e, { u, engine }) => {
       const { store } = global.lumio.current.profile;
-      store.removeBookmark(u);
+      store.marks.removeUrl(u);
       store.setSetting('searchEngine', engine);
     }, { u: `${base}/kept`, engine: saved });
     await L.main(() => global.lumio.tabs.navigate('about:blank'));

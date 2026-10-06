@@ -97,7 +97,7 @@ test('a newer release shows the Update button next to the profile picture', { sk
 });
 
 test("a new version shows its What's new card by itself, once (urgent: every launch)", { skip: !mac }, async () => {
-  assert.ok(await until(async () => (await L.main(() => global.lumio.current.overlayKind)) === 'update', 10_000), 'card opened');
+  assert.ok(await until(async () => (await L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current))) === 'update', 10_000), 'card opened');
   const card = await L.main(() => global.lumio.current.overlay.webContents.executeJavaScript('document.body.innerText'));
   assert.match(card, /Important update[\s\S]*Lumio Browser 9\.9\.9 is here[\s\S]*Passkeys in every tab[\s\S]*Faster tabs[\s\S]*Update now/);
   assert.doesNotMatch(card, /Install|dmg/, 'no install section');
@@ -106,12 +106,12 @@ test("a new version shows its What's new card by itself, once (urgent: every lau
   if (process.env.LUMIO_SHOTS) { await new Promise((r) => setTimeout(r, 500)); await L.shot(path.join(process.env.LUMIO_SHOTS, '33-update-card.png')); }
   // Later closes it; the Update button opens it again.
   await L.main(() => global.lumio.current.overlay.webContents.executeJavaScript(`document.querySelector('[data-up="later"]').dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); true`));
-  assert.ok(await until(async () => (await L.main(() => global.lumio.current.overlayKind)) !== 'update'));
+  assert.ok(await until(async () => (await L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current))) !== 'update'));
 });
 
 test('Update now (from the card) downloads, verifies and installs the new version', { skip: !mac }, async () => {
   await L.shell(`document.getElementById('update-btn').click(); true`);
-  assert.ok(await until(async () => (await L.main(() => global.lumio.current.overlayKind)) === 'update'));
+  assert.ok(await until(async () => (await L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current))) === 'update'));
   await L.main(() => global.lumio.current.overlay.webContents.executeJavaScript(`document.querySelector('[data-up="now"]').dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); true`));
   assert.ok(await until(() => L.main(() => global.lumio.updater?.state.status === 'installing'), 30_000), 'installing');
   assert.equal(await L.shell(`document.querySelector('#update-btn .label').textContent`), 'Restarting…');

@@ -170,10 +170,13 @@ test('shortcuts: Chrome’s keys are in the menu, and view source, stop, Esc, Al
     return out;
   });
   assert.equal(keys['Open File…'], 'CmdOrCtrl+O');
-  assert.equal(keys['View Page Source'], MAC ? 'Cmd+Alt+U' : 'Ctrl+U');
+  assert.equal(keys['View Source'], MAC ? 'Cmd+Alt+U' : 'Ctrl+U'); // View › Developer (main/menu-extras.js)
   assert.equal(keys['JavaScript Console'], MAC ? 'Cmd+Alt+J' : 'Ctrl+Shift+J');
   assert.equal(keys.Downloads, MAC ? 'Cmd+Alt+L' : 'Ctrl+J');
-  assert.equal(keys['Bookmark All Tabs'], 'CmdOrCtrl+Shift+D');
+  assert.equal(keys['Bookmark All Tabs…'], 'CmdOrCtrl+Shift+D');
+  assert.equal(keys['Ask Lumio'], MAC ? 'Cmd+J' : 'Ctrl+Shift+K');
+  assert.equal(keys[MAC ? 'Report an Issue…' : 'Report an issue…'], 'Alt+Shift+I');
+  if (!MAC) assert.equal(keys['Help center'], 'F1');
   assert.equal(keys.Home, MAC ? 'Cmd+Shift+H' : 'Alt+Home');
   if (MAC) assert.equal(keys.Stop, 'Cmd+.');
 
@@ -206,11 +209,10 @@ test('shortcuts: Chrome’s keys are in the menu, and view source, stop, Esc, Al
   assert.ok((await L.main(() => global.lumio.store.downloads().length)) > before);
   assert.equal(await title(), 'Links', 'and stayed on the page');
 
-  // ⌘⇧⌫ / Ctrl+Shift+Delete: the Clear browsing data dialog.
+  // ⌘⇧⌫ / Ctrl+Shift+Delete: Delete browsing data (batch 6's page, lumio://settings/clearBrowserData).
   await L.main(() => global.lumio.cmd.clearBrowsingData());
-  assert.ok(await until(() => L.page(`location.href === 'lumio://history/#clear' && document.getElementById('clear-dialog').open`)));
+  assert.ok(await until(() => L.page(`location.href === 'lumio://settings/clearBrowserData' && !!document.getElementById('cd-list') && !!document.getElementById('go')`)));
   await shot('nav-03-clear-data');
-  await L.page(`document.getElementById('clear-dialog').close(); true`);
   await L.main(() => global.lumio.cmd.closeTab());
 });
 
@@ -240,7 +242,7 @@ test('zoom is shared by a site’s tabs, shows its bubble, and the default appli
   const factor = () => L.main(() => Math.round(global.lumio.tabs.wc().getZoomFactor() * 100));
   assert.equal(await factor(), 110);
   assert.ok(await until(() => L.shell(`!document.getElementById('zoom-badge').hidden && document.getElementById('zoom-badge').textContent === '110%'`)));
-  assert.ok(await until(() => L.main(() => global.lumio.current.overlayKind === 'zoom')), 'the zoom bubble shows');
+  assert.ok(await until(() => L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current) === 'zoom')), 'the zoom bubble shows');
   await shot('nav-05-zoom-bubble');
   assert.deepEqual(await L.main(() => global.lumio.store.settings.zoomLevels), { '127.0.0.1': 110 });
   // Another tab on the same site has the same zoom (Chromium shares it by host).

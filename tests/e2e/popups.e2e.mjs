@@ -244,11 +244,21 @@ test('a pop-up’s dialogs and permission prompts appear in the pop-up', async (
   await L.main(() => global.lumio.popups[0].dialogs.view.webContents.executeJavaScript(`document.querySelector('#d-buttons [data-id="ok"]').click(); true`));
   assert.equal(await until(() => inPopup('window.r')), true);
 
-  await inPopup(`Notification.requestPermission().then((p) => { window.perm = p; }); true`);
-  assert.equal(await until(() => inBar(`!document.getElementById('permbar').hidden && document.querySelector('#permbar .infobar-text').textContent`)), `${new URL(base).host} wants to show notifications`);
-  await inBar(`document.querySelector('#permbar [data-act=block]').click(); true`);
-  assert.equal(await until(() => inPopup('window.perm')), 'denied');
-  await L.main((_e, origin) => global.lumio.profiles.normal.permissions.set(origin, 'notifications', undefined), base);
+  // Notifications are quiet by default (batch 6: only the browser window's
+  // address bar chip shows those), so this site's question must be one that asks.
+  await L.main(() => global.lumio.profiles.normal.permissions.settings.setDefault('notifications', 'ask'));
+  try {
+    await inPopup(`Notification.requestPermission().then((p) => { window.perm = p; }); true`);
+    assert.equal(await until(() => inBar(`!document.getElementById('permbar').hidden && document.querySelector('#permbar .infobar-text').textContent`)), `${new URL(base).host} wants to show notifications`);
+    await inBar(`document.querySelector('#permbar [data-act=block]').click(); true`);
+    assert.equal(await until(() => inPopup('window.perm')), 'denied');
+  } finally {
+    await L.main((_e, origin) => {
+      const p = global.lumio.profiles.normal.permissions;
+      p.set(origin, 'notifications', undefined);
+      p.settings.setDefault('notifications', 'quiet');
+    }, base);
+  }
   await closePopups();
   assert.ok(await until(async () => (await popupCount()) === 0));
 });
@@ -402,10 +412,14 @@ test('"Save Link As…" and "Save Image As…" always ask where; a normal downlo
 test('window management asks first; sound waits for a click', async () => {
   await go(`${base}/target`, 'Target');
   await L.page(`window.getScreenDetails().then(() => { window.wm = 'yes'; }, (e) => { window.wm = e.name; }); true`);
-  assert.equal(await until(() => L.shell(`!document.getElementById('permbar').hidden && document.querySelector('#permbar .infobar-text').textContent`)), `${new URL(base).host} wants to manage windows on all your displays`);
-  await L.shell(`document.querySelector('#permbar [data-act=block]').click(); true`);
+  // The browser window asks in the address bar's chip and its bubble (batch 6), not a bar.
+  assert.ok(await until(() => L.main(() => ((w) => w.overlayKind === 'permission' && w.overlayIn === w.overlaySeq)(global.lumio.current))), 'the bubble opens by itself');
+  const bubble = (code) => L.main((_e, c) => global.lumio.current.overlay.webContents.executeJavaScript(c), code);
+  assert.match(await until(() => bubble(`document.querySelector('.pb [data-d=block]') && document.querySelector('.pb').innerText`)), new RegExp(`${new URL(base).host.replace(/\./g, '\\.')} wants to[\\s\\S]*Manage windows on all your displays`, 'i'));
+  assert.equal(await L.shell(`!document.getElementById('perm-chip').hidden`), true, 'the chip shows');
+  await bubble(`document.querySelector('.pb [data-d=block]').click(); true`);
   assert.equal(await until(() => L.page('window.wm')), 'NotAllowedError');
-  await L.main((_e, origin) => global.lumio.profiles.normal.permissions.set(origin, 'window-management', undefined), base);
+  await L.main((_e, origin) => global.lumio.profiles.normal.permissions.set(origin, 'windowManagement', undefined), base);
 
   // Chrome's autoplay rule: no sound until you click or type in the page.
   assert.equal(await L.page('new AudioContext().state'), 'suspended');

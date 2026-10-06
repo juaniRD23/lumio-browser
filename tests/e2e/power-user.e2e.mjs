@@ -65,24 +65,24 @@ after(async () => {
 test('Name window: the box names the window; tabs don’t rename it; the Window menu and the session keep it', async () => {
   await open(`${base}/one`, 'Page one');
   await L.main(() => global.lumio.cmd.nameWindow());
-  assert.ok(await until(() => L.main(() => global.lumio.current.overlayKind === 'namewindow')), 'the box opened');
+  assert.ok(await until(() => L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current) === 'namewindow')), 'the box opened');
   const typeName = (name) => L.main((_e, n) => global.lumio.current.overlay.webContents.executeJavaScript(
     `(() => { const i = document.getElementById('nw-name'); i.value = ${JSON.stringify(n)}; i.form.requestSubmit(); return true })()`), name);
   assert.ok(await until(() => L.main(() => global.lumio.current.overlay.webContents.executeJavaScript(`!!document.getElementById('nw-name')`))));
   await shot('power-01-name-window');
   await typeName('Research');
   assert.ok(await until(() => L.main(() => global.lumio.win.getTitle() === 'Research')), 'the window’s title is its name');
-  assert.equal(await L.main(() => global.lumio.current.overlayKind), null, 'the box closed');
+  assert.equal(await L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current)), null, 'the box closed');
   await open(`${base}/two`, 'Page two');
   await L.wait(300);
   assert.equal(await L.main(() => global.lumio.win.getTitle()), 'Research', 'switching tabs keeps the name');
   assert.ok(await until(() => L.main(() => global.lumio.store.sessionWindows()[0]?.name === 'Research')), 'saved with the session');
   const win = await menuItem('Window');
   assert.ok(win.items.includes('Name Window…'));
-  if (process.platform === 'darwin') assert.equal(win.role, 'windowmenu', 'macOS lists the windows there, by name');
+  if (process.platform === 'darwin') assert.match(String(win.role), /^window$/i, 'macOS lists the windows there, by name (main/menu.js role \'window\')');
   // An empty name goes back to the page's title.
   await L.main(() => global.lumio.cmd.nameWindow());
-  assert.ok(await until(() => L.main(() => global.lumio.current.overlayKind === 'namewindow')));
+  assert.ok(await until(() => L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current) === 'namewindow')));
   assert.ok(await until(() => L.main(() => global.lumio.current.overlay.webContents.executeJavaScript(`document.getElementById('nw-name')?.value === 'Research'`))), 'the box shows the name');
   await typeName('');
   assert.ok(await until(async () => (await L.main(() => global.lumio.win.getTitle())).includes('Page two')));
@@ -191,13 +191,33 @@ test('Force dark: started with it on, light websites are drawn dark and Lumio is
   }
 });
 
+test('Force dark: lumio://flags-lite’s old “Dark mode for all websites” choice moves to Settings › Appearance', async () => {
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'lumio-fd-flag-'));
+  fs.writeFileSync(path.join(profile, 'settings.json'), JSON.stringify({ flags: { forceDark: true, smoothScrolling: false }, onboarded: true }));
+  const D = await launch({ profile });
+  try {
+    await until(() => D.main(() => !!global.lumio.tabs?.active), 15_000);
+    assert.match(await D.main((e) => e.app.commandLine.getSwitchValue('blink-settings')), /forceDarkModeEnabled=true/, 'on from the first run');
+    const s = await D.main(() => ({ on: global.lumio.store.settings.forceDarkPages, flags: global.lumio.store.settings.flags }));
+    assert.equal(s.on, true, 'now the Appearance setting');
+    assert.deepEqual(s.flags, { smoothScrolling: false }, 'the old flag is gone; the others stay');
+  } finally {
+    await D.close();
+    fs.rmSync(profile, { recursive: true, force: true });
+  }
+});
+
 test('Protocol handlers: a site asks, Allow sends its mailto: links to it, Settings lists and removes it', async () => {
   await open(`${base}/mail`, 'Page mail');
   await L.page(`navigator.registerProtocolHandler('mailto', '/compose?to=%s'); true`);
-  const bar = () => L.shell(`!document.getElementById('permbar').hidden && document.querySelector('#permbar .infobar-text').textContent`);
-  assert.ok(await until(async () => /wants to open all email links$/.test(await bar() || '')), `the bar asks: ${await bar()}`);
-  await shot('power-04-protocol-handler-bar');
-  await L.shell(`document.querySelector('#permbar [data-act=allow]').click(); true`);
+  // The browser window asks in the address bar's chip and its bubble (batch 6; #permbar is only in pop-up windows).
+  const bubble = (code) => L.main((_e, c) => global.lumio.current.overlay.webContents.executeJavaScript(c), code);
+  const asks = () => L.main(() => ((w) => w.overlayKind === 'permission' && w.overlayIn === w.overlaySeq)(global.lumio.current))
+    .then((open) => open && bubble(`document.querySelector('.pb [data-d=allow]') && document.querySelector('.pb').innerText`));
+  assert.ok(await until(async () => /open all email links/i.test(await asks() || '')), `the bubble asks: ${await asks()}`);
+  assert.equal(await L.shell(`!document.getElementById('perm-chip').hidden`), true, 'the chip shows');
+  await shot('power-04-protocol-handler-bubble');
+  await bubble(`document.querySelector('.pb [data-d=allow]').click(); true`);
   assert.ok(await until(() => L.main(() => global.lumio.store.settings.protocolHandlers?.[0]?.allowed === true)));
   assert.equal(await L.main((_e, b) => global.lumio.store.settings.protocolHandlers[0].url, base), `${base}/compose?to=%s`);
 

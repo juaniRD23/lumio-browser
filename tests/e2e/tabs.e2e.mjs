@@ -217,7 +217,7 @@ test('tab search lists every window’s tabs; Enter switches to the tab and its 
   const first = await L.main(() => global.lumio.windows[0].id);
   await L.main((_e, x) => { const w = global.lumio.windows.find((y) => y.id === x); global.lumio.focus(w); w.focus(); return true; }, first);
   await L.main(() => { global.lumio.cmd.tabSearch(); return true; });
-  const opened = await until(() => L.main(() => global.lumio.current.overlayKind === 'tabsearch'));
+  const opened = await until(() => L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current) === 'tabsearch'));
   assert.ok(opened, '⌘⇧A opens tab search');
   const ov = (code) => L.main((_e, c) => global.lumio.current.overlay.webContents.executeJavaScript(c), code);
   assert.ok(await until(() => ov(`document.querySelectorAll('.ts-row').length >= 2`)));
@@ -243,6 +243,18 @@ test('the tab menu has Chrome’s items; Mute site mutes every tab of that site,
     assert.ok(labels.includes(l), `has ${l}`);
   }
   assert.ok(labels.some((l) => /^Move Tab to (New|Another) Window$/.test(l)));
+  // The other parts' items (main.js menuExtras): groups, reading list, split view, tabs to the side.
+  assert.ok(labels.some((l) => /^Add Tab to (New )?Group$/.test(l)), 'tab groups');
+  for (const l of ['Add Tab to Reading List', 'Add Tab to New Split View', 'Show Tabs to the Side']) assert.ok(labels.includes(l), `has ${l}`);
+  // The strip's own menu (right-click between tabs) names the window.
+  const strip = await L.main(() => {
+    const w = global.lumio.current;
+    const menu = global.lumio.tabStrip.stripMenu(w);
+    const out = menu.items.map((i) => i.label).filter(Boolean);
+    menu.closePopup(w.win);
+    return out;
+  });
+  for (const l of ['New Tab', 'Reopen Closed Tab', 'Bookmark All Tabs', 'Name Window…', 'Show Tabs to the Side']) assert.ok(strip.includes(l), `the strip menu has ${l}`);
   const origin = new URL(base).origin;
   await L.main(() => { const w = global.lumio.current; global.lumio.tabStrip.run(w, 'mute', [w.tabs.activeId], w.tabs.activeId); return true; });
   assert.ok(await L.main((_e, o) => global.lumio.store.settings.mutedSites.includes(o), origin), 'remembered in settings');

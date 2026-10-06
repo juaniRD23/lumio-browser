@@ -33,7 +33,7 @@ const go = async (url, expectTitle) => {
   assert.ok(await until(async () => (await title()).includes(expectTitle)), `page "${expectTitle}" loaded`);
 };
 // The overlay above the page draws the folder menus and the star's bubble.
-const kind = () => L.main(() => global.lumio.current.overlayKind);
+const kind = () => L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current));
 const overlay = (code) => L.main((_e, c) => global.lumio.current.overlay.webContents.executeJavaScript(c), code);
 const idOf = (url) => L.main((_e, u) => global.lumio.store.marks.byUrl(u)[0]?.id || null, url);
 const parentTitle = (id) => L.main((_e, i) => global.lumio.store.marks.parentOf(i)?.title || null, id);

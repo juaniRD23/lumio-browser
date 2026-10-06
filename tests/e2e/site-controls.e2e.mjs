@@ -82,10 +82,10 @@ test('a quiet notification request shows the chip; allowing it from the bubble r
   await go(`${a}/ask`, 'Asks');
   await L.page('window.__answer = null; Notification.requestPermission().then((p) => { window.__answer = p; }); true');
   assert.ok(await until(() => L.shell(`!document.getElementById('perm-chip').hidden && document.getElementById('perm-chip').classList.contains('quiet')`)), 'the quiet chip');
-  assert.equal(await L.main(() => global.lumio.current.overlayKind), null, 'no bubble by itself');
+  assert.equal(await L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current)), null, 'no bubble by itself');
   await shot('site-01-quiet-chip');
   await L.shell(`document.getElementById('perm-chip').click(); true`);
-  assert.ok(await until(() => L.main(() => global.lumio.current.overlayKind === 'permission')));
+  assert.ok(await until(() => L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current) === 'permission')));
   const overlay = (code) => L.main((_e, c) => global.lumio.current.overlay.webContents.executeJavaScript(c), code);
   assert.ok(await until(() => overlay(`!!document.querySelector('.pb [data-d=allow]')`)));
   await shot('site-02-quiet-bubble');
@@ -101,7 +101,7 @@ test('a question opens the bubble by itself; "Don’t allow" is remembered and b
   await settings((s) => s.setDefault('notifications', 'ask'));
   await go(`${b}/ask`, 'Asks');
   await L.page('window.__answer = null; Notification.requestPermission().then((p) => { window.__answer = p; }); true');
-  assert.ok(await until(() => L.main(() => global.lumio.current.overlayKind === 'permission')), 'the bubble opens by itself');
+  assert.ok(await until(() => L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current) === 'permission')), 'the bubble opens by itself');
   assert.equal(await L.shell(`document.querySelector('#perm-chip .pc-t').textContent`), 'Send notifications?');
   const overlay = (code) => L.main((_e, c) => global.lumio.current.overlay.webContents.executeJavaScript(c), code);
   assert.ok(await until(() => overlay(`document.querySelectorAll('.pb-btn').length === 2`)), 'notifications: Allow / Don’t allow');
@@ -189,7 +189,7 @@ test('automatic downloads: a page’s second download without a click asks first
   assert.ok(await until(() => L.shell(`document.querySelector('#perm-chip .pc-t')?.textContent === 'Download files?'`)), 'the second one asks');
   assert.equal(await count(), start + 2, 'both listed; the second waits');
   const overlay = (code) => L.main((_e, c) => global.lumio.current.overlay.webContents.executeJavaScript(c), code);
-  await until(() => L.main(() => global.lumio.current.overlayKind === 'permission'));
+  await until(() => L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current) === 'permission'));
   await overlay(`document.querySelector('.pb [data-d=allow]').click(); true`);
   assert.ok(await until(async () => (await L.main(() => global.lumio.store.downloads().filter((d) => /file-two/.test(d.name) && d.state === 'completed').length)) > 0), 'allowed: it finishes');
   assert.equal(await settings((s, o) => s.exception(o, 'automaticDownloads'), a), 'allow');
