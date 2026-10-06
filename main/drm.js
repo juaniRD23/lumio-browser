@@ -10,6 +10,11 @@
 // nothing: Lumio starts exactly as before and Settings shows no
 // Protected content row.
 const SLOW_MS = 1000; // the waiting window shows only after this
+// It's made (hidden) a little before that: a first window's page process
+// can take seconds to start on a slow Mac, and the window must be ready to
+// show at the one-second mark, not seconds after it. A Widevine that's
+// already there (every launch after the first) is ready long before this.
+const PRELOAD_MS = 300;
 const MAX_MS = 15000; // and Lumio never waits longer than this
 const WAIT_URL = 'lumio://shell/drm-wait.html'; // renderer/ui/drm-wait.html
 const WIDEVINE_ID = 'oimompecagnajdejgnnjijobebaeigek'; // Chromium's id for the Widevine component
@@ -36,15 +41,20 @@ function componentsOf(electron, env) {
 // What went wrong, from castlabs' ComponentsError (one error per component).
 const describe = (err) => (Array.isArray(err?.errors) && err.errors.length ? err.errors.map((e) => e?.message || String(e)).join('; ') : err?.message || String(err));
 
-function createDrm({ electron = require('electron'), theme, env = process.env, slowMs = SLOW_MS, maxMs = MAX_MS, log = console } = {}) {
+function createDrm({ electron = require('electron'), theme, env = process.env, slowMs = SLOW_MS, maxMs = MAX_MS, preloadMs = Math.min(PRELOAD_MS, slowMs / 2), log = console } = {}) {
   let components; // looked up once the app is ready: castlabs' API needs that
   let state = 'starting'; // then 'ready' or 'failed'
   let pending = null;
   const api = () => (components === undefined ? (components = componentsOf(electron, env)) : components);
+  // What happened when, in ms from the start of the wait (for tests, when the
+  // waiting window is late): mark() adds main.js's own start-up steps.
+  let started = null;
+  const events = [];
+  const mark = (what) => { if (started !== null && events.length < 50) events.push(`${Date.now() - started} ms ${what}`); };
 
   // The small "Getting protected content ready…" window. The page has no
   // script: Open now links to #skip, and Esc is caught here.
-  function openWaiting(skip, over) {
+  function openWaiting(skip, over, wanted) {
     const win = new electron.BrowserWindow({
       width: 420, height: 180, show: false, frame: false, center: true,
       resizable: false, minimizable: false, maximizable: false, fullscreenable: false,
@@ -58,9 +68,18 @@ function createDrm({ electron = require('electron'), theme, env = process.env, s
     wc.on('will-navigate', (e) => e.preventDefault());
     wc.setWindowOpenHandler(() => ({ action: 'deny' }));
     win.on('closed', skip);
-    win.once('ready-to-show', () => { if (!win.isDestroyed() && !over()) win.show(); });
+    // Shown at the one-second mark, or as soon as it can be after that.
+    win.lumioLoaded = false;
+    win.once('ready-to-show', () => { mark('waiting window ready'); win.lumioLoaded = true; if (wanted()) showWaiting(win, over); });
     win.loadURL(WAIT_URL).catch(() => {});
+    mark('waiting window made');
     return win;
+  }
+  function showWaiting(win, over) {
+    if (!win || win.isDestroyed() || over() || !win.lumioLoaded || win.lumioShown) return;
+    win.lumioShown = true;
+    win.show();
+    mark('waiting window shown');
   }
 
   // Resolves true when Widevine is ready, false when it isn't (stock
@@ -70,12 +89,17 @@ function createDrm({ electron = require('electron'), theme, env = process.env, s
     if (pending) return pending;
     const c = api();
     if (!c) return (pending = Promise.resolve(false));
+    started = Date.now();
+    mark('waiting for Widevine');
     pending = new Promise((resolve) => {
       let done = false;
       let waiting = null;
+      let slowPassed = false;
       const finish = () => {
         if (done) return;
         done = true;
+        mark(`done (${state})`);
+        clearTimeout(early);
         clearTimeout(slow);
         clearTimeout(cap);
         // Hidden now and closed once the browser's first window exists, so
@@ -87,7 +111,10 @@ function createDrm({ electron = require('electron'), theme, env = process.env, s
         }
         resolve(state === 'ready');
       };
-      const slow = setTimeout(() => { waiting = openWaiting(finish, () => done); }, slowMs);
+      const over = () => done;
+      const open = () => { if (!waiting && !done) waiting = openWaiting(finish, over, () => slowPassed); };
+      const early = setTimeout(open, preloadMs);
+      const slow = setTimeout(() => { slowPassed = true; open(); showWaiting(waiting, over); }, slowMs);
       const cap = setTimeout(() => { log.warn(`[lumio] Widevine isn’t ready after ${Math.round(maxMs / 1000)} s; opening Lumio anyway.`); finish(); }, maxMs);
       let install;
       try { install = Promise.resolve(c.whenReady(c.WIDEVINE_CDM_ID ? [c.WIDEVINE_CDM_ID] : undefined)); } catch (err) { install = Promise.reject(err); }
@@ -108,7 +135,7 @@ function createDrm({ electron = require('electron'), theme, env = process.env, s
     return { available: true, state, version };
   }
 
-  return { whenReady, status };
+  return { whenReady, status, mark, timeline: () => [...events] };
 }
 
 // main.js: Widevine starts getting ready as soon as the app is (castlabs' API
@@ -120,4 +147,4 @@ function setup(app, opts = {}) {
   return drm;
 }
 
-module.exports = { setup, createDrm, SLOW_MS, MAX_MS, WAIT_URL };
+module.exports = { setup, createDrm, SLOW_MS, MAX_MS, PRELOAD_MS, WAIT_URL };

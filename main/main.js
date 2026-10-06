@@ -2065,10 +2065,12 @@ let sessionsBegun = false;
 // so a window already open in it is enough when there's nothing to restore.
 async function startProfile(p, { restore = false, deferred = false } = {}) {
   await p.ready;
+  drm.mark(`profile ${p.id}: extensions ready`); // (the start-up timeline e2e tests print)
   await drm.whenReady(); // DRM builds: Widevine before the first window, 15 s at most (once per run)
   // Quit while it waited (Cmd+Q on the waiting window): opening windows now
   // would stall the quit and leave Lumio unable to quit or save its tabs.
   if (quitting) return;
+  drm.mark(`profile ${p.id}: opening its windows`);
   // Site data that should have gone when Lumio last closed (if it couldn't finish).
   if (!p.cleanedUp) { p.cleanedUp = true; await p.siteControls.clearSessionData(); }
   const { store } = p;
@@ -2679,6 +2681,7 @@ global.lumio = {
   screenAura,
   set answerDownloads(fn) { answerDownloads = fn; },
   get updater() { return updater; },
+  drmTimeline: () => drm.timeline(),
   signIn: (w) => signIn(w || cur()),
   focus: (w) => { lastFocused = w; },
   createWindow,

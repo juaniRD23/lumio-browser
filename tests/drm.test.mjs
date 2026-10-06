@@ -282,9 +282,14 @@ test('castlabs, first launch: after a second the waiting window shows, then hide
   const { drm, windows, BrowserWindow } = standIns({ components: c });
   let resolved = null;
   drm.whenReady().then((v) => { resolved = v; });
-  await wait(20);
+  await wait(8);
   assert.equal(windows.length, 0, 'not for a quick one');
-  await wait(60);
+  // Made (hidden) before the second is up, so a slow first page process
+  // can't make it late; shown only once the second has passed.
+  await wait(22);
+  assert.equal(windows.length, 1, 'made ahead of time');
+  assert.equal(windows[0].shown, false, 'but hidden until the second is up');
+  await wait(50);
   assert.equal(windows.length, 1);
   const [w] = windows;
   assert.equal(w.url, WAIT_URL);
@@ -308,6 +313,22 @@ test('castlabs, first launch: after a second the waiting window shows, then hide
   await wait(5);
   assert.equal(w.destroyed, true);
   assert.equal(drm.status().state, 'ready');
+  assert.deepEqual(drm.timeline().map((e) => e.replace(/^\d+ ms /, '')), ['waiting for Widevine', 'waiting window made', 'waiting window ready', 'waiting window shown', 'done (ready)']);
+});
+
+test('a waiting window whose page is slow to load shows as soon as it has, and never after the wait is over', async () => {
+  for (const loadMs of [60, 400]) {
+    const c = castlabs({ ms: 250 });
+    const { drm, windows, BrowserWindow } = standIns({ components: c });
+    BrowserWindow.prototype.loadURL = function loadURL(url) { this.url = url; setTimeout(() => this.emit('ready-to-show'), loadMs); return Promise.resolve(); };
+    drm.whenReady();
+    await wait(45);
+    assert.equal(windows[0].shown, false, `${loadMs}: not yet loaded`);
+    await wait(80);
+    assert.equal(windows[0].shown, loadMs < 100, `${loadMs}: shown once loaded, if Widevine is still on its way`);
+    await wait(400);
+    assert.equal(windows[0].shown, loadMs < 100, `${loadMs}: a window that loads after the wait is over stays hidden`);
+  }
 });
 
 test('Esc or Open now skips the wait; Widevine keeps installing and Settings shows when it’s ready', async () => {
