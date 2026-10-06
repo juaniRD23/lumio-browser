@@ -187,4 +187,12 @@ class TaskManager {
   }
 }
 
-module.exports = { TaskManager, buildRows, serviceLabel };
+// A page's memory, as the Task manager counts it (bytes), for its tab's hover
+// card; null when its process isn't known. metrics: app.getAppMetrics().
+function memoryOf(pid, metrics) {
+  const m = pid > 0 ? (metrics || []).find((x) => x.pid === pid) : null;
+  const kb = m?.memory?.privateBytes || m?.memory?.workingSetSize || 0;
+  return kb ? Math.round(kb * 1024) : null;
+}
+
+module.exports = { TaskManager, buildRows, serviceLabel, memoryOf };

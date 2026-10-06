@@ -516,18 +516,22 @@ function cardLeave() {
   cardLeaveTimer = setTimeout(() => hideCard(), 80); // time to cross the gap to the next tab
 }
 
+// Tabs to the side (batch 7d): the card shows beside the tab's row instead.
+const sideRow = (id) => (document.body.classList.contains('vtabs') ? document.querySelector(`#vtabs .vt-tab[data-id="${id}"]`) : null);
 function showCard(id) {
   const t = state.tabs.find((x) => x.id === id);
-  const el = tabEls.get(id);
+  const row = sideRow(id);
+  const el = row || tabEls.get(id);
   // Menus and prompts keep the overlay; a dragged tab has no card.
   if (!t || !el || tabDrag || (overlayKind && overlayKind !== 'hovercard')) return;
   const r = el.getBoundingClientRect();
-  // The view spans the strip, so the card can slide from tab to tab inside it.
-  const left = Math.max(0, Math.round(tabsEl.getBoundingClientRect().left) - 12);
-  const width = Math.round(window.innerWidth - left);
+  // The view spans the strip, so the card can slide from tab to tab inside it;
+  // beside the column, it spans the column's height.
+  const left = row ? Math.round(r.right) + 2 : Math.max(0, Math.round(tabsEl.getBoundingClientRect().left) - 12);
+  const width = row ? CARD_WIDTH + 24 : Math.round(window.innerWidth - left);
   const card = {
     id,
-    x: Math.round(Math.max(0, Math.min(r.left - left - 12, width - 24 - CARD_WIDTH))),
+    x: row ? 0 : Math.round(Math.max(0, Math.min(r.left - left - 12, width - 24 - CARD_WIDTH))),
     title: t.title || 'Untitled',
     site: siteName(t.url),
     sleeping: !!t.sleeping,
@@ -538,8 +542,18 @@ function showCard(id) {
   cardTab = id;
   cardKey = key;
   overlayKind = 'hovercard';
-  api.send('tab:hovercard', { rect: { x: left, y: Math.round(r.bottom) + 2, width, height: 300 }, card });
+  api.send('tab:hovercard', { rect: { x: left, y: row ? Math.max(0, Math.round(r.top) - 10) : Math.round(r.bottom) + 2, width, height: 300 }, card });
 }
+// The column's rows (renderer/ui/vertical-tabs.js) open the same cards.
+document.addEventListener('pointerover', (e) => {
+  const rowEl = e.target.closest?.('#vtabs .vt-tab');
+  if (rowEl && !rowEl.contains(e.relatedTarget)) cardEnter(Number(rowEl.dataset.id));
+});
+document.addEventListener('pointerout', (e) => {
+  const rowEl = e.target.closest?.('#vtabs .vt-tab');
+  if (rowEl && !rowEl.contains(e.relatedTarget)) cardLeave();
+});
+document.addEventListener('pointerdown', (e) => { if (e.target.closest?.('#vtabs .vt-tab')) hideCard(true); }, true);
 
 // instant: you clicked or dragged, so the next card waits again.
 function hideCard(instant = false) {

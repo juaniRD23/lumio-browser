@@ -10,7 +10,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const perf = require('../main/perf.js');
-const { buildRows, serviceLabel } = require('../main/task-manager.js');
+const { buildRows, serviceLabel, memoryOf } = require('../main/task-manager.js');
 const { Store } = require('../main/store.js');
 
 test('Memory Saver modes map to how long a tab sits unseen', () => {
@@ -224,4 +224,12 @@ test('Task Manager: one row per process, with what runs in it', () => {
   assert.equal(by[7].canEnd, false);
 
   assert.equal(serviceLabel({ name: 'Audio Service' }), 'Audio Service');
+});
+
+test('a tab’s memory for its hover card: its process’s, as the Task manager counts it', () => {
+  const metrics = [{ pid: 40, memory: { privateBytes: 120_000, workingSetSize: 150_000 } }, { pid: 41, memory: { workingSetSize: 2_000 } }];
+  assert.equal(memoryOf(40, metrics), 120_000 * 1024);
+  assert.equal(memoryOf(41, metrics), 2_000 * 1024);
+  assert.equal(memoryOf(99, metrics), null, 'not known');
+  assert.equal(memoryOf(0, metrics), null);
 });

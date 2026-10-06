@@ -15,6 +15,7 @@ const { menuModel } = require('./menu');
 const theme = require('./theme');
 const tabLayout = require('./tab-layout');
 const windowName = require('./window-name');
+const { memoryOf } = require('./task-manager');
 
 // Bundled by scripts/build-preload.mjs (it includes the extension toolbar code).
 const SHELL_PRELOAD = path.join(__dirname, '..', 'preload', 'dist', 'shell.js');
@@ -414,7 +415,10 @@ class BrowserWin {
     if (!tab || !rect || (this.overlayKind && this.overlayKind !== 'hovercard')) return;
     this.cardTab = tab.id;
     const url = tab.view && !tab.view.webContents.isDestroyed() ? tab.view.webContents.getURL() : '';
-    const payload = { ...card, kind: 'hovercard', shot: this.tabs.canPreview(tab), preview: tab.preview?.src || null };
+    // Memory usage, as the Task manager counts it (batch 7a), like Chrome's card.
+    let memory = null;
+    try { memory = tab.view && !tab.sleeping && !tab.view.webContents.isDestroyed() ? memoryOf(tab.view.webContents.getOSProcessId(), require('electron').app.getAppMetrics()) : null; } catch { /* not known */ }
+    const payload = { ...card, kind: 'hovercard', shot: this.tabs.canPreview(tab), preview: tab.preview?.src || null, memory };
     this.showOverlay(rect, payload);
     if (!payload.shot || (tab.id !== this.tabs.activeId && tab.preview && tab.preview.url === url)) return;
     const shot = await this.tabs.capturePreview(tab);

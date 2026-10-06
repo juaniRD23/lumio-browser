@@ -74,7 +74,9 @@ export function initTabGroups({ api, tabsEl, getState, accent, overlay }) {
   // ---- the editor (overlay-groups.js draws it)
   function openEditor(id, { keyboard = false, refresh = false } = {}) {
     const g = groups.get(id);
-    const chip = chips.get(id);
+    // Tabs to the side (batch 7d): the column's group row stands in for the chip.
+    const shown = (el) => el && el.getBoundingClientRect().width > 0;
+    const chip = [chips.get(id), document.querySelector(`.vt-group[data-group="${CSS.escape(id)}"]`)].find(shown) || chips.get(id);
     if (!g || !chip) return;
     editing = id;
     const r = chip.getBoundingClientRect();
@@ -92,6 +94,7 @@ export function initTabGroups({ api, tabsEl, getState, accent, overlay }) {
     if (!refresh || keyboard) api.send('groups:overlay-focus');
   }
   api.on('tab-group-edit', ({ id } = {}) => openEditor(id));
+  document.addEventListener('lumio-group-edit', (e) => openEditor(e.detail));
   api.on('overlay-picked', (msg) => {
     if (msg.kind !== 'tab-group') return;
     overlay.closed('tab-group');

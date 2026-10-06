@@ -120,3 +120,27 @@ body.vtabs-flyout #card { padding: 6px 6px 8px; border-radius: 12px; box-shadow:
   #vtabs, .vt-tab, .vt-tab.shifting { transition: none !important; }
   .vt-tab .agent-dot, body.vtabs-flyout #card { animation: none; }
 }
+
+/* ---------------------------------------------------------------- tab groups */
+/* Batch 5's groups in the column: a header row in the group's color (a
+   click collapses it), and a line in that color beside its tabs. */
+.vt-group {
+  grid-column: 1 / -1; display: flex; align-items: center; gap: 8px;
+  height: 28px; min-width: 0; margin-top: 4px; padding: 0 10px; border-radius: 9px;
+  color: var(--text); font: inherit; font-size: 12px; font-weight: 600; text-align: left;
+  transition: background 140ms var(--ease);
+}
+.vt-group:hover { background: var(--tab-hover); }
+.vt-group:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.vt-gdot { width: 10px; height: 10px; flex: none; border-radius: 50%; background: var(--gc); }
+.vt-gname { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vt-group.untitled .vt-gname { display: none; }
+.vt-gcount { color: var(--dim); font-weight: 500; }
+.vt-group.collapsed .vt-gdot { box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px var(--gc); }
+.vt-tab.grouped::before {
+  content: ''; position: absolute; left: 3px; top: 7px; bottom: 7px; width: 3px; border-radius: 2px; background: var(--gc);
+}
+/* Collapsed to icons: the header is just its dot. */
+body.vtabs-collapsed #vtabs .vt-group { justify-content: center; padding: 0; }
+body.vtabs-collapsed #vtabs .vt-group :is(.vt-gname, .vt-gcount) { display: none; }
+@media (prefers-reduced-motion: reduce) { .vt-group { transition: none; } }

@@ -464,3 +464,29 @@ test('light and dark: the tabs column, the panes and the flyout use the theme', 
     await fly.page.close();
   }
 });
+
+// Seam: batch 5's tab groups and batch 3's hover cards in the tabs column.
+test('tabs to the side: groups get a header row (click collapses), their tabs a colored line, and rows open hover cards beside the column', { skip: !CHROME && 'Google Chrome not installed' }, async () => {
+  const groups = [{ id: 'gA', title: 'Trip', color: 'blue', collapsed: false, count: 2 }, { id: 'gB', title: '', color: 'yellow', collapsed: true, count: 1 }];
+  const tabs = TABS.map((t) => (t.id === 4 || t.id === 5 ? { ...t, groupId: 'gA' } : t.id === 6 ? { ...t, groupId: 'gB' } : t));
+  const init = { ...INIT, tabs: { activeId: 3, split: null, tabs, groups } };
+  const { page, errors } = await open({ init });
+  const order = await page.$$eval('#vtabs .vt-tabs > *', (els) => els.map((e) => (e.classList.contains('vt-group') ? `[${e.dataset.group}]` : e.dataset.id)));
+  assert.deepEqual(order, ['1', '2', '3', '[gA]', '4', '5', '[gB]', '6']);
+  assert.equal(await page.getAttribute('.vt-group[data-group="gA"]', 'aria-label'), 'Trip, 2 tabs, expanded');
+  assert.equal(await page.isVisible('#vtabs .vt-tab[data-id="6"]'), false, 'a collapsed group’s tab is hidden');
+  assert.equal(await page.$eval('#vtabs .vt-tab[data-id="4"]', (el) => el.classList.contains('grouped') && getComputedStyle(el, '::before').backgroundColor !== 'rgba(0, 0, 0, 0)'), true);
+  await page.click('.vt-group[data-group="gA"]');
+  assert.deepEqual(await lastSent(page, 'groups:update'), { id: 'gA', collapsed: true });
+  // Hover cards beside the column.
+  await page.hover('#vtabs .vt-tab[data-id="5"]');
+  await page.waitForFunction(() => window.__sent.some(([c, p]) => c === 'tab:hovercard' && p?.card?.id === 5), null, { timeout: 3000 });
+  const card = (await sent(page, 'tab:hovercard')).filter((p) => p?.card).at(-1);
+  const col = await box(page, '#vtabs');
+  assert.ok(card.rect.x >= col.right - 2, `beside the column (${card.rect.x} vs ${col.right})`);
+  assert.equal(card.card.x, 0);
+  await page.mouse.move(900, 600);
+  await page.waitForFunction(() => window.__sent.some(([c, p]) => c === 'tab:hovercard' && p?.hide));
+  assert.deepEqual(errors, []);
+  await page.close();
+});

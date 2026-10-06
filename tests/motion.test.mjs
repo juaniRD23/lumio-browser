@@ -209,8 +209,10 @@ test('tab hover card in the overlay: title, site, sleeping, picture, and it glid
     // Moving to another tab glides the card there.
     await slowMotion(page);
     const xs = sample(page, () => parseFloat(getComputedStyle(document.getElementById('card')).translate) || 0, 300);
-    await show({ id: 3, x: 300, title: 'Page 3', site: 'site3.example', shot: false });
+    await show({ id: 3, x: 300, title: 'Page 3', site: 'site3.example', shot: false, memory: 123_400_000 });
     const moved = await xs;
+    // Memory usage, as the Task manager counts it (batch 7a), on an awake tab's card.
+    assert.equal(await page.textContent('.hc-mem'), 'Memory usage: 123 MB');
     assert.ok(moved.some((x) => x > 31 && x < 299), `glides: ${moved.map(Math.round).join(',')}`);
     await slowMotion(page, 1);
     await page.waitForFunction(() => parseFloat(getComputedStyle(document.getElementById('card')).translate) === 300);

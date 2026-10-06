@@ -66,21 +66,65 @@ function updateRow(el, t, { activeId, shownId }) {
   audio.setAttribute('aria-label', audio.title);
 }
 
+// A tab group's header row (batch 5's groups): its color and name; a click
+// collapses or expands it, like the strip's chip.
+const tabsLabel = (n) => `${n} tab${n === 1 ? '' : 's'}`;
+function groupRow(g, send) {
+  const el = document.createElement('button');
+  el.type = 'button';
+  el.className = 'vt-group';
+  el.dataset.group = g.id;
+  el.tabIndex = -1;
+  el.innerHTML = '<i class="vt-gdot" aria-hidden="true"></i><span class="vt-gname"></span><span class="vt-gcount"></span>';
+  el.addEventListener('click', () => send('groups:update', { id: el.dataset.group, collapsed: !el.classList.contains('collapsed') }));
+  // Right-click: the group editor, like the strip's chip (renderer/ui/tab-groups.js).
+  el.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); document.dispatchEvent(new CustomEvent('lumio-group-edit', { detail: el.dataset.group })); });
+  return el;
+}
+function updateGroupRow(el, g) {
+  el.style.setProperty('--gc', `var(--group-${g.color})`);
+  el.classList.toggle('collapsed', !!g.collapsed);
+  el.classList.toggle('untitled', !g.title);
+  el.querySelector('.vt-gname').textContent = g.title;
+  el.querySelector('.vt-gcount').textContent = g.collapsed ? String(g.count) : '';
+  const name = g.title || 'Unnamed group';
+  el.setAttribute('aria-label', `${name}, ${tabsLabel(g.count)}, ${g.collapsed ? 'collapsed' : 'expanded'}`);
+  el.setAttribute('aria-expanded', String(!g.collapsed));
+  el.title = `${name} · ${tabsLabel(g.count)}\nClick to ${g.collapsed ? 'expand' : 'collapse'}`;
+}
+
 // Draws `tabs` into `list`, reusing each tab's row. Pinned tabs come first
 // (the tab model keeps them there) and the first other tab is marked, for the
-// line under the pinned ones.
-export function renderRows(list, tabs, { activeId, shownId = null, rows, send }) {
+// line under the pinned ones. groups: the window's tab groups (each group's
+// header comes before its tabs; a collapsed group's tabs are hidden).
+export function renderRows(list, tabs, { activeId, shownId = null, rows, send, groups = [] }) {
   const ids = new Set(tabs.map((t) => t.id));
   for (const [id, el] of rows) if (!ids.has(id)) { el.remove(); rows.delete(id); }
+  const byId = new Map(groups.map((g) => [g.id, g]));
+  list._groups ||= new Map(); // group id -> its header row
+  for (const [id, el] of list._groups) if (!byId.has(id)) { el.remove(); list._groups.delete(id); }
+  const order = [];
   let firstOther = true;
   tabs.forEach((t, i) => {
+    const g = t.groupId && !t.pinned ? byId.get(t.groupId) : null;
+    if (g && tabs[i - 1]?.groupId !== g.id) {
+      let head = list._groups.get(g.id);
+      if (!head) { head = groupRow(g, send); list._groups.set(g.id, head); }
+      updateGroupRow(head, g);
+      order.push(head);
+    }
     let el = rows.get(t.id);
     if (!el) { el = createRow(t.id, send); rows.set(t.id, el); }
-    if (list.children[i] !== el) list.insertBefore(el, list.children[i] || null);
     updateRow(el, t, { activeId, shownId });
     el.classList.toggle('after-pins', !t.pinned && firstOther && i > 0);
+    el.classList.toggle('grouped', !!g);
+    el.classList.toggle('group-end', !!g && tabs[i + 1]?.groupId !== g.id);
+    if (g) el.style.setProperty('--gc', `var(--group-${g.color})`); else el.style.removeProperty('--gc');
+    el.hidden = !!g?.collapsed && t.id !== activeId; // (the tab you're on stays, as in the strip)
     if (!t.pinned) firstOther = false;
+    order.push(el);
   });
+  order.forEach((el, i) => { if (list.children[i] !== el) list.insertBefore(el, list.children[i] || null); });
 }
 
 // Drag to reorder: rows slide up or down, pinned tiles (a grid) show where
@@ -93,8 +137,8 @@ export function startReorder(e, el, { list, tabs, onDown, track = () => false, f
   const id = Number(el.dataset.id);
   onDown?.(id);
   const pinned = el.classList.contains('pinned');
-  const group = [...list.children].filter((x) => x.classList.contains('pinned') === pinned);
-  const offset = pinned ? 0 : tabs().filter((t) => t.pinned).length;
+  // The rows it moves among (not group headers, nor a collapsed group's hidden tabs).
+  const group = [...list.children].filter((x) => x.classList.contains('vt-tab') && !x.hidden && x.classList.contains('pinned') === pinned);
   const from = group.indexOf(el);
   const rects = group.map((x) => x.getBoundingClientRect());
   const start = { x: e.clientX, y: e.clientY };
@@ -151,7 +195,8 @@ export function startReorder(e, el, { list, tabs, onDown, track = () => false, f
     el.classList.remove('dragging');
     list.classList.remove('reordering');
     if (finish()) return;
-    if (dragging && target !== from) drop(id, offset + target);
+    // Its place among all the tabs: where the row it landed on is.
+    if (dragging && target !== from) drop(id, tabs().findIndex((t) => t.id === Number(group[target].dataset.id)));
   };
   el.addEventListener('pointermove', move);
   el.addEventListener('pointerup', up);

@@ -59,7 +59,7 @@ export function initVerticalTabs({ api, init, splitDrop, onLayout }) {
   };
 
   function render() {
-    renderRows(list, state.tabs, { activeId: state.activeId, shownId: shownId(), rows, send });
+    renderRows(list, state.tabs, { activeId: state.activeId, shownId: shownId(), rows, send, groups: state.groups || [] });
     if (!rows.has(focusId)) focusId = state.activeId;
     for (const [id, el] of rows) el.tabIndex = id === focusId ? 0 : -1;
     if (flyoutOpen) showFlyout();

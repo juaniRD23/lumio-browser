@@ -398,6 +398,8 @@ function renderUpdateCard({ update: u }) {
 // strip and --x puts the card under its tab, so moving along the tabs slides
 // the card over instead of opening it again.
 let cardTab = null;
+// "120 MB", "1.2 GB", like the Task manager.
+const memoryText = (bytes) => (bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1e6))} MB`);
 function renderHoverCard(p, fresh) {
   const before = cardTab;
   const shown = card.querySelector('.hc-shot img')?.getAttribute('src') || null;
@@ -411,6 +413,7 @@ function renderHoverCard(p, fresh) {
       <div class="hc-title">${esc(p.title)}</div>
       ${p.site ? `<div class="hc-site">${esc(p.site)}</div>` : ''}
       ${p.sleeping ? `<div class="hc-note">${icons.moon}<span>Sleeping (saved memory)</span></div>` : ''}
+      ${!p.sleeping && p.memory > 0 ? `<div class="hc-mem">Memory usage: ${esc(memoryText(p.memory))}</div>` : ''}
       ${p.agent ? `<div class="hc-note"><i class="hc-dot"${dot}></i><span>${esc(p.agent.name)} is working here: ${esc(p.agent.title)}</span></div>` : ''}
     </div>
     ${p.shot ? `<div class="hc-shot">${p.preview ? `<img src="${esc(p.preview)}" alt="">` : icons.globe}</div>` : ''}`;
