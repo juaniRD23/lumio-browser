@@ -325,15 +325,22 @@ test('dangerous downloads: a misleading name waits for Keep or Discard', async (
   assert.ok(d, 'listed, with a warning');
   assert.equal(d.danger.kind, 'deceptive');
   assert.equal(d.state, 'progressing');
-  assert.equal(await L.main((_e, id) => global.lumio.profiles.normal.downloads.items.find((x) => x.id === id).item.isPaused(), d.id), true, 'it waits');
+  assert.equal(d.paused, true, 'it waits');
   await L.wait(500);
-  assert.equal((await downloads()).find((x) => x.id === d.id).state, 'progressing', 'still waiting');
+  const waiting = (await downloads()).find((x) => x.id === d.id);
+  assert.equal(waiting.state, 'progressing', 'still waiting');
+  assert.ok(waiting.danger, 'still warned about');
+  // (A small file may have arrived whole already: it keeps a temporary name until it's kept.)
+  assert.equal(fs.existsSync(d.path), false, 'not saved under its name yet');
   await shot('security-06-dangerous-download');
   // Discard: gone from the list, and not saved.
   await L.main((_e, id) => global.lumio.profiles.normal.downloads.action(id, 'discard'), d.id);
   assert.ok(await until(async () => !(await downloads()).some((x) => x.id === d.id)), 'discarded');
   assert.equal(fs.existsSync(d.path), false);
-  // Again, and Keep: it finishes.
+  // Again, and Keep: it finishes. (From the page loaded afresh: a second
+  // download from the same page without a real click would first ask about
+  // automatic downloads, main/site-controls.js.)
+  await go(`http://127.0.0.1:${P}/dl-page?again`, 'Downloads page');
   await L.page(`document.getElementById('exe').click(); true`);
   const again = await until(async () => (await downloads()).find((x) => x.name === 'report.pdf.exe' && x.id !== d.id && x.danger) || null);
   assert.ok(again);

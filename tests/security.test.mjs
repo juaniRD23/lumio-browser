@@ -650,6 +650,46 @@ test('features: a risky download waits for Keep or Discard; devices may open the
   });
 });
 
+test('features: a risky file that arrives whole waits under a temporary name; Keep names it, Discard deletes it', () => {
+  const dir = tmp();
+  const ses = fakeSession();
+  const dl = new Downloads(ses, { emit: () => {}, settings: { settings: { downloadDir: dir } } });
+  dl.danger = (item) => (item.getFilename().endsWith('.pdf.exe') ? { kind: 'deceptive', title: '…', detail: '…' } : null);
+  // Like Chromium with a small file: the pause doesn't stop it arriving.
+  const arriving = (name) => {
+    const it = new EventEmitter();
+    Object.assign(it, { getFilename: () => name, getURL: () => `https://f.test/${name}`, getTotalBytes: () => 3, setSaveDialogOptions() {}, getReceivedBytes: () => 3,
+      setSavePath: (p) => { it.savePath = p; }, getSavePath: () => it.savePath, pause() {}, resume() {}, isPaused: () => false, cancel: () => { it.cancelled = true; } });
+    ses.emit('will-download', {}, it, null);
+    fs.writeFileSync(it.savePath, 'MZ!');
+    it.emit('done', {}, 'completed');
+    return it;
+  };
+  const kept = arriving('report.pdf.exe');
+  const k = dl.list()[0];
+  assert.equal(path.basename(kept.savePath).endsWith('.crdownload'), true, 'a temporary name');
+  assert.equal(k.state, 'progressing', 'still waiting');
+  assert.equal(k.paused, true);
+  assert.equal(k.danger.kind, 'deceptive');
+  assert.equal(fs.existsSync(k.path), false, 'not under its own name');
+  dl.action(k.id, 'keep');
+  const done = dl.list().find((d) => d.id === k.id);
+  assert.equal(done.state, 'completed');
+  assert.equal(done.danger, undefined);
+  assert.equal(fs.readFileSync(done.path, 'utf8'), 'MZ!', 'kept: named and saved');
+  assert.equal(fs.existsSync(kept.savePath), false);
+  const thrown = arriving('invoice.pdf.exe');
+  const t = dl.list()[0];
+  dl.action(t.id, 'discard');
+  assert.equal(thrown.cancelled, undefined, 'it had already arrived');
+  assert.equal(dl.list().some((d) => d.id === t.id), false);
+  return new Promise((resolve) => setTimeout(() => {
+    assert.equal(fs.existsSync(thrown.savePath), false, 'discarded: deleted');
+    assert.deepEqual(fs.readdirSync(dir), ['report.pdf.exe']);
+    resolve();
+  }, 50));
+});
+
 test('pages: the warning page and the Security pages are served', () => {
   assert.ok(PAGE_HOSTS.has('interstitial'));
   assert.match(resolveFile(new URL('lumio://interstitial/?type=unsafe&url=x'), PAGE_HOSTS), /interstitial\.html$/);
