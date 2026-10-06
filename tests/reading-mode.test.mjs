@@ -94,6 +94,8 @@ const open = async (page) => {
 test('the address bar button opens the article in its own column, sanitized, and Esc closes it', { skip }, async () => {
   const { page, errors } = await openShell();
   assert.equal(await page.isVisible('#reader-btn'), true, 'shown on a page that looks like an article');
+  // The shell reports its page slot after its first layout, which can come late on a busy machine.
+  await page.waitForFunction(() => window.__sent.some(([c]) => c === 'layout:slot'));
   const before = (await sent(page, 'layout:slot')).at(-1).width;
   await open(page);
   assert.deepEqual(await calls(page, 'reader:article'), [1]);

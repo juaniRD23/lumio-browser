@@ -64,6 +64,11 @@ jobs:
       - name: Install
         run: npm ci
 
+      # Electron 43 fetches its app on first run, not at install; the credits
+      # tests read Chromium's notices from it.
+      - name: Fetch Electron
+        run: node node_modules/electron/install.js
+
       - name: Test
         run: npm test
 

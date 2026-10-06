@@ -207,8 +207,10 @@ test('more contrast makes lines and secondary text stronger; less transparency m
     const probe = (v) => { const el = document.createElement('i'); el.style.color = v; document.body.append(el); const c = getComputedStyle(el).color; el.remove(); return c; };
     return { line: probe('var(--line)'), dim: probe('var(--dim)'), glass: probe('var(--popover-glass)'), popover: probe('var(--popover)'), raw: s.getPropertyValue('--line').trim() };
   });
-  const before = await read();
+  // Start from the defaults, whatever the computer has on (GitHub's Macs reduce transparency).
   const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-contrast', value: 'no-preference' }, { name: 'prefers-reduced-transparency', value: 'no-preference' }] });
+  const before = await read();
   await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-contrast', value: 'more' }, { name: 'prefers-reduced-transparency', value: 'reduce' }] });
   const after = await read();
   assert.notEqual(after.line, before.line, 'stronger lines');
