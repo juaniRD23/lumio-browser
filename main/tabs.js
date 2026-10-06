@@ -460,11 +460,11 @@ class TabManager {
       // full screen window, no notice). Once the window is out, so is the page.
       const settle = () => {
         if (wc.isDestroyed() || M().fullscreenTab === tab.id) return;
-        wc.executeJavaScript('document.fullscreenElement ? document.exitFullscreen().then(() => true, () => false) : false', true).catch(() => {});
+        Promise.resolve().then(() => wc.executeJavaScript('document.fullscreenElement ? document.exitFullscreen().then(() => true, () => false) : false', true)).catch(() => {});
       };
       // (Again a second later, in case the window said it was out before its animation ended.)
-      if (m.win.isFullScreen()) m.win.once('leave-full-screen', () => setTimeout(settle, 0));
-      setTimeout(settle, 1000);
+      if (m.win.isFullScreen?.()) m.win.once('leave-full-screen', () => setTimeout(settle, 0));
+      setTimeout(settle, 1000).unref?.();
     });
     wc.on('found-in-page', (_e, result) => M().hooks.onFound?.(tab.id, result));
     // Split view: clicking into the other side's page makes it the focused side.
