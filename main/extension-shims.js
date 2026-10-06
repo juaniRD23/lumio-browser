@@ -28,12 +28,11 @@ function attach(ses) {
 
 // Sends one extension an event (chrome.commands.onCommand, Lumio's
 // chrome.alarms.onAlarm). The library's router only delivers to listeners it
-// saw being added, and drops an extension's when it's unloaded (a site access
-// change reloads it). A service worker that kept running through the reload,
-// or whose addListener calls came before the library was listening to it,
-// would never hear the event. So when the router knows no listener of that
-// extension's, the event goes straight to its service worker (woken if it's
-// asleep), on the channel the worker's preloads listen on.
+// saw being added, drops an extension's when it's unloaded (a site access
+// change reloads it), and tries to start the worker once. So an extension
+// with a service worker gets the event from Lumio: straight to its newest
+// running worker (woken if it's asleep), on the channel the worker's
+// preloads listen on.
 // Just after a reload the worker isn't registered again yet and can't start
 // ("Failed to start service worker") for a moment; the event waits for it
 // (sendEvent.retry) instead of being dropped.
@@ -42,19 +41,49 @@ function sendEvent(manager, id, eventName, ...args) {
 }
 sendEvent.retry = { ms: 10_000, every: 250 };
 
-function deliver(manager, id, eventName, args, deadline) {
+function deliver(manager, id, eventName, args, deadline, first = true) {
   const router = manager.ece?.ctx?.router;
   if (!router) return;
-  const known = !(router.listeners instanceof Map) || (router.listeners.get(eventName) || []).some((l) => l.extensionId === id);
   const workers = manager.session?.serviceWorkers;
   const hasWorker = !!manager.api?.getExtension?.(id)?.manifest?.background?.service_worker;
-  if (known || !hasWorker || typeof workers?.startWorkerForScope !== 'function') { router.sendEvent(id, eventName, ...args); return; }
-  workers.startWorkerForScope(`chrome-extension://${id}/`)
-    .then((sw) => sw.send(`crx-${eventName}`, ...args))
+  if (!hasWorker || typeof workers?.startWorkerForScope !== 'function') { router.sendEvent(id, eventName, ...args); return; }
+  // The extension's own pages that listen (popup, options) get it from the
+  // router's list; its service worker always goes through Lumio, never the
+  // router's one-shot startWorkerForScope (no retry, and after a reload it
+  // can land on the worker of the extension's previous load).
+  if (first && router.listeners instanceof Map) {
+    for (const l of router.listeners.get(eventName) || []) {
+      if (l.extensionId === id && l.type === 'frame' && l.host && !l.host.isDestroyed?.()) l.host.send(`crx-${eventName}`, ...args);
+    }
+  }
+  const scope = `chrome-extension://${id}/`;
+  workers.startWorkerForScope(scope)
+    .then((sw) => {
+      // A reload leaves the previous load's worker running beside the new one
+      // (same scope and script); the newest version is the extension as loaded now.
+      const target = newestWorker(workers, scope, sw);
+      if (process.env.LUMIO_TEST) console.warn(`[lumio] ${eventName} -> ${id} worker v${target.versionId} (started v${sw?.versionId})`);
+      target.send(`crx-${eventName}`, ...args);
+    })
     .catch((err) => {
-      if (Date.now() < deadline && manager.api?.getExtension?.(id)) { setTimeout(() => deliver(manager, id, eventName, args, deadline), sendEvent.retry.every); return; }
+      if (Date.now() < deadline && manager.api?.getExtension?.(id)) { setTimeout(() => deliver(manager, id, eventName, args, deadline, false), sendEvent.retry.every); return; }
       console.warn(`[lumio] couldn't send ${eventName} to extension ${id}:`, err?.message || err);
     });
+}
+
+// The running worker for scope with the highest version ID (versions only go
+// up), or the one startWorkerForScope gave.
+function newestWorker(workers, scope, started) {
+  let best = started;
+  let running = {};
+  try { running = workers.getAllRunning?.() || {}; } catch { /* older Electron */ }
+  for (const [vid, info] of Object.entries(running)) {
+    if (info?.scope !== scope || Number(vid) <= Number(best?.versionId ?? -1)) continue;
+    const sw = workers.getWorkerFromVersionID?.(Number(vid));
+    if (sw && !sw.isDestroyed?.()) best = sw;
+  }
+  if (!best) throw new Error('no service worker');
+  return best;
 }
 
 // The extension a call came from, checked against the page or worker that

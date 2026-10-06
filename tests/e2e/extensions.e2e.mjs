@@ -55,7 +55,7 @@ const extDiag = async (what) => {
     const m = global.lumio.extensions;
     const r = m.ece?.ctx?.router;
     const ext = m.api.getExtension(id);
-    const workers = Object.values(m.session.serviceWorkers.getAllRunning?.() || {}).filter((w) => String(w.scope).includes(id)).map((w) => w.scriptUrl);
+    const workers = Object.entries(m.session.serviceWorkers.getAllRunning?.() || {}).filter(([, w]) => String(w.scope).includes(id)).map(([v, w]) => `v${v} ${w.scriptUrl} pid ${w.renderProcessId}`);
     const listeners = r?.listeners instanceof Map ? Object.fromEntries([...r.listeners].map(([k, v]) => [k, v.filter((l) => l.extensionId === id).map((l) => l.type)]).filter(([, v]) => v.length)) : null;
     const items = Menu.getApplicationMenu()?.items.flatMap((top) => top.submenu?.items || []).filter((it) => String(it.id || '').startsWith(`ext-cmd:${id}:`)).map((it) => ({ id: it.id, accelerator: it.accelerator || null, enabled: it.enabled }));
     // Without the sandbox (Playwright's default on Linux) no service-worker
@@ -63,7 +63,7 @@ const extDiag = async (what) => {
     return { noSandbox: app.commandLine.hasSwitch('no-sandbox'), loaded: !!ext, path: ext?.path, permissions: ext?.manifest?.permissions, runningWorkers: workers, routerListeners: listeners, lumioAlarms: m.alarms?.all(id), menuItems: items, tabs: global.lumio.tabs.tabs.map((t) => t.pendingUrl || t.url) };
   }, ID).catch((e) => `unavailable: ${e.message}`);
   console.error(`[diag] ${what}:`, JSON.stringify(state, null, 1));
-  const log = L.logs.join('').split('\n').filter((l) => /\[extension worker\]|\[lumio\]|Extension Error|^\s+(Message|Context):/.test(l));
+  const log = L.logs.join('').split('\n').filter((l) => /\[extension worker\]|\[lumio\]|Extension Error|Failed to start service worker|failed to send|^\s+(Message|Context):/.test(l));
   console.error(`[diag] extension output in the app's log (last ${Math.min(40, log.length)} of ${log.length} lines):\n` + log.slice(-40).join('\n'));
 };
 const menuItem = (id) => L.main(({ Menu }, i) => { const it = Menu.getApplicationMenu().getMenuItemById(i); return it ? { label: it.label, accelerator: it.accelerator || null } : null; }, id);
@@ -185,7 +185,7 @@ test('keyboard shortcuts run extension commands from the menu bar', async () => 
     const item = await until(() => menuItem(`ext-cmd:${ID}:open-page`));
     assert.equal(item.accelerator, 'Alt+Shift+O', 'the manifest’s suggestion');
     await L.main(({ Menu }, id) => Menu.getApplicationMenu().getMenuItemById(`ext-cmd:${id}:open-page`).click(), ID);
-    const ran = await until(async () => (await tabUrls()).includes(`${base}/cmd-open-page`));
+    const ran = await until(async () => (await tabUrls()).includes(`${base}/cmd-open-page`), 15_000); // past sendEvent's 10 s retry, so its warning is in the log
     if (!ran) await extDiag('chrome.commands.onCommand did not open its page');
     assert.ok(ran, 'chrome.commands.onCommand ran');
     await L.main(() => global.lumio.cmd.closeTab());
