@@ -221,7 +221,9 @@ test('the ⋮ menu: under its button, shortcuts, keyboard, submenus that slide o
     await key('s');
     assert.equal(await selected(), 'Save page as…');
     await key('s');
-    assert.equal(await selected(), 'Settings', 'the same letter again: the next one');
+    assert.equal(await selected(), 'Save and share', 'the same letter again: the next one');
+    await key('s');
+    assert.equal(await selected(), 'Settings');
     await key('Enter');
     assert.deepEqual((await sent(page, 'overlay:menu')).at(-1), { id: id('Settings') });
     // Typing starts over after another key, from the row that's selected.

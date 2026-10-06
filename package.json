@@ -23,6 +23,7 @@
     "ship": "node scripts/ship.mjs"
   },
   "dependencies": {
+    "@mozilla/readability": "^0.6.0",
     "dompurify": "^3.2.6",
     "electron-chrome-extensions": "^4.9.0",
     "electron-chrome-web-store": "^0.13.0",

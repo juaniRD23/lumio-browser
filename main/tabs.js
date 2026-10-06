@@ -1095,6 +1095,8 @@ class TabManager {
         muted: t.muted,
         sleeping: !!t.discarded,
         pdf: !!t.pdf,
+        readerable: !!t.readerable,
+        translate: t.translate ? { lang: t.translate.lang, status: t.translate.status, target: t.translate.target } : null,
         agent: t.agent || null,
         crashed: t.crashed,
         pinned: t.pinned,
@@ -1148,6 +1150,7 @@ class TabManager {
     const index = this.tabs.indexOf(tab) + 1;
     const engine = searchEngines.defaultEngine(this.store.settings);
     const ai = !!this.hooks.askAI; // a pop-up has no Lumio AI
+    const more = (section) => this.hooks.pageMenu?.(section, tab, params) || []; // page tools' items (main/page-menu.js)
 
     if (params.misspelledWord) {
       const suggestions = (params.dictionarySuggestions || []).slice(0, 5);
@@ -1167,6 +1170,7 @@ class TabManager {
         { label: 'Save Link As…', click: () => this.hooks.saveAs(wc, params.linkURL) },
         { label: 'Copy Link Address', click: () => clipboard.writeText(params.linkURL) },
         ...(this.incognito || this.guest || !/^https?:/.test(params.linkURL) || !this.hooks.readingList ? [] : [{ label: 'Add Link to Reading List', click: () => this.hooks.readingList(params.linkURL, params.linkText) }]),
+        ...more('link'),
         ...(ai ? [{ label: 'Ask Lumio About This Link', click: () => this.hooks.askAI(i18n.t(`What is at this link? ${params.linkURL}`), { includePage: false }) }] : []),
       );
       sep();
@@ -1177,14 +1181,18 @@ class TabManager {
         { label: 'Save Image As…', click: () => this.hooks.saveAs(wc, params.srcURL) },
         { label: 'Copy Image', click: () => wc.copyImageAt(params.x, params.y) },
         { label: 'Copy Image Address', click: () => clipboard.writeText(params.srcURL) },
+        ...more('image'),
       );
       sep();
     }
-    if ((params.mediaType === 'video' || params.mediaType === 'audio') && params.srcURL && /^https?:/.test(params.srcURL)) {
-      items.push(
-        { label: `Open ${params.mediaType === 'video' ? 'Video' : 'Audio'} in New Tab`, click: () => this.create(params.srcURL, { active: false, index }) },
-        { label: `Save ${params.mediaType === 'video' ? 'Video' : 'Audio'} As…`, click: () => this.hooks.saveAs(wc, params.srcURL) },
-      );
+    if (params.mediaType === 'video' || params.mediaType === 'audio') {
+      if (params.srcURL && /^https?:/.test(params.srcURL)) {
+        items.push(
+          { label: `Open ${params.mediaType === 'video' ? 'Video' : 'Audio'} in New Tab`, click: () => this.create(params.srcURL, { active: false, index }) },
+          { label: `Save ${params.mediaType === 'video' ? 'Video' : 'Audio'} As…`, click: () => this.hooks.saveAs(wc, params.srcURL) },
+        );
+      }
+      items.push(...more('media'));
       sep();
     }
     const selection = (params.selectionText || '').trim();
@@ -1198,6 +1206,7 @@ class TabManager {
         { role: 'paste', enabled: params.editFlags.canPaste },
         { role: 'pasteAndMatchStyle', enabled: params.editFlags.canPaste },
         { role: 'selectAll' },
+        ...more('editable'),
         ...(selection && ai ? [{ type: 'separator' }, { label: 'Lumio', submenu: this.selectionActions(selection) }] : []),
       );
       sep();
@@ -1210,6 +1219,7 @@ class TabManager {
           { label: `Ask Lumio About “${short}”`, click: () => this.hooks.askAI(`${i18n.t('About this text from the page:')}\n\n> ${selection}\n\n`, { includePage: true, draft: true }) },
           { label: 'Lumio', submenu: this.selectionActions(selection) },
         ] : []),
+        ...more('selection'),
       );
       sep();
     }
@@ -1225,6 +1235,7 @@ class TabManager {
         { type: 'separator' },
         ...(ai ? [{ label: 'Summarize This Page with Lumio', click: () => this.hooks.askAI(i18n.t('Summarize this page.'), { includePage: true }) }] : []),
         { label: 'View Page Source', click: () => this.create('view-source:' + wc.getURL(), { index }) },
+        ...more('page'),
       );
       sep();
     }

@@ -42,6 +42,11 @@ export const CHAT_DEFAULT = 'inclusionai/ling-3.0-flash-vl';
 export const BROWSER_DEFAULT = 'openai/gpt-6-luna';
 // Answers a browser step when the default model's providers are down or busy, so people don't see an error.
 export const BROWSER_BACKUP = 'inclusionai/ling-3.0-flash-vl';
+// Translating pages (translate.ts): mostly output tokens, so the model with
+// the cheapest output wins, and it's fast enough to keep up with scrolling.
+// GPT-6 Luna takes over when Ling's providers are down.
+export const TRANSLATE_MODEL = 'inclusionai/ling-3.0-flash-vl';
+export const TRANSLATE_BACKUP = 'openai/gpt-6-luna';
 
 export const findModel = (id: unknown) => MODELS.find((m) => m.id === id) || null;
 export const browserModels = () => MODELS.filter((m) => m.browser);

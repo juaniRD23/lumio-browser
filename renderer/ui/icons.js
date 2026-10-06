@@ -60,6 +60,11 @@ export const icons = {
   // The ⋮ menu's rows (renderer/ui/overlay.js renderMenu).
   minus: s('<path d="M5 12h14"/>'),
   window: s('<rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M3.5 9h17"/>', 'width="16" height="16"'),
+  share: s('<path d="M12 3.5v11M8 7.5l4-4 4 4"/><path d="M8.5 10.5H7a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-1.5"/>', 'width="16" height="16"'),
+  qr: s('<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><path d="M14 14h2.5v2.5H14zM17.5 17.5H20V20h-2.5zM14 19.5v.5M20 14v.5"/>', 'width="16" height="16"'),
+  camera: s('<path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2l1.5-2h6l1.5 2h2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/><circle cx="12" cy="12.5" r="3.5"/>', 'width="16" height="16"'),
+  reader: s('<path d="M4 5.5h6a2 2 0 0 1 2 2V19a1.5 1.5 0 0 0-1.5-1.5H4zM20 5.5h-6a2 2 0 0 0-2 2V19a1.5 1.5 0 0 1 1.5-1.5H20z"/>', 'width="16" height="16"'),
+  translate: s('<path d="M4 6h9M8.5 4v2M6 6c.8 3 3 5.5 6 6.5M11 6c-.8 3-3 5.5-6 6.5M13 20l3.5-8 3.5 8M14.2 17.3h4.6"/>', 'width="16" height="16"'),
   print: s('<path d="M7 9V4.5h10V9"/><rect x="3.5" y="9" width="17" height="8" rx="2"/><path d="M7 14h10v5.5H7z"/>', 'width="16" height="16"'),
   tools: s('<rect x="3.5" y="8" width="17" height="11" rx="2"/><path d="M9 8V6a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M3.5 13h17M12 12v2"/>', 'width="16" height="16"'),
   fullscreen: s('<path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4"/>', 'width="16" height="16"'),

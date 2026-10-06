@@ -85,6 +85,14 @@ const { PrintPreview } = require('./print');
 const { System } = require('./system');
 const languages = require('./languages');
 const { t } = require('./i18n');
+const { Translator } = require('./translate');
+const { Reader } = require('./reader');
+const { MediaHub } = require('./media');
+const { ShareTools } = require('./share');
+const { Screenshots } = require('./screenshot');
+const { Apps } = require('./apps');
+const { appIdFromArgv } = require('./app-launchers');
+const { PageMenu } = require('./page-menu');
 
 const IS_DEV = !app.isPackaged;
 
@@ -120,6 +128,14 @@ let taskManager = null;
 let picker = null; // "Who's using Lumio?"
 let printPreview = null; // File › Print… (main/print.js)
 let system = null; // Settings › System (main/system.js)
+// Page tools, for every profile (translating pages and reading mode are each
+// profile's: profile.translator, profile.reader).
+let media = null; // the toolbar's media controls (main/media.js)
+let shareTools = null; // Share, QR codes, Send to your devices (main/share.js)
+let screenshots = null; // the screenshot tool (main/screenshot.js)
+let apps = null; // installed web apps (main/apps.js), each kept with the profile it came from
+let pageMenu = null; // the page tools' right-click items (main/page-menu.js)
+let waitingProfiles = null; // started for an installed app: the profiles whose windows come back once the browser is opened
 let quitting = false;
 let launched = false; // the first windows are open: links and files from other apps open right away
 const windows = new Set();
@@ -192,6 +208,7 @@ function emitFor(wcId, channel, payload) {
   for (const w of tabHolders()) {
     if (w.tabs.tabs.some((t) => t.view?.webContents.id === wcId)) { w.emit(channel, payload); return; }
   }
+  apps?.emitFor(wcId, channel, payload); // a site in an installed app's window
 }
 
 // Site settings that act on a profile's pages (main/site-controls.js).
@@ -249,23 +266,35 @@ const services = {
     security?.attach(w, tab);
     navigation.onViewCreated(w, tab);
     tabStrip.onViewCreated(w, tab);
+    w.profile.base.translator?.wire(tab);
+    w.profile.base.reader?.wire(tab);
+    media?.wire(tab);
+    shareTools?.wire(tab);
     if (!w.incognito && tab.view) w.profile.extensions?.addTab(tab.view.webContents, w.win);
     if (!w.incognito && tab.view) w.profile.omnibox?.watchTab(tab.view.webContents); // sites' OpenSearch engines
   },
   onPasskeyPromptClosed: (w) => w.profile.passwords?.passkeyClosed(w),
   onScreenSharePickerClosed: (w) => shareCancel(w),
-  onOverlayClosed: (w, kind) => security?.overlayClosed(w, kind),
+  onOverlayClosed: (w, kind) => { security?.overlayClosed(w, kind); shareTools?.overlayClosed(w, kind); },
   loadFailed: (w, wc, code, url) => security?.loadFailed(w, wc, code, url),
   captureOf: (tab) => security?.captureOf(tab),
   onTabActivated: (w, tab) => {
     navigation.onTabActivated(w);
     osIntegration.onTabActivated(tab);
+    shareTools?.tabChanged(w, tab);
+    screenshots?.cancel(w, false);
     if (!w.incognito && tab.view) w.profile.extensions?.selectTab(tab.view.webContents);
     printPreview?.tabActivated(w, tab);
   },
   print: (w, tab) => printPreview.open(w, tab),
   savePage: (w, tab) => savePage(w, tab),
-  contextMenuExtras: (w, tab, params) => (w.incognito || !tab.view ? [] : w.profile.extensions?.contextMenuItems(tab.view.webContents, params) || []),
+  pageMenu: (w, section, tab, params) => pageMenu?.items(w, section, tab, params) || [],
+  contextMenuExtras: (w, tab, params) => {
+    const base = w.profile.base;
+    const tools = [...(base.reader?.menuItems(w, tab, params) || []), ...(base.translator?.menuItems(w, tab, params) || [])];
+    const ext = w.incognito || !tab.view ? [] : w.profile.extensions?.contextMenuItems(tab.view.webContents, params) || [];
+    return tools.length && ext.length ? [...tools, { type: 'separator' }, ...ext] : [...tools, ...ext];
+  },
   broadcastAIState: () => alive().forEach((w) => w.ai.emitState()),
   openExternal: (w, tab, req) => openExternalLink(w, tab, req),
   // Is a page in this page's process waiting on its alert()/confirm()/prompt()?
@@ -320,6 +349,8 @@ function startMenuShortcut() {
 
 // opts.profile: the profile it's for (else the front window's). Guest has no incognito.
 function createWindow(opts = {}) {
+  // Started for an installed app: the browser's last windows come back with the first browser window.
+  if (waitingProfiles) startWaitingProfiles();
   const base = opts.profile || curProfile();
   const incognito = !!opts.incognito && !base.guest;
   const w = new BrowserWin(services, incognito ? incognitoProfile(base) : base, { ...opts, incognito, near: cur()?.win });
@@ -390,7 +421,7 @@ function saveSessionSoon() {
 let menuTimer = null;
 function menuChanged() {
   clearTimeout(menuTimer);
-  menuTimer = setTimeout(() => Menu.setApplicationMenu(buildMenu(cmd, menuState())), 50);
+  menuTimer = setTimeout(() => Menu.setApplicationMenu(apps?.focusedMenu() || buildMenu(cmd, menuState())), 50); // an app window in front keeps its own
 }
 // The menu follows the front window's profile (before any window: the first profile's).
 function menuState() {
@@ -535,6 +566,11 @@ const cmd = {
   addProfile: () => picker.open({ mode: 'add' }),
   openProfile: (id) => switchToProfile(id),
   newGuest: () => openGuest(),
+  readingMode: () => { const w = cur(); if (!w) return; w.win.webContents.focus(); w.emit('reader-open', { toggle: true }); },
+  translatePage: () => { const w = cur(); if (w?.tabs.active) w.emit('translate-prompt', { tabId: w.tabs.activeId, force: true }); },
+  // Save and share: copy, qr, send, open (the Share popover), screenshot, save, install, shortcut, native (main/share.js).
+  share: (what) => { const w = cur(); if (w) shareTools.command(w, what); },
+  apps: () => openInternal('lumio://apps/'),
 };
 
 // Back/forward menus, swipes, the link status bubble, zoom, Home, start pages… (main/navigation.js)
@@ -596,6 +632,7 @@ function openLegal(which) {
 // and the payment window, and the View menu shows the choice.
 function appearanceChanged() {
   for (const w of alive()) w.applyAppearance();
+  apps?.applyAppearance();
   if (checkoutWin && !checkoutWin.isDestroyed()) checkoutWin.setBackgroundColor(theme.colors(theme.isDark()).frame);
   menuChanged();
 }
@@ -962,7 +999,7 @@ function registerIpc() {
     };
   });
 
-  on('layout:slot', (w, rect) => { w.tabs.setSlot(rect); w.indicator.place(); printPreview.place(w); });
+  on('layout:slot', (w, rect) => { w.tabs.setSlot(rect); w.indicator.place(); printPreview.place(w); screenshots.place(w); });
   on('aura:size', (w, size) => { if (w.indicator.bar?.webContents) w.indicator.resize(size); });
   on('panel:full', (w, { on: covered, slot } = {}) => w.tabs.setCovered(!!covered, slot && Number.isFinite(slot.width) ? slot : null));
   on('sidebar:set', (w, { open, getStarted } = {}) => {
@@ -1195,6 +1232,12 @@ function registerIpc() {
   on('ai:mac-permissions-open', (w, which) => w.ai.openMacPermissionSettings(which));
   handle('ai:mac-permissions', (w) => w.ai.macPermissions());
   on('open-url', (w, url) => w.tabs.create(url));
+
+  // ---- media controls, Share, screenshots and installed apps
+  media.register({ handle, on, tabOfWc });
+  shareTools.register({ handle, on });
+  screenshots.register();
+  apps.register({ on, internalHandle });
 
   // ---- internal pages ----
   internalHandle('page:newtab-data', ['newtab'], ({ w }) => {
@@ -1664,6 +1707,7 @@ app.on('certificate-error', (event, wc, url, error, cert, callback, isMainFrame)
 });
 
 app.on('second-instance', (_e, argv) => {
+  if (apps?.launch(argv)) return; // an installed app's launcher (main/app-launchers.js)
   const urls = launchTargets(argv.slice(1));
   if (urls.length && alive().length) openExternalUrls(urls);
   else if (urls.length && picker?.isOpen) pendingUrls.push(...urls);
@@ -1726,6 +1770,11 @@ function addProfileServices(profile) {
     stopAI: () => wins().filter((w) => !w.incognito).forEach((w) => w.ai.stop()),
     siteOf: (host) => sites.siteOf(host),
   });
+  // Translating pages and reading mode: their settings are the profile's.
+  profile.translator = new Translator({ store, account: profile.account, windowOf: (tab) => tabHolders().find((w) => w.tabs === tab.owner) || null });
+  profile.reader = new Reader({ store });
+  profile.translator.register(ipc);
+  profile.reader.register(ipc);
   profile.bookmarks.register(ipc);
   profile.groups.register(ipc);
   profile.sidePanel.register(ipc);
@@ -1853,6 +1902,7 @@ function openProfile(id) {
     windows: () => alive().filter((w) => !w.incognito && w.profile === profile),
     pickWindow: () => (lastFocused && !lastFocused.incognito && lastFocused.profile === profile && windows.has(lastFocused) ? lastFocused : normalWin(profile) || createWindow({ profile, focus: false })),
     openChat: (w, chatId) => w.openChat(chatId, { full: false }),
+    onTab: (tab) => shareTools?.receiveTab(tab, profile), // Send to your devices, from another computer
   });
   profile.companion = companion;
   companion.start();
@@ -1899,7 +1949,9 @@ function openProfile(id) {
 // The first profile started at launch keeps the crash check and "Restore
 // pages?" (main/sessions.js): one run of Lumio, one marker.
 let sessionsBegun = false;
-async function startProfile(p, { restore = false } = {}) {
+// deferred: the browser opened after an installed app (startWaitingProfiles),
+// so a window already open in it is enough when there's nothing to restore.
+async function startProfile(p, { restore = false, deferred = false } = {}) {
   await p.ready;
   // Site data that should have gone when Lumio last closed (if it couldn't finish).
   if (!p.cleanedUp) { p.cleanedUp = true; await p.siteControls.clearSessionData(); }
@@ -1922,7 +1974,7 @@ async function startProfile(p, { restore = false } = {}) {
     store.setSetting('panelOpen', false);
     createWindow({ profile: p, tabs: [{ url: 'lumio://welcome/', title: 'Welcome to Lumio Browser' }], active: 0 });
   } else if (plan.windows.length) plan.windows.forEach((s) => createWindow({ profile: p, tabs: s.tabs, active: s.active, groups: s.groups, bounds: s.bounds, maximized: !!s.maximized }));
-  else createWindow({ profile: p, urls: plan.urls });
+  else if (!(deferred && normalWin(p))) createWindow({ profile: p, urls: plan.urls });
   const w = normalWin(p);
   // "Restore pages?" after a crash, and "Lumio isn't your default browser".
   if (p.id === DEFAULT_PROFILE) sessions.offerRestore(w);
@@ -1930,6 +1982,18 @@ async function startProfile(p, { restore = false } = {}) {
     isDefault: app.isDefaultProtocolClient('https'), packaged: app.isPackaged, test: !!process.env.LUMIO_TEST, firstRun,
   });
   if (offerDefault && w) defaultBrowser.offerDefaultBrowser(w, { store: rootStore, infobars, makeDefault: () => makeDefaultBrowser() });
+}
+
+// Lumio was started by an installed app's launcher: the profiles that were
+// open come back with the first browser window (or a click on the Dock).
+function startWaitingProfiles() {
+  const ids = waitingProfiles || [];
+  waitingProfiles = null;
+  for (const id of ids) {
+    if (!profiles.get(id) || starting.has(id)) continue;
+    const run = startProfile(openProfile(id), { deferred: true }).catch((err) => console.error('[lumio] starting a profile:', err)).finally(() => starting.delete(id));
+    starting.set(id, run);
+  }
 }
 
 // A profile picked in the picker or the account menu: its window comes to
@@ -2156,6 +2220,44 @@ app.whenReady().then(async () => {
   }
   if (lastVersion !== app.getVersion()) rootStore.setSetting('lastVersion', app.getVersion());
 
+  // Page tools: media controls, Share, screenshots, installed apps and their
+  // right-click items. Installed apps keep the profile they came from: its
+  // session (signed in there), its permissions, its windows for links.
+  const toast = (w, text) => w.emit('toast', { text });
+  const appProfile = (id) => openProfile(id && profiles.get(id) ? id : DEFAULT_PROFILE);
+  const openInProfile = (url, id) => {
+    if (!/^https?:/i.test(url || '')) return;
+    const p = appProfile(id);
+    const w = normalWin(p);
+    if (!w) { createWindow({ profile: p, urls: [url] }); return; }
+    w.tabs.create(url);
+    w.focus();
+  };
+  media = new MediaHub({ windows: alive });
+  screenshots = new Screenshots({ toast });
+  apps = new Apps({
+    dir: app.getPath('userData'),
+    session: (id) => appProfile(id).session,
+    permissions: (id) => appProfile(id).permissions,
+    openUrl: openInProfile,
+    cmd,
+    restoreMenu: () => Menu.setApplicationMenu(buildMenu(cmd, menuState())),
+    toast,
+    ...(process.env.LUMIO_TEST ? { launcherDir: path.join(app.getPath('userData'), 'Lumio Apps') } : {}), // tests keep ~/Applications clean
+  });
+  // Send to your devices goes through the window's profile's Lumio Sync.
+  shareTools = new ShareTools({
+    syncOf: (w) => (w?.incognito ? null : w?.profile.base.sync || null),
+    companionOf: (w) => (w?.incognito ? null : w?.profile.base.companion || null),
+    savePage,
+    openUrl: (url, profile) => openInProfile(url, profile?.id),
+    screenshots,
+    apps,
+    tabOfWc,
+    windowOf: (tab) => alive().find((w) => w.tabs === tab.owner) || null,
+  });
+  pageMenu = new PageMenu({ share: shareTools, toast });
+
   // Security and privacy (main/security.js): its settings are Lumio's, for
   // every profile; Password Checkup looks at the front window's profile's passwords.
   sites = new SiteResolver(cookieProbe(session));
@@ -2177,23 +2279,32 @@ app.whenReady().then(async () => {
   Menu.setApplicationMenu(buildMenu(cmd, menuState()));
 
   osIntegration.start(); // the Dock menu and download progress
+  // Started by an installed app's launcher: just that app, like Chrome. The
+  // browser's windows come back once it's opened (createWindow, activate).
+  const launchedApp = appIdFromArgv(process.argv);
+  const appRec = launchedApp ? apps.get(launchedApp) : null;
   // Windows passes links to open on the command line.
   if (process.platform !== 'darwin' && !process.env.LUMIO_TEST) pendingUrls.push(...launchTargets(process.argv.slice(1)));
   // Several profiles: "Who's using Lumio?" first, unless that's turned off.
   // Otherwise (and after a restart from Settings) the profiles that were
   // open come back (or the last one used).
-  if (profiles.wantsPicker() && !system.restarted && (!process.env.LUMIO_TEST || process.env.LUMIO_TEST_PICKER)) picker.open();
+  if (appRec?.window && apps.open(launchedApp)) {
+    const ids = profiles.lastOpen();
+    waitingProfiles = ids.length ? ids : [profiles.lastUsed()];
+  } else if (profiles.wantsPicker() && !system.restarted && (!process.env.LUMIO_TEST || process.env.LUMIO_TEST_PICKER)) picker.open();
   else {
     const ids = profiles.lastOpen();
     for (const id of ids.length ? ids : [profiles.lastUsed()]) await startProfile(openProfile(id), { restore: system.restarted });
   }
+  if (appRec && !appRec.window) apps.open(launchedApp); // a shortcut that opens in a tab
   if (process.platform === 'win32' && app.isPackaged && !process.windowsStore) startMenuShortcut();
   if (pendingUrls.length && alive().length) openExternalUrls(pendingUrls.splice(0));
   launched = true;
 
   app.on('activate', () => {
     if (alive().length) return;
-    if (profiles.wantsPicker()) picker.open(); else createWindow();
+    if (waitingProfiles) startWaitingProfiles();
+    else if (profiles.wantsPicker()) picker.open(); else createWindow();
   });
 });
 
@@ -2376,6 +2487,7 @@ global.lumio = {
   get siteData() { return curProfile().siteData; },
   get browsingData() { return curProfile().browsingData; },
   get security() { return security; },
+  get pageTools() { return { media, share: shareTools, screenshots, apps, pageMenu }; },
   screenAura,
   set answerDownloads(fn) { answerDownloads = fn; },
   get updater() { return updater; },

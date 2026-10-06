@@ -19,7 +19,7 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kA
 export async function startMockLumio({ plan = 'plus' } = {}) {
   const sessions = new Map(); // token -> { email, name }
   // connected: which apps are connected (the + menu); tools: what /v1/tools/run did.
-  const state = { plan, agentRequests: [], agentScript: null, connected: new Set(), toolRuns: [], images: 0, billing: [], canceling: false, voice: [] };
+  const state = { plan, agentRequests: [], agentScript: null, connected: new Set(), toolRuns: [], images: 0, billing: [], canceling: false, voice: [], translate: [] };
   const APPS = [['google_drive', 'Google Drive', 'drive'], ['gmail', 'Gmail', 'gmail'], ['outlook', 'Outlook', 'mail'], ['onedrive', 'OneDrive', 'files'], ['word', 'Word', 'files']];
   const remoteTools = () => (state.connected.has('gmail') ? [{ name: 'gmail_search', app: 'Gmail' }, { name: 'gmail_read', app: 'Gmail' }] : []);
   const json = (res, status, data) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(data)); };
@@ -126,6 +126,13 @@ export async function startMockLumio({ plan = 'plus' } = {}) {
         state.voice.push({ path: url.pathname, body });
         if (url.pathname === '/v1/voice/transcribe') return json(res, 200, { text: 'What is on this page?' });
         if (url.pathname === '/v1/voice/speak') { res.writeHead(200, { 'content-type': 'audio/mpeg' }); res.end(Buffer.from('ID3mockaudio')); return; }
+      }
+      // ---- translating pages: every piece comes back tagged with the language
+      if (url.pathname === '/v1/translate' && req.method === 'POST') {
+        if (!bearer(req)) return json(res, 401, { error: 'Sign in to your Lumio account first.', code: 'sign_in_required' });
+        const body = JSON.parse(await readBody(req));
+        state.translate.push(body);
+        return json(res, 200, { translations: body.blocks.map((b) => b.map((t) => `[${body.target}] ${t}`)) });
       }
       if (url.pathname === '/v1/extract' && req.method === 'POST') {
         if (!bearer(req)) return json(res, 401, { error: 'Sign in.', code: 'sign_in_required' });

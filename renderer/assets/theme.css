@@ -122,6 +122,16 @@
   --group-ink: light-dark(#ffffff, #202124);
   --group-ink-dark: light-dark(#202124, #202124);
 
+  /* Reading mode (renderer/ui/reading-mode.css). Its Light and Dark themes
+     set color-scheme on the view, so these follow the view, not the window. */
+  --reader-link: light-dark(var(--accent-light, #2563eb), var(--accent-dark, #86b7ff)); /* the accent for the view's own light or dark */
+  --sepia-bg: light-dark(#f6efdf, #241f17); /* warm paper; warm dusk in dark */
+  --sepia-text: light-dark(#45362a, #e8dcc5);
+  --sepia-dim: light-dark(#6b5641, #b9a98e);
+  --sepia-line: light-dark(#45362a24, #e8dcc524);
+  --sepia-link: light-dark(#8a4b0f, #f0b36b);
+  --sepia-mark: light-dark(#e2b5525c, #e2b55240); /* the sentence being read aloud */
+
   /* depth */
   --shadow-xs: 0 2px 10px light-dark(#00000026, #000a); /* a knob on a slider */
   --shadow-inset: inset 0 1px 2px light-dark(#0000001a, #0008); /* a sunken track */

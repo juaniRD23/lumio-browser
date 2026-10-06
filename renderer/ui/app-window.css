@@ -1,0 +1,33 @@
+/* The title bar of an installed app's window (renderer/ui/app-window.js).
+   The window behind it is the frame color (main/theme.js); the site sits
+   below it in its own view. */
+@import url('/assets/fonts/fonts.css');
+@import url('/assets/theme.css');
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body { background: var(--bg); color: var(--text); font: 13px/1.4 var(--font); -webkit-font-smoothing: antialiased; user-select: none; }
+[hidden] { display: none !important; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: default; }
+
+#bar {
+  height: 38px; display: flex; align-items: center; gap: 2px; padding: 0 8px;
+  -webkit-app-region: drag; border-bottom: 1px solid var(--line);
+}
+#bar button { -webkit-app-region: no-drag; }
+body.mac .lights { width: 70px; flex: none; } /* the traffic lights */
+body.windows .caps { width: 138px; flex: none; } /* Windows draws its caption buttons here */
+.nb { width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; color: var(--dim); flex: none; transition: background 140ms var(--ease), color 140ms var(--ease); }
+.nb:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.nb:active:not(:disabled) { background: var(--active); }
+.nb:disabled { opacity: .3; }
+:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.who { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 8px; }
+.icon { width: 16px; height: 16px; flex: none; display: grid; place-items: center; color: var(--label); }
+.icon img { width: 16px; height: 16px; border-radius: 4px; display: block; }
+.title { min-width: 0; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.away { display: flex; align-items: center; gap: 6px; flex: none; min-width: 0; }
+.away-host { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 999px; background: var(--overlay-4); color: var(--dim); font-size: 12px; max-width: 220px; }
+.away-host span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.away-host.insecure { color: var(--warn-text); }
+.home { -webkit-app-region: no-drag; height: 22px; padding: 0 9px; border-radius: 999px; background: var(--active); color: var(--text-soft); font-size: 12px; font-weight: 550; }
+.home:hover { background: var(--active-hover); color: var(--text-strong); }

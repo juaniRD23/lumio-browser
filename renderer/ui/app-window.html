@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>App</title>
+  <link rel="stylesheet" href="app-window.css" />
+</head>
+<body>
+  <header id="bar" role="toolbar" aria-label="App">
+    <span class="lights"></span>
+    <button type="button" class="nb" data-act="back" title="Back" aria-label="Back" disabled></button>
+    <button type="button" class="nb" data-act="forward" title="Forward" aria-label="Forward" disabled></button>
+    <button type="button" class="nb" data-act="reload" title="Reload" aria-label="Reload"></button>
+    <span class="who">
+      <span class="icon" aria-hidden="true"></span>
+      <span class="title" id="title"></span>
+      <span class="away" id="away" hidden>
+        <span class="away-host"></span>
+        <button type="button" class="home" data-act="home">Back to app</button>
+      </span>
+    </span>
+    <button type="button" class="nb" data-act="browser" title="Open in Lumio Browser" aria-label="Open in Lumio Browser"></button>
+    <button type="button" class="nb" data-act="menu" title="More" aria-label="More" aria-haspopup="menu"></button>
+    <span class="caps"></span>
+  </header>
+  <script type="module" src="app-window.js"></script>
+</body>
+</html>

@@ -13,6 +13,9 @@ import { siteIcon } from '/assets/site-icons.js';
 import { permissionBubble } from './overlay-site.js';
 import { securityChoosers } from './overlay-security.js';
 import { renderPerf, perfAction } from './overlay-perf.js';
+import { initTranslateBubble } from './overlay-translate.js';
+import { initShareBubble, initInstallDialog } from './overlay-share.js';
+import { initMediaHub } from './overlay-media.js';
 
 const api = window.lumio;
 const card = document.getElementById('card');
@@ -708,6 +711,7 @@ const FIXED = new Set(['suggest', 'downloads', 'screenshare', 'menu', 'bm-menu',
 // These draw in a layer of their own over the whole view (overlay-bookmarks.js,
 // overlay-groups.js); the card stays out of the way.
 const OWN_LAYER = new Set(['bm-menu', 'bm-edit', 'tab-group']);
+const PAGE_TOOLS = new Set(['translate', 'share', 'install', 'media']);
 // Where each comes in from (scaled toward its button, unless said here).
 const ENTER_FROM = { suggest: 'scale(.99, .96)', hovercard: 'translateY(-4px) scale(.98)' };
 let kind = null;
@@ -822,6 +826,17 @@ function fit() {
   else api.send('overlay:ready', { seq, height: naturalHeight() });
 }
 
+// Page tools: the translate bubble, Share, Install app and media controls
+// (they handle their own clicks and keys; overlay-translate.js,
+// overlay-share.js, overlay-media.js). Async changes (a QR code drawn, a
+// track changing) re-measure like any other new content.
+const toolFit = () => requestAnimationFrame(() => { if (PAGE_TOOLS.has(kind)) fit(); });
+const translateBubble = initTranslateBubble(card, api, () => kind === 'translate');
+const isOpen = (k) => kind === k;
+const pageTools = { share: initShareBubble(card, api, isOpen, toolFit), install: initInstallDialog(card, api, isOpen, toolFit), media: initMediaHub(card, api, isOpen, toolFit) };
+RENDER.translate = (p) => translateBubble.render(p);
+for (const k of Object.keys(pageTools)) RENDER[k] = (p) => pageTools[k].render(p);
+
 api.on('overlay-data', (p) => {
   if (p.op === 'in') { if (p.seq === seq && !entered) enter(); return; }
   if (p.op === 'out') { seq = p.seq; leave(!!p.now); return; }
@@ -880,6 +895,7 @@ card.addEventListener('mousedown', async (e) => {
   if (kind === 'tabsearch') return; // overlay-tabsearch.js has its own
   if (kind === 'permission' || choosers.owns(kind)) return; // overlay-site.js and overlay-security.js handle their own clicks
   if (kind === 'perf') return;
+  if (PAGE_TOOLS.has(kind)) return; // their buttons, boxes and lists work normally (overlay-translate.js, overlay-share.js, overlay-media.js)
   if (kind === 'screenshare') {
     if (!e.target.closest('#ss-audio, .ss-audio')) pickShare(e);
     return;

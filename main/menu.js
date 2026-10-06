@@ -8,6 +8,31 @@ const MAC = process.platform === 'darwin';
 
 const short = (label) => (label.length > 60 ? label.slice(0, 60) + '…' : label);
 
+// Save and share (main/share.js, main/screenshot.js, main/apps.js). The menu
+// bar says it in Title Case and the ⋮ menu (buildBrowserMenu's model, with
+// icons) in sentence case, like Chrome.
+function saveAndShare(cmd, menuBar) {
+  const item = (title, sentence, icon, run, accel) => (menuBar
+    ? { label: title, ...(accel ? { accelerator: accel } : {}), click: run }
+    : { label: sentence, icon, ...(accel ? { accel } : {}), run });
+  const sep = { type: 'separator' };
+  // (Without page tools, none of these: the ⋮ menu leaves out what doesn't exist.)
+  const share = (what) => cmd.share && (() => cmd.share(what));
+  return [
+    item('Share…', 'Share…', 'share', share('open')),
+    item('Copy Link', 'Copy link', 'copy', share('copy')),
+    item('Send to Your Devices…', 'Send to your devices…', 'send', share('send')),
+    item('Create QR Code…', 'Create QR code…', 'qr', share('qr')),
+    item('Take Screenshot…', 'Screenshot…', 'camera', share('screenshot')),
+    ...(MAC ? [item('More Share Options…', 'More share options…', 'external', share('native'))] : []),
+    sep,
+    item('Save Page As…', 'Save page as…', 'page', cmd.savePage),
+    item('Install Page as App…', 'Install page as app…', 'app', share('install')),
+    item('Create Shortcut…', 'Create shortcut…', 'app', share('shortcut')),
+    item('Installed Apps', 'Installed apps', 'app', cmd.apps),
+  ];
+}
+
 function buildMenu(cmd, state = {}) {
   const hidden = (accelerator, click) => ({ label: accelerator, accelerator, click, visible: false, acceleratorWorksWhenHidden: true });
   const tabKeys = Array.from({ length: 9 }, (_, i) => hidden(`CmdOrCtrl+${i + 1}`, () => cmd.tabIndex(i + 1)));
@@ -49,6 +74,7 @@ function buildMenu(cmd, state = {}) {
         { label: 'Close Window', accelerator: 'CmdOrCtrl+Shift+W', click: cmd.closeWindow },
         { type: 'separator' },
         { label: 'Save Page As…', accelerator: 'CmdOrCtrl+S', click: cmd.savePage },
+        { label: 'Save and Share', submenu: saveAndShare(cmd, true) },
         { label: 'Print…', accelerator: 'CmdOrCtrl+P', click: cmd.print },
         { label: 'Print Using System Dialog…', accelerator: MAC ? 'Cmd+Alt+P' : 'Ctrl+Shift+P', click: cmd.printSystemDialog },
         ...(MAC ? [] : [{ type: 'separator' }, { label: 'Settings', accelerator: 'Ctrl+,', click: cmd.settings }, { label: 'Delete Browsing Data…', accelerator: 'Ctrl+Shift+Delete', click: cmd.clearBrowsingData }, { role: 'quit', label: 'Exit' }]),
@@ -95,6 +121,8 @@ function buildMenu(cmd, state = {}) {
         { label: 'Show/Hide Sidebar', accelerator: 'CmdOrCtrl+Shift+S', click: cmd.toggleSidebar },
         { label: 'Show/Hide Lumio AI', accelerator: 'CmdOrCtrl+Shift+L', click: cmd.togglePanel },
         { label: 'Ask Lumio', accelerator: MAC ? 'Cmd+J' : 'Ctrl+Shift+K', click: cmd.focusAI },
+        { label: 'Reading Mode', click: cmd.readingMode },
+        { label: 'Translate Page…', click: cmd.translatePage },
         { type: 'separator' },
         { label: 'View Page Source', accelerator: MAC ? 'Cmd+Alt+U' : 'Ctrl+U', click: cmd.viewSource },
         { label: 'Developer Tools', accelerator: MAC ? 'Cmd+Alt+I' : 'Ctrl+Shift+I', click: cmd.devtools },
@@ -239,12 +267,15 @@ function buildBrowserMenu(cmd, state = {}) {
     SEP,
     { label: 'Print…', icon: 'print', accel: 'CmdOrCtrl+P', run: cmd.print },
     { label: 'Find…', icon: 'search', accel: 'CmdOrCtrl+F', run: cmd.find },
+    { label: 'Translate…', icon: 'translate', run: cmd.translatePage },
     { label: 'Save page as…', icon: 'page', accel: 'CmdOrCtrl+S', run: cmd.savePage },
+    ...(cmd.share ? [{ label: 'Save and share', icon: 'share', submenu: saveAndShare(cmd, false) }] : []),
     {
       label: 'More tools',
       icon: 'tools',
       submenu: [
         { label: 'Delete browsing data…', icon: 'trash', accel: k('Cmd+Shift+Backspace', 'Ctrl+Shift+Delete'), run: cmd.clearBrowsingData },
+        { label: 'Reading mode', icon: 'reader', run: cmd.readingMode },
         { label: 'Task manager', icon: 'gauge', accel: MAC ? '' : 'Shift+Escape', run: cmd.taskManager },
         SEP,
         { label: 'Developer tools', icon: 'terminal', accel: k('Cmd+Alt+I', 'Ctrl+Shift+I'), run: cmd.devtools },

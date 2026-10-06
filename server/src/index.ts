@@ -16,7 +16,7 @@
 //   GET  /api/connections, GET /api/connect/:app/start, GET /api/connect/:provider/callback,
 //   POST /api/connections/:app/disconnect                          (connected apps)
 //   GET  /v1/agent, POST /v1/agent, GET /v1/usage, POST /v1/images, POST /v1/tools/run,
-//   POST /v1/extract, POST /v1/voice/transcribe, POST /v1/voice/speak (Lumio Browser)
+//   POST /v1/extract, POST /v1/voice/transcribe, POST /v1/voice/speak, POST /v1/translate (Lumio Browser)
 //   GET  /api/admin/spend   AI spend vs OpenRouter (the owner only; the /admin page)
 //   GET|POST /api/admin/codes  one-time plan codes (the owner only); POST /api/billing/redeem uses one
 //
@@ -34,6 +34,7 @@ import { chatModels, deleteChat, getChat, listChats, send } from './chat.ts';
 import { download, extract, upload } from './files.ts';
 import { imageForBrowser } from './images.ts';
 import { speak, transcribe } from './voice.ts';
+import { translate } from './translate.ts';
 import {
   companionList, companionPost, companionStatusGet, companionStatusPut, pairAnswer, pairCheck, pairPending, pairRequest,
   pushSubscribe, syncChanges, syncCleanup, syncDeleteAll, syncDevice, syncInit, syncPush, syncRemoveDevice, syncStatus, vapidKey,
@@ -112,6 +113,7 @@ function routeFor(path: string, method: string): Route | null {
   if (path === '/v1/images' && method === 'POST') return (r, env, c, user) => imageForBrowser(r, env, user, c);
   if (path === '/v1/voice/transcribe' && method === 'POST') return (r, env, c, user) => transcribe(r, env, user, c);
   if (path === '/v1/voice/speak' && method === 'POST') return (r, env, c, user) => speak(r, env, user, c);
+  if (path === '/v1/translate' && method === 'POST') return (r, env, c, user) => translate(r, env, user, c);
   if (path === '/api/files' && method === 'POST') return (r, env, _c, user) => upload(r, env, user);
   if (path === '/v1/tools/run' && method === 'POST') return (r, env, _c, user) => runTool(r, env, user);
   if (path === '/v1/extract' && method === 'POST') return (r) => extract(r);

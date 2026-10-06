@@ -1,0 +1,141 @@
+/* Reading mode (renderer/ui/reading-mode.js): its column right of the page,
+   and the reading view inside it. The Light and Dark themes set color-scheme
+   on the view, so the tokens' light-dark() colors follow the view rather than
+   the window; Sepia has tokens of its own (renderer/assets/theme.css). */
+
+/* The column: slides open from the page's edge, like the AI panel. */
+#reader {
+  --reader-w: clamp(320px, 30vw, 460px);
+  width: var(--reader-w); flex: none; min-width: 0; margin-left: 8px;
+  display: flex; overflow: hidden;
+  border: 1px solid var(--line); border-radius: 12px;
+  transition: width var(--slide), margin var(--slide), border-width var(--slide), opacity .22s ease, visibility 0s;
+}
+#reader.closed {
+  width: 0; margin-left: 0; border-width: 0; opacity: 0; visibility: hidden;
+  transition: width var(--slide-out), margin var(--slide-out), border-width var(--slide-out), opacity .2s ease .08s, visibility 0s .3s;
+}
+body.chat-full #reader { display: none; }
+body:is(.resizing, .no-anim) #reader { transition: none; }
+@media (prefers-reduced-motion: reduce) { #reader, #reader.closed { transition: none; } }
+
+/* The address bar's Reading mode button. */
+#reader-btn { color: var(--label); }
+#reader-btn.on { color: var(--accent); }
+
+/* ---------------------------------------------------------------- the view */
+.rd {
+  --rd-bg: var(--card); --rd-text: var(--text); --rd-dim: var(--dim); --rd-line: var(--overlay-5);
+  --rd-link: var(--reader-link); --rd-mark: var(--highlight); --rd-fill: var(--overlay-3); --rd-fill-hover: var(--overlay-5);
+  --rd-font: var(--font);
+  --reading-serif: 'Iowan Old Style', Charter, 'Palatino Linotype', Palatino, Georgia, serif;
+  width: calc(var(--reader-w, 420px) - 2px); flex: none; height: 100%; min-height: 0;
+  display: flex; flex-direction: column;
+  background: var(--rd-bg); color: var(--rd-text);
+}
+.rd[data-theme="light"] { color-scheme: light; }
+.rd[data-theme="dark"] { color-scheme: dark; }
+.rd[data-theme="sepia"] { --rd-bg: var(--sepia-bg); --rd-text: var(--sepia-text); --rd-dim: var(--sepia-dim); --rd-line: var(--sepia-line); --rd-link: var(--sepia-link); --rd-mark: var(--sepia-mark); }
+.rd[data-font="serif"] { --rd-font: var(--reading-serif); }
+.rd :is(button, select):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+
+.rd-head { display: flex; align-items: center; gap: 4px; height: 46px; flex: none; padding: 0 8px 0 14px; border-bottom: 1px solid var(--rd-line); }
+.rd-ic { display: grid; place-items: center; color: var(--rd-dim); margin-right: 4px; }
+.rd-name { font-weight: 600; font-size: 13px; letter-spacing: -.15px; }
+.rd-btn { width: 30px; height: 30px; border-radius: 8px; display: inline-grid; place-items: center; flex: none; color: var(--rd-dim); transition: background var(--fast) var(--ease), color var(--fast) var(--ease); }
+.rd-btn:hover:not(:disabled), .rd-btn.on { background: var(--rd-fill); color: var(--rd-text); }
+.rd-btn:disabled { opacity: .35; }
+.rd-aa { font: 600 14px/1 var(--reading-serif); letter-spacing: -.02em; }
+
+/* Text and theme */
+.rd-settings { flex: none; display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 14px; border-bottom: 1px solid var(--rd-line); animation: rd-drop .18s var(--ease); }
+@keyframes rd-drop { from { opacity: 0; transform: translateY(-4px); } }
+.rd-row { display: flex; align-items: center; gap: 10px; }
+.rd-label { width: 56px; flex: none; color: var(--rd-dim); font-size: 12px; }
+.rd-seg { display: flex; flex: 1; gap: 2px; padding: 2px; border-radius: 10px; background: var(--rd-fill); }
+.rd-seg [role=radio] { flex: 1; min-width: 0; height: 28px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; color: var(--rd-dim); font-size: 12px; }
+.rd-seg [role=radio]:hover { color: var(--rd-text); }
+/* The chosen one is raised: the page color on light, a lighter step on dark. */
+.rd-seg [aria-checked="true"] { background: light-dark(var(--rd-bg), var(--overlay-6)); color: var(--rd-text); font-weight: 600; box-shadow: var(--shadow-xs); }
+.rd-seg .rd-serif { font-family: var(--reading-serif); font-size: 13px; }
+.sw { width: 13px; height: 13px; flex: none; display: inline-flex; overflow: hidden; border-radius: 50%; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--rd-text) 40%, transparent); } /* visible on either segment color */
+.sw-light, .sw-auto b:first-child { color-scheme: light; background: var(--card); }
+.sw-dark, .sw-auto b:last-child { color-scheme: dark; background: var(--card); }
+.sw-auto b { flex: 1; }
+.sw-sepia { background: var(--sepia-bg); }
+.rd-size { display: flex; align-items: center; gap: 4px; flex: 1; }
+.rd-size button { width: 44px; height: 30px; border-radius: 8px; background: var(--rd-fill); color: var(--rd-text); font: 600 15px/1 var(--reading-serif); }
+.rd-size button:first-child { font-size: 12.5px; }
+.rd-size button:hover:not(:disabled) { background: var(--rd-fill-hover); }
+.rd-size button:disabled { opacity: .4; }
+.rd-size sup { font-size: .65em; margin-left: 1px; }
+.rd-size-v { min-width: 34px; text-align: center; color: var(--rd-dim); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+
+/* The article */
+.rd-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; outline: none; }
+.rd-scroll.kb-focus:focus { box-shadow: inset 0 0 0 2px var(--focus-ring); }
+.rd-article {
+  max-width: 68ch; margin: 0 auto; padding: 22px 24px 72px;
+  font-family: var(--rd-font); font-size: var(--rd-size, 17px); line-height: var(--rd-lh, 1.65);
+  overflow-wrap: break-word; user-select: text; cursor: auto;
+}
+.rd-article:empty { display: none; }
+.rd-article ::selection { background: color-mix(in srgb, var(--rd-link) 30%, transparent); }
+.rd-top { padding-bottom: 14px; margin-bottom: 18px; border-bottom: 1px solid var(--rd-line); }
+.rd-site { margin: 0 0 6px; color: var(--rd-dim); font: 500 12px/1.4 var(--font); letter-spacing: .02em; }
+.rd-title { margin: 0 0 8px; font-size: 1.6em; line-height: 1.2; font-weight: 700; letter-spacing: -.015em; }
+.rd[data-font="serif"] .rd-title { font-weight: 600; letter-spacing: 0; }
+.rd-by { margin: 0; color: var(--rd-dim); font-size: .82em; }
+.rd-body :is(p, ul, ol, dl, blockquote, figure, pre, table, details) { margin: 0 0 1em; }
+.rd-body :is(h1, h2, h3, h4, h5, h6) { margin: 1.4em 0 .5em; line-height: 1.3; }
+.rd-body h1 { font-size: 1.35em; }
+.rd-body h2 { font-size: 1.25em; }
+.rd-body h3 { font-size: 1.12em; }
+.rd-body :is(h4, h5, h6) { font-size: 1em; }
+.rd-body :is(ul, ol) { padding-inline-start: 1.4em; }
+.rd-body li + li { margin-top: .3em; }
+.rd-body a { color: var(--rd-link); text-decoration: underline; text-decoration-thickness: from-font; text-underline-offset: 2px; cursor: pointer; }
+.rd-body img { display: block; max-width: 100%; height: auto; margin: 0 auto; border-radius: 8px; }
+.rd-body figure { margin-inline: 0; }
+.rd-body figcaption { margin-top: 6px; color: var(--rd-dim); font-size: .82em; text-align: center; }
+.rd-body blockquote { margin-inline: 0; padding-inline-start: 1em; border-inline-start: 3px solid var(--rd-line); color: var(--rd-dim); }
+.rd-body :is(code, kbd, samp) { font-family: var(--mono); font-size: .86em; padding: .05em .3em; border-radius: 4px; background: var(--rd-fill); }
+.rd-body pre { padding: 12px 14px; border-radius: 8px; background: var(--rd-fill); font: .82em/1.5 var(--mono); overflow-x: auto; }
+.rd-body pre code { padding: 0; background: none; font-size: inherit; }
+.rd-body table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; font-size: .9em; }
+.rd-body :is(td, th) { padding: 6px 8px; border: 1px solid var(--rd-line); text-align: start; vertical-align: top; }
+.rd-body hr { margin: 1.6em 0; border: 0; border-top: 1px solid var(--rd-line); }
+/* The sentence being read aloud; while reading, a click on a sentence reads from there. */
+.rs { border-radius: 3px; transition: background .2s ease, box-shadow .2s ease; }
+.rs.on { background: var(--rd-mark); box-shadow: 0 0 0 2px var(--rd-mark); }
+.rd.reading .rs { cursor: pointer; }
+
+/* Loading, and pages without an article */
+.rd-skel { display: flex; flex-direction: column; gap: 12px; padding: 26px 24px; }
+.rd-skel i { height: 12px; border-radius: 6px; background: var(--rd-fill); animation: rd-shimmer 1.2s ease-in-out infinite; }
+.rd-skel i:first-child { height: 24px; width: 72%; margin-bottom: 8px; }
+.rd-skel i:nth-child(3) { width: 92%; }
+.rd-skel i:last-child { width: 58%; }
+@keyframes rd-shimmer { 50% { opacity: .45; } }
+.rd-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 56px 28px; color: var(--rd-dim); font-size: 13px; text-align: center; }
+.rd-empty svg { width: 28px; height: 28px; margin-bottom: 6px; }
+.rd-empty p { margin: 0; max-width: 300px; }
+.rd-empty .rd-empty-t { color: var(--rd-text); font-weight: 600; font-size: 14px; }
+.rd-again { margin-top: 10px; height: 30px; padding: 0 14px; border-radius: 999px; background: var(--rd-fill); color: var(--rd-text); font-size: 12.5px; font-weight: 550; }
+.rd-again:hover { background: var(--rd-fill-hover); }
+
+/* Read aloud */
+.rd-player { flex: none; display: flex; align-items: center; gap: 4px; padding: 8px 10px; border-top: 1px solid var(--rd-line); }
+.rd-play { height: 32px; margin: 0 2px; padding: 0 14px 0 10px; border-radius: 999px; display: inline-flex; align-items: center; gap: 7px; background: var(--primary-bg); color: var(--primary-fg); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.rd-play:hover:not(:disabled) { background: var(--primary-hover); }
+.rd-play:disabled { opacity: .4; }
+.rd-pi { display: grid; place-items: center; }
+.rd-play.busy .rd-pi svg { animation: rd-spin .8s linear infinite; }
+@keyframes rd-spin { to { transform: rotate(360deg); } }
+.rd-status { flex: 1; min-width: 0; padding: 0 4px; color: var(--rd-dim); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rd-speed { flex: none; height: 28px; padding: 0 4px; border: 0; border-radius: 8px; background: var(--rd-fill); color: var(--rd-text); font: inherit; font-size: 12px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rd-settings, .rd-skel i, .rd-play.busy .rd-pi svg { animation: none; }
+  .rs, .rd-btn { transition: none; }
+}

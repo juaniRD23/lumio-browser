@@ -42,7 +42,7 @@ function render(d) {
   const m = d.lumio.month;
   $('#month').hidden = false;
   $('#month-split').innerHTML = [
-    ['Browser', money(m.byKind.browser)], ['Chat', money(m.byKind.chat)], ['Pictures', money(m.byKind.image)], ['Voice', money(m.byKind.voice || 0)],
+    ['Browser', money(m.byKind.browser)], ['Chat', money(m.byKind.chat)], ['Pictures', money(m.byKind.image)], ['Voice', money(m.byKind.voice || 0)], ['Translation', money(m.byKind.translate || 0)],
     ['Free users', money(m.free)], ['Paying users', money(m.paid)], ['AI calls', m.calls.toLocaleString()],
   ].map(([k, v]) => `<div><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('');
   $('#checked').textContent = `${m.checked.toLocaleString()} of ${m.calls.toLocaleString()} calls this month matched to OpenRouter’s records${d.waitingForCheck ? `, ${d.waitingForCheck} waiting for OpenRouter to record them` : ''}. Each call is checked seconds after it ends.`;

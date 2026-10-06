@@ -87,6 +87,82 @@ if (/^https?:$/.test(window.location.protocol) && window === window.top) {
       }],
     });
   } catch { /* the page keeps its own navigator.credentials */ }
+  // Share buttons (navigator.share) and media controls (main/share.js, main/media.js).
+  let mediaRun = null;
+  try {
+    contextBridge.executeInMainWorld({
+      func: installPageApis,
+      args: [{
+        share: (data) => ipcRenderer.invoke('share:web', data),
+        mediaActions: (list) => ipcRenderer.send('media:actions', list),
+        mediaConnect: (run) => { mediaRun = run; },
+      }],
+    });
+  } catch { /* the page keeps Electron's own */ }
+  ipcRenderer.on('media:session', (_e, msg) => { try { mediaRun?.(String(msg?.action || ''), msg?.details || {}); } catch { /* the page's handler failed */ } });
+}
+
+// Runs in the page's own world (before its scripts), so it must be
+// self-contained; only `bridge` reaches back to Lumio.
+// - navigator.share() and canShare() open Lumio's share popover. Files can't
+//   be shared, so canShare({ files }) is false and sites share a link instead.
+// - navigator.mediaSession.setActionHandler() still works as before, and the
+//   handlers are also kept here so the toolbar's media controls can run them
+//   (previous / next track, the site's own play and pause).
+function installPageApis(bridge) {
+  const native = (name, fn) => {
+    const f = { [name](...args) { return fn.apply(this, args); } }[name];
+    Object.defineProperty(f, 'toString', { value: () => `function ${name}() { [native code] }` });
+    return f;
+  };
+  if (window.isSecureContext && window.Navigator) {
+    let busy = false;
+    const check = (data) => {
+      if (data == null || typeof data !== 'object') throw new TypeError('Failed to execute \'share\' on \'Navigator\': No known share data fields supplied.');
+      if (data.files && data.files.length) throw new DOMException('Lumio can’t share files from websites.', 'NotAllowedError');
+      const out = {};
+      if (data.title !== undefined) out.title = String(data.title);
+      if (data.text !== undefined) out.text = String(data.text);
+      if (data.url !== undefined) {
+        let u;
+        try { u = new URL(String(data.url), document.baseURI); } catch { throw new TypeError('Invalid URL'); }
+        if (!/^https?:$/.test(u.protocol)) throw new TypeError('Invalid URL');
+        out.url = u.href;
+      }
+      if (!out.title && !out.text && !out.url) throw new TypeError('Failed to execute \'share\' on \'Navigator\': No known share data fields supplied.');
+      return out;
+    };
+    const share = native('share', async (data) => {
+      if (busy) throw new DOMException('An earlier share has not yet completed.', 'InvalidStateError');
+      if (navigator.userActivation && !navigator.userActivation.isActive) throw new DOMException('Must be handling a user gesture to perform a share request.', 'NotAllowedError');
+      const clean = check(data);
+      busy = true;
+      try {
+        const res = await bridge.share(clean);
+        if (!res || res.error) throw new DOMException(res?.message || 'Share canceled', res?.error || 'AbortError');
+      } finally {
+        busy = false;
+      }
+    });
+    const canShare = native('canShare', (data) => { try { check(data); return true; } catch { return false; } });
+    Object.defineProperty(window.Navigator.prototype, 'share', { value: share, writable: true, configurable: true, enumerable: true });
+    Object.defineProperty(window.Navigator.prototype, 'canShare', { value: canShare, writable: true, configurable: true, enumerable: true });
+  }
+  const MS = window.MediaSession;
+  if (MS && MS.prototype.setActionHandler) {
+    const handlers = new Map();
+    const set = MS.prototype.setActionHandler;
+    MS.prototype.setActionHandler = native('setActionHandler', function setActionHandler(action, handler) {
+      const result = set.call(this, action, handler); // throws for an unknown action, as before
+      if (typeof handler === 'function') handlers.set(String(action), handler); else handlers.delete(String(action));
+      bridge.mediaActions([...handlers.keys()]);
+      return result;
+    });
+    bridge.mediaConnect((action, details) => {
+      const h = handlers.get(action);
+      if (h) h.call(navigator.mediaSession, { ...details, action });
+    });
+  }
 }
 
 // Back and forward from the mouse's buttons and (on a Mac) two-finger swipes,

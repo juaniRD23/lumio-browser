@@ -16,6 +16,10 @@ A Chromium web browser with **Lumio AI** built in. Lumio sits in a side panel ne
   - history search with time-range clearing;
   - a bookmarks bar and bookmark manager;
   - site permissions, and importing from Chrome, Edge, Brave, Arc or Vivaldi;
+  - **translate pages** in place with Lumio AI, and a **reading mode** that reads articles aloud;
+  - **Share**: copy a link, a QR code made on your computer, send a tab to your other computers, screenshots you can mark up, and the Mac's share sheet;
+  - **media controls** in the toolbar for every tab that plays, with Picture in picture;
+  - **install sites as apps** in their own window, with a launcher in Applications on the Mac;
   - **Chrome extensions** from the Chrome Web Store;
   - a **password manager** that saves, fills, generates, and imports or exports CSV, encrypted with your system keychain;
   - **updates in one click**: when a new release is out, a blue Update button appears next to your profile picture.

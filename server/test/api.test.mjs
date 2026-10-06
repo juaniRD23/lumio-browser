@@ -841,7 +841,7 @@ test('spend page: only the owner sees OpenRouter’s charges next to what Lumio 
   orKey = { usage: 12.5, usage_daily: 0.000321, usage_weekly: 0.5, usage_monthly: 2.25, limit: 50, limit_remaining: 37.5 };
   const d = await (await call('/api/admin/spend', { token })).json();
   assert.deepEqual(d.openrouter, { today: 0.000321, week: 0.5, month: 2.25, total: 12.5, limit: 50, limitRemaining: 37.5 });
-  assert.deepEqual(d.lumio.today, { total: 0.000321, free: 0.000321, paid: 0, byKind: { browser: 0.000321, chat: 0, image: 0, voice: 0 }, calls: 1, checked: 1 });
+  assert.deepEqual(d.lumio.today, { total: 0.000321, free: 0.000321, paid: 0, byKind: { browser: 0.000321, chat: 0, image: 0, voice: 0, translate: 0 }, calls: 1, checked: 1 });
   assert.deepEqual(d.people, { free: 1 });
   assert.equal(d.monthlyRevenue, 0);
   assert.deepEqual(d.freeCap, { usedToday: 0.000321, cap: 10 });

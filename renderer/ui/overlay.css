@@ -1,6 +1,9 @@
 @import url('/assets/fonts/fonts.css');
 @import url('/assets/theme.css'); /* colors and type */
 @import url('overlay-perf.css'); /* profiles in the account menu, Performance issues */
+@import url('overlay-translate.css'); /* the translate bubble */
+@import url('overlay-share.css'); /* Share and Install app */
+@import url('overlay-media.css'); /* media controls */
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
 body {

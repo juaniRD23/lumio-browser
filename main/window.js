@@ -140,6 +140,7 @@ class BrowserWin {
         print: (tab) => app.print(this, tab),
         contextMenuExtras: (tab, params) => app.contextMenuExtras(this, tab, params),
         readingList: (url, title) => app.addToReadingList(this, url, title),
+        pageMenu: (section, tab, params) => app.pageMenu?.(this, section, tab, params),
       },
     });
     this.indicator = new PageIndicator(this);

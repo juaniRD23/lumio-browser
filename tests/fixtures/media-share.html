@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8" /><title>Fixture Radio</title>
+<link rel="manifest" href="/app.webmanifest" />
+<link rel="icon" href="/app-icon.png" sizes="192x192" />
+<style>body{font:16px/1.6 system-ui,sans-serif;max-width:680px;margin:40px auto;padding:0 20px} .tall{height:3200px}</style></head>
+<body>
+<h1>Fixture Radio</h1>
+<p id="quote">The quiet harbor wakes before the gulls do.</p>
+<p><a id="more" href="/media-share.html?more">Read more stories</a></p>
+<button id="share" type="button">Share</button>
+<!-- A video drawn from a canvas: it has a picture (for Picture in picture) without a media file. -->
+<video id="v" width="320" height="180" muted playsinline></video>
+<div class="tall"></div>
+<script>
+  window.__log = [];
+  const canvas = Object.assign(document.createElement('canvas'), { width: 320, height: 180 });
+  const ctx = canvas.getContext('2d');
+  let frame = 0;
+  setInterval(() => { ctx.fillStyle = frame++ % 2 ? '#2563eb' : '#0f766e'; ctx.fillRect(0, 0, 320, 180); }, 100);
+  const video = document.getElementById('v');
+  video.srcObject = canvas.captureStream(10);
+  window.start = () => video.play();
+  navigator.mediaSession.metadata = new MediaMetadata({ title: 'Fixture Song', artist: 'The Testers', album: 'Tests' });
+  navigator.mediaSession.setActionHandler('nexttrack', () => window.__log.push('next'));
+  navigator.mediaSession.setActionHandler('previoustrack', () => window.__log.push('prev'));
+  document.getElementById('share').addEventListener('click', () => {
+    navigator.share({ title: 'Fixture story', url: '/shared' }).then(() => window.__log.push('shared'), (e) => window.__log.push(e.name));
+  });
+</script>
+</body></html>

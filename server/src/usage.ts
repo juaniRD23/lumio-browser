@@ -76,7 +76,7 @@ function outOfAllowance(plan: Plan) {
 // Holds `held` microUSD of the allowance while a call runs. Atomic across
 // concurrent requests; Free accounts also share a daily cap.
 export async function hold(env: Env, { key, owner, plan, requestHash, kind, held, now = Date.now() }:
-  { key: string; owner: string; plan: Plan; requestHash: string; kind: 'browser' | 'chat' | 'image' | 'voice'; held: number; now?: number }) {
+  { key: string; owner: string; plan: Plan; requestHash: string; kind: 'browser' | 'chat' | 'image' | 'voice' | 'translate'; held: number; now?: number }) {
   if (plan === 'free') {
     const cap = Math.floor(Number(env.FREE_DAILY_CAP_USD || '10') * 1_000_000);
     const today = await env.DB.prepare(`SELECT ${SPENT} AS used FROM steps WHERE plan = 'free' AND created_at >= ?1`).bind(now - 24 * HOUR).first<{ used: number }>();
@@ -92,7 +92,7 @@ export async function hold(env: Env, { key, owner, plan, requestHash, kind, held
 // Reserves room for one model call (input + output) at the model's price
 // ceiling and returns how many output tokens it may use.
 export async function reserve(env: Env, { key, owner, plan, requestHash, kind, inputTokens, model, maxOutput = 8192, minOutput = 1024, now = Date.now() }:
-  { key: string; owner: string; plan: Plan; requestHash: string; kind: 'browser' | 'chat'; inputTokens: number; model: Model; maxOutput?: number; minOutput?: number; now?: number }) {
+  { key: string; owner: string; plan: Plan; requestHash: string; kind: 'browser' | 'chat' | 'translate'; inputTokens: number; model: Model; maxOutput?: number; minOutput?: number; now?: number }) {
   const left = (await allowance(env, owner, plan, now)).remaining;
   const rate = ceiling(model); // USD per million tokens = microUSD per token
   const inputHold = Math.ceil(inputTokens * rate.prompt);

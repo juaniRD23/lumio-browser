@@ -123,6 +123,8 @@ export function initExtras({ api, getAi, onChange, notice }) {
     renderTray();
   }
   input.addEventListener('change', () => { add([...input.files]); input.value = ''; $('#prompt').focus(); });
+  // A picture from the page or a screenshot (right-click › Ask Lumio About This Image, Screenshot › Ask Lumio).
+  api.on('ai-attach', ({ name, type, data } = {}) => { if (data && /^image\//.test(type || '')) add([new File([data], String(name || 'image.png'), { type })]); });
   $('#prompt').addEventListener('paste', (e) => { const files = [...(e.clipboardData?.files || [])]; if (files.length) { e.preventDefault(); add(files); } });
   const panel = $('#panel');
   panel.addEventListener('dragover', (e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); panel.classList.add('dropping'); } });
