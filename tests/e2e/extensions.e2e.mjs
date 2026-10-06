@@ -60,7 +60,7 @@ const extDiag = async (what) => {
     const items = Menu.getApplicationMenu()?.items.flatMap((top) => top.submenu?.items || []).filter((it) => String(it.id || '').startsWith(`ext-cmd:${id}:`)).map((it) => ({ id: it.id, accelerator: it.accelerator || null, enabled: it.enabled }));
     // Without the sandbox (Playwright's default on Linux) no service-worker
     // preload runs, so chrome.commands and Lumio's chrome.alarms are missing.
-    return { noSandbox: app.commandLine.hasSwitch('no-sandbox'), loaded: !!ext, path: ext?.path, permissions: ext?.manifest?.permissions, runningWorkers: workers, routerListeners: listeners, lumioAlarms: m.alarms?.all(id), menuItems: items, tabs: global.lumio.tabs.tabs.map((t) => t.pendingUrl || t.url) };
+    return { noSandbox: app.commandLine.hasSwitch('no-sandbox'), loaded: !!ext, path: ext?.path, permissions: ext?.manifest?.permissions, runningWorkers: workers, routerListeners: listeners, lumioAlarms: m.alarms?.all(id), menuItems: items, tabs: global.lumio.tabs.tabs.map((t) => t.pendingUrl || t.url), everyWindow: global.lumio.windows.map((w) => ({ incognito: !!w.incognito, current: w === global.lumio.current, tabs: w.tabs.tabs.map((t) => t.pendingUrl || t.url) })) };
   }, ID).catch((e) => `unavailable: ${e.message}`);
   console.error(`[diag] ${what}:`, JSON.stringify(state, null, 1));
   const log = L.logs.join('').split('\n').filter((l) => /\[extension worker\]|\[lumio\]|Extension Error|Failed to start service worker|failed to send|^\s+(Message|Context):/.test(l));

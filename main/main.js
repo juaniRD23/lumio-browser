@@ -2017,8 +2017,11 @@ function openProfile(id) {
     store,
     hooks: {
       // Extensions can open tabs and windows, but never Lumio's own pages.
-      createTab: (details) => {
-        const w = alive().find((x) => x.win.id === details.windowId && !x.incognito && x.profile === profile) || normalWin(profile) || createWindow({ profile });
+      createTab: async (details) => {
+        const find = () => alive().find((x) => x.win.id === details.windowId && !x.incognito && x.profile === profile) || normalWin(profile);
+        // Still starting (no window yet): the tab goes in the window it opens.
+        if (!find() && profile.opening) await Promise.race([profile.opening, new Promise((r) => setTimeout(r, 20_000))]);
+        const w = find() || createWindow({ profile });
         const tab = w.tabs.create(extensionUrl(details.url), { active: details.active !== false, index: details.index });
         return [tab.view.webContents, w.win];
       },
@@ -2063,7 +2066,15 @@ function openProfile(id) {
 let sessionsBegun = false;
 // deferred: the browser opened after an installed app (startWaitingProfiles),
 // so a window already open in it is enough when there's nothing to restore.
-async function startProfile(p, { restore = false, deferred = false } = {}) {
+// While it runs, p.opening is pending: an extension that opens a tab before
+// the profile's first window exists (its worker starts with the extensions,
+// before the windows) waits for that window instead of making one of its own.
+async function startProfile(p, opts) {
+  let opened;
+  p.opening = new Promise((r) => { opened = r; });
+  try { return await openProfileWindows(p, opts); } finally { p.opening = null; opened(); }
+}
+async function openProfileWindows(p, { restore = false, deferred = false } = {}) {
   await p.ready;
   drm.mark(`profile ${p.id}: extensions ready`); // (the start-up timeline e2e tests print)
   await drm.whenReady(); // DRM builds: Widevine before the first window, 15 s at most (once per run)
