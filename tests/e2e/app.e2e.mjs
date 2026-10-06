@@ -479,8 +479,8 @@ test('while Lumio controls the computer the screen glows, and the Stop pill stop
   const auras = () => L.main(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter((w) => w.webContents.getURL().startsWith('lumio://aura/')).map((w) => ({ url: w.webContents.getURL(), focusable: w.isFocusable(), top: w.isAlwaysOnTop(), visible: w.isVisible(), protected: w.isContentProtected?.() ?? null })));
   assert.ok(await until(async () => (await auras()).filter((a) => a.visible).length >= 2), 'glow and pill shown');
   const list = await auras();
-  const displays = await L.main(({ screen }) => screen.getAllDisplays().length);
-  assert.equal(list.filter((a) => a.url.includes('mode=glow')).length, displays, 'one glow per display');
+  // Only the screen the tool used glows (main/ai/screen-aura.js), not every screen.
+  assert.equal(list.filter((a) => a.url.includes('mode=glow')).length, 1, 'one glow, on the screen it used');
   assert.equal(list.filter((a) => a.url.includes('mode=pill')).length, 1);
   assert.ok(list.every((a) => a.focusable === false && a.top), 'never takes focus, always on top');
   assert.ok(list.every((a) => a.protected !== false), 'left out of screen captures');

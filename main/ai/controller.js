@@ -577,7 +577,8 @@ class AIController {
       buildDocument: (spec) => this.buildDocument(spec),
       onPage: (wc) => this.indicator?.touch(wc),
       onCapture: (wc, hidden) => this.indicator?.capture(wc, hidden),
-      onToolRun: (tool) => { if (CONTROLS_COMPUTER.has(tool.name)) screenAura.acquire(this); },
+      // The glow goes only on the screens the tool looks at or acts on.
+      onToolRun: (tool, args) => { if (CONTROLS_COMPUTER.has(tool.name)) screenAura.acquire(this, screenAura.displaysFor(tool.name, args, ctx.lastMacShot)); },
       runHelpers: (list, opts) => this.runHelpers(list, { ...opts, run, chat, record, runId }),
     };
     const runId = crypto.randomUUID();
