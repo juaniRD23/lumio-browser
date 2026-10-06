@@ -1154,7 +1154,10 @@ const pageOverlay = {
   close: hideOverlay,
   picked: () => { overlayKind = null; },
 };
-const translate = initTranslate({ api, activeTab, isTyping: () => omniFocused, getAccent: () => accent(), overlay: pageOverlay });
+// Typing: the person typed in the address bar since focusing it. Focused but
+// untouched (the new tab page puts the caret there) isn't typing: the page
+// was opened from elsewhere and its bubble may offer itself.
+const translate = initTranslate({ api, activeTab, isTyping: () => omniFocused && omniEdited, getAccent: () => accent(), overlay: pageOverlay });
 const readingMode = initReadingMode({ api, activeTab, onLayout: reportSlot });
 const share = initShare({ api, activeTab, overlay: pageOverlay, getAccent: () => accent() });
 const media = initMedia({ api, activeTab, overlay: pageOverlay, getAccent: () => accent() });

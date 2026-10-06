@@ -62,7 +62,8 @@ export function initTranslate({ api, activeTab, overlay, isTyping = () => false,
   // Found a page in another language (or the menu's Translate Page…).
   api.on('translate-prompt', ({ tabId, force } = {}) => {
     if (activeTab()?.id !== tabId) return;
-    if (!force && (overlay.kind || isTyping())) return;
+    // A tab's hover card gives way (it's only there while the pointer rests on a tab).
+    if (!force && ((overlay.kind && overlay.kind !== 'hovercard') || isTyping())) return;
     open({ focus: !!force });
   });
   api.on('overlay-picked', (msg) => {

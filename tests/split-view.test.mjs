@@ -11,6 +11,7 @@ const require = createRequire(import.meta.url);
 
 // ---------------------------------------------------------------- stand-ins for Electron
 let nextWc = 1;
+let focusedWc = null; // the page with the keyboard
 class FakeWebContents extends EventEmitter {
   constructor() {
     super();
@@ -29,7 +30,10 @@ class FakeWebContents extends EventEmitter {
   getZoomLevel() { return Math.log(this.zoom) / Math.log(1.2); }
   isDestroyed() { return false; }
   close() {}
-  focus() { this.emit('focus'); } // what a click into the page does
+  // What a click into the page does. Like Chromium, a page that already has
+  // the keyboard gets no 'focus' event.
+  focus() { if (focusedWc === this) return; focusedWc = this; this.emit('focus'); }
+  isFocused() { return focusedWc === this; }
 }
 class FakeView {
   constructor() { this.webContents = new FakeWebContents(); this.visible = true; this.bounds = null; }
@@ -117,6 +121,24 @@ test('clicking into the other side’s page makes it the focused side, without r
   m.ensureView(other);
   other.view.webContents.focus();
   assert.equal(m.activeId, b);
+});
+
+test('the keyboard goes with the focused side, so a click back into the other page still switches', () => {
+  const { m, ids: [a, b] } = manager(2);
+  // The newest page had the keyboard (it opened last); then the pair is made
+  // on the first one.
+  m.get(b).view.webContents.focus();
+  m.split.create(a, b);
+  m.activate(a);
+  assert.equal(m.activeId, a);
+  assert.ok(m.get(a).view.webContents.isFocused(), 'the focused side has the keyboard');
+  m.get(b).view.webContents.focus();
+  assert.equal(m.activeId, b, 'clicking into the right page makes it the focused side');
+  // A tab that isn't one of the pair keeps whatever had the keyboard.
+  m.create('https://other.example/', { active: false });
+  const other = m.tabs.at(-1);
+  m.activate(other.id);
+  assert.ok(m.get(b).view.webContents.isFocused());
 });
 
 test('pinned tabs and the same tab twice don’t pair; joining a new pair ends the old one', () => {
