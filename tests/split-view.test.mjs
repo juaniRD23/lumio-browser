@@ -28,6 +28,10 @@ class FakeWebContents extends EventEmitter {
   setZoomFactor(f) { this.zoom = f; }
   getZoomLevel() { return Math.log(this.zoom) / Math.log(1.2); }
   isDestroyed() { return false; }
+  isLoading() { return false; }
+  isCurrentlyAudible() { return false; }
+  isBeingCaptured() { return true; } // as under a test driver (DevTools' focus emulation)
+  isDevToolsOpened() { return false; }
   close() {}
   focus() { this.emit('focus'); } // what a click into the page does
 }
@@ -259,6 +263,20 @@ test('Memory Saver never puts the other side on screen to sleep', () => {
   m.activate(a);
   m.get(b).view.webContents.url = 'https://site2.example/';
   assert.equal(m.discard(b), false);
+});
+
+test('Memory Saver: a tab using the camera or shared to another page stays awake; isBeingCaptured() alone doesn’t', () => {
+  const { m, ids: [a, b, c] } = manager(3);
+  m.activate(a);
+  const capture = new Map([[b, { camera: true }]]);
+  m.hooks.captureOf = (tab) => capture.get(tab.id) || null;
+  for (const id of [b, c]) m.get(id).view.webContents.url = `https://site${id}.example/`;
+  assert.equal(m.discard(b), false, 'its camera is on');
+  assert.equal(m.discard(c), true, 'nothing captured (whatever isBeingCaptured() says)');
+  capture.set(b, { sharedTo: 'meet.example' });
+  assert.equal(m.discard(b), false, 'shown to another page');
+  capture.delete(b);
+  assert.equal(m.discard(b), true);
 });
 
 test('the zoom badge shows the focused side’s zoom only', () => {

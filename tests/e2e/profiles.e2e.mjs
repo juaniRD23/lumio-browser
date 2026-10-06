@@ -173,12 +173,22 @@ test('Task Manager lists the browser, the GPU and each tab, and ends a tab’s p
   await L.main(() => global.lumio.taskManager.win.close());
 });
 
-test('Memory Saver keeps the sites on its list awake; Energy Saver quiets the window', async () => {
+test('Memory Saver keeps the sites on its list awake; Energy Saver quiets the window', async (t) => {
   const perf = (fn, arg) => L.main(fn, arg);
+  let ids = [];
+  // Even if a check fails: the settings back, and the tabs closed, for the next tests.
+  t.after(() => perf((_e, made) => {
+    const p = global.lumio.perf;
+    p.set('sites', []);
+    p.set('mode', 'balanced');
+    p.setBattery({ level: 1, charging: true });
+    for (const id of made) if (global.lumio.tabs.get(id)) global.lumio.tabs.close(id);
+    return true;
+  }, ids));
   await perf(() => global.lumio.perf.set('mode', 'maximum'));
   await perf((_e, host) => global.lumio.perf.set('sites', [host]), '127.0.0.1');
-  // Two background tabs: one on the kept site, one elsewhere (a lumio:// page never sleeps, so use file:).
-  const ids = await L.main(async (_e, u) => {
+  // Two background tabs: one on the kept site, one elsewhere (a lumio:// page never sleeps, so use data:).
+  ids = await L.main(async (_e, u) => {
     const tabs = global.lumio.tabs;
     const kept = tabs.create(`${u}/kept`, { active: false });
     const other = tabs.create('data:text/html,<title>Other</title>', { active: false });
