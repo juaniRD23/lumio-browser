@@ -59,9 +59,10 @@ const key = (keyCode) => L.main((_e, k) => {
 const waitDialog = (kind) => until(async () => { const d = await dialog(); return d.shown && d.kinds[0] === kind && d; });
 const noDialog = () => until(async () => { const d = await dialog(); return !d.shown && !d.kinds.length; });
 // A real click in the page: it counts as using the page (Chrome's rule for "Leave site?").
+// Scrolled into view first, as a person would (the page area can be short).
 const clickPage = (sel = 'body') => L.main(async (_e, s) => {
   const wc = global.lumio.tabs.wc();
-  const r = await wc.executeJavaScript(`(() => { const b = document.querySelector(${JSON.stringify(s)}).getBoundingClientRect(); return { x: Math.round(b.x + Math.min(b.width / 2, 40)), y: Math.round(b.y + Math.min(b.height / 2, 20)) } })()`);
+  const r = await wc.executeJavaScript(`(() => { const el = document.querySelector(${JSON.stringify(s)}); el.scrollIntoView({ block: 'center', behavior: 'instant' }); const b = el.getBoundingClientRect(); return { x: Math.round(b.x + Math.min(b.width / 2, 40)), y: Math.round(b.y + Math.min(b.height / 2, 20)) } })()`);
   wc.focus();
   wc.sendInputEvent({ type: 'mouseDown', x: r.x, y: r.y, button: 'left', clickCount: 1 });
   wc.sendInputEvent({ type: 'mouseUp', x: r.x, y: r.y, button: 'left', clickCount: 1 });
