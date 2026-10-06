@@ -33,13 +33,21 @@ const go = async (u, expect, ms) => {
   await L.main((_e, x) => global.lumio.tabs.navigate(x), u);
   assert.ok(await until(async () => (await title()) === expect, ms), `loaded ${expect}`);
 };
-// What the notice over the page says, and whether it's showing.
-const notice = () => L.main(async () => {
+// What the notice over the page says, and whether it's showing. The "·"
+// between the site and "Press Esc…" is drawn by CSS (#n-action::before),
+// which innerText leaves out, so it's read from the computed style.
+const READ_NOTICE = `(() => {
+  const $ = (id) => document.getElementById(id);
+  if ($('bubble').hidden) return '';
+  const sep = getComputedStyle($('n-action'), '::before').content;
+  return [$('n-title').innerText, sep.startsWith('"') ? JSON.parse(sep) : '', $('n-action').innerText].join(' ');
+})()`;
+const notice = () => L.main(async (_e, js) => {
   const n = global.lumio.current.notice;
   const shown = !!n.view && global.lumio.win.contentView.children.includes(n.view);
-  const text = shown && n.ready ? await n.view.webContents.executeJavaScript('document.getElementById("bubble").hidden ? "" : document.getElementById("bubble").innerText') : '';
+  const text = shown && n.ready ? await n.view.webContents.executeJavaScript(js) : '';
   return { shown, text: text.replace(/\s+/g, ' ').trim(), data: n.data };
-});
+}, READ_NOTICE);
 const pressEsc = () => L.main(() => {
   const wc = global.lumio.tabs.wc();
   wc.focus();
@@ -53,7 +61,9 @@ const slow = new Set();
 const answerCancel = () => L.main(() => { global.__asked = []; global.lumio.answerDownloads = (box) => { global.__asked.push(box); return 1; }; return true; });
 const stopDownloads = () => L.main(() => {
   global.lumio.answerDownloads = null;
-  for (const p of Object.values(global.lumio.profiles)) for (const d of p?.downloads.items || []) if (d.state === 'progressing') d.item.cancel();
+  // lumio.profiles also holds the registry, the list, open()…: only the sessions' profiles have downloads.
+  const P = global.lumio.profiles;
+  for (const p of new Set([P.normal, P.incognito, global.__incProfile])) for (const d of p?.downloads?.items || []) if (d.state === 'progressing') d.item.cancel();
   return true;
 });
 const PAGES = {
