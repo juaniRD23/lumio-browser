@@ -508,6 +508,46 @@ test('an app’s title bar: back, reload, its title, and the way back after leav
   await page.close();
 });
 
+// A site in an app window gets "Save password?" like a tab (main/apps.js):
+// the key in the title bar, and the same bubble, drawn by the app window's overlay.
+test('an app’s title bar: "Save password?" after signing in, the key that brings it back, and toasts, in light and dark', { skip }, async () => {
+  for (const colorScheme of ['light', 'dark']) {
+    const { page, errors } = await open('overlay', { file: 'app-window.html', colorScheme, viewport: { width: 900, height: 38 }, answers: { 'apps:state': APP_STATE } });
+    await page.waitForFunction(() => document.getElementById('title').textContent === 'Inbox');
+    assert.equal(await page.isVisible('#pw-key'), false);
+    const prompt = { id: 4, tabId: 1, host: 'mail.example', username: 'sam', action: 'save', length: 9 };
+    await page.evaluate((p) => window.__emit('passwords-prompt', p), prompt);
+    assert.equal(await page.isVisible('#pw-key'), true);
+    assert.equal(await page.getAttribute('#pw-key', 'aria-label'), 'Save password');
+    await page.waitForFunction(() => window.__sent.some(([c, p]) => c === 'overlay:show' && p.payload.kind === 'pwsave'));
+    const shown = (await sent(page, 'overlay:show')).at(-1);
+    assert.deepEqual(shown.payload.prompt, prompt);
+    const key = await page.$eval('#pw-key', (e) => e.getBoundingClientRect().toJSON());
+    assert.ok(shown.rect.y >= key.bottom && shown.rect.x + shown.rect.width <= key.right + 24, 'under the key');
+    // The key closes it and brings it back; a click elsewhere on the bar closes it.
+    await page.click('#pw-key');
+    assert.deepEqual((await sent(page, 'overlay:hide')).at(-1), 'pwsave');
+    await page.focus('#pw-key');
+    await page.keyboard.press('Enter');
+    assert.equal((await sent(page, 'overlay:show')).length, 2, 'from the keyboard too');
+    await page.click('#title');
+    assert.equal((await sent(page, 'overlay:hide')).length, 2);
+    // Answered in the bubble: the key goes.
+    await page.evaluate(() => window.__emit('overlay-picked', { kind: 'pwsave' }));
+    assert.equal(await page.isVisible('#pw-key'), false);
+    // "Password saved", for a moment, readable.
+    await page.evaluate(() => window.__emit('toast', { text: 'Password saved' }));
+    assert.equal(await page.textContent('#toast'), 'Password saved');
+    assert.equal(await page.getAttribute('#toast', 'role'), 'status');
+    const c = await colorsOf(page, ['#toast'], '#toast');
+    assert.ok(contrast(c['#toast'], c.bg) >= 4.5, `${colorScheme}: toast ${contrast(c['#toast'], c.bg).toFixed(2)}:1`);
+    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `app-window-saved-${colorScheme}.png`) });
+    await page.waitForFunction(() => document.getElementById('toast').hidden, null, { timeout: 4000 });
+    assert.deepEqual(errors, []);
+    await page.close();
+  }
+});
+
 test('lumio://apps lists installed apps, with Open, Show in Finder and Remove', { skip }, async () => {
   const { page, errors } = await open('apps', { answers: { 'page:apps': APPS, 'page:app-remove': true } });
   await page.waitForSelector('.app');

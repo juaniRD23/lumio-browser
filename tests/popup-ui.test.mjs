@@ -135,6 +135,69 @@ test('a pop-up’s bar: blocked pop-ups, the permission bar, and saving a passwo
   await page.close();
 });
 
+// Quiet questions (notifications, by default) and what Lumio blocked had
+// nowhere to show in a pop-up: they get the browser window's chip, in the
+// pop-up's address box. Questions that ask still use the bar over the page.
+const NOTIFY = { id: 9, wcId: 5, host: 'maps.example', quiet: true, cats: [{ id: 'notifications', prompt: 'Show notifications', chip: 'Send notifications?', blocked: 'Notifications blocked' }] };
+// The chip's words and what's behind them, as painted.
+const chipColors = (page) => page.evaluate(() => {
+  const ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+  const paint = (...colors) => { ctx.clearRect(0, 0, 1, 1); for (const c of colors) { ctx.fillStyle = c; ctx.fillRect(0, 0, 1, 1); } return [...ctx.getImageData(0, 0, 1, 1).data.slice(0, 3)]; };
+  const chip = document.getElementById('perm-chip');
+  const layers = [];
+  for (let el = chip; el; el = el.parentElement) layers.unshift(getComputedStyle(el).backgroundColor);
+  return { fg: paint(...layers, getComputedStyle(chip).color), bg: paint(...layers) };
+});
+
+test('a pop-up’s permission chip: quiet requests and blocked notices, its bubble, the keyboard, light and dark', { skip }, async () => {
+  for (const scheme of ['light', 'dark']) {
+    const { page, errors } = await open('popup', { colorScheme: scheme, answers: { 'popup:init': { tabs: state({ wcId: 5 }) } } });
+    await page.waitForFunction(() => document.getElementById('address').value !== '');
+    assert.equal(await page.isVisible('#perm-chip'), false, 'nothing to show yet');
+    await emit(page, 'permission', NOTIFY);
+    assert.equal(await page.isVisible('#permbar'), false, 'a quiet request doesn’t ask over the page');
+    assert.equal(await page.isVisible('#perm-chip'), true);
+    assert.equal(await page.textContent('#perm-chip .pc-t'), 'Notifications blocked');
+    assert.match(await page.getAttribute('#perm-chip', 'class'), /\bquiet\b/);
+    assert.equal(await page.textContent('#perm-live'), 'Notifications blocked', 'screen readers hear it');
+    assert.equal(await page.getAttribute('#perm-chip', 'aria-expanded'), 'false');
+    const c = await chipColors(page);
+    assert.ok(contrast(c.fg, c.bg) >= 4.5, `${scheme}: chip words ${contrast(c.fg, c.bg).toFixed(2)}:1`);
+    if (process.env.LUMIO_SHOTS) await page.screenshot({ path: path.join(process.env.LUMIO_SHOTS, `popup-chip-${scheme}.png`) });
+    // The keyboard reaches it between the lock and the address; Enter opens its bubble.
+    await page.focus('#site-icon');
+    await page.keyboard.press('Tab');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'perm-chip');
+    await page.keyboard.press('Enter');
+    const shown = (await sent(page)).filter(([c]) => c === 'overlay:show').at(-1)[1];
+    assert.equal(shown.payload.kind, 'permission');
+    assert.deepEqual([shown.payload.mode, shown.payload.id, shown.payload.wcId, shown.payload.host, shown.payload.focus], ['quiet', 9, 5, 'maps.example', true]);
+    const where = await page.$eval('#where', (e) => e.getBoundingClientRect().bottom);
+    assert.equal(shown.rect.y, where + 4, 'under the address box');
+    assert.ok((await sent(page)).some(([ch]) => ch === 'permission:focus-bubble'), 'the bubble takes the keyboard');
+    assert.equal(await page.getAttribute('#perm-chip', 'aria-expanded'), 'true');
+    // Answered in the bubble ("Allow for this site"): the chip goes.
+    await emit(page, 'overlay-picked', { kind: 'permission', id: 9 });
+    assert.equal(await page.isVisible('#perm-chip'), false);
+    // A question that asks still goes to the bar, not the chip.
+    await emit(page, 'permission', { ...NOTIFY, id: 10, quiet: false });
+    assert.equal(await page.isVisible('#permbar'), true);
+    assert.equal(await page.isVisible('#perm-chip'), false);
+    await page.click('#permbar [data-act=block]');
+    // Something Lumio blocked on this page, until the page moves on.
+    await emit(page, 'permission-blocked', { wcId: 5, cat: 'camera', host: 'maps.example', label: 'Camera blocked' });
+    assert.equal(await page.textContent('#perm-chip .pc-t'), 'Camera blocked');
+    await emit(page, 'permission-reset', { wcId: 5 });
+    assert.equal(await page.isVisible('#perm-chip'), false);
+    // A quiet request the page dropped (it went away) leaves no chip.
+    await emit(page, 'permission', { ...NOTIFY, id: 11 });
+    await emit(page, 'permission-cancel', { id: 11 });
+    assert.equal(await page.isVisible('#perm-chip'), false);
+    assert.deepEqual(errors, []);
+    await page.close();
+  }
+});
+
 test('a pop-up’s bar in light and dark: readable, and dark when incognito', { skip }, async () => {
   for (const [scheme, query] of [['light', ''], ['dark', ''], ['light', '?appearance=dark']]) {
     const { page, errors } = await open('popup', { colorScheme: scheme, query, answers: { 'popup:init': { tabs: state({ url: 'http://intranet.example/' }) } } });
