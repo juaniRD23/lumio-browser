@@ -146,7 +146,10 @@ class TabManager {
     // Site settings that only apply when a page is made (main/site-controls.js).
     // (A pop-up's page was made by Chromium with its opener's settings.)
     const insecure = !made && !!this.hooks.allowInsecure?.(tab.pendingUrl || tab.url);
-    const view = new WebContentsView(made ? { webContents: made } : {
+    // A view given a page without its preferences resets them (Electron 43):
+    // the pop-up's page would lose Lumio's preload and dialogs. So they go
+    // along, the same ones the page was made with (setWindowOpenHandler).
+    const view = new WebContentsView(made ? { webContents: made, webPreferences: { ...PAGE_PREFS } } : {
       webPreferences: {
         session: this.session,
         ...PAGE_PREFS,
@@ -317,6 +320,11 @@ class TabManager {
       // They were the old page's: its blocked pop-ups, and its dialogs "in a
       // row" or blocked ("Don't allow … to show more dialogs"), like Chrome.
       tab.blockedPopups = null;
+      // A click on the old page doesn't let the new one open a pop-up (in
+      // Chrome the activation is the page's). A frame's click can be reported
+      // after its pop-up used it up, and an ad on the next page mustn't get it.
+      tab.activatedAt = 0;
+      tab.frameActivatedAt = 0;
       tab.dialogStreak = null;
       tab.dialogsBlocked = null;
       tab.view.setBackgroundColor(M().pageBackground(url));
@@ -535,7 +543,9 @@ class TabManager {
       const m = M();
       m.hooks.onViewDestroyed?.(wc);
       // The page closed itself (window.close()): its tab goes too, like Chrome.
-      if (tab.view?.webContents === wc && m.tabs.includes(tab) && !tab.closing && !m.win.isDestroyed?.()) m.remove(tab);
+      // (Its view may already have let go of the page by now: still this tab's.)
+      const page = tab.view?.webContents;
+      if (tab.view && (!page || page === wc) && m.tabs.includes(tab) && !tab.closing && !m.win.isDestroyed?.()) m.remove(tab);
     });
   }
 
@@ -1112,7 +1122,7 @@ class TabManager {
       split: this.split.state(), // the pair on screen: { left, right, ratio } or null
       tabs: this.tabs.map((t) => ({
         id: t.id,
-        wcId: t.view ? t.view.webContents.id : null,
+        wcId: t.view?.webContents?.id ?? null,
         title: t.title,
         url: this.displayUrl(t),
         // International addresses in their own letters, unless they could pass for another site (main/lookalike.js).

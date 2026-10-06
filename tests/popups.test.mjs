@@ -172,6 +172,19 @@ test('a frame from another site needs a click of its own; a click inside a frame
   assert.equal(calls.created.length, 2);
 });
 
+test('a click on one page doesn’t let the next page (or an ad on it) open a pop-up', () => {
+  const { m, tab, wc, calls, open, blocked } = setup();
+  const ad = { url: 'https://ads.example/', policy: 'strict-origin-when-cross-origin' };
+  wc.click();
+  m.noteActivation(tab, { frame: true }); // reported late, after its pop-up opened
+  wc.url = 'https://news.example/next';
+  wc.emit('did-navigate', event(), wc.url);
+  open('https://ads.example/landing', { referrer: ad });
+  open('https://news.example/more');
+  assert.equal(calls.created.length, 0, 'the new page needs a click of its own');
+  assert.equal(blocked(), 2);
+});
+
 test('pages can’t open browser-internal pages; "noopener" alone isn’t a pop-up window; a helper AI’s tab only opens background tabs', () => {
   const { wc, tab, calls, open, blocked } = setup();
   for (const u of ['chrome://process-internals', 'devtools://devtools/bundled/inspector.html?ws=evil.example', 'chrome-extension://abcdefghijklmnop/options.html', 'about:settings']) {
@@ -230,6 +243,23 @@ test('a page that closes itself (window.close()) closes its tab, like Chrome', (
   wc.emit('destroyed');
   assert.equal(m.tabs.length, 0);
   assert.deepEqual(calls.closed, ['https://news.example/story']);
+});
+
+test('a page that closes itself closes its tab even when its view already let go of it (a pop-up moved into a tab)', () => {
+  const { m, wc, tab } = setup();
+  const other = { id: 2, owner: m, view: { ...tab.view, webContents: fakePage('https://other.example/') }, url: 'https://other.example/', title: 'Other', pinned: false };
+  m.tabs.push(other);
+  wc.destroyed = true;
+  tab.view.webContents = undefined; // Electron's view drops its page as it's destroyed
+  assert.doesNotThrow(() => m.state(), 'the window still draws its tabs');
+  wc.emit('destroyed');
+  assert.deepEqual(m.tabs.map((t) => t.id), [2]);
+  // A tab whose page was swapped for a new one (Memory Saver, a site setting) stays.
+  const { m: m2, wc: wc2, tab: tab2 } = setup();
+  tab2.view = { ...tab2.view, webContents: fakePage(tab2.url) };
+  wc2.destroyed = true;
+  wc2.emit('destroyed');
+  assert.equal(m2.tabs.length, 1);
 });
 
 // A session that records Lumio's permission handlers.
