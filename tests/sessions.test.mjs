@@ -168,7 +168,7 @@ test('Restore pages? brings the crashed session back: its first window into this
   infobars.act(w, 'restore', 'restore');
   assert.deepEqual(w.tabs.tabs.map((t) => w.tabs.displayUrl(t)), ['https://a.example/2', 'https://z.example/'], 'the unused new tab made way');
   assert.equal(w.tabs.active.view.webContents.navigationHistory.canGoBack(), true, 'with its history');
-  assert.deepEqual(made, [{ tabs: last[1].tabs, active: 0, groups: undefined, bounds: undefined, maximized: true }]);
+  assert.deepEqual(made, [{ tabs: last[1].tabs, active: 0, bounds: null, maximized: true }]); // (sessions.windowOptions: only what the file has)
   assert.deepEqual(recentlyClosed.map((e) => e.title), ['Older'], 'no longer under Recently Closed');
   assert.equal(menus, 1);
   assert.deepEqual(infobars.list(w), [], 'the bar went away');

@@ -78,7 +78,7 @@ const syncAdapters = require('./sync/adapters');
 const { CompanionBridge } = require('./sync/companion');
 const { Navigation, SAVE_FILTERS, saveType } = require('./navigation');
 const { startupPlan, STARTUP } = require('./startup');
-const { Sessions, launchPlan } = require('./sessions');
+const { Sessions, launchPlan, windowOptions } = require('./sessions');
 const { Infobars } = require('./infobars');
 const defaultBrowser = require('./default-browser');
 const { TabStrip } = require('./tab-strip');
@@ -516,7 +516,7 @@ function reopenClosed(index = null, tabIndex = null, w = cur()) {
   }
   const [e] = recentlyClosed.splice(index, 1);
   menuChanged();
-  if (e.kind === 'window') { createWindow({ profile: p, tabs: e.tabs, active: e.active, groups: e.groups, bounds: e.bounds, maximized: !!e.maximized, layout: e.layout, name: e.name }); return; }
+  if (e.kind === 'window') { createWindow({ profile: p, ...windowOptions(e) }); return; }
   const target = alive().find((x) => x.id === e.windowId && x.profile === p) || (w && w.profile === p && !w.incognito && !w.closed ? w : normalWin(p));
   if (!target) { createWindow({ profile: p, tabs: [{ url: e.url, title: e.title, history: e.history }], active: 0 }); return; }
   target.tabs.create(e.url, { index: e.index, title: e.title, pinned: e.pinned, history: e.history });
@@ -2073,7 +2073,7 @@ async function startProfile(p, { restore = false, deferred = false } = {}) {
   if (firstRun && (!process.env.LUMIO_TEST || process.env.LUMIO_TEST_WELCOME)) {
     store.setSetting('panelOpen', false);
     createWindow({ profile: p, tabs: [{ url: 'lumio://welcome/', title: 'Welcome to Lumio Browser' }], active: 0 });
-  } else if (plan.windows.length) plan.windows.forEach((s) => createWindow({ profile: p, tabs: s.tabs, active: s.active, groups: s.groups, bounds: s.bounds, maximized: !!s.maximized }));
+  } else if (plan.windows.length) plan.windows.forEach((s) => createWindow({ profile: p, ...windowOptions(s) }));
   else if (!(deferred && normalWin(p))) createWindow({ profile: p, urls: plan.urls });
   const w = normalWin(p);
   // "Restore pages?" after a crash, and "Lumio isn't your default browser".

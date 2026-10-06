@@ -71,6 +71,21 @@ function historyOf(tab) {
 // the windows saved last time. After a crash nothing reopens by itself and
 // the bar offers the last session; whenever the session isn't reopened, its
 // windows also wait in Recently Closed (so closing the bar doesn't lose them).
+// What a saved window opens with (createWindow's options): its tabs (each
+// with its back/forward pages, group and split side), batch 5's groups,
+// where it was, and batch 7d's tabs-to-the-side layout and window name.
+// Older session files have only some of these.
+function windowOptions(s = {}) {
+  return {
+    tabs: s.tabs, active: s.active || 0,
+    ...(s.groups?.length ? { groups: s.groups } : {}),
+    bounds: s.bounds || null,
+    ...(s.maximized ? { maximized: true } : {}),
+    ...(s.layout ? { layout: s.layout } : {}),
+    ...(s.name ? { name: s.name } : {}),
+  };
+}
+
 function launchPlan(plan, { crashed = false, lastSession = [] } = {}) {
   const last = Array.isArray(lastSession) ? lastSession.filter((w) => w && Array.isArray(w.tabs) && w.tabs.length) : [];
   if (crashed) return { windows: [], urls: plan.urls || [], offer: last.length ? last : null, recent: last };
@@ -135,7 +150,7 @@ class Sessions {
   pending() {
     const recent = this.deps.recentlyClosed;
     return [...(this.kept || []), ...this.offered].filter((e) => recent.includes(e) && e.tabs?.length)
-      .map(({ tabs, active, groups, bounds, maximized }) => ({ tabs, active, ...(groups?.length ? { groups } : {}), bounds, ...(maximized ? { maximized } : {}) }));
+      .map(windowOptions);
   }
 
   // Browsing data's "Recently closed" was cleared: nothing left to restore.
@@ -182,7 +197,7 @@ class Sessions {
     const target = w && !w.closed && !w.incognito ? w : null;
     list.forEach((s, i) => {
       if (i === 0 && target) this.restoreInto(target, s);
-      else this.deps.createWindow({ tabs: s.tabs, active: s.active, groups: s.groups, bounds: s.bounds, maximized: !!s.maximized });
+      else this.deps.createWindow(windowOptions(s));
     });
   }
 
@@ -201,4 +216,4 @@ function isUnusedNewTab(tab) {
   return !wc || wc.isDestroyed() || wc.navigationHistory.length() <= 1;
 }
 
-module.exports = { Sessions, RunMarker, trimHistory, historyOf, launchPlan, realUrl, isCrashPage, KEEP, MAX_PAGE_STATE };
+module.exports = { Sessions, RunMarker, trimHistory, historyOf, launchPlan, windowOptions, realUrl, isCrashPage, KEEP, MAX_PAGE_STATE };

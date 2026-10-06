@@ -346,3 +346,29 @@ test('fallback halves and the minimum side', () => {
   const ui = fs.readFileSync(new URL('../renderer/ui/split-view.js', import.meta.url), 'utf8');
   assert.equal(Number(/const MIN_PANE = (\d+)/.exec(ui)?.[1]), MIN_PANE);
 });
+
+// Seam: one session file for every batch — batch 4's back/forward pages,
+// batch 5's tab groups, 7d's split view, the layout and the window's name —
+// saved and brought back together; older files still load.
+test('the session keeps history, groups and split pairs together, and older files still load', async () => {
+  const { windowOptions } = require('../main/sessions.js');
+  const { m, ids: [a, b, c] } = manager(3);
+  const g = m.groups.create([b, c], { title: 'Trip', color: 'blue' });
+  m.split.create(b, c);
+  m.split.setRatio(b, 0.3);
+  m.get(a).savedHistory = { entries: [{ url: 'https://old.example/', title: 'Old' }, { url: 'https://site1.example/', title: 'One' }], index: 1 };
+  const saved = { tabs: m.sessionTabs({ history: true }), groups: m.groups.session(), active: 2, bounds: { x: 1, y: 2, width: 900, height: 700 }, layout: { vertical: true, collapsed: false }, name: 'Research' };
+  assert.deepEqual(saved.tabs.map((t) => [t.group || null, t.split?.side || null]), [[null, null], [g.id, 'left'], [g.id, 'right']]);
+  const opts = windowOptions(JSON.parse(JSON.stringify(saved))); // through the file
+  assert.deepEqual(Object.keys(opts).sort(), ['active', 'bounds', 'groups', 'layout', 'name', 'tabs']);
+  const again = new TabManager({ win: windowStandIn(), session: {}, store: { settings: {}, setSetting(k, v) { this.settings[k] = v; }, isBookmarked: () => false }, emit: () => {}, hooks: {} });
+  again.restore(opts.tabs, opts.active, opts.groups);
+  await flush();
+  const [x, y, z] = again.tabs.map((t) => t.id);
+  assert.deepEqual(again.split.state(), { left: y, right: z, ratio: 0.3 });
+  assert.equal(again.get(y).groupId, again.get(z).groupId);
+  assert.equal(again.groups.get(again.get(y).groupId).title, 'Trip');
+  assert.equal(again.get(x).groupId || null, null);
+  // A file from before groups, splits and names: tabs only.
+  assert.deepEqual(windowOptions({ tabs: [{ url: 'https://a.example/' }] }), { tabs: [{ url: 'https://a.example/' }], active: 0, bounds: null });
+});
