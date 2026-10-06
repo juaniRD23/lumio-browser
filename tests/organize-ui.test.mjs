@@ -198,7 +198,7 @@ test('the group editor: name, nine colors with arrow keys, and its actions; read
     await shot(page, `group-editor-${colorScheme}`);
     // Typing a name sends it a moment later.
     await page.fill('#tg-name', 'Summer trip');
-    await page.waitForTimeout(400);
+    await page.waitForFunction(() => window.__sent.some(([c, p]) => c === 'groups:update' && p?.title === 'Summer trip'));
     assert.deepEqual(await lastSent(page, 'groups:update'), { id: 'gA', title: 'Summer trip' });
     // Colors: a click, then the arrow keys.
     await page.click('.tg-color[data-color="red"]');
@@ -327,7 +327,7 @@ test('side panel: the switcher shares the panel with Lumio AI; reading list, boo
     // Arrow keys move along the switcher.
     await page.focus('.ss-tab[data-view="ai"]');
     await page.keyboard.press('ArrowRight');
-    assert.equal(await page.getAttribute('.ss-tab[data-view="reading"]', 'aria-selected'), 'true');
+    await page.waitForSelector('.ss-tab[data-view="reading"][aria-selected="true"]', { timeout: 5000 });
     assert.deepEqual(errors, []);
     await page.close();
   }
