@@ -408,6 +408,7 @@ All ten batch branches are merged into `merge-v0.6.8`, then joined by "Seam" com
 - **batch7c-autofill-extensions**, merged: address and card autofill, form history, passkey sync and security keys, puzzle menu, pinned extensions, site access, details and shortcuts pages, API stand-ins, extension New Tab override, Help center, Report an issue (`/api/feedback`), lumio://version and flags-lite, DevTools docking, Mac menu bar parity, Look Up/Speech, Handoff.
 - **batch7d-layout**, merged: tabs to the side, split view, Name window, keyboard shortcut customization, caret browsing, force dark, protocol handlers.
 - **batch8-crash-drm**, merged: opt-in crash reports (app, `/api/crash`, /admin), castlabs DRM build behind `LUMIO_DRM` / EVS secrets with a Widevine wait.
+- **gaps-h**: installed-app windows get saved passwords, "Save password?", Lumio passkeys (Touch ID), addresses, cards and form entries, and prompt()/alert()/confirm() as Lumio's card; the autofill dropdown is a listbox read through a polite live region; a pop-up window's bar shows quiet permission requests in the chip (and its dropdowns work).
 
 **Counts** (all checklist items): 191 done, 31 partly done, 10 not done. In the Batches checklist: 84 done, 11 partly, 0 not done.
 
@@ -421,7 +422,6 @@ Needs the owner (outside the code):
 - Bump "Last updated" on privacy.html; redeploy the website (FAQ anchor for Help).
 
 Product gaps left in the code:
-- Passkeys and password/address autofill don't work in installed-app windows.
 - Customize: custom color themes, toolbar customization, full URLs, density, font settings.
 - Certificate viewer for a valid site's certificate; view-source page (lumio://source); file:// directory listings; error page polish (details, auto-reload when online, offline game).
 - Hold Cmd+Q to quit and a many-tabs close warning; pinned-tab attention dot; Cmd+Shift+F toolbar in full screen.
@@ -430,6 +430,6 @@ Product gaps left in the code:
 - Live Caption (post-launch), automatic PiP, Help me write and other AI extras (tab organizer, AI history search), preferred camera/microphone, notification click bringing up its tab, download extras (drag out, resume after restart, always open type), spell check custom words, GPU/remote debugging pages, import of search engines and autofill.
 - Omnibox doesn't learn which suggestion was picked for a prefix; the side panel can't move to the left; Reopen Closed Tab doesn't restore a tab's group.
 - AppleScript dictionary skipped (Electron has no Cocoa scripting support).
-- Known review leftovers: a page can draw a look-alike of the dialog card (D10); `window.open` without features and `form target=_blank` lose opener/POST body (P11); autofill dropdown ARIA; extension update briefly runs without site-access limits.
+- Known review leftovers: a page can draw a look-alike of the dialog card (D10); `window.open` without features and `form target=_blank` lose opener/POST body (P11); the autofill dropdown can't be linked to its field with ARIA across views (it's a listbox read through a live region instead); extension update briefly runs without site-access limits.
 
 Windows (paused): background mode and tray icon, Jump List, Chromium password import, geolocation provider, middle-click autoscroll, swipe navigation check, installer file types.
