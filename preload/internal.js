@@ -194,6 +194,20 @@ function installDialogs(ask) {
   });
 }
 
+// navigator.registerProtocolHandler (and unregister…), which Electron ignores:
+// Lumio asks the person and remembers the site's handler (main/protocol-handlers.js).
+if (/^https?:$/.test(window.location.protocol) && window === window.top) {
+  try {
+    contextBridge.executeInMainWorld({
+      func: installProtocolHandlers,
+      args: [{
+        register: (scheme, url) => ipcRenderer.send('ph:register', { scheme, url }),
+        unregister: (scheme, url) => ipcRenderer.send('ph:unregister', { scheme, url }),
+      }],
+    });
+  } catch { /* the page keeps the built-in one, which does nothing */ }
+}
+
 // Runs in the page's own world (before its scripts), so it must be
 // self-contained. Only `bridge` reaches back to Lumio, and Lumio decides the
 // origin itself, so a page can only ever ask for its own site's passkeys.
@@ -581,4 +595,33 @@ function swipeHelper() {
     const target = e.composedPath()[0] || e.target;
     setTimeout(() => onWheel(e, target), 0);
   }, { capture: true, passive: true });
+}
+
+// Runs in the page's own world, so it must be self-contained. It checks what
+// the HTML standard checks, so a page gets the same errors as in Chrome, and
+// hands the rest to Lumio, which checks again (it knows the real origin).
+function installProtocolHandlers(bridge) {
+  const proto = window.Navigator && window.Navigator.prototype;
+  if (!proto || !window.isSecureContext) return;
+  const SAFE = ['bitcoin', 'cabal', 'dat', 'did', 'doi', 'dweb', 'ethereum', 'ftp', 'geo', 'hyper', 'im', 'ipfs', 'ipns', 'irc', 'ircs', 'magnet',
+    'mailto', 'matrix', 'mms', 'news', 'nntp', 'openpgp4fpr', 'sftp', 'sip', 'sms', 'smsto', 'ssb', 'ssh', 'tel', 'urn', 'webcal', 'wtai', 'xmpp'];
+  // The scheme and the full handler URL, or the error Chrome throws.
+  function check(name, args) {
+    if (args.length < 2) throw new TypeError(`Failed to execute '${name}' on 'Navigator': 2 arguments required, but only ${args.length} present.`);
+    const s = String(args[0]).toLowerCase();
+    if (!SAFE.includes(s) && !/^web\+[a-z]+$/.test(s)) throw new DOMException(`The scheme '${s}' doesn't belong to the scheme allowlist. Please prefix non-allowlisted schemes with the string 'web+'.`, 'SecurityError');
+    const raw = String(args[1]);
+    if (!raw.includes('%s')) throw new DOMException(`The url provided ('${raw}') does not contain '%s'.`, 'SyntaxError');
+    let u;
+    try { u = new URL(raw, document.baseURI); } catch { throw new DOMException(`The url provided ('${raw}') is not valid.`, 'SyntaxError'); }
+    if (!/^https?:$/.test(u.protocol) || u.origin !== window.location.origin) throw new DOMException('Can only register custom handler in the document\'s origin.', 'SecurityError');
+    return [s, u.href];
+  }
+  const methods = {
+    registerProtocolHandler(scheme, url) { bridge.register(...check('registerProtocolHandler', arguments)); },
+    unregisterProtocolHandler(scheme, url) { bridge.unregister(...check('unregisterProtocolHandler', arguments)); },
+  };
+  for (const [name, fn] of Object.entries(methods)) {
+    Object.defineProperty(proto, name, { value: fn, writable: true, configurable: true, enumerable: true });
+  }
 }

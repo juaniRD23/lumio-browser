@@ -22,6 +22,7 @@ const EVENTS = new Set([
   'translate-prompt', 'reader-open', // page tools
   'share-open', 'media', 'ai-attach', 'shot-data', 'app-state',
   'ext-activate', 'ext-menu-closed', // extensions
+  'tab-layout', 'shortcut-hints', // tabs to the side and split view, keyboard shortcuts
 ]);
 
 contextBridge.exposeInMainWorld('lumio', {

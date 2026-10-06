@@ -1,0 +1,72 @@
+/* Split view (split-view.js): two pages side by side in the page slot, each
+   under a slim bar, with a divider to drag. The pages are views laid over
+   each pane's body; the focused side's ring shows just outside it. */
+#slot.split { background: transparent; }
+body:not(.agent-running) #slot.split { box-shadow: none; }
+#split {
+  position: absolute; inset: 0;
+  display: grid; grid-template-columns: minmax(0, calc((100% - 10px) * var(--ratio, .5))) 10px minmax(0, 1fr);
+}
+.pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.pane-bar { height: 30px; flex: none; display: flex; align-items: center; gap: 4px; padding: 0 0 2px; color: var(--label); }
+.pane-site {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px;
+  height: 26px; padding: 0 8px 0 6px; border-radius: 8px; text-align: left; font-size: 12px;
+  transition: background 140ms var(--ease), color 140ms var(--ease);
+}
+.pane-site:hover { background: var(--hover); color: var(--text); }
+.pane.focused .pane-site { color: var(--text); }
+.pane-site .fav { width: 16px; height: 16px; flex: none; display: grid; place-items: center; border-radius: 4px; overflow: hidden; }
+.pane-site .fav img { width: 16px; height: 16px; }
+.pane-site .fav svg { width: 14px; height: 14px; }
+.pane-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* This side's page asked for a permission (answered in the bar above). */
+.pane-ask {
+  flex: 0 1 auto; min-width: 0; max-width: 50%; height: 22px; line-height: 22px; padding: 0 9px; border-radius: 999px;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  background: color-mix(in srgb, var(--accent) 13%, transparent); color: light-dark(color-mix(in srgb, var(--accent) 70%, var(--text-strong)), var(--accent));
+  font-size: 11.5px;
+}
+.pane-acts { display: flex; gap: 1px; flex: none; opacity: 0; transition: opacity 140ms var(--ease); }
+.pane:is(:hover, .focused) .pane-acts, .pane-acts:focus-within { opacity: 1; }
+.pane-btn { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; color: var(--label); }
+.pane-btn:hover { background: var(--hover); color: var(--text); }
+:is(.pane-btn, .pane-site, .split-divider):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -1px; }
+.pane-body {
+  flex: 1; min-height: 0; position: relative;
+  border-radius: 10px; background: var(--slot-bg); box-shadow: 0 0 0 1px var(--line);
+  transition: box-shadow .2s var(--ease);
+}
+.pane.focused .pane-body { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 75%, transparent); }
+.pane-hint { display: none; }
+
+/* The divider: a handle in the gap, under the bars' height. */
+.split-divider { position: relative; margin-top: 30px; display: grid; place-items: center; cursor: col-resize; border-radius: 6px; }
+.split-divider i { width: 4px; height: 40px; border-radius: 4px; background: var(--line-strong); transition: background .15s var(--ease), height .15s var(--ease); }
+.split-divider:is(:hover, .dragging, :focus-visible) i { background: var(--accent); height: 64px; }
+body.split-resizing, body.split-resizing * { cursor: col-resize !important; }
+
+/* A tab dragged onto an edge of the page: its page takes that half; the
+   other half shows the tab you were on, and where to let go. */
+#split.preview .pane-acts { display: none; }
+#split.preview { animation: split-in .18s var(--ease); }
+@keyframes split-in { from { opacity: 0; } }
+#split.preview .pane:not(.focused) .pane-body {
+  display: grid; place-items: center;
+  background: color-mix(in srgb, var(--accent) 6%, var(--slot-bg));
+  box-shadow: none; outline: 1.5px dashed color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: -1.5px;
+}
+#split.preview .pane-hint { display: block; padding: 0 20px; text-align: center; color: var(--dim); font-size: 13px; }
+
+/* The tab strip: a split view's tabs carry the split icon; the side on
+   screen that isn't focused is lit too. */
+.tab .split-ic { display: grid; place-items: center; flex: none; color: var(--label); }
+.tab:is(.active, .shown) .split-ic { color: var(--accent); }
+.tab:is(.narrow, .pinned) .split-ic { display: none; }
+.tab.shown { background: var(--overlay-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--line); }
+.tab.shown::before, .tab.shown + .tab::before { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pane-body, .pane-site, .pane-acts, .split-divider i { transition: none; }
+  #split.preview { animation: none; }
+}

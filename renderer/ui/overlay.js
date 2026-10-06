@@ -19,6 +19,8 @@ import { initMediaHub } from './overlay-media.js';
 import * as autofillUi from './overlay-autofill.js';
 import * as extUi from './overlay-extensions.js';
 import * as helpUi from './overlay-help.js';
+import './tab-flyout.js'; // the collapsed tabs column's flyout (kind 'vtabs')
+import './name-window.js'; // Name Window… (kind 'namewindow')
 
 const api = window.lumio;
 const card = document.getElementById('card');

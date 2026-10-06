@@ -14,6 +14,8 @@ if (process.env.LUMIO_DOWNLOADS) app.setPath('downloads', process.env.LUMIO_DOWN
 app.setName(FLAVOR.name);
 // Experiments (lumio://flags-lite) are Chromium switches, so they're set before the app starts.
 require('./flags').applyAtStartup(app, app.getPath('userData'));
+// Force dark mode for web contents is a startup switch too (main/force-dark.js).
+require('./force-dark').applyAtStartup(app);
 
 // Before Electron starts: Lumio's language and graphics acceleration
 // (Settings › Languages and › System), which apply from launch.
@@ -42,7 +44,7 @@ const { SiteData } = require('./site-data');
 const { BrowsingData, CookieClock } = require('./browsing-data');
 const { registerSiteIpc } = require('./site-ipc');
 const { Security } = require('./security');
-const { buildMenu, buildBrowserMenu } = require('./menu');
+const { buildMenu, buildBrowserMenu, menuTemplate } = require('./menu');
 const { OmniboxService } = require('./omnibox-service');
 const { BookmarksService } = require('./bookmarks-service');
 const { NtpShortcuts } = require('./ntp-shortcuts');
@@ -102,6 +104,9 @@ const { Screenshots } = require('./screenshot');
 const { Apps } = require('./apps');
 const { appIdFromArgv } = require('./app-launchers');
 const { PageMenu } = require('./page-menu');
+const tabLayout = require('./tab-layout');
+const powerUser = require('./power-user');
+const forceDark = require('./force-dark');
 
 const IS_DEV = !app.isPackaged;
 
@@ -243,7 +248,7 @@ const services = {
   },
   onClose: (w) => {
     if (quitting || w.incognito || w.profile.guest || !w.tabs.tabs.length) return;
-    recentlyClosed.push({ kind: 'window', profileId: w.profile.id, ...w.session(), title: w.tabs.active?.title || 'Window', time: Date.now() });
+    recentlyClosed.push({ kind: 'window', profileId: w.profile.id, ...w.session(), title: w.name || w.tabs.active?.title || 'Window', time: Date.now() });
     if (recentlyClosed.length > 25) recentlyClosed.shift();
     menuChanged();
   },
@@ -463,6 +468,7 @@ function menuState() {
     extensionKeys: (cur()?.profile.base || loaded.get(DEFAULT_PROFILE))?.extUi?.menuKeys() || [],
     bookmarksBar: !!(cur()?.profile.store || rootStore).settings.showBookmarksBar,
     appearance: theme.appearance(),
+    ...powerUser.menuState(rootStore), // Caret Browsing's checkmark, the shortcuts people picked (Lumio's own)
     profiles: profiles ? (cur() ? profilesFor(cur()) : profilesList()) : [],
     recentlyClosed: recentlyClosed.map((e, index) => ({ e, index })).filter(({ e }) => e.profileId === id).slice(-10).reverse().map(({ e, index }) => ({
       label: e.kind === 'window' ? t(`${e.tabs.length} Tab${e.tabs.length === 1 ? '' : 's'} (${e.title})`) : e.title || e.url, // a page's title stays as it is
@@ -506,7 +512,7 @@ function reopenClosed(index = null, tabIndex = null, w = cur()) {
   }
   const [e] = recentlyClosed.splice(index, 1);
   menuChanged();
-  if (e.kind === 'window') { createWindow({ profile: p, tabs: e.tabs, active: e.active, groups: e.groups, bounds: e.bounds, maximized: !!e.maximized }); return; }
+  if (e.kind === 'window') { createWindow({ profile: p, tabs: e.tabs, active: e.active, groups: e.groups, bounds: e.bounds, maximized: !!e.maximized, layout: e.layout, name: e.name }); return; }
   const target = alive().find((x) => x.id === e.windowId && x.profile === p) || (w && w.profile === p && !w.incognito && !w.closed ? w : normalWin(p));
   if (!target) { createWindow({ profile: p, tabs: [{ url: e.url, title: e.title, history: e.history }], active: 0 }); return; }
   target.tabs.create(e.url, { index: e.index, title: e.title, pinned: e.pinned, history: e.history });
@@ -592,6 +598,8 @@ const cmd = {
   cycle: (dir) => cur()?.tabs.cycle(dir),
   tabIndex: (n) => cur()?.tabs.activateIndex(n),
   makeDefault: () => makeDefaultBrowser(),
+  nameWindow: () => powerUser.nameWindow(cur()),
+  toggleCaretBrowsing: () => powerUser.toggleCaretBrowsing(cur()),
   webStore: () => { const w = normalWin() || createWindow(); w.tabs.create('https://chromewebstore.google.com/'); w.focus(); },
   fullscreen: () => { const w = cur(); if (w) w.win.setFullScreen(!w.win.isFullScreen()); },
   quit: () => app.quit(),
@@ -635,8 +643,15 @@ const tabStrip = new TabStrip({
   removeExtensionTab: (wc, w) => w.profile.extensions?.removeTab(wc),
   detached: (w, tab) => { if (printPreview?.stateOf(w)?.tab === tab) printPreview.close(w, { focusPage: false }); },
   get siteMute() { return siteMute; },
-  // Tab groups and the reading list in the tab menu (main/groups-service.js, side-panel.js).
-  menuExtras: (w, ids, tab) => ({ groups: w.profile.groups?.menuItems(w, tab, ids) || [], reading: w.profile.sidePanel?.menuItem(w, tab) || [] }),
+  // Tab groups, the reading list, split view and tabs to the side in the tab
+  // menu (main/groups-service.js, side-panel.js, split-view.js, tab-layout.js).
+  menuExtras: (w, ids, tab) => ({
+    groups: w.profile.groups?.menuItems(w, tab, ids) || [],
+    reading: w.profile.sidePanel?.menuItem(w, tab) || [],
+    split: ids.length === 1 ? w.tabs.split.menuItems(tab) : [], // (a split pairs two tabs)
+    layout: tabLayout.menuItems(w, w.profile.store),
+  }),
+  stripExtras: (w) => [{ label: 'Name Window…', click: () => powerUser.nameWindow(w) }, { type: 'separator' }, ...tabLayout.menuItems(w, w.profile.store)],
 });
 const tabSearch = new TabSearch({ alive, recentlyClosed, ownsClosed, reopenClosed: (index) => reopenClosed(index) });
 const tabDrag = new TabDrag({ alive, cur, strip: tabStrip });
@@ -1014,6 +1029,7 @@ function registerIpc() {
       downloads: w.profile.downloads.list(),
       panel: { open: store.settings.panelOpen, width: store.settings.panelWidth },
       sidebar: { open: store.settings.sidebarOpen !== false, getStarted: store.settings.getStartedDone !== true },
+      tabLayout: w.tabLayout, // tabs at the top or to the side (main/tab-layout.js)
       ai: w.ai.state(),
       bookmarks: w.profile.bookmarks.payload(),
       savedGroups: w.incognito ? [] : w.profile.groups.payload(),
@@ -1060,6 +1076,14 @@ function registerIpc() {
   on('tab:focus-page', (w) => w.tabs.wc()?.focus());
   on('tab:hovercard', (w, msg) => (msg?.hide ? w.hideHoverCard({ now: !!msg.now }) : w.showHoverCard(msg)));
   on('window:new', (w) => createWindow({ profile: w.profile.base }));
+  // Tabs to the side (main/tab-layout.js) and split view (main/split-view.js).
+  on('layout:tabs', (w, patch) => tabLayout.set(w, patch || {}, w.profile.store));
+  on('layout:split', (w, rects) => w.tabs.split.setRects(rects));
+  on('layout:split-preview', (w, rect) => w.tabs.split.setPreview(rect));
+  on('tab:split', (w, { id, base, side } = {}) => w.tabs.split.dropOnEdge(id, { base, side }));
+  on('tab:split-ratio', (w, { id, ratio } = {}) => w.tabs.split.setRatio(id, ratio));
+  on('tab:split-swap', (w, id) => w.tabs.split.swap(id));
+  on('tab:split-separate', (w, id) => w.tabs.split.separate(id));
   // The ⋮ menu, drawn by the overlay (main/window.js showMenu). edit: the
   // shell had a text field focused, so Cut, Copy and Paste act there, not on the page.
   on('app:menu', (w, opts = {}) => {
@@ -1394,6 +1418,7 @@ function registerIpc() {
       approvalMode: store.settings.approvalMode,
       showBookmarksBar: !!store.settings.showBookmarksBar,
       appearance: theme.appearance(),
+      verticalTabs: !!store.settings.verticalTabs, // tabs to the side (main/tab-layout.js)
       ai: w.ai.state(),
       version: app.getVersion(),
       update: updater?.state || null,
@@ -1456,6 +1481,8 @@ function registerIpc() {
     if (key === 'approvalMode') w.ai.setMode(value);
     if (key === 'reasoning') w.ai.setReasoning(value);
     if (key === 'showBookmarksBar') w.profile.bookmarks.setBar(!!value);
+    // Tabs to the side: the profile's choice, for its windows now and new ones.
+    if (key === 'verticalTabs') { store.setSetting('verticalTabs', !!value); profileWindows(w.profile.base).forEach((x) => tabLayout.set(x, { vertical: !!value }, store)); }
     if (key === 'appearance' && theme.APPEARANCES.includes(value)) rootStore.setSetting('appearance', value); // app-wide
     if (key === 'startup' && STARTUP.includes(value)) store.setSetting('startup', value);
     if (key === 'askDownload') store.setSetting('askDownload', !!value);
@@ -1468,6 +1495,7 @@ function registerIpc() {
   system.register({
     internalHandle,
     shell,
+    beforeRelaunch: (w) => powerUser.confirmRelaunch(w), // asks while Lumio AI is busy
     onReset: (w) => {
       const p = w.profile.base;
       p.bookmarks.changed();
@@ -2367,6 +2395,10 @@ app.whenReady().then(async () => {
   registerIpc();
   security.registerIpc({ on, internalHandle });
   help.register({ handle, on, internalHandle });
+  // Window names, shortcuts, caret browsing, force dark, protocol handlers
+  // (main/power-user.js): Lumio's own settings, for every profile.
+  forceDark.migrate(rootStore); // lumio://flags-lite's old "Dark mode for all websites"
+  powerUser.setup({ store: rootStore, on, handle, internalHandle, windows: alive, tabOf: tabOfWc, menuChanged, menuTemplate: () => menuTemplate(cmd, menuState()) });
   Menu.setApplicationMenu(buildMenu(cmd, menuState()));
 
   osIntegration.start(); // the Dock menu and download progress
@@ -2526,7 +2558,7 @@ async function snapshot(w = cur()) {
       }
     }
   };
-  if (tabs.active?.view) await paste(tabs.active.view);
+  for (const t of tabs.tabs) if (t.view && tabs.split.isShown(t.id)) await paste(t.view); // both sides of a split view
   const bar = w.indicator?.bar;
   if (bar && win.contentView.children.includes(bar)) await paste(bar);
   for (const v of Object.values(w.hud?.views || {})) if (win.contentView.children.includes(v) && v.getVisible()) await paste(v);

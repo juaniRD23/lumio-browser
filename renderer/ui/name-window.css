@@ -1,0 +1,9 @@
+/* "Name this window" (name-window.js), drawn by the overlay. Its parts come
+   from overlay.css (the Save password box); this adds what a keyboard needs. */
+.nw .pws-field input { margin-top: 2px; }
+.nw .pws-field span { line-height: 1.4; }
+.nw .acc-btn { cursor: pointer; }
+.nw .acc-btn:focus-visible, .nw .pws-field input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  body.namewindow #card { animation: none; }
+}

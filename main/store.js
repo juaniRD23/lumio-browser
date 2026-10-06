@@ -67,6 +67,7 @@ const DEFAULT_SETTINGS = {
   memorySaver: true, // tabs you haven't looked at for a while give back their memory
   memorySaverMinutes: 60,
   appearance: 'system', // 'system', 'light' or 'dark' (main/theme.js; profile.theme is the accent)
+  verticalTabs: false, // new windows show their tabs in a column at the side (main/tab-layout.js)
 };
 
 const HISTORY_DAYS = 90;

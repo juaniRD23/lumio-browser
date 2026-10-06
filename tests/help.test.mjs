@@ -29,27 +29,29 @@ const settingsStore = (settings = {}) => ({ settings, setSetting(k, v) { this.se
 
 // ---------------------------------------------------------------- flags
 test('experiments: defaults, switches, and a restart to apply', () => {
-  assert.deepEqual(flags.values(), { smoothScrolling: true, forceDark: false, parallelDownloading: false });
+  // (Dark mode for all websites is Settings › Appearance › Force dark mode, main/force-dark.js.)
+  assert.deepEqual(flags.values(), { smoothScrolling: true, parallelDownloading: false });
   assert.deepEqual(flags.switchesFor({}), { switches: [], features: [] }, 'the defaults change nothing');
   assert.deepEqual(flags.switchesFor({ smoothScrolling: false, forceDark: true, parallelDownloading: true, bogus: true }), {
     switches: [['disable-smooth-scrolling']],
-    features: ['WebContentsForceDark', 'ParallelDownloading'],
+    features: ['ParallelDownloading'],
   });
   assert.deepEqual(flags.set({}, 'bogus', true), {}, 'only known experiments are saved');
-  const saved = flags.set({}, 'forceDark', 1);
-  assert.deepEqual(saved, { forceDark: true });
+  assert.deepEqual(flags.set({}, 'forceDark', true), {}, 'force dark is a setting of its own now');
+  const saved = flags.set({}, 'parallelDownloading', 1);
+  assert.deepEqual(saved, { parallelDownloading: true });
 
   // At startup: straight from settings.json, merged with features already asked for.
-  fs.writeFileSync(path.join(tmp, 'settings.json'), JSON.stringify({ flags: { forceDark: true, smoothScrolling: false } }));
+  fs.writeFileSync(path.join(tmp, 'settings.json'), JSON.stringify({ flags: { parallelDownloading: true, smoothScrolling: false } }));
   const switches = new Map([['enable-features', 'Existing']]);
   const app = { commandLine: { appendSwitch: (k, v) => switches.set(k, v), getSwitchValue: (k) => switches.get(k) || '' } };
   flags.applyAtStartup(app, tmp);
-  assert.equal(switches.get('enable-features'), 'Existing,WebContentsForceDark');
+  assert.equal(switches.get('enable-features'), 'Existing,ParallelDownloading');
   assert.ok(switches.has('disable-smooth-scrolling'));
-  assert.equal(flags.state({ forceDark: true, smoothScrolling: false }).restart, false, 'what it started with');
-  const changed = flags.state({ forceDark: false, smoothScrolling: false });
+  assert.equal(flags.state({ parallelDownloading: true, smoothScrolling: false }).restart, false, 'what it started with');
+  const changed = flags.state({ parallelDownloading: false, smoothScrolling: false });
   assert.equal(changed.restart, true);
-  assert.deepEqual(changed.flags.map((f) => [f.id, f.value, f.default]), [['smoothScrolling', false, true], ['forceDark', false, false], ['parallelDownloading', false, false]]);
+  assert.deepEqual(changed.flags.map((f) => [f.id, f.value, f.default]), [['smoothScrolling', false, true], ['parallelDownloading', false, false]]);
 
   // A first launch (no settings yet) starts with the defaults.
   const fresh = new Map();
@@ -192,14 +194,11 @@ test('Help commands and the pages’ calls', async () => {
   assert.deepEqual(handlers['page:version-info'].hosts, ['version']);
   assert.deepEqual(handlers['page:flags'].hosts, ['flags-lite']);
   assert.equal(handlers['page:version-info'].fn({}).version, '0.6.7');
-  const after = handlers['page:set-flag'].fn({}, 'forceDark', true);
-  assert.equal(h.store.settings.flags.forceDark, true);
-  assert.equal(after.flags.find((f) => f.id === 'forceDark').value, true);
+  const after = handlers['page:set-flag'].fn({}, 'parallelDownloading', true);
+  assert.equal(h.store.settings.flags.parallelDownloading, true);
+  assert.equal(after.flags.find((f) => f.id === 'parallelDownloading').value, true);
   handlers['page:flags-reset'].fn({});
   assert.deepEqual(h.store.settings.flags, {});
-  dialogAnswer = 1;
-  assert.equal(await handlers['page:relaunch'].fn({ w: { win: {} } }), false, 'Cancel keeps Lumio running');
-  dialogAnswer = 0;
-  assert.equal(await handlers['page:relaunch'].fn({ w: { win: {} } }), true);
-  assert.equal(relaunched, 1);
+  // Its Restart button is main/system.js's page:relaunch (the windows come back).
+  assert.equal(handlers['page:relaunch'], undefined);
 });

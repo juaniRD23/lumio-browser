@@ -384,6 +384,10 @@ page.on('appearance', showAppearance);
 $('#bm-bar').checked = s.showBookmarksBar;
 $('#bm-bar').addEventListener('change', (e) => page.invoke('page:set-setting', 'showBookmarksBar', e.target.checked));
 
+// Tabs to the side: all windows now, and new ones (main/tab-layout.js).
+$('#vertical-tabs').checked = !!s.verticalTabs;
+$('#vertical-tabs').addEventListener('change', (e) => page.invoke('page:set-setting', 'verticalTabs', e.target.checked));
+
 // The search engine select and its settings: search-engines.js.
 
 $('#dl-dir').textContent = s.downloadDir;

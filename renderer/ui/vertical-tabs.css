@@ -1,0 +1,122 @@
+/* Tabs to the side (vertical-tabs.js) and the collapsed column's flyout over
+   the page (tab-flyout.js, loaded by the overlay). Colors are theme tokens
+   (renderer/assets/theme.css), so both work in light and dark. */
+
+/* ---------------------------------------------------------------- the window */
+/* The tab strip's row folds away and the toolbar becomes the top row. */
+body.vtabs { grid-template-rows: 0 46px auto 1fr; }
+body.vtabs #tabstrip { display: none; }
+/* The window drags by the toolbar's empty parts, as it does by the strip's. */
+body.vtabs #toolbar { -webkit-app-region: drag; }
+body.vtabs #toolbar > * { -webkit-app-region: no-drag; }
+body.vtabs #toolbar > .vt-lead { -webkit-app-region: drag; }
+body.windows.vtabs #toolbar { padding-right: 146px; } /* Windows' caption buttons */
+.vt-lead { display: none; }
+body.vtabs .vt-lead { display: flex; align-items: center; gap: 2px; flex: none; align-self: stretch; }
+/* Room for the Mac's window buttons, unless the open Lumio sidebar holds them. */
+.vt-traffic { width: 72px; flex: none; }
+body:not(.sidebar-closed) .vt-traffic { width: 0; }
+body.windows .vt-traffic { width: 10px; }
+.vt-lead #sb-open { margin: 0 2px 0 0; align-self: center; -webkit-app-region: no-drag; }
+
+/* ---------------------------------------------------------------- the column */
+#vtabs { display: none; }
+body.vtabs #vtabs {
+  display: flex; flex-direction: column; flex: none; min-height: 0;
+  width: 232px; margin-right: 8px;
+  transition: width .22s var(--ease);
+}
+body.vtabs-collapsed #vtabs { width: 44px; }
+body.no-anim #vtabs { transition: none; }
+/* Its top is another place to drag the window by (the toolbar has little room left). */
+.vt-head { display: flex; align-items: center; gap: 6px; height: 34px; flex: none; padding: 0 0 0 4px; -webkit-app-region: drag; }
+.vt-head > * { -webkit-app-region: no-drag; }
+body.vtabs-collapsed .vt-head { padding: 0; justify-content: center; }
+.vt-badge { display: flex; min-width: 0; }
+.vt-badge #incognito-badge { height: 24px; font-size: 11.5px; }
+body.vtabs-collapsed .vt-badge { display: none; }
+.vt-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0 0 10px; }
+.vt-scroll::-webkit-scrollbar { width: 6px; }
+.vt-scroll::-webkit-scrollbar-thumb { background: var(--overlay-5); border-radius: 6px; }
+
+/* ---------------------------------------------------------------- tab rows */
+/* One list: pinned tabs are tiles in a grid at the top, the others full rows. */
+.vt-tabs { display: grid; grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); gap: 2px; }
+.vt-tab {
+  grid-column: 1 / -1; position: relative;
+  display: flex; align-items: center; gap: 8px;
+  height: 34px; min-width: 0; padding: 0 5px 0 10px; border-radius: 9px;
+  color: var(--dim); font-size: 12.5px;
+  transition: background 140ms var(--ease), color 140ms var(--ease);
+}
+.vt-tab:hover { background: var(--tab-hover); color: var(--text); }
+.vt-tab.active { background: var(--tab-active); color: var(--text); box-shadow: inset 0 0 0 1px var(--line); }
+/* The other side of the split view on screen. */
+.vt-tab.shown { background: var(--overlay-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--line); }
+.vt-tab:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.vt-tab.sleeping:not(.active) :is(.fav, .title) { opacity: .55; }
+.vt-tab .fav { width: 16px; height: 16px; flex: none; display: grid; place-items: center; border-radius: 4px; overflow: hidden; }
+.vt-tab .fav img { width: 16px; height: 16px; }
+.vt-tab .fav svg { width: 14px; height: 14px; }
+.vt-tab .title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vt-tab .vt-split { display: grid; place-items: center; flex: none; color: var(--label); }
+.vt-tab:is(.active, .shown) .vt-split { color: var(--accent); }
+.vt-tab .audio { flex: none; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; color: var(--dim); }
+.vt-tab .audio:hover { background: var(--active); color: var(--text); }
+.vt-tab .x { width: 22px; height: 22px; border-radius: 6px; flex: none; display: grid; place-items: center; color: var(--label); opacity: 0; }
+.vt-tab:is(:hover, .active, :focus-visible) .x { opacity: 1; }
+.vt-tab .x:hover { background: var(--active); color: var(--text); }
+.vt-tab .agent-dot {
+  --dot: light-dark(color-mix(in srgb, var(--c) 70%, var(--text-strong)), var(--c));
+  --ring: light-dark(transparent, var(--scrim));
+  width: 8px; height: 8px; border-radius: 50%; flex: none; margin-left: -4px;
+  background: var(--dot); box-shadow: 0 0 0 2px var(--ring), 0 0 8px var(--dot);
+  animation: vt-pulse 1.6s ease-in-out infinite;
+}
+@keyframes vt-pulse { 50% { box-shadow: 0 0 0 2px var(--ring), 0 0 2px var(--dot); opacity: .75; } }
+/* Pinned tiles: just the icon. */
+.vt-tab.pinned { grid-column: auto; justify-content: center; padding: 0; }
+.vt-tab.pinned :is(.title, .x, .vt-split) { display: none; }
+.vt-tab.pinned .audio { position: absolute; right: 4px; top: 3px; width: 15px; height: 15px; border-radius: 50%; background: var(--field); box-shadow: 0 0 0 1.5px var(--bg); }
+.vt-tab.pinned .audio svg { width: 10px; height: 10px; }
+.vt-tab.pinned .agent-dot { position: absolute; right: 4px; bottom: 4px; margin: 0; }
+/* A line between the pinned tabs and the others. */
+.vt-tab.after-pins { margin-top: 9px; }
+.vt-tab.after-pins::before { content: ''; position: absolute; left: 8px; right: 8px; top: -6px; height: 1px; background: var(--line); }
+/* Dragging to reorder. */
+.vt-tab.dragging { z-index: 2; background: var(--tab-active); color: var(--text); box-shadow: var(--shadow-lift), inset 0 0 0 1px var(--line-strong); transition: none; }
+.vt-tab.shifting { transition: transform 160ms var(--ease); }
+.vt-tab:is(.drop-before, .drop-after)::after { content: ''; position: absolute; top: 6px; bottom: 6px; width: 2px; border-radius: 2px; background: var(--accent); }
+.vt-tab.drop-before::after { left: -2px; }
+.vt-tab.drop-after::after { right: -2px; }
+.vt-tabs.reordering .vt-tab:not(.dragging) { pointer-events: none; }
+/* New tab, under the tabs. */
+.vt-new { display: flex; align-items: center; gap: 8px; width: 100%; height: 34px; margin-top: 2px; padding: 0 10px; border-radius: 9px; color: var(--label); font-size: 12.5px; text-align: left; }
+.vt-new:hover { background: var(--tab-hover); color: var(--text); }
+.vt-new:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.vt-new .fav { width: 16px; height: 16px; flex: none; display: grid; place-items: center; }
+.vt-new svg { width: 15px; height: 15px; }
+
+/* ---------------------------------------------------------------- collapsed: icons only */
+body.vtabs-collapsed #vtabs :is(.vt-tab, .vt-new) { padding: 0; justify-content: center; }
+body.vtabs-collapsed #vtabs :is(.vt-tab .title, .vt-tab .x, .vt-tab .vt-split, .vt-new .title) { display: none; }
+body.vtabs-collapsed #vtabs .vt-tab .audio { position: absolute; right: 4px; top: 3px; width: 15px; height: 15px; border-radius: 50%; background: var(--field); box-shadow: 0 0 0 1.5px var(--bg); }
+body.vtabs-collapsed #vtabs .vt-tab .audio svg { width: 10px; height: 10px; }
+body.vtabs-collapsed #vtabs .vt-tab .agent-dot { position: absolute; right: 5px; bottom: 5px; margin: 0; }
+/* A split view's tabs: an accent mark at the edge. */
+body.vtabs-collapsed #vtabs .vt-tab.split::after { content: ''; position: absolute; left: 1px; top: 9px; bottom: 9px; width: 2px; border-radius: 2px; background: var(--accent); opacity: .7; }
+body.vtabs-collapsed #vtabs .vt-tab.after-pins::before { left: 6px; right: 6px; }
+
+/* ---------------------------------------------------------------- the flyout (overlay page) */
+body.vtabs-flyout { padding: 0 16px 6px 0; }
+body.vtabs-flyout #card { padding: 6px 6px 8px; border-radius: 12px; box-shadow: var(--shadow-md); animation: vtf-in .16s var(--ease); }
+@keyframes vtf-in { from { opacity: 0; transform: translateX(-8px); } }
+:where(.vtf button) { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: default; }
+.vtf [hidden] { display: none !important; }
+.vtf .spinner { width: 14px; height: 14px; border-radius: 50%; border: 1.8px solid var(--overlay-6); border-top-color: var(--text); animation: vt-spin .8s linear infinite; }
+@keyframes vt-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  #vtabs, .vt-tab, .vt-tab.shifting { transition: none !important; }
+  .vt-tab .agent-dot, body.vtabs-flyout #card { animation: none; }
+}

@@ -5,6 +5,7 @@
 // themes native menus, dialogs and the title bar. Native backgrounds can't
 // read CSS, so colors() gives them. Incognito windows are always dark.
 const accessibility = require('./accessibility');
+const forceDark = require('./force-dark');
 
 const APPEARANCES = ['system', 'light', 'dark'];
 
@@ -32,7 +33,8 @@ const systemSource = () => (!process.env.LUMIO_TEST ? 'system' : process.env.LUM
 
 function apply() {
   const a = appearance();
-  const source = a === 'system' ? systemSource() : a;
+  // Force dark mode for web contents darkens Lumio's pages too, so Lumio is dark while it's on (main/force-dark.js).
+  const source = forceDark.active() ? 'dark' : a === 'system' ? systemSource() : a;
   if (nativeTheme.themeSource !== source) nativeTheme.themeSource = source;
   changed();
 }

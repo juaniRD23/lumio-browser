@@ -1,0 +1,69 @@
+// Force dark mode for web contents (Settings › Appearance, experimental):
+// Chromium darkens light websites as it draws them, like Chrome's
+// chrome://flags/#enable-force-dark.
+//
+// Chrome's flag turns on a feature ("WebContentsForceDark") whose wiring
+// lives in Chrome's own code, not in Electron 43, so Lumio also sets the
+// Blink setting it ends in with a switch: --blink-settings=forceDarkModeEnabled=true.
+// The feature switch is added too, in case a later Electron reads it.
+// Switches are read when the app starts, so a change needs a relaunch;
+// Settings shows a Relaunch button until then.
+//
+// The switch reaches every page Chromium draws, Lumio's own window and
+// pages too, and while the computer prefers light it darkens all of them
+// (tests/power-user.test.mjs checks this in Chrome). So while it's on, Lumio
+// itself is dark (main/theme.js): then Lumio's pages and sites with a dark
+// theme of their own use their real dark colors, and only the rest are
+// darkened, and the window's native parts match.
+
+const fs = require('fs');
+const path = require('path');
+
+const KEY = 'forceDarkPages';
+const RESTORE = '--lumio-restore-session'; // a relaunch reopens the windows, whatever On startup says
+let startedWith = false;
+
+// Before the app is ready (the Store isn't open yet, so it reads the file).
+function applyAtStartup(app) {
+  try {
+    const saved = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'settings.json'), 'utf8'));
+    startedWith = saved[KEY] === true || (saved[KEY] === undefined && saved.flags?.forceDark === true); // (lumio://flags-lite's old switch)
+  } catch { startedWith = false; }
+  if (startedWith) {
+    appendValue(app.commandLine, 'blink-settings', 'forceDarkModeEnabled=true');
+    appendValue(app.commandLine, 'enable-features', 'WebContentsForceDark');
+  }
+  return startedWith;
+}
+
+// Adds to a comma-separated switch instead of replacing what's there
+// (Chromium reads only the last copy of a switch).
+function appendValue(commandLine, name, value) {
+  const prev = commandLine.hasSwitch(name) ? commandLine.getSwitchValue(name) : '';
+  commandLine.appendSwitch(name, prev ? `${prev},${value}` : value);
+}
+
+// Whether this run of Lumio started with it on.
+const active = () => startedWith;
+
+// lumio://flags-lite's "Dark mode for all websites" (batch 7c) is this
+// setting now: an old choice there moves here once.
+function migrate(store) {
+  const flags = store.settings.flags;
+  if (!flags || !('forceDark' in flags)) return;
+  if (store.settings[KEY] === undefined && flags.forceDark === true) store.setSetting(KEY, true);
+  const { forceDark: _old, ...rest } = flags;
+  store.setSetting('flags', rest);
+}
+
+// on: the setting. active: what this run of Lumio started with.
+const state = (store) => ({ on: store.settings[KEY] === true, active: startedWith });
+
+// Quits and starts again; the windows and tabs come back.
+function relaunch(app, argv = process.argv) {
+  app.relaunch({ args: [...argv.slice(1).filter((a) => a !== RESTORE), RESTORE] });
+  app.quit();
+}
+const relaunched = (argv = process.argv) => argv.includes(RESTORE);
+
+module.exports = { KEY, applyAtStartup, appendValue, active, state, migrate, relaunch, relaunched, RESTORE };

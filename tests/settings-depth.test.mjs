@@ -186,7 +186,7 @@ test('Reset settings puts settings back and keeps bookmarks, history, passwords 
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('a Guest can’t change app-wide settings, restart or reset', () => {
+test('a Guest can’t change app-wide settings, restart or reset', async () => {
   const dir = tmp();
   const rootStore = new Store(path.join(dir, 'root'));
   const store = new Store(path.join(dir, 'g'));
@@ -202,7 +202,7 @@ test('a Guest can’t change app-wide settings, restart or reset', () => {
   assert.equal(resets, 0);
   assert.equal(rootStore.settings.appearance, 'dark', 'the owner’s settings stay');
   assert.equal(handlers['page:set-system'](ctx, 'hardwareAcceleration', false).hardwareAcceleration, true);
-  assert.equal(handlers['page:relaunch'](ctx), false);
+  assert.equal(await handlers['page:relaunch'](ctx), false);
   handlers['page:set-ui-language'](ctx, 'es');
   assert.equal(rootStore.settings.uiLanguage, undefined);
   rootStore.flushAll(); store.flushAll();

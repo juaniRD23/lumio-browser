@@ -90,14 +90,16 @@ class System {
     return true;
   }
 
-  // ctx: { internalHandle, shell, onReset(w) } from main.js. A Guest can't
-  // change app-wide settings (they're the computer owner's), restart or reset.
-  register({ internalHandle, shell, onReset }) {
+  // ctx: { internalHandle, shell, onReset(w), beforeRelaunch(w) } from
+  // main.js. A Guest can't change app-wide settings (they're the computer
+  // owner's), restart or reset. Every Restart / Relaunch button (Languages,
+  // System, force dark, lumio://flags-lite) comes here, so the windows come back.
+  register({ internalHandle, shell, onReset, beforeRelaunch = async () => true }) {
     const guest = ({ w }) => !!w.profile.guest;
     internalHandle('page:system', ['settings'], () => this.pageState());
     internalHandle('page:set-system', ['settings'], (ctx, key, value) => (guest(ctx) ? this.pageState() : this.set(String(key), value)));
     internalHandle('page:open-proxy-settings', ['settings'], () => this.openProxySettings(shell));
-    internalHandle('page:relaunch', ['settings'], (ctx) => !guest(ctx) && this.relaunch());
+    internalHandle('page:relaunch', ['settings', 'flags-lite'], async (ctx) => !guest(ctx) && (await beforeRelaunch(ctx.w)) && this.relaunch());
     internalHandle('page:reset-settings', ['settings'], (ctx) => {
       const { w } = ctx;
       if (guest(ctx)) return false;

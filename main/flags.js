@@ -12,13 +12,9 @@ const FLAGS = [
     default: true,
     switches: (on) => (on ? [] : [['disable-smooth-scrolling']]),
   },
-  {
-    id: 'forceDark',
-    name: 'Dark mode for all websites',
-    description: 'Show websites in dark colors, even ones that don’t have a dark mode. Some sites, and Lumio’s own light pages, may look wrong.',
-    default: false,
-    features: (on) => (on ? ['WebContentsForceDark'] : []),
-  },
+  // (Dark mode for all websites is one setting: Settings › Appearance ›
+  // Force dark mode for web contents, main/force-dark.js. An older
+  // flags.forceDark choice moves there.)
   {
     id: 'parallelDownloading',
     name: 'Parallel downloading',

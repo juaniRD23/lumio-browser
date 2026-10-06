@@ -4,6 +4,7 @@
 // The ⋮ button opens buildBrowserMenu() on every platform.
 const { Menu } = require('electron');
 const extras = require('./menu-extras');
+const shortcuts = require('./shortcuts');
 
 const MAC = process.platform === 'darwin';
 
@@ -34,7 +35,12 @@ function saveAndShare(cmd, menuBar) {
   ];
 }
 
+// state.shortcuts: the shortcuts the person picked (main/shortcuts.js).
 function buildMenu(cmd, state = {}) {
+  return Menu.buildFromTemplate(shortcuts.apply(menuTemplate(cmd, state), state.shortcuts));
+}
+
+function menuTemplate(cmd, state = {}) {
   const hidden = (accelerator, click) => ({ label: accelerator, accelerator, click, visible: false, acceleratorWorksWhenHidden: true });
   const tabKeys = Array.from({ length: 9 }, (_, i) => hidden(`CmdOrCtrl+${i + 1}`, () => cmd.tabIndex(i + 1)));
 
@@ -118,14 +124,16 @@ function buildMenu(cmd, state = {}) {
         {
           label: 'Appearance',
           submenu: [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']]
-            .map(([id, label]) => ({ label, type: 'radio', checked: state.appearance === id, click: () => cmd.setAppearance(id) })),
+            // Force dark mode keeps Lumio dark until it's off (main/force-dark.js).
+            .map(([id, label]) => ({ label, type: 'radio', checked: state.appearance === id, enabled: !state.darkForced, click: () => cmd.setAppearance(id) })),
         },
         { label: 'Always Show Bookmarks Bar', type: 'checkbox', checked: !!state.bookmarksBar, accelerator: 'CmdOrCtrl+Shift+B', click: cmd.toggleBookmarksBar },
         { label: 'Show/Hide Sidebar', accelerator: 'CmdOrCtrl+Shift+S', click: cmd.toggleSidebar },
         { label: 'Show/Hide Lumio AI', accelerator: 'CmdOrCtrl+Shift+L', click: cmd.togglePanel },
         { label: 'Ask Lumio', accelerator: MAC ? 'Cmd+J' : 'Ctrl+Shift+K', click: cmd.focusAI },
-        { label: 'Reading Mode', click: cmd.readingMode },
-        { label: 'Translate Page…', click: cmd.translatePage },
+        { label: 'Reading Mode', id: 'reading-mode', click: cmd.readingMode },
+        { label: 'Translate Page…', id: 'translate-page', click: cmd.translatePage },
+        { label: 'Caret Browsing', type: 'checkbox', checked: !!state.caretBrowsing, accelerator: 'F7', click: cmd.toggleCaretBrowsing },
         { type: 'separator' },
         extras.developerMenu(state, cmd, hidden),
         { type: 'separator' },
@@ -181,14 +189,16 @@ function buildMenu(cmd, state = {}) {
     }, extras.tabMenu(cmd)] : []),
     {
       label: 'Window',
-      // The Mac lists the open windows at the end of its Window menu.
+      // The Mac lists the open windows at the end of its Window menu, by title (or name).
       ...(MAC ? { role: 'window' } : {}),
       submenu: [
         ...(MAC ? [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }] : []),
-        { label: 'Task Manager', ...(MAC ? {} : { accelerator: 'Shift+Escape' }), click: cmd.taskManager },
+        // An id lists a command without a shortcut in Settings › Keyboard shortcuts (main/shortcuts.js).
+        { id: 'name-window', label: 'Name Window…', click: cmd.nameWindow },
+        { label: 'Task Manager', ...(MAC ? {} : { accelerator: 'Shift+Escape' }), id: 'task-manager', click: cmd.taskManager },
         { type: 'separator' },
         // (The Mac has these in its Tab menu.)
-        ...(MAC ? [] : [{ label: 'Pin/Unpin Tab', click: cmd.pinTab }, { label: 'Move Tab to New Window', click: cmd.moveTabToNewWindow }]),
+        ...(MAC ? [] : [{ id: 'pin-unpin-tab', label: 'Pin/Unpin Tab', click: cmd.pinTab }, { id: 'move-tab-to-new-window', label: 'Move Tab to New Window', click: cmd.moveTabToNewWindow }]),
         { label: 'Search Tabs…', accelerator: 'CmdOrCtrl+Shift+A', click: cmd.tabSearch },
         { type: 'separator' },
         { label: 'Show Next Tab', accelerator: MAC ? 'Cmd+Shift+]' : 'Ctrl+PageDown', click: () => cmd.cycle(1) },
@@ -202,7 +212,7 @@ function buildMenu(cmd, state = {}) {
     },
     extras.helpMenu(cmd),
   ];
-  return Menu.buildFromTemplate(template);
+  return template;
 }
 
 // The ⋮ menu, laid out like Chrome's. Its entries are data: menuModel()
@@ -217,7 +227,8 @@ function buildBrowserMenu(cmd, state = {}) {
   const SEP = { type: 'separator' };
   const recent = (state.recentlyClosed || []).slice(0, 8);
   const marks = (state.bookmarks || []).slice(0, 20);
-  return [
+  // Shows the shortcuts as the person set them (main/shortcuts.js).
+  return followShortcuts(cmd, state, [
     { label: 'New tab', icon: 'plus', accel: 'CmdOrCtrl+T', run: cmd.newTab },
     { label: 'New window', icon: 'window', accel: 'CmdOrCtrl+N', run: cmd.newWindow },
     { label: 'New Incognito window', icon: 'incognito', accel: 'CmdOrCtrl+Shift+N', run: cmd.newIncognito },
@@ -301,7 +312,20 @@ function buildBrowserMenu(cmd, state = {}) {
       ],
     },
     { label: MAC ? 'Quit Lumio Browser' : 'Exit', icon: 'logout', accel: MAC ? 'Cmd+Q' : '', run: cmd.quit },
-  ];
+  ]);
+}
+
+// The ⋮ menu's entries with the shortcuts the person picked (main/shortcuts.js
+// follow() reads Electron's accelerator; these entries say accel).
+function followShortcuts(cmd, state, entries) {
+  if (!state.shortcuts || !Object.keys(state.shortcuts).length) return entries;
+  const swap = (list, from, to) => list.map((e) => {
+    const next = { ...e };
+    if (Array.isArray(e.submenu)) next.submenu = swap(e.submenu, from, to);
+    if (from in e) { delete next[from]; if (e[from]) next[to] = e[from]; }
+    return next;
+  });
+  return swap(shortcuts.follow(menuTemplate(cmd, state), state.shortcuts, swap(entries, 'accel', 'accelerator')), 'accelerator', 'accel');
 }
 
 // An accelerator as menus show it: ⇧⌘N on the Mac, Ctrl+Shift+N elsewhere.
@@ -356,4 +380,4 @@ function menuModel(entries, { mac = MAC } = {}) {
   return { items: build(entries), actions };
 }
 
-module.exports = { buildMenu, buildBrowserMenu, menuModel, accelLabel };
+module.exports = { buildMenu, buildBrowserMenu, menuTemplate, menuModel, accelLabel };

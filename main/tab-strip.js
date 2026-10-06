@@ -35,7 +35,8 @@ function windowLabel(w) {
 }
 
 // The tab menu. c says what it acts on; act(command, arg) runs a command.
-// extra: other parts' items, { groups } (tab groups) and { reading } (reading list).
+// extra: other parts' items, { groups } (tab groups), { reading } (reading
+// list), { split } (split view) and { layout } (tabs to the side).
 function tabMenuTemplate(c, act, extra = {}) {
   const s = c.many ? 's' : '';
   const shortcut = (accelerator) => ({ accelerator, registerAccelerator: false });
@@ -59,6 +60,7 @@ function tabMenuTemplate(c, act, extra = {}) {
     { label: c.pinned ? `Unpin Tab${s}` : `Pin Tab${s}`, click: () => act('pin') },
     { label: c.siteMuted ? `Unmute Site${s}` : `Mute Site${s}`, click: () => act('mute') },
     ...(extra.reading || []),
+    ...(extra.split || []),
     { type: 'separator' },
     { label: `Close Tab${s}`, ...shortcut('CmdOrCtrl+W'), click: () => act('close') },
     { label: 'Close Other Tabs', enabled: c.othersClosable, click: () => act('closeOthers') },
@@ -66,22 +68,26 @@ function tabMenuTemplate(c, act, extra = {}) {
     { type: 'separator' },
     { label: 'Reopen Closed Tab', ...shortcut('CmdOrCtrl+Shift+T'), enabled: c.closedCount > 0, click: () => act('reopen') },
     { label: 'Bookmark All Tabs', ...shortcut('CmdOrCtrl+Shift+D'), click: () => act('bookmarkAll') },
+    ...(extra.layout?.length ? [{ type: 'separator' }, ...extra.layout] : []),
   ];
 }
 
-// Right-click on the strip itself.
-function stripMenuTemplate(c, act) {
+// Right-click on the strip itself. extra: other parts' items (Name Window…,
+// tabs to the side).
+function stripMenuTemplate(c, act, extra = []) {
   return [
     { label: 'New Tab', accelerator: 'CmdOrCtrl+T', registerAccelerator: false, click: () => act('newTab') },
     { label: 'Reopen Closed Tab', accelerator: 'CmdOrCtrl+Shift+T', registerAccelerator: false, enabled: c.closedCount > 0, click: () => act('reopen') },
     { label: 'Bookmark All Tabs', accelerator: 'CmdOrCtrl+Shift+D', registerAccelerator: false, click: () => act('bookmarkAll') },
+    ...(extra.length ? [{ type: 'separator' }, ...extra] : []),
   ];
 }
 
 class TabStrip {
   // deps: { alive(), createWindow(opts), recentlyClosed: [], ownsClosed(w, entry), reopenClosed(w),
   //         bookmarkAllTabs(w), removeExtensionTab(wc), siteMute,
-  //         menuExtras(w, ids, tab): { groups, reading } items for the tab menu }
+  //         menuExtras(w, ids, tab): { groups, reading, split, layout } items for the tab menu,
+  //         stripExtras(w): items for the strip's own menu }
   constructor(deps) {
     this.deps = deps;
     this.wired = new WeakSet();
@@ -141,7 +147,7 @@ class TabStrip {
   }
 
   stripMenu(w) {
-    const menu = Menu.buildFromTemplate(stripMenuTemplate({ closedCount: this.closedCount(w) }, (cmd) => this.run(w, cmd, [], null)));
+    const menu = Menu.buildFromTemplate(stripMenuTemplate({ closedCount: this.closedCount(w) }, (cmd) => this.run(w, cmd, [], null), this.deps.stripExtras?.(w) || []));
     menu.popup({ window: w.win });
     return menu;
   }

@@ -17,6 +17,7 @@ const sessions = require('./sessions');
 const sadTab = require('./sad-tab');
 const { TabGroups } = require('./tab-groups');
 const i18n = require('./i18n');
+const { SplitViews } = require('./split-view');
 
 const NEWTAB = 'lumio://newtab/';
 const INTERNAL_PRELOAD = path.join(__dirname, '..', 'preload', 'internal.js');
@@ -73,6 +74,7 @@ class TabManager {
     this.fullscreenTab = null;
     this.pushTimer = null;
     this.groups = new TabGroups(this); // main/tab-groups.js
+    this.split = new SplitViews(this, { newTabUrl: NEWTAB }); // tabs side by side (main/split-view.js)
   }
 
   get active() { return this.tabs.find((t) => t.id === this.activeId) || null; }
@@ -126,6 +128,7 @@ class TabManager {
 
   // Pinned tabs always come first.
   insert(tab, index) {
+    index = this.split.insertIndex(index);
     const pins = this.pinnedCount();
     const lo = tab.pinned ? 0 : pins;
     const hi = tab.pinned ? pins : this.tabs.length;
@@ -186,7 +189,7 @@ class TabManager {
   // (screen share, camera), with devtools open, or a Lumio AI working in it.
   discard(id) {
     const tab = this.get(id);
-    if (!tab?.view || tab.id === this.activeId || tab.audible || tab.agent || tab.dialogs?.length || tab.closing) return false;
+    if (!tab?.view || tab.id === this.activeId || this.split.isShown(tab.id) || tab.audible || tab.agent || tab.dialogs?.length || tab.closing) return false;
     const wc = tab.view.webContents;
     if (wc.isDestroyed() || wc.isLoading() || wc.isCurrentlyAudible() || wc.isBeingCaptured() || wc.isDevToolsOpened()) return false;
     const url = wc.getURL();
@@ -440,6 +443,8 @@ class TabManager {
       m.hooks.onFullscreen?.(tab, false);
     });
     wc.on('found-in-page', (_e, result) => M().hooks.onFound?.(tab.id, result));
+    // Split view: clicking into the other side's page makes it the focused side.
+    wc.on('focus', () => { const m = M(); if (tab.id !== m.activeId && m.split.isShown(tab.id)) m.activate(tab.id); });
     wc.on('zoom-changed', (_e, dir) => M().zoom(dir === 'in' ? 1 : -1, tab.id));
     // How far the page has got, for the address bar's progress line
     // (shell.js renderLoad): started, the new page answered, its document is
@@ -592,14 +597,15 @@ class TabManager {
   detach(id) {
     const i = this.tabs.findIndex((t) => t.id === id);
     if (i < 0) return null;
+    const partner = this.split.drop(id);
     const [tab] = this.tabs.splice(i, 1);
     if (tab.view) this.win.contentView.removeChildView(tab.view);
     if (this.fullscreenTab === id) this.fullscreenTab = null;
     if (this.activeId === id) {
       this.activeId = null;
-      if (this.tabs.length) this.activate(this.tabs[Math.min(i, this.tabs.length - 1)].id);
+      if (this.tabs.length) this.activate(partner ?? this.tabs[Math.min(i, this.tabs.length - 1)].id);
       else this.hooks.onDialogs?.(); // its dialog goes with it
-    }
+    } else if (partner === this.activeId) this.layout(); // its other side left: the whole page area again
     this.changed();
     return tab;
   }
@@ -702,6 +708,7 @@ class TabManager {
     const i = this.tabs.indexOf(tab);
     if (i < 0) return;
     const id = tab.id;
+    const partner = this.split.drop(id); // closing one side leaves the other as a normal tab
     this.tabs.splice(i, 1);
     this.dismiss(tab);
     const wc = tab.view?.webContents;
@@ -721,9 +728,9 @@ class TabManager {
       return;
     }
     if (this.activeId === id) {
-      const next = this.tabs[Math.min(i, this.tabs.length - 1)];
-      this.activate(next.id);
-    }
+      const next = partner ?? this.tabs[Math.min(i, this.tabs.length - 1)].id;
+      this.activate(next);
+    } else if (partner === this.activeId) this.layout(); // the other side now has the whole page area
     this.changed();
   }
 
@@ -817,11 +824,19 @@ class TabManager {
     this.activeId = id;
     this.groups.onActivate(tab);
     this.ensureView(tab);
-    for (const t of this.tabs) if (t.view) { t.view.setVisible(t.id === id); t.view.lumioCovered = false; }
+    // In split view the other side shows too (main/split-view.js).
+    const partner = this.get(this.split.partnerOf(id));
+    if (partner) this.ensureView(partner);
+    for (const t of this.tabs) if (t.view) { t.view.setVisible(t === tab || t === partner); t.view.lumioCovered = false; }
     // Keep the active page on top of the other tabs (and below any overlay).
-    // Re-adding a view detaches it briefly, so skip it when it's already on top.
+    // Re-adding a view detaches it briefly, so skip it when it's already on
+    // top (or its other side is: switching sides must not interrupt a click).
     const children = this.win.contentView.children.filter((v) => this.tabs.some((t) => t.view === v));
-    if (children[children.length - 1] !== tab.view) this.win.contentView.addChildView(tab.view);
+    const top = children[children.length - 1];
+    if (top !== tab.view && top !== partner?.view) {
+      if (partner) this.win.contentView.addChildView(partner.view);
+      this.win.contentView.addChildView(tab.view);
+    }
     this.hooks.onActivated?.(tab, this);
     this.layout();
     this.changed();
@@ -833,12 +848,16 @@ class TabManager {
     const [tab] = this.tabs.splice(i, 1);
     this.insert(tab, toIndex);
     this.groups.afterMove(tab);
+    this.split.follow(id); // the other side of a split moves with it
     this.changed();
   }
 
   setPinned(id, pinned) {
     const tab = this.get(id);
     if (!tab || tab.pinned === !!pinned) return;
+    // Pinned tabs don't split: if this pair is on screen, only the active side stays.
+    const partner = pinned ? this.split.drop(id) : null;
+    if (partner != null && (this.activeId === id || this.activeId === partner)) this.activate(this.activeId);
     this.tabs.splice(this.tabs.indexOf(tab), 1);
     tab.pinned = !!pinned;
     this.insert(tab, pinned ? this.pinnedCount() : this.pinnedCount());
@@ -971,7 +990,8 @@ class TabManager {
     const percent = zoomPrefs.stepZoom(zoomPrefs.percentOf(wc.getZoomFactor()), step, def);
     wc.setZoomFactor(zoomPrefs.factorOf(percent));
     if (!this.incognito) zoomPrefs.rememberZoom(this.store, wc.getURL(), percent);
-    this.emit('zoom', { level: percent, zoomed: percent !== def });
+    // The bubble in the address bar is the focused tab's (in split view, ⌘-scrolling the other side doesn't open it).
+    if (id === this.activeId) this.emit('zoom', { level: percent, zoomed: percent !== def });
     this.changed();
   }
 
@@ -1027,22 +1047,32 @@ class TabManager {
   layout() {
     const tab = this.active;
     if (!tab?.view) return;
-    if (tab.view.lumioCovered !== !!this.covered) {
-      tab.view.setVisible(!this.covered);
-      tab.view.lumioCovered = !!this.covered;
-    }
-    const full = this.fullscreenTab === tab.id;
-    if (full) {
-      const [w, h] = this.win.getContentSize();
-      tab.view.setBounds({ x: 0, y: 0, width: w, height: h });
-    } else {
-      tab.view.setBounds(this.slot);
-    }
-    // Setting the corner radius rebuilds the view's layer; only do it when it changes.
-    const radius = full ? 0 : this.radius;
-    if (tab.view.lumioRadius !== radius && typeof tab.view.setBorderRadius === 'function') {
-      tab.view.setBorderRadius(radius);
-      tab.view.lumioRadius = radius;
+    // Split view: both sides, where the shell measured its panes. Otherwise
+    // the active page fills the slot (or the half a tab dragged to the
+    // page's edge leaves it).
+    const panes = this.split.panes() || [{ tab, rect: this.split.preview || this.slot }];
+    const fullId = panes.some((p) => p.tab.id === this.fullscreenTab) ? this.fullscreenTab : null;
+    for (const { tab: t, rect } of panes) {
+      if (!t.view) continue;
+      // Hidden under the full-size chat, or beside the other side's full screen video.
+      const hidden = !!this.covered || (fullId != null && fullId !== t.id);
+      if (t.view.lumioCovered !== hidden) {
+        t.view.setVisible(!hidden);
+        t.view.lumioCovered = hidden;
+      }
+      const full = fullId === t.id;
+      if (full) {
+        const [w, h] = this.win.getContentSize();
+        t.view.setBounds({ x: 0, y: 0, width: w, height: h });
+      } else {
+        t.view.setBounds(rect);
+      }
+      // Setting the corner radius rebuilds the view's layer; only do it when it changes.
+      const radius = full ? 0 : this.radius;
+      if (t.view.lumioRadius !== radius && typeof t.view.setBorderRadius === 'function') {
+        t.view.setBorderRadius(radius);
+        t.view.lumioRadius = radius;
+      }
     }
     this.hooks.onLayout?.();
   }
@@ -1079,6 +1109,7 @@ class TabManager {
   state() {
     return {
       activeId: this.activeId,
+      split: this.split.state(), // the pair on screen: { left, right, ratio } or null
       tabs: this.tabs.map((t) => ({
         id: t.id,
         wcId: t.view ? t.view.webContents.id : null,
@@ -1105,6 +1136,7 @@ class TabManager {
         pinned: t.pinned,
         zoom: this.zoomShown(t),
         groupId: t.groupId || null,
+        split: this.split.sideOf(t.id), // 'left' or 'right' in a split view
         bookmarked: this.store.isBookmarked(this.displayUrl(t)),
         popupsBlocked: t.blockedPopups?.length || 0,
         // A certificate warning, or a site you went past one for: "Not secure" in red.
@@ -1120,15 +1152,14 @@ class TabManager {
   // What the session file keeps for this window. A tab on an error page is
   // kept as the page that failed. history: with each tab's back/forward pages.
   // An extension's new tab page is saved as the new tab page, so it follows
-  // if the extension goes.
+  // if the extension goes. Split views keep their pairs (main/split-view.js).
   sessionTabs({ history = false } = {}) {
-    return this.tabs
-      .map((t) => {
-        const h = history ? sessions.historyOf(t) : null;
-        const raw = t.pendingUrl || t.url || '';
-        return { url: this.isExtensionNewTab(raw) ? NEWTAB : sessions.realUrl(raw), title: t.title, ...(t.pinned ? { pinned: true } : {}), ...(t.groupId ? { group: t.groupId } : {}), ...(h ? { history: h } : {}) };
-      })
-      .filter((t) => t.url);
+    const urlOf = (t) => { const raw = t.pendingUrl || t.url || ''; return this.isExtensionNewTab(raw) ? NEWTAB : sessions.realUrl(raw); };
+    const saved = this.tabs.filter((t) => urlOf(t));
+    return saved.map((t) => {
+      const h = history ? sessions.historyOf(t) : null;
+      return { url: urlOf(t), title: t.title, ...(t.pinned ? { pinned: true } : {}), ...(t.groupId ? { group: t.groupId } : {}), ...this.split.sessionFields(t, saved), ...(h ? { history: h } : {}) };
+    });
   }
 
   changed() {
@@ -1146,6 +1177,7 @@ class TabManager {
     // The tab to show is one of these (the window may already have others).
     const made = list.map((t, i) => this.create(t.url, { active: false, lazy: i !== active, title: t.title, pinned: !!t.pinned, history: t.history }));
     this.groups.restore(groups, list, made);
+    this.split.restore(list, made);
     const target = made[Math.min(active, made.length - 1)];
     if (target) this.activate(target.id);
     return true;
@@ -1174,6 +1206,7 @@ class TabManager {
       items.push(
         { label: 'Open Link in New Tab', click: openLink(() => this.create(params.linkURL, { active: false, index })) },
         { label: 'Open Link in New Window', click: openLink(() => this.hooks.openInNewWindow?.(params.linkURL, this.incognito)) },
+        ...(tab.pinned || classify(params.linkURL) === 'external' ? [] : [{ label: 'Open Link in Split View', click: () => this.split.openBeside(tab.id, params.linkURL) }]),
         ...(this.incognito || this.guest ? [] : [{ label: 'Open Link in Incognito Window', click: openLink(() => this.hooks.openInNewWindow?.(params.linkURL, true)) }]),
         { type: 'separator' },
         { label: 'Save Link As…', click: () => this.hooks.saveAs(wc, params.linkURL) },

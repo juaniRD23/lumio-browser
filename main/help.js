@@ -6,7 +6,7 @@
 // screenshot are off until they turn them on, and system info (versions,
 // OS) can be turned off. The screenshot is taken when the dialog opens, kept
 // in memory to preview, and dropped when it closes.
-const { app, dialog } = require('electron');
+const { app } = require('electron');
 const os = require('os');
 const pkg = require('../package.json');
 const FLAVOR = require('./flavor');
@@ -104,16 +104,7 @@ class Help {
       this.store.setSetting('flags', {});
       return flags.state({});
     });
-    internalHandle('page:relaunch', ['flags-lite'], async ({ w }) => {
-      const { response } = await dialog.showMessageBox(w.win, {
-        type: 'question', buttons: ['Restart', 'Cancel'], defaultId: 0, cancelId: 1,
-        message: 'Restart Lumio Browser now?', detail: 'Your tabs come back after the restart.',
-      });
-      if (response !== 0) return false;
-      app.relaunch();
-      app.quit();
-      return true;
-    });
+    // (Its Restart button: main/system.js page:relaunch, which brings the windows back.)
   }
 
   // "Report an issue…": the dialog over the page, with a screenshot ready

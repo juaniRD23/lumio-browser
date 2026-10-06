@@ -21,7 +21,11 @@ import { initReadingMode } from './reading-mode.js';
 import { initShare } from './share.js';
 import { initMedia } from './media.js';
 import { initExtensionsBar } from './extensions-bar.js';
+import { initVerticalTabs } from './vertical-tabs.js';
+import { initSplitView } from './split-view.js';
+import { splitIcon } from './tab-rows.js';
 import './keys.js';
+import './shortcut-hints.js'; // tooltips show the keys people picked (Settings › Keyboard shortcuts)
 import '/assets/ui-prefs.js';
 import { initA11y, textScale } from './a11y.js';
 
@@ -32,7 +36,7 @@ const modKey = (e) => (IS_MAC ? e.metaKey : e.ctrlKey);
 const api = window.lumio;
 const $ = (sel) => document.querySelector(sel);
 
-const state = { tabs: [], groups: [], activeId: null, downloads: [], incognito: false, guest: false, account: {}, profile: {}, profiles: [] };
+const state = { tabs: [], groups: [], activeId: null, split: null, downloads: [], incognito: false, guest: false, account: {}, profile: {}, profiles: [] };
 const activeTab = () => state.tabs.find((t) => t.id === state.activeId) || null;
 
 // ------------------------------------------------------------------ icons
@@ -90,6 +94,7 @@ const overlays = {
   clear(kind) { if (overlayKind === kind) overlayKind = null; },
 };
 const strip = initTabStrip({ api, getState: () => state, overlays });
+let splitDrop = null; // a tab dragged onto an edge of the page (split-view.js), set once the window starts
 
 function faviconHtml(t) {
   if (t.crashed) return SAD_ICON;
@@ -113,8 +118,9 @@ function createTabEl(id) {
   el._id = id;
   el.dataset.id = id;
   el.setAttribute('role', 'tab');
-  el.innerHTML = '<span class="fav"></span><i class="agent-dot" hidden></i><span class="title"></span><i class="rec-dot" role="img" hidden></i><button class="audio" hidden></button><button class="x" aria-label="Close tab"></button>';
+  el.innerHTML = '<span class="fav"></span><i class="agent-dot" hidden></i><span class="title"></span><i class="split-ic" hidden></i><i class="rec-dot" role="img" hidden></i><button class="audio" hidden></button><button class="x" aria-label="Close tab"></button>';
   el.querySelector('.x').innerHTML = icons.close;
+  el.querySelector('.split-ic').innerHTML = splitIcon();
   el.querySelector('.x').addEventListener('click', (e) => { e.stopPropagation(); closeTabByMouse(id); });
   el.querySelector('.audio').addEventListener('click', (e) => { e.stopPropagation(); api.send('tab:mute', id); });
   el.addEventListener('auxclick', (e) => { if (e.button === 1) closeTabByMouse(id); });
@@ -130,10 +136,13 @@ function updateTabEl(el, t) {
   el.classList.toggle('active', t.id === state.activeId);
   el.classList.toggle('pinned', !!t.pinned);
   el.classList.toggle('sleeping', !!t.sleeping);
+  // Split view: both tabs carry the icon; the side on screen that isn't focused is lit too.
+  el.classList.toggle('shown', t.id !== state.activeId && !!state.split && (state.split.left === t.id || state.split.right === t.id));
+  el.querySelector('.split-ic').hidden = !t.split;
   el.setAttribute('aria-selected', String(t.id === state.activeId));
   // The hover card shows these; screen readers hear them here.
   const capture = captureWords(t.capture);
-  el.setAttribute('aria-description', [t.shown || t.url, t.sleeping && 'Sleeping to save memory', t.agent && `${t.agent.name} is working here`, capture].filter(Boolean).join(' · '));
+  el.setAttribute('aria-description', [t.shown || t.url, t.sleeping && 'Sleeping to save memory', t.split && 'In split view', t.agent && `${t.agent.name} is working here`, capture].filter(Boolean).join(' · '));
   // Camera, microphone or screen in use (renderer/ui/capture-bar.js).
   const rec = el.querySelector('.rec-dot');
   rec.hidden = !capture;
@@ -372,6 +381,14 @@ function startTabDrag(e, el, id) {
   let target = from;
   el.setPointerCapture(e.pointerId);
   const move = (ev) => {
+    // Over the left or right edge of the page: it will open in split view
+    // (split-view.js), so the strip stays put and it isn't pulled out.
+    if (splitDrop?.track(ev, id)) {
+      target = from;
+      if (rects) for (const x of els) x.style.transform = '';
+      return;
+    }
+    if (splitDrop?.aims(ev, id)) return; // on its way down to a side of the page
     if (strip.tearOff(ev, el, [id])) { tornOff(); return; } // pulled out: a window of its own
     const dx = ev.clientX - startX;
     if (!rects && Math.abs(dx) < 5) return;
@@ -422,6 +439,13 @@ function startTabDrag(e, el, id) {
   };
   const up = () => {
     stop();
+    // Let go over an edge of the page: the two tabs open side by side.
+    if (splitDrop?.finish(id)) {
+      tabDrag = null;
+      if (rects) for (const x of els) { x.style.transform = ''; x.classList.remove('shifting', 'dragging'); }
+      if (drag.pending) renderTabs();
+      return;
+    }
     if (!rects) return; // a click, not a drag
     tabDrag = null;
     // Dropped: the tab takes its new place in the strip right away (main
@@ -452,6 +476,7 @@ function startTabDrag(e, el, id) {
 }
 
 $('#newtab').addEventListener('click', () => api.send('tab:new'));
+// (Right-click away from a tab: the strip's menu, renderer/ui/tabstrip.js.)
 $('#tabstrip').addEventListener('dblclick', (e) => { if (e.target.classList.contains('strip-drag')) { /* system zoom handles it */ } });
 
 // ------------------------------------------------------------------ tab hover cards
@@ -1128,6 +1153,7 @@ api.on('tabs', (s) => {
   state.tabs = s.tabs;
   state.groups = s.groups || [];
   state.activeId = s.activeId;
+  state.split = s.split || null;
   renderTabs();
   const toolbar = () => {
     renderToolbar();
@@ -1198,6 +1224,7 @@ const init = await api.invoke('shell:init');
 state.tabs = init.tabs.tabs;
 state.groups = init.tabs.groups || [];
 state.activeId = init.tabs.activeId;
+state.split = init.tabs.split || null;
 state.downloads = init.downloads;
 bookmarksBar.set(init.bookmarks, init.savedGroups);
 state.incognito = init.incognito;
@@ -1227,6 +1254,10 @@ panel.init(init);
 // The side panel's views share the panel's column (renderer/ui/side-panel.js).
 const sidePanel = initSidePanel({ api, panel, modKey, activeTab });
 sidePanel.init(init);
+// Split view in the page slot, and tabs to the side (each in its own file).
+splitDrop = initSplitView({ api, init });
+// The strip measures its tabs again when it comes back (hidden, they all measured narrow).
+initVerticalTabs({ api, init, splitDrop, onLayout: () => { reportSlot(); renderTabs(); } });
 const sidebar = initSidebar({
   api,
   panel,
