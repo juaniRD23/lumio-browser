@@ -228,11 +228,26 @@ test('tab search lists every window’s tabs; Enter switches to the tab and its 
   await go(`${base}/alpha`, 'Page alpha');
   const other = await L.main((_e, u) => global.lumio.createWindow({ urls: [u] }).id, `${base}/bravo-search`);
   await until(() => L.main((_e, x) => global.lumio.windows.find((w) => w.id === x)?.tabs.active?.title === 'Page bravo-search', other));
+  // The new window comes to the front once its UI has drawn (createWindow:
+  // focus() on ready-to-show), which can be after its page has loaded; the
+  // first window is brought forward only after that, or the new one takes
+  // the front (and lumio.current) back while tab search opens: CI run 5.
+  const winState = () => L.main(() => ({ current: global.lumio.current?.id, windows: global.lumio.windows.map((w) => ({ id: w.id, visible: w.win.isVisible(), focused: w.win.isFocused(), overlay: w.overlayKind })) }));
+  if (!(await until(() => L.main((_e, x) => !!global.lumio.windows.find((w) => w.id === x)?.win.isVisible(), other)))) console.error('the new window never showed:', JSON.stringify(await winState()));
+  await L.wait(300);
   const first = await L.main(() => global.lumio.windows[0].id);
   await L.main((_e, x) => { const w = global.lumio.windows.find((y) => y.id === x); global.lumio.focus(w); w.focus(); return true; }, first);
+  if (!(await until(() => L.main((_e, x) => global.lumio.current.id === x && global.lumio.current.win.isFocused(), first), 5000))) console.error('the first window is not in front:', JSON.stringify(await winState()));
+  // ⌘⇧A is the menu's (Search Tabs…), which runs the same command.
+  assert.match(await L.main(({ Menu }) => {
+    const find = (items) => { for (const i of items) { if (i.label === 'Search Tabs…') return i; const f = i.submenu && find(i.submenu.items); if (f) return f; } return null; };
+    return String(find(Menu.getApplicationMenu().items)?.accelerator || null);
+  }), /^(CmdOrCtrl|CommandOrControl|Cmd|Command)\+Shift\+A$/);
   await L.main(() => { global.lumio.cmd.tabSearch(); return true; });
-  const opened = await until(() => L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current) === 'tabsearch'));
+  const opened = await until(() => L.main((_e, x) => ((w) => (!w || !w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.windows.find((y) => y.id === x)) === 'tabsearch', first));
+  if (!opened) console.error('no tab search:', JSON.stringify(await winState()));
   assert.ok(opened, '⌘⇧A opens tab search');
+  assert.equal(await L.main(() => global.lumio.current.id), first, 'in the window it was asked in');
   const ov = (code) => L.main((_e, c) => global.lumio.current.overlay.webContents.executeJavaScript(c), code);
   assert.ok(await until(() => ov(`document.querySelectorAll('.ts-row').length >= 2`)));
   await shot('tabs-03-tab-search');
