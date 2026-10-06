@@ -1,6 +1,9 @@
 // The title bar of an installed app's window (main/apps.js): back, forward
 // and reload, the app's icon and page title, a note when you've left the
-// app's site (with Back to app), Open in Lumio Browser and a menu.
+// app's site (with Back to app), "Save password?" after you sign in, Open in
+// Lumio Browser and a menu.
+import { icons } from './icons.js';
+
 const api = window.lumio;
 const $ = (s) => document.querySelector(s);
 const svg = (d, size = 16) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
@@ -49,3 +52,47 @@ $('#bar').addEventListener('click', (e) => {
 });
 api.on('app-state', render);
 api.invoke('apps:state').then(render).catch(() => {});
+
+// "Save password?" after signing in here (main/password-manager.js), in the
+// same bubble as a browser window's (renderer/ui/overlay.js, kind 'pwsave'),
+// drawn over the site by this window's overlay. The key brings it back.
+const pwKey = $('#pw-key');
+pwKey.innerHTML = icons.key;
+let pwPrompt = null;
+let overlayKind = null;
+function showPwSave(prompt) {
+  const r = pwKey.getBoundingClientRect();
+  const width = 340;
+  overlayKind = 'pwsave';
+  api.send('overlay:show', { rect: { x: Math.max(0, r.right - width - 12 + 8), y: r.bottom + 6, width: width + 24, height: 260 }, payload: { kind: 'pwsave', prompt } });
+}
+function hideOverlay() {
+  if (!overlayKind) return;
+  const kind = overlayKind;
+  overlayKind = null;
+  api.send('overlay:hide', kind);
+}
+api.on('passwords-prompt', (p) => {
+  pwPrompt = p;
+  pwKey.hidden = false;
+  setTimeout(() => showPwSave(p), 60);
+});
+pwKey.addEventListener('mousedown', (e) => e.preventDefault());
+pwKey.addEventListener('click', () => {
+  if (overlayKind === 'pwsave') hideOverlay(); else if (pwPrompt) showPwSave(pwPrompt);
+});
+window.addEventListener('mousedown', (e) => { if (overlayKind && !e.target.closest('#pw-key')) hideOverlay(); });
+api.on('overlay-picked', (msg) => {
+  if (msg?.kind === overlayKind) overlayKind = null;
+  if (msg?.kind === 'pwsave') { pwPrompt = null; pwKey.hidden = true; }
+});
+api.on('overlay-state', (s) => { if (s?.closed && s.kind === overlayKind) overlayKind = null; });
+
+let toastTimer = 0;
+api.on('toast', ({ text } = {}) => {
+  const el = $('#toast');
+  el.textContent = text || '';
+  el.hidden = !text;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; }, 2200);
+});

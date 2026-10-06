@@ -106,6 +106,41 @@ for (const scheme of ['light', 'dark']) {
   });
 }
 
+// The field keeps the keyboard in the site's view and the list is in Lumio's
+// overlay, so a screen reader hears the list through a polite live region
+// (overlay-autofill.js explains why the field can't point at it).
+test('the dropdown for screen readers: a listbox with its active option, read as it opens and as the arrows move', { skip }, async () => {
+  const { page, errors } = await openOverlay('light');
+  const liveText = () => page.$eval('#ff-live', (e) => e.textContent);
+  await page.evaluate((p) => window.__show(p), { ...CARDS, selected: -1 });
+  assert.equal(await page.$eval('#ff-live', (e) => [e.getAttribute('aria-live'), e.getAttribute('aria-atomic'), e.closest('#card') === null].join()), 'polite,true,true', 'outside the card, so it stays while the card is redrawn');
+  assert.equal(await liveText(), 'Saved cards, 2. Use the arrow keys to choose and Enter to fill.');
+  assert.equal(await page.$eval('[role=listbox]', (e) => e.hasAttribute('aria-activedescendant')), false, 'nothing highlighted yet');
+  assert.deepEqual(await page.$$eval('[role=option]', (els) => els.map((e) => [e.id, e.getAttribute('aria-posinset'), e.getAttribute('aria-setsize')])), [['ff-opt-0', '1', '2'], ['ff-opt-1', '2', '2']]);
+  const box = await page.$eval('#ff-live', (e) => { const r = e.getBoundingClientRect(); return [r.width, r.height]; });
+  assert.ok(box[0] <= 1 && box[1] <= 1, 'read, never shown');
+  // The field's arrow keys move the highlight (main/autofill.js sends the same list again).
+  await page.evaluate((p) => window.__show(p), { ...CARDS, selected: 0 });
+  assert.equal(await page.$eval('[role=listbox]', (e) => e.getAttribute('aria-activedescendant')), 'ff-opt-0');
+  assert.equal(await page.$eval('#ff-opt-0', (e) => e.getAttribute('aria-selected')), 'true');
+  assert.equal(await liveText(), 'Visa •••• 4242, Sam Tester · Expires 04/31, 1 of 2');
+  assert.equal(await page.$eval('#ff-live [translate=no]', (e) => e.textContent), 'Visa •••• 4242, Sam Tester · Expires 04/31,', 'the saved card’s own words are never translated');
+  await page.evaluate((p) => window.__show(p), { ...CARDS, selected: 1 });
+  assert.equal(await liveText(), 'Mastercard •••• 4444, 2 of 2');
+  const before = await liveText();
+  await page.evaluate((p) => window.__show(p), { ...CARDS, selected: 1 });
+  assert.equal(await liveText(), before, 'the same highlight isn’t read again');
+  // Typing changed what it offers: read like a new list.
+  await page.evaluate(() => window.__show({ kind: 'formfill', mode: 'history', selected: -1, footer: '', items: [{ type: 'history', label: 'Miami', removable: true }] }));
+  assert.equal(await liveText(), 'Earlier entries, 1. Use the arrow keys to choose and Enter to fill.');
+  // The mouse still works, and keeps the keyboard in the page's field.
+  const prevented = await page.$eval('.ff-row[data-i="0"]', (el) => { const ev = new MouseEvent('mousedown', { bubbles: true, cancelable: true }); el.dispatchEvent(ev); return ev.defaultPrevented; });
+  assert.equal(prevented, true);
+  assert.deepEqual(await sentTo(page, 'autofill:pick'), [{ index: 0 }]);
+  await page.close();
+  assert.deepEqual(errors, []);
+});
+
 test('"Save card?" and "Update address?": keyboard first, and sized to fit', { skip }, async () => {
   const { page, errors } = await openOverlay('dark');
   await page.evaluate(() => window.__show({ kind: 'formsave', prompt: { id: 7, what: 'card', action: 'save', host: 'shop.example', lines: ['Visa •••• 4242', 'Sam Tester', 'Expires 04/31'], note: 'Lumio keeps it encrypted on this computer and asks for Touch ID before filling it. The security code is never saved.' } }));

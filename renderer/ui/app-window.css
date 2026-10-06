@@ -31,3 +31,10 @@ body.windows .caps { width: 138px; flex: none; } /* Windows draws its caption bu
 .away-host.insecure { color: var(--warn-text); }
 .home { -webkit-app-region: no-drag; height: 22px; padding: 0 9px; border-radius: 999px; background: var(--active); color: var(--text-soft); font-size: 12px; font-weight: 550; }
 .home:hover { background: var(--active-hover); color: var(--text-strong); }
+
+/* "Password saved", "Card saved"… for a moment. */
+#toast {
+  flex: none; height: 22px; padding: 0 10px; border-radius: 999px; display: inline-flex; align-items: center;
+  background: color-mix(in srgb, var(--accent) 13%, transparent); color: light-dark(color-mix(in srgb, var(--accent) 70%, var(--text-strong)), var(--accent));
+  font-size: 11.5px; white-space: nowrap; max-width: 240px; overflow: hidden; text-overflow: ellipsis;
+}

@@ -33,6 +33,10 @@ const EXPECTED = {
   'example.com wants to use your camera and use your microphone': 'example.com quiere usar tu cámara y usar tu micrófono',
   'Active 3 hours ago': 'Activo hace 3 horas',
   'Open tab': 'Pestaña abierta',
+  // the autofill dropdown's announcements (renderer/ui/overlay-autofill.js)
+  'Saved cards, 2. Use the arrow keys to choose and Enter to fill.': 'Tarjetas guardadas, 2. Usa las flechas para elegir y Enter para completar.',
+  'Earlier entries, 12. Use the arrow keys to choose and Enter to fill.': 'Entradas anteriores, 12. Usa las flechas para elegir y Enter para completar.',
+  '2 of 3': '2 de 3',
   // pages (renderer/pages)
   'Lists updated 5 min ago · 1,200 sites': 'Listas actualizadas hace 5 min · 1,200 sitios',
   'But you have 2 reused passwords and 1 weak password.': 'Pero tienes 2 contraseñas reutilizadas y 1 contraseña débil.',

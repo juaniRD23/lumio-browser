@@ -2,11 +2,15 @@
 // the address of the page under it, which that page can't change, and "Open
 // in tab". The page's title is the window's. The site information, saving a
 // password, blocked pop-ups and permission prompts work as in the browser
-// window, with the same dropdowns (renderer/ui/overlay.js).
+// window, with the same dropdowns (renderer/ui/overlay.js). A site's
+// question asks in the permission bar over the page; quiet ones
+// (notifications, by default) and what Lumio blocked show in the same chip
+// as the browser window's address bar (renderer/ui/permission-chip.js).
 import { icons } from './icons.js';
 import { paintSiteIcon } from './site-icon.js';
 import { initPermBar } from './permbar.js';
 import { popupsButton } from './popups-button.js';
+import { initPermissionChip } from './permission-chip.js';
 
 const api = window.lumio;
 const $ = (sel) => document.querySelector(sel);
@@ -68,7 +72,7 @@ api.on('overlay-picked', (msg) => {
 });
 // A click anywhere else on the bar closes the open one.
 window.addEventListener('mousedown', (e) => {
-  if (overlayKind && !e.target.closest('#site-icon, #pw-key, #popups-btn')) hideOverlay();
+  if (overlayKind && !e.target.closest('#site-icon, #pw-key, #popups-btn, #perm-chip')) hideOverlay();
 });
 
 // The site information (the lock).
@@ -116,6 +120,20 @@ pwKey.addEventListener('click', () => {
 
 // ---- the rest
 initPermBar($('#permbar'), api);
+// The chip takes the quiet questions (the bar above takes the others) and
+// says what Lumio blocked here; its bubble opens under the address.
+const permChip = initPermissionChip({
+  api,
+  getActiveTab: page,
+  accept: (req) => !!req.quiet,
+  anchor: 'where',
+  overlay: {
+    show: (kind, rect, payload) => showOverlay(kind, rect, payload),
+    hide: (kind) => { if (overlayKind === kind) hideOverlay(); },
+    picked: () => { overlayKind = null; },
+    kind: () => overlayKind,
+  },
+});
 $('#open-tab').addEventListener('click', () => api.send('popup:open-in-tab'));
 
 let toastTimer = 0;
@@ -127,8 +145,10 @@ api.on('toast', ({ text }) => {
   toastTimer = setTimeout(() => { el.hidden = true; }, 2200);
 });
 
-api.on('tabs', (s) => { state = s; render(); });
+const pageIds = () => state.tabs.map((t) => t.wcId).filter((id) => id != null);
+api.on('tabs', (s) => { state = s; render(); permChip.update(false, pageIds()); });
 const init = await api.invoke('popup:init');
 if (init) state = init.tabs;
 render();
+permChip.update(false, pageIds());
 reportSlot();

@@ -10,6 +10,16 @@
 // site there like in your tabs. Links to other sites open in a Lumio tab.
 // On the Mac the window shows Lumio's own Dock icon (the launcher's icon is
 // the one in Finder and the Dock while it's kept there).
+//
+// The site in an app window gets what it would in a tab of its profile: its
+// saved passwords and "Save password?", passkeys (with the same Touch ID
+// check), addresses, cards and earlier form entries, and the page's
+// alert(), confirm() and prompt() as Lumio's card over the page. The window
+// does that with the browser's own code: a one-page stand-in for the tabs
+// (AppTabs), Lumio's dropdowns on its own overlay (main/overlay-host.js) and
+// the dialog view (main/dialog-view.js). main.js finds it with holderOf()
+// (the site) and uiOwner() (its title bar, dropdowns and dialog), and only
+// for the calls in UI_CHANNELS, so nothing else of the browser's reaches it.
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -20,6 +30,9 @@ const theme = require('./theme');
 const FLAVOR = require('./flavor');
 const launchers = require('./app-launchers');
 
+const { DialogView } = require('./dialog-view');
+const { lendOverlay, wireOverlay } = require('./overlay-host');
+
 const WORLD = 1005; // page tools' isolated world (see main/page-menu.js)
 const SHELL_PRELOAD = path.join(__dirname, '..', 'preload', 'dist', 'shell.js');
 const INTERNAL_PRELOAD = path.join(__dirname, '..', 'preload', 'internal.js');
@@ -27,6 +40,13 @@ const HEADER = 38; // the title bar's height
 const MAC = process.platform === 'darwin';
 const MAX_ICON = 3 * 1024 * 1024;
 const MAX_MANIFEST = 256 * 1024;
+// What an app window's title bar, dropdowns and dialog may ask main.js for
+// (the rest of the browser's calls are for browser windows only).
+const UI_CHANNELS = new Set([
+  'overlay:show', 'overlay:hide', 'overlay:size', 'overlay:pick',
+  'passwords:fill', 'passwords:decide', 'passwords:passkey', 'passwords:reveal-pending', 'passwords:manage',
+  'autofill:pick', 'autofill:remove', 'autofill:manage', 'autofill:decide',
+]);
 const web = (url) => /^https?:/i.test(url || '');
 const hostOf = (url) => { try { return new URL(url).host.replace(/^www\./, ''); } catch { return ''; } };
 // This computer or the local network: a public page's manifest and icons are never fetched from there.
@@ -86,16 +106,18 @@ class Apps {
   // Each app belongs to the profile it was installed from (rec.profile;
   // apps from before profiles have none: the first profile).
   // session(profile): that profile's session. permissions(profile): its site
-  // permissions (main/features.js). openUrl(url, profile): a new tab in one
+  // permissions (main/features.js). profile(id): the whole profile (its
+  // passwords, autofill and store; tests may leave it out). openUrl(url, profile): a new tab in one
   // of its normal windows. cmd: the browser's menu commands. restoreMenu(): the browser's
   // menu again (when an app window loses focus on the Mac). launcherDir: where
   // the Mac launchers go.
-  constructor({ dir, session, permissions, openUrl, cmd = {}, restoreMenu = () => {}, toast = () => {}, launcherDir = path.join(os.homedir(), 'Applications', `${FLAVOR.beta ? 'Lumio Beta' : 'Lumio'} Apps`) }) {
+  constructor({ dir, session, permissions, profile = () => null, openUrl, cmd = {}, restoreMenu = () => {}, toast = () => {}, launcherDir = path.join(os.homedir(), 'Applications', `${FLAVOR.beta ? 'Lumio Beta' : 'Lumio'} Apps`) }) {
     this.dir = path.join(dir, 'apps');
     this.launcherDir = launcherDir;
     this.file = new JsonFile(dir, 'apps.json', { apps: [] });
     this.session = session;
     this.permissions = permissions;
+    this.profile = profile;
     this.openUrl = openUrl;
     this.cmd = cmd;
     this.restoreMenu = restoreMenu;
@@ -281,6 +303,20 @@ class Apps {
   // The app window showing a site's page (its Share buttons, main/share.js).
   windowFor(wc) { return [...this.windows].find((aw) => aw.view.webContents === wc) || null; }
 
+  // The site's page as main.js's tab lookups give it: { w, tab }, where w is
+  // its app window (its profile's passwords and autofill, its overlay).
+  holderOf(wc) {
+    const aw = wc && this.windowFor(wc);
+    return aw && !aw.closed && aw.profile ? { w: aw, tab: aw.tab } : null;
+  }
+
+  // The app window whose own UI (title bar, overlay, dialog) sent a call,
+  // for the calls an app window answers (UI_CHANNELS); null for any other.
+  uiOwner(wc, channel = null) {
+    if (!wc || (channel !== null && !UI_CHANNELS.has(channel))) return null;
+    return [...this.windows].find((aw) => !aw.closed && aw.profile && (aw.win.webContents === wc || aw.overlay?.webContents === wc || aw.dialogs?.view?.webContents === wc)) || null;
+  }
+
   // A site in an app window asked for a permission (camera, location…):
   // the browser windows can't show it, so the app window asks with a dialog.
   emitFor(wcId, channel, payload) {
@@ -322,11 +358,44 @@ class Apps {
   }
 }
 
+// The app window's one page, shaped like main/tabs.js's TabManager for the
+// code that works on a tab (passwords, autofill, passkeys, the page's
+// dialogs). Its dialog queue is TabManager's own (ask, answer, dismiss).
+class AppTabs {
+  constructor(aw) {
+    this.aw = aw;
+    this.tab = { id: 1, view: aw.view, owner: this, dialogs: [] };
+    this.tabs = [this.tab];
+    this.activeId = 1;
+    this.covered = false; // (the dialog view checks it: nothing covers an app's page)
+  }
+
+  get active() { return this.tab; }
+  wc() { const wc = this.tab.view.webContents; return wc.isDestroyed() ? null : wc; }
+  byWebContents(wc) { return wc && wc === this.tab.view.webContents ? this.tab : null; }
+  dialogsChanged() { if (!this.aw.closed) this.aw.dialogs.sync(); }
+}
+let borrowed = false;
+function borrowTabCode() {
+  if (borrowed) return;
+  borrowed = true;
+  const { TabManager } = require('./tabs');
+  for (const m of ['ask', 'answer', 'dismiss']) AppTabs.prototype[m] = TabManager.prototype[m];
+  lendOverlay(AppWindow, require('./window').BrowserWin);
+}
+
 // One app's window: its title bar (renderer/ui/app-window.html) and the site under it.
 class AppWindow {
   constructor(apps, rec) {
+    borrowTabCode();
     this.apps = apps;
     this.rec = rec;
+    // The profile it was installed from: its passwords, passkeys and autofill
+    // (the same one whose session the site uses).
+    this.profile = apps.profile(rec.profile) || null;
+    this.incognito = false;
+    this.indicator = { bar: null }; // no Lumio AI here
+    this.app = { onPasskeyPromptClosed: (w) => w.profile?.passwords?.passkeyClosed(w) }; // what main/window.js's overlay code tells
     const c = theme.colors(theme.isDark(false), false);
     this.win = new BrowserWindow({
       ...this.bounds(),
@@ -351,8 +420,17 @@ class AppWindow {
     });
     this.view.setBackgroundColor('#ffffff');
     this.win.contentView.addChildView(this.view);
+    this.tabs = new AppTabs(this);
+    this.tab = this.tabs.active;
+    // Lumio's dropdowns and bubbles over the site, and its dialogs.
+    this.overlay = new WebContentsView({ webPreferences: { preload: SHELL_PRELOAD, contextIsolation: true, sandbox: true, nodeIntegration: false } });
+    this.overlay.setBackgroundColor('#00000000');
+    this.overlay.webContents.loadURL('lumio://overlay/');
+    wireOverlay(this);
+    this.dialogs = new DialogView(this);
     this.layout();
     this.wire();
+    this.tab.navigatingTo = rec.url; // its first page may ask to sign in
     this.view.webContents.loadURL(rec.url).catch(() => {});
 
     this.win.once('ready-to-show', () => { if (!process.env.LUMIO_HIDDEN) this.win.show(); });
@@ -366,6 +444,12 @@ class AppWindow {
     this.win.on('closed', () => {
       apps.windows.delete(this);
       apps.permissions(rec.profile)?.dropFor(this.wcId);
+      // Whatever the page was waiting on is answered "no".
+      this.tabs.dismiss(this.tab);
+      this.profile?.passwords?.passkeyClosed(this);
+      this.profile?.autofill?.closeAll(this);
+      this.dialogs.destroy();
+      if (!this.overlay.webContents.isDestroyed()) this.overlay.webContents.close();
       if (!this.view.webContents.isDestroyed()) this.view.webContents.close();
       if (MAC) apps.restoreMenu();
     });
@@ -384,6 +468,18 @@ class AppWindow {
     const [w, h] = this.win.getContentSize();
     const top = this.win.isFullScreen() ? 0 : HEADER;
     this.view.setBounds({ x: 0, y: top, width: w, height: Math.max(1, h - top) });
+    this.dialogs?.place();
+    // A dropdown under a field would be left where the field was.
+    if (this.overlayKind === 'formfill') this.profile?.autofill?.closeAll(this);
+    else if (this.overlayKind === 'autofill') this.hideOverlay({ now: true });
+  }
+
+  get closed() { return this.win.isDestroyed(); }
+
+  // To its title bar (renderer/ui/app-window.js): "Save password?", toasts,
+  // a dropdown that closed.
+  emit(channel, payload) {
+    if (!this.win.isDestroyed()) this.win.webContents.send(channel, payload);
   }
 
   focus() {
@@ -433,6 +529,13 @@ class AppWindow {
     const wc = this.view.webContents;
     this.wcId = wc.id;
     for (const ev of ['did-start-loading', 'did-stop-loading', 'did-navigate', 'did-navigate-in-page', 'page-title-updated']) wc.on(ev, () => this.push());
+    // A page that leaves takes its alert(), confirm() or prompt() with it.
+    wc.on('did-start-navigation', (d) => {
+      if (!d?.isMainFrame || d.isSameDocument) return;
+      this.tab.navigatingTo = d.url; // whose sign-in requests may ask (main/page-dialogs.js)
+      this.tabs.dismiss(this.tab, ['js', 'auth']);
+    });
+    wc.on('render-process-gone', () => this.tabs.dismiss(this.tab, ['js']));
     // Lumio's own pages are never opened from a site.
     wc.on('will-navigate', (e) => { if (/^lumio:/i.test(e.url || '')) e.preventDefault(); });
     wc.on('will-frame-navigate', (e) => { if (!e.isMainFrame && /^lumio:/i.test(e.url || '')) e.preventDefault(); });
@@ -598,4 +701,4 @@ class AppWindow {
   }
 }
 
-module.exports = { Apps, AppWindow, appDetails, pageAppInfo, isLocal };
+module.exports = { Apps, AppWindow, AppTabs, UI_CHANNELS, appDetails, pageAppInfo, isLocal };
