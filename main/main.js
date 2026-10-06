@@ -1781,8 +1781,11 @@ app.on('certificate-error', (event, wc, url, error, cert, callback, isMainFrame)
 handoff.listen((url) => { if (launched && windows.size) openExternalUrls([url]); else pendingUrls.push(url); });
 
 app.on('second-instance', (_e, argv) => {
-  if (apps?.launch(argv)) return; // an installed app's launcher (main/app-launchers.js)
   const urls = launchTargets(argv.slice(1));
+  // Still starting (extensions, the DRM wait): links wait for the first
+  // windows, and nothing opens before Lumio's messages and menu are set up.
+  if (!launched) { pendingUrls.push(...urls); return; }
+  if (apps?.launch(argv)) return; // an installed app's launcher (main/app-launchers.js)
   if (urls.length && alive().length) openExternalUrls(urls);
   else if (urls.length && picker?.isOpen) pendingUrls.push(...urls);
   else if (urls.length) openExternalUrls(urls);
