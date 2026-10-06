@@ -11,6 +11,10 @@
 # and notarized by Apple with the App Store Connect key (APPLE_API_KEY,
 # APPLE_API_KEY_ID, APPLE_API_ISSUER). Without those secrets they are signed
 # ad hoc. "Test build" signs and notarizes without publishing anything.
+# DRM (Widevine, for Netflix, Spotify, Disney+): with the castlabs EVS secrets
+# EVS_ACCOUNT_NAME and EVS_PASSWORD, the Mac build uses castlabs' Electron and
+# VMP-signs it (build/drm.mjs, docs/drm.md). Without them, or with the
+# repository variable LUMIO_DRM set to 0, nothing changes.
 name: Release Lumio Browser
 
 on:
@@ -46,6 +50,7 @@ jobs:
     env:
       HAS_CERT: ${{ secrets.MACOS_CERT_P12 != '' }}
       HAS_NOTARY: ${{ secrets.APPLE_API_KEY != '' }}
+      HAS_EVS: ${{ secrets.EVS_ACCOUNT_NAME != '' && secrets.EVS_PASSWORD != '' && !contains(fromJSON('["0","false","no"]'), vars.LUMIO_DRM) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -100,6 +105,28 @@ jobs:
           printf '%s\n' "$APPLE_API_KEY" > "$RUNNER_TEMP/AuthKey.p8"
           echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
 
+      # DRM builds: sign in to castlabs EVS; build/package.mjs then swaps in
+      # castlabs' Electron and VMP-signs the app (docs/drm.md).
+      - uses: actions/setup-python@v5
+        if: env.HAS_EVS == 'true'
+        with:
+          python-version: '3.12'
+
+      # Installed in a step of its own, so the install never sees the password.
+      - name: DRM (castlabs EVS client)
+        if: env.HAS_EVS == 'true'
+        run: python -m pip install --upgrade castlabs-evs
+
+      - name: DRM (castlabs EVS sign-in)
+        if: env.HAS_EVS == 'true'
+        env:
+          EVS_ACCOUNT_NAME: ${{ secrets.EVS_ACCOUNT_NAME }}
+          EVS_PASSWD: ${{ secrets.EVS_PASSWORD }}
+        run: |
+          python -m castlabs_evs.account --no-ask reauth
+          echo "LUMIO_DRM=1" >> "$GITHUB_ENV"
+          echo "EVS_PYTHON=python" >> "$GITHUB_ENV"
+
       - name: Build (Mac Apple Silicon, Mac Intel)
         env:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
@@ -130,6 +157,7 @@ jobs:
         run: |
           [ -n "$MACOS_SIGN_KEYCHAIN" ] && security delete-keychain "$MACOS_SIGN_KEYCHAIN" || true
           rm -f "$RUNNER_TEMP/AuthKey.p8" "$RUNNER_TEMP/cert.p12"
+          [ "$HAS_EVS" = true ] && python -m castlabs_evs.account --no-ask deauth || true
 
       - name: Summary
         if: ${{ !inputs.dry_run }}

@@ -1684,6 +1684,23 @@
   'Expand Tabs': 'Expandir pestañas',
   'Open Link in Split View': 'Abrir el enlace en vista dividida',
   'Let go to show these side by side': 'Suelta para mostrarlas lado a lado',
+  // ------------------------------------------------------------ crash reports and protected content (batch 8)
+  'Getting protected content ready…': 'Preparando el contenido protegido…',
+  'Lumio is setting up playback for sites like Netflix and Spotify. It only takes a moment the first time.': 'Lumio está preparando la reproducción para sitios como Netflix y Spotify. Solo tarda un momento la primera vez.',
+  'Protected videos may not play until it’s done (Esc)': 'Es posible que los videos protegidos no se reproduzcan hasta que termine (Esc)',
+  'Open now': 'Abrir ahora',
+  'Help improve Lumio': 'Ayuda a mejorar Lumio',
+  'Send crash reports to Lumio': 'Enviar informes de fallos a Lumio',
+  'When Lumio crashes, it sends a report so we can fix the problem: the Lumio version, your system and technical details of the crash, which can include bits of what was open. Turning it on takes effect the next time you open Lumio.': 'Cuando Lumio falla, envía un informe para que podamos solucionar el problema: la versión de Lumio, tu sistema y los detalles técnicos del fallo, que pueden incluir partes de lo que estaba abierto. Al activarlo, se aplica la próxima vez que abras Lumio.',
+  'A few more things you might like:': 'Algunas cosas más que te podrían gustar:',
+  'If Lumio crashes, send us a technical report so we can fix it. You can change this anytime in Settings › Privacy.': 'Si Lumio falla, envíanos un informe técnico para que podamos solucionarlo. Puedes cambiarlo cuando quieras en Configuración › Privacidad.',
+  'Protected content IDs': 'Identificadores de contenido protegido',
+  'Sites can play protected content': 'Los sitios pueden reproducir contenido protegido',
+  'Sites like Netflix, Spotify and Disney+ can play protected videos and music. Lumio gets Google’s Widevine module for this, the same one Chrome uses.': 'Sitios como Netflix, Spotify y Disney+ pueden reproducir videos y música protegidos. Para esto, Lumio obtiene el módulo Widevine de Google, el mismo que usa Chrome.',
+  'Getting ready… Lumio is downloading Google’s Widevine module.': 'Preparando… Lumio está descargando el módulo Widevine de Google.',
+  'Couldn’t get it ready. Lumio tries again the next time it opens.': 'No se pudo preparar. Lumio lo intentará de nuevo la próxima vez que se abra.',
+  'Ready.': 'Listo.',
+  'Ready · Widevine {v}': 'Listo · Widevine {v}',
   };
   if (typeof module === 'object' && module.exports) module.exports = es;
   else (root.LUMIO_LOCALES ||= {}).es = es;

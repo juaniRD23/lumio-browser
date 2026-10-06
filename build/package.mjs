@@ -12,9 +12,12 @@
 //   … --release --mac --beta            → Lumio Beta: the same app as a separate
 //                                        "Lumio Beta.app" (own bundle id, icon,
 //                                        profile, update channel) for testing
+// LUMIO_DRM=1 (or CI with the EVS secrets) makes a DRM build: castlabs'
+// Electron with Widevine, VMP-signed by castlabs EVS (build/drm.mjs, docs/drm.md).
 import { fileURLToPath } from 'node:url';
 import { packager } from '@electron/packager';
 import { sign as osxSign } from '@electron/osx-sign';
+import { buildPlan, drmSwitch, ensureCastlabsElectron, installedElectron, vmpCommand } from './drm.mjs';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -44,6 +47,13 @@ if (BETA) {
   process.on('exit', () => fs.rmSync(flavorFile, { force: true }));
 }
 
+// DRM build or not, and the signing steps after packaging (build/drm.mjs).
+// DRM builds are Mac only: buildPlan stops one that would package Windows too.
+const WITH_WINDOWS = arg('--release') && !arg('--mac');
+if (drmSwitch(process.env).on && !WITH_WINDOWS) ensureCastlabsElectron();
+const PLAN = buildPlan({ env: process.env, appElectron: pkg.devDependencies.electron, installed: installedElectron(), windows: WITH_WINDOWS });
+if (PLAN.drm) console.log(`DRM build (${PLAN.why}): castlabs Electron ${PLAN.electron}`);
+
 const common = {
   dir: root,
   name: APP,
@@ -66,6 +76,7 @@ const common = {
     /^\/mobile($|\/)/,
     /\.DS_Store$/,
   ],
+  ...PLAN.packager, // DRM builds: castlabs' Electron
 };
 
 // Electron's and Chromium's license notices. Packaging leaves them next to the
@@ -151,18 +162,34 @@ function notarize(file) {
   console.log(`  ✓ notarized (${res.id})`);
 }
 
-// Signed and notarized, with the ticket stapled to the app itself so it opens
-// without warnings even offline.
+// Notarized, with the ticket stapled to the app itself so it opens without
+// warnings even offline.
+function notarizeApp(app) {
+  const zipFile = `${app}.zip`;
+  execFileSync('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', app, zipFile]);
+  try { notarize(zipFile); } finally { fs.rmSync(zipFile, { force: true }); }
+  execFileSync('xcrun', ['stapler', 'staple', app], { stdio: 'inherit' });
+  execFileSync('spctl', ['--assess', '--type', 'execute', '--verbose=2', app], { stdio: 'inherit' });
+}
+
+// castlabs EVS signs the app in the packaged folder for Widevine (DRM builds).
+// Locally it may ask for the EVS password; docs/drm.md has the sign-in.
+function vmpSign(folder, name) {
+  console.log(`VMP signing ${path.basename(folder)} with castlabs EVS…`);
+  const [cmd, args] = vmpCommand({ env: process.env, dir: folder, name });
+  execFileSync(cmd, args, { stdio: 'inherit' });
+}
+
+// Every step after packaging, in build/drm.mjs's order: VMP signing (DRM
+// builds), then Developer ID signing and notarization, or ad-hoc signing.
+const MAC_STEPS = {
+  'vmp-sign': (app) => vmpSign(path.dirname(app), APP),
+  'ad-hoc-sign': adhocSign,
+  'developer-id-sign': developerIdSign,
+  notarize: notarizeApp,
+};
 async function signApp(app) {
-  if (!SIGN_ID) return adhocSign(app);
-  await developerIdSign(app);
-  if (NOTARY) {
-    const zipFile = `${app}.zip`;
-    execFileSync('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', app, zipFile]);
-    try { notarize(zipFile); } finally { fs.rmSync(zipFile, { force: true }); }
-    execFileSync('xcrun', ['stapler', 'staple', app], { stdio: 'inherit' });
-    execFileSync('spctl', ['--assess', '--type', 'execute', '--verbose=2', app], { stdio: 'inherit' });
-  }
+  for (const step of PLAN.mac) await MAC_STEPS[step](app);
   return app;
 }
 

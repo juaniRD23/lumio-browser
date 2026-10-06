@@ -18,6 +18,11 @@ select.field { appearance: none; padding-right: 30px; background: var(--field) v
 .switch i::after { content: ''; position: absolute; left: 3px; top: 3px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform .18s var(--ease); }
 .switch input:checked + i { background: var(--accent); }
 .switch input:checked + i::after { transform: translateX(16px); }
+/* The real checkbox is invisible, so keyboard focus shows on the track. */
+.switch input:focus-visible + i { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+#crash-note:not(:empty) { margin-top: 4px; color: var(--text); }
+#pc-state:not(:empty) { margin-top: 4px; color: var(--text); } /* Widevine ready or not (protected-content.js) */
+@media (prefers-reduced-motion: reduce) { .switch i, .switch i::after { transition: none; } }
 .checks .grow { flex: 1; }
 
 /* A segmented control made of radios (Settings › Appearance › Theme). */

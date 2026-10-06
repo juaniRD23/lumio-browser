@@ -89,7 +89,7 @@
     <!-- 5. Done -->
     <section class="step" data-step="done" hidden>
       <h1>You’re all <em>set</em></h1>
-      <p class="lead">Two more things you might like:</p>
+      <p class="lead">A few more things you might like:</p>
       <div class="cards">
         <div class="card-row">
           <div><b>Make Lumio your default browser</b><span>Links from other apps open here.</span></div>
@@ -99,6 +99,10 @@
           <div><b>Sign in to Lumio AI</b><span>Free to start. Chat, pictures, documents, and an AI that uses websites for you.</span></div>
           <button class="btn small accent" id="sign-in">Sign in</button>
         </div>
+        <label class="card-row">
+          <div><b id="crash-title">Help improve Lumio</b><span id="crash-desc">If Lumio crashes, send us a technical report so we can fix it. You can change this anytime in Settings › Privacy.</span><span class="crash-note" id="crash-note" role="status" aria-live="polite"></span></div>
+          <span class="switch"><input type="checkbox" id="crash-reports" aria-label="Send crash reports to Lumio" aria-describedby="crash-desc crash-note"><i></i></span>
+        </label>
       </div>
       <div class="actions">
         <button class="btn" data-back>Back</button>
@@ -107,5 +111,6 @@
     </section>
   </main>
   <script type="module" src="welcome.js"></script>
+  <script type="module" src="crash-optin.js"></script>
 </body>
 </html>

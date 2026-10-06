@@ -231,3 +231,31 @@ CREATE TABLE IF NOT EXISTS feedback (
 );
 CREATE INDEX IF NOT EXISTS feedback_sender ON feedback (sender, created_at);
 CREATE INDEX IF NOT EXISTS feedback_time ON feedback (created_at);
+-- Crash reports from Lumio Browser (opt-in; src/crashes.ts). No account or
+-- install ID: just the Lumio version, system and what crashed. Minidumps are
+-- in R2 at crashes/<date>/<id>.dmp. Kept 90 days; ip_hash (for the per-IP
+-- limit, salted with the day) is cleared after a day.
+CREATE TABLE IF NOT EXISTS crashes (
+  id TEXT PRIMARY KEY,                   -- cr_<24 hex>
+  created_at INTEGER NOT NULL,
+  version TEXT,                          -- Lumio Browser's version
+  platform TEXT,                         -- darwin | win32 | linux
+  arch TEXT,                             -- arm64 | x64 | ...
+  channel TEXT,                          -- stable | beta | dev
+  process_type TEXT,                     -- browser | renderer | gpu-process | utility | ...
+  reason TEXT,                           -- EXC_BAD_ACCESS, uncaughtException, oom, ...
+  has_dump INTEGER NOT NULL DEFAULT 0,
+  signature TEXT NOT NULL,               -- groups the same crash: "EXC_BAD_ACCESS in Electron Framework+0x2a3f10"
+  message TEXT,                          -- JavaScript errors: the scrubbed message
+  stack TEXT,                            -- JavaScript errors: the stack, with Lumio's own file paths only
+  ip_hash TEXT,
+  dump_bytes INTEGER NOT NULL DEFAULT 0  -- for the daily storage budget
+);
+CREATE INDEX IF NOT EXISTS crashes_created ON crashes (created_at);
+CREATE INDEX IF NOT EXISTS crashes_ip ON crashes (ip_hash, created_at);
+-- Every POST /api/crash, kept or refused, for the per-IP limit (cleared after a day).
+CREATE TABLE IF NOT EXISTS crash_attempts (
+  ip_hash TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS crash_attempts_ip ON crash_attempts (ip_hash, created_at);

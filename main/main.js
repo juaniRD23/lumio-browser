@@ -114,6 +114,10 @@ const IS_DEV = !app.isPackaged;
 // modal error box: log it and keep going.
 process.on('uncaughtException', (err) => console.error('[lumio] uncaught exception:', err?.stack || err));
 process.on('unhandledRejection', (err) => console.error('[lumio] unhandled rejection:', err?.stack || err));
+// Opt-in crash reports (Settings › Privacy): Crashpad has to start before the app is ready.
+const crashReports = require('./crash-reports').setup(app);
+// Protected content (Widevine) on DRM builds; nothing at all on stock Electron (main/drm.js).
+const drm = require('./drm').setup(app, { theme });
 
 if (!process.env.LUMIO_TEST && !app.requestSingleInstanceLock()) app.quit();
 // Windows shows an app's notifications only under its app ID, matched by its
@@ -1509,6 +1513,11 @@ function registerIpc() {
   internalHandle('page:set-performance', ['settings'], ({ w }, key, value) => (w.profile.guest ? perf.pageState() : perf.set(String(key), value))); // app-wide: not a Guest's
   internalHandle('page:task-manager', ['settings'], ({ w }) => { taskManager.open(w.win); });
   internalHandle('page:make-default', ['settings', 'welcome'], () => makeDefaultBrowser());
+  // "Send crash reports to Lumio" (main/crash-reports.js): Settings › Privacy and the welcome screens.
+  internalHandle('page:crash-reports', ['settings', 'welcome'], () => crashReports.state());
+  // Crash reports are Lumio's own setting (the computer owner's: Guest can't change it).
+  internalHandle('page:set-crash-reports', ['settings', 'welcome'], ({ w }, on) => (w.profile.guest ? crashReports.state() : crashReports.setEnabled(rootStore, on === true)));
+  internalHandle('page:protected-content', ['settings'], () => drm.status());
   internalHandle('page:mac-permissions', ['settings'], ({ w }) => w.ai.macPermissions());
   internalHandle('page:mac-permissions-open', ['settings'], ({ w }, which) => w.ai.openMacPermissionSettings(which));
   internalHandle('page:passwords', ['passwords'], ({ w }) => w.profile.passwords.pageState());
@@ -2039,6 +2048,10 @@ let sessionsBegun = false;
 // so a window already open in it is enough when there's nothing to restore.
 async function startProfile(p, { restore = false, deferred = false } = {}) {
   await p.ready;
+  await drm.whenReady(); // DRM builds: Widevine before the first window, 15 s at most (once per run)
+  // Quit while it waited (Cmd+Q on the waiting window): opening windows now
+  // would stall the quit and leave Lumio unable to quit or save its tabs.
+  if (quitting) return;
   // Site data that should have gone when Lumio last closed (if it couldn't finish).
   if (!p.cleanedUp) { p.cleanedUp = true; await p.siteControls.clearSessionData(); }
   const { store } = p;
