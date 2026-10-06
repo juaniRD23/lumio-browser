@@ -91,24 +91,24 @@ const profilesMenu = (s, cmd) => ({
 const tabMenu = (cmd) => ({
   label: 'Tab',
   submenu: [
-    { label: 'New Tab to the Right', click: cmd.newTabRight },
+    { label: 'New Tab to the Right', id: 'new-tab-to-the-right', click: cmd.newTabRight },
     { type: 'separator' },
     { label: 'Select Next Tab', accelerator: 'Cmd+Alt+Right', click: () => cmd.cycle(1) },
     { label: 'Select Previous Tab', accelerator: 'Cmd+Alt+Left', click: () => cmd.cycle(-1) },
     { type: 'separator' },
-    { label: 'Duplicate Tab', click: cmd.duplicateTab },
-    { label: 'Pin Tab', click: cmd.pinTab },
-    { label: 'Mute Site', click: cmd.muteTab },
+    { label: 'Duplicate Tab', id: 'duplicate-tab', click: cmd.duplicateTab },
+    { label: 'Pin Tab', id: 'pin-unpin-tab', click: cmd.pinTab },
+    { label: 'Mute Site', id: 'mute-site', click: cmd.muteTab },
     { type: 'separator' },
-    { label: 'Move Tab to New Window', click: cmd.moveTabToNewWindow },
-    { label: 'Close Other Tabs', click: cmd.closeOtherTabs },
+    { label: 'Move Tab to New Window', id: 'move-tab-to-new-window', click: cmd.moveTabToNewWindow },
+    { label: 'Close Other Tabs', id: 'close-other-tabs', click: cmd.closeOtherTabs },
   ],
 });
 
 const HELP_ITEMS = (cmd) => [
   { label: k('Lumio Browser Help', 'Help center'), ...(MAC ? {} : { accelerator: 'F1' }), click: cmd.helpCenter },
   { label: k('Report an Issue…', 'Report an issue…'), accelerator: 'Alt+Shift+I', click: cmd.reportIssue },
-  { label: k('What’s New', 'What’s new'), click: cmd.whatsNew },
+  { label: k('What’s New', 'What’s new'), id: 'whats-new', click: cmd.whatsNew },
 ];
 
 // Help in the menu bar (the Mac adds its search box to it).
@@ -118,8 +118,8 @@ const helpMenu = (cmd) => ({
   submenu: [
     ...HELP_ITEMS(cmd),
     { type: 'separator' },
-    { label: 'Version Info', click: cmd.versionPage },
-    { label: 'Experiments', click: cmd.flagsPage },
+    { label: 'Version Info', id: 'version-info', click: cmd.versionPage },
+    { label: 'Experiments', id: 'experiments', click: cmd.flagsPage },
     { type: 'separator' },
     { label: 'Terms of Service', click: cmd.terms },
     { label: 'Privacy Policy', click: cmd.privacy },

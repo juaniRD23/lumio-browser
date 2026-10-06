@@ -617,6 +617,7 @@ const cmd = {
   // Save and share: copy, qr, send, open (the Share popover), screenshot, save, install, shortcut, native (main/share.js).
   share: (what) => { const w = cur(); if (w) shareTools.command(w, what); },
   apps: () => openInternal('lumio://apps/'),
+  safetyCheck: () => openInternal('lumio://settings/#safety'), // Settings › Safety check (batch 6)
 };
 
 // Back/forward menus, swipes, the link status bubble, zoom, Home, start pages… (main/navigation.js)

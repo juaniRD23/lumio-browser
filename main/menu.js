@@ -14,8 +14,10 @@ const short = (label) => (label.length > 60 ? label.slice(0, 60) + '…' : label
 // bar says it in Title Case and the ⋮ menu (buildBrowserMenu's model, with
 // icons) in sentence case, like Chrome.
 function saveAndShare(cmd, menuBar) {
+  // (Menu bar items get an id, so Settings › Keyboard shortcuts lists them: main/shortcuts.js.)
+  const slug = (t) => t.toLowerCase().replace(/…/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   const item = (title, sentence, icon, run, accel) => (menuBar
-    ? { label: title, ...(accel ? { accelerator: accel } : {}), click: run }
+    ? { label: title, id: slug(title), ...(accel ? { accelerator: accel } : {}), click: run }
     : { label: sentence, icon, ...(accel ? { accel } : {}), run });
   const sep = { type: 'separator' };
   // (Without page tools, none of these: the ⋮ menu leaves out what doesn't exist.)
@@ -114,7 +116,7 @@ function menuTemplate(cmd, state = {}) {
         { label: 'Reload Page', accelerator: 'CmdOrCtrl+R', click: () => cmd.reload(false) },
         { label: 'Force Reload', accelerator: 'CmdOrCtrl+Shift+R', click: () => cmd.reload(true) },
         ...(MAC ? [] : [hidden('F5', () => cmd.reload(false)), hidden('Ctrl+F5', () => cmd.reload(true)), hidden('Shift+F5', () => cmd.reload(true))]),
-        { label: 'Stop', ...(MAC ? { accelerator: 'Cmd+.' } : {}), click: cmd.stop },
+        { label: 'Stop', id: 'stop', ...(MAC ? { accelerator: 'Cmd+.' } : {}), click: cmd.stop },
         { type: 'separator' },
         { label: 'Zoom In', accelerator: 'CmdOrCtrl+Plus', click: () => cmd.zoom(1) },
         hidden('CmdOrCtrl+=', () => cmd.zoom(1)),
@@ -168,8 +170,8 @@ function menuTemplate(cmd, state = {}) {
         { label: 'Bookmark Manager', accelerator: MAC ? 'Cmd+Alt+B' : 'Ctrl+Shift+O', click: cmd.bookmarksManager },
         ...(MAC ? [hidden('Cmd+Shift+O', cmd.bookmarksManager)] : []),
         { type: 'separator' },
-        { label: 'Add Tab to Reading List', click: cmd.addToReadingList },
-        { label: 'Show Reading List', click: () => cmd.sidePanel('reading') },
+        { label: 'Add Tab to Reading List', id: 'add-tab-to-reading-list', click: cmd.addToReadingList },
+        { label: 'Show Reading List', id: 'show-reading-list', click: () => cmd.sidePanel('reading') },
         ...extras.bookmarkItems(state, cmd),
       ],
     },
@@ -179,12 +181,12 @@ function menuTemplate(cmd, state = {}) {
       submenu: [
         ...(state.profiles || []).map((p) => ({ label: p.name, translate: false, type: 'checkbox', checked: !!p.current, click: () => cmd.openProfile(p.id) })),
         { type: 'separator' },
-        { label: 'Customize Profile…', click: cmd.customizeProfile },
+        { label: 'Customize Profile…', id: 'customize-profile', click: cmd.customizeProfile },
         { label: state.signedIn ? 'Manage Your Lumio Account…' : 'Sign In to Lumio…', click: cmd.lumioAccount },
         { type: 'separator' },
-        { label: 'Manage Profiles…', click: cmd.profilePicker },
-        { label: 'Add Profile…', click: cmd.addProfile },
-        { label: 'Open Guest Window', click: cmd.newGuest },
+        { label: 'Manage Profiles…', id: 'manage-profiles', click: cmd.profilePicker },
+        { label: 'Add Profile…', id: 'add-profile', click: cmd.addProfile },
+        { label: 'Open Guest Window', id: 'open-guest-window', click: cmd.newGuest },
       ],
     }, extras.tabMenu(cmd)] : []),
     {
@@ -284,6 +286,10 @@ function buildBrowserMenu(cmd, state = {}) {
       icon: 'tools',
       submenu: [
         { label: 'Delete browsing data…', icon: 'trash', accel: k('Cmd+Shift+Backspace', 'Ctrl+Shift+Delete'), run: cmd.clearBrowsingData },
+        { label: 'Safety check', icon: 'shield', run: cmd.safetyCheck },
+        SEP,
+        { label: 'Search tabs…', icon: 'search', accel: 'CmdOrCtrl+Shift+A', run: cmd.tabSearch },
+        { label: 'Name window…', icon: 'window', run: cmd.nameWindow },
         { label: 'Reading mode', icon: 'reader', run: cmd.readingMode },
         { label: 'Task manager', icon: 'gauge', accel: MAC ? '' : 'Shift+Escape', run: cmd.taskManager },
         SEP,
