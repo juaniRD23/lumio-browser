@@ -36,7 +36,8 @@ function normalizeUrl(input) {
 
 function read(settings) {
   const s = settings.ntpShortcuts || {};
-  const item = (x) => (x && typeof x.url === 'string' ? { url: x.url, title: String(x.title || '').slice(0, MAX_TITLE) } : null);
+  // Web pages only: the setting syncs (main/sync/adapters.js), so another device's copy is checked too.
+  const item = (x) => (x && typeof x.url === 'string' && /^https?:\/\//i.test(x.url) ? { url: x.url, title: String(x.title || '').slice(0, MAX_TITLE) } : null);
   return {
     mode: s.mode === 'mostVisited' ? 'mostVisited' : 'custom',
     custom: Array.isArray(s.custom) ? s.custom.map(item).filter(Boolean).slice(0, MAX_CUSTOM) : null,

@@ -2,7 +2,11 @@
 // Lumio Browser's AI, in one Worker.
 //   Deploy:  npx wrangler deploy
 //   Schema:  npx wrangler d1 execute lumio --remote --file schema.sql
+//            (or, on an existing database, the new files in migrations/)
 //   Secrets: node scripts/setup.mjs --host <host>   (OpenRouter, Google, Stripe)
+//            OPENROUTER_API_KEY, GOOGLE_CLIENT_SECRET, STRIPE_SECRET_KEY,
+//            STRIPE_PUBLISHABLE_KEY, STRIPE_WEBHOOK_SECRET, MICROSOFT_CLIENT_SECRET,
+//            CONNECTIONS_KEY, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY (see Env in src/util.ts)
 {
   "name": "lumio",
   "main": "src/index.ts",
@@ -21,7 +25,8 @@
   "r2_buckets": [
     { "binding": "FILES", "bucket_name": "lumio-files" }
   ],
-  // Checks recent AI calls against OpenRouter's records of what they cost (src/spend.ts).
+  // Checks recent AI calls against OpenRouter's records of what they cost (src/spend.ts),
+  // and clears out old sync pairings, feedback and crash reports (see scheduled() in src/index.ts).
   "triggers": { "crons": ["*/5 * * * *"] },
   "vars": {
     "GOOGLE_CLIENT_ID": "1034095196731-3gfal3tuf9goo6ejtnhgi07h3pgtkhdr.apps.googleusercontent.com",

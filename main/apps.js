@@ -290,7 +290,7 @@ class Apps {
     dialog.showMessageBox(aw.win, {
       type: 'question', buttons: ['Allow', 'Block', 'Not now'], defaultId: 2, cancelId: 2,
       message: `${payload.host} wants to ${payload.label}`,
-    }).then(({ response }) => this.permissions(aw.rec.profile).respond(payload.id, response === 0, response !== 2)).catch(() => {}); // Not now (or Esc) isn't remembered
+    }).then(({ response }) => this.permissions(aw.rec.profile).respond(payload.id, ['allow', 'block', 'dismiss'][response] || 'dismiss')).catch(() => {}); // Not now (or Esc) isn't remembered
     return true;
   }
 

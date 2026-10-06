@@ -2,7 +2,9 @@
 // (Stripe), web Chat and Lumio Browser's AI, in one Cloudflare Worker.
 //
 //   /                       website pages (static, from website/public)
+//   GET  /health            liveness check
 //   /api/auth/google/*      sign in with Google
+//   GET  /api/auth/app/finish, POST /api/auth/app/session         (the phone app's sign-in hand-off)
 //   POST /api/auth          { action: 'logout' }
 //   GET  /api/account       who is signed in (the shape Lumio Browser reads)
 //   GET  /api/usage         the plan and its Lumio AI allowance
@@ -23,9 +25,15 @@
 //   GET  /api/admin/feedback, GET /api/admin/feedback/:id/screenshot, DELETE /api/admin/feedback/:id (the owner only)
 //   POST /api/crash         crash reports from Lumio Browser (opt-in, no account; crashes.ts)
 //   GET  /api/admin/crashes, GET /api/admin/crashes/:id/dump   crash reports (the owner only)
+//   GET|DELETE /api/sync, POST /api/sync/init, POST /api/sync/devices, DELETE /api/sync/devices/:id,
+//   GET  /api/sync/changes, POST /api/sync/push, GET|POST /api/sync/pair, GET|POST /api/sync/pair/:id   (Lumio Sync)
+//   GET|POST /api/companion/messages, GET|PUT /api/companion/status, POST /api/companion/push,
+//   GET  /api/companion/vapid                                       (the phone companion)
 //
 // Every 5 minutes (cron trigger) recent AI calls are checked against
-// OpenRouter's records of what they cost (spend.ts).
+// OpenRouter's records of what they cost (spend.ts), and old sync tombstones,
+// pairings and relay messages (sync.ts), feedback (feedback.ts) and crash reports
+// (crashes.ts) are cleaned up.
 //
 // Website requests use the session cookie; Lumio Browser sends the same
 // session as a bearer token. Cookie-authenticated POSTs must come from our own

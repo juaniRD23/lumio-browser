@@ -332,7 +332,11 @@ test('Protocol handlers: a site asks in the permission bar; Allow routes its lin
   assert.ok(asked.asked);
   const [channel, bar] = w.sent.at(-1);
   assert.equal(channel, 'permission');
-  assert.deepEqual(bar, { id: asked.asked, origin: 'https://mail.example', host: 'mail.example', permission: 'protocol-handler', label: 'open all email links', wcId: wc.id });
+  // In batch 6's request shape, so the address bar's chip and bubble ask it.
+  assert.deepEqual(bar, {
+    id: asked.asked, origin: 'https://mail.example', host: 'mail.example', permission: 'protocol-handler', label: 'open all email links', wcId: wc.id, quiet: false, once: false,
+    cats: [{ id: 'protocolHandler', prompt: 'Open all email links', chip: 'Open these links?', blocked: 'Link handler blocked' }],
+  });
   // Asking again while the bar is up doesn't add a second bar.
   handlers.register(wc, 'https://mail.example/inbox', 'mailto', 'https://mail.example/compose?to=%s');
   assert.equal(w.sent.filter(([c]) => c === 'permission').length, 1);

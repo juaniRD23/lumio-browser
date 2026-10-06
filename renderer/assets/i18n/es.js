@@ -2314,6 +2314,8 @@
   'know when you’re using this device': 'saber cuándo estás usando este dispositivo',
   'See your screen': 'Ver tu pantalla',
   '{host} wants to {@a} and {@b}': '{host} quiere {a} y {b}',
+  'Open these links?': '¿Abrir estos enlaces?',
+  'Link handler blocked': 'Controlador de enlaces bloqueado',
   };
   if (typeof module === 'object' && module.exports) module.exports = es;
   else (root.LUMIO_LOCALES ||= {}).es = es;

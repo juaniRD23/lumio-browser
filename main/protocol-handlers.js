@@ -95,15 +95,24 @@ class ProtocolHandlers {
     const id = `ph-${++this.seq}`; // apart from Permissions' numbers: both answer 'permission:respond'
     this.pending.set(id, { ...h, wcId: wc.id, w: found.w });
     const instead = current && current.origin !== h.origin ? ` instead of ${current.host}` : '';
-    found.w.emit('permission', { id, origin: h.origin, host: h.host, permission: 'protocol-handler', label: `open all ${linksOf(h.scheme)}${instead}`, wcId: wc.id });
+    // In batch 6's shape (main/features.js request), so the address bar's chip and bubble ask it.
+    const prompt = `Open all ${linksOf(h.scheme)}${instead}`;
+    found.w.emit('permission', {
+      id, origin: h.origin, host: h.host, wcId: wc.id, quiet: false, once: false,
+      permission: 'protocol-handler', label: prompt.charAt(0).toLowerCase() + prompt.slice(1),
+      cats: [{ id: 'protocolHandler', prompt, chip: 'Open these links?', blocked: 'Link handler blocked' }],
+    });
     return { ok: true, asked: id };
   }
 
   // The permission bar's answer (Allow or Block). Other ids are Permissions'.
-  respond(id, allow) {
+  // decision: 'allow' / 'once' / 'block' / 'dismiss' (or true / false).
+  respond(id, decision) {
     const p = this.pending.get(id);
     if (!p) return false;
     this.pending.delete(id);
+    if (decision === 'dismiss') return true; // asked again next time
+    const allow = decision === true || decision === 'allow' || decision === 'once';
     // One entry per site and scheme, and one handler per scheme.
     const rest = this.all().filter((x) => !(x.scheme === p.scheme && (x.origin === p.origin || (allow && x.allowed))));
     this.save([...rest, { scheme: p.scheme, url: p.url, origin: p.origin, host: p.host, allowed: !!allow, time: Date.now() }]);

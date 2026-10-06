@@ -8,7 +8,22 @@ const DAY = 24 * 3600 * 1000;
 const HISTORY_DAYS = 30;
 const HISTORY_MAX = 2000;
 const CHAT_MAX = 400 * 1024;
-const SETTINGS = ['searchEngine', 'approvalMode', 'reasoning', 'showBookmarksBar', 'memorySaver', 'memorySaverMinutes', 'memorySaverMode', 'startup', 'offerPasswords', 'autofillPasswords', 'profile', 'appearance', 'newTab', 'startupPages', 'showHome', 'homePage', 'searchEngines', 'searchSuggest', 'languages', 'spellcheck', 'autofillAddresses', 'autofillCards', 'formHistory'];
+// The profile's preferences that follow the person, like Chrome's synced
+// settings. Left out on purpose, as device-specific: downloadDir, the window
+// and panel layout (panelOpen, panelWidth, sidebarOpen, sidePanelView),
+// devtoolsDock, hardwareAcceleration, energySaver, preloadPages and
+// performanceAlerts (this computer's battery and memory), defaultZoom and
+// zoomLevels (they depend on the screen), shortcuts (keys differ by OS),
+// printSettings (this computer's printers), security (each computer keeps its
+// own, see main/security.js), sitePermissions and extensions, crashReports,
+// the app-wide accessibility, caretBrowsing and uiLanguage, and
+// searchEnginesFound (sites this computer happened to visit).
+const SETTINGS = [
+  'searchEngine', 'approvalMode', 'reasoning', 'showBookmarksBar', 'memorySaver', 'memorySaverMinutes', 'memorySaverMode', 'startup',
+  'offerPasswords', 'autofillPasswords', 'profile', 'appearance', 'newTab', 'startupPages', 'showHome', 'homePage', 'searchEngines',
+  'searchSuggest', 'languages', 'spellcheck', 'spellcheckLanguages', 'autofillAddresses', 'autofillCards', 'formHistory',
+  'askDownload', 'verticalTabs', 'translate', 'reader', 'ntpShortcuts', 'contentDefaults',
+];
 
 function simple(name, { entries, apply, keepAbsent }) {
   return {

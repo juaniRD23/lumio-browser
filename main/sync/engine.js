@@ -1,5 +1,6 @@
-// Lumio Sync on this computer: keeps bookmarks, passwords, passkeys,
-// addresses, cards (when turned on), history, chats, workflows, settings and
+// Lumio Sync on this computer: keeps bookmarks (with folders), the reading
+// list, saved tab groups, passwords, passkeys,
+// addresses, cards (when turned on), history, chats, workflows, projects, settings and
 // open tabs the same on every device signed in to the same Lumio account.
 // Records are encrypted here (main/sync/crypto.js) before they leave; the
 // server stores ciphertext.
@@ -67,11 +68,15 @@ class SyncEngine {
 
   addAdapters(list) { for (const a of list) this.adapters.set(a.name, a); }
   // Whether a collection syncs: its switch is on (some follow another type's,
-  // like bookmark folders with Bookmarks), and for a newer, optional one, the
-  // server says it keeps it (an older server would refuse the whole upload).
+  // like bookmark folders with Bookmarks), and the server keeps it. A server
+  // that lists what it keeps is taken at its word; one that doesn't (older
+  // ones) gets the original collections, and newer non-optional ones are
+  // tried and retried later if refused (NEWER), but never an optional one
+  // (it would refuse the whole upload).
   syncs(adapter) {
     if (!this.prefs.types[adapter.type || adapter.name]) return false;
-    return !adapter.optional || !!this.serverCollections?.has(adapter.name);
+    if (this.serverCollections) return this.serverCollections.has(adapter.name);
+    return !adapter.optional;
   }
 
   // ---------------------------------------------------------------- settings

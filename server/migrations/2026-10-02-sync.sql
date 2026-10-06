@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS sync_items (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
   owner TEXT NOT NULL,
   id TEXT NOT NULL,                      -- HMAC of the collection and key, made on the device
-  collection TEXT NOT NULL,              -- bookmarks | passwords | history | chats | workflows | settings | tabs
+  collection TEXT NOT NULL,              -- one of COLLECTIONS in src/sync.ts (bookmarks, bookmarkTree, readingList, savedGroups, passwords, passkeys, addresses, cards, history, chats, workflows, projects, settings, tabs)
   data TEXT,                             -- AES-GCM ciphertext (base64); NULL when deleted
   deleted INTEGER NOT NULL DEFAULT 0,
   size INTEGER NOT NULL DEFAULT 0,

@@ -58,7 +58,8 @@ function setup(d) {
   ipcMain.on('ph:unregister', (e, { scheme, url } = {}) => {
     if (e.senderFrame && e.senderFrame === e.sender.mainFrame) handlers.unregister(e.sender, e.senderFrame.url, scheme, url);
   });
-  on('permission:respond', (_w, { id, allow } = {}) => handlers.respond(id, !!allow));
+  // Batch 6's chip bubble and the pop-ups' bar answer with a decision ('allow', 'once', 'block', 'dismiss').
+  on('permission:respond', (_w, { id, decision, allow } = {}) => handlers.respond(id, decision ?? !!allow));
 
   // Settings: lumio://settings/shortcuts, and the rows settings-power.js adds.
   // New keys go into the menu and the windows' tooltips right away.
