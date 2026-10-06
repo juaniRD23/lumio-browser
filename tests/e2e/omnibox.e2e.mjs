@@ -114,8 +114,18 @@ test('an open tab in another window is offered, and picking it switches there', 
     await L.main((_e, url) => { global.lumio.createWindow({ urls: [url] }); return true; }, `${base}/beta`);
     assert.ok(await until(() => L.main(() => global.lumio.windows.length === 2 && global.lumio.tabs.wc()?.getTitle() === 'Page beta')));
     const other = await L.main(() => global.lumio.current.id);
+    // A new window comes to the front once its UI has drawn (createWindow:
+    // focus() on ready-to-show), which can be after its page has loaded. If
+    // the first window were brought forward before that, the new one would
+    // take the front back, and the bar typed into would be the one whose own
+    // tab is "Page beta" (never offered as a switch): CI run 5.
+    if (!(await until(() => L.main((_e, id) => { const w = global.lumio.windows.find((x) => x.id === id); return !!w && w.win.isVisible(); }, other)))) console.error('the new window never showed:', JSON.stringify(await focusState()));
+    await L.wait(300);
+    const first = await L.main(() => global.lumio.windows[0].id);
     await L.main(() => { global.lumio.windows[0].focus(); return true; });
+    if (!(await until(() => L.main((_e, id) => global.lumio.current.id === id && global.lumio.current.win.isFocused(), first), 5000))) console.error('the first window is not in front:', JSON.stringify(await focusState()));
     await focusBar();
+    assert.equal(await L.main(() => global.lumio.current.id), first, 'typing in the first window');
     await clearBar();
     await typeText('beta');
     assert.ok(await until(async () => (await rows()).some((r) => r.type === 'tab' && /Switch to this tab/.test(r.text))), `a "Switch to this tab" row: ${JSON.stringify({ rows: await rows(), focus: await focusState() })}`);
