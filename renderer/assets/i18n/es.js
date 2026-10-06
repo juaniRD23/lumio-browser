@@ -1900,6 +1900,7 @@
   'Saved cards': 'Tarjetas guardadas',
   'Saved addresses': 'Direcciones guardadas',
   'Earlier entries': 'Entradas anteriores',
+  '{@what}, {#n}. Use the arrow keys to choose and Enter to fill.': '{what}, {n}. Usa las flechas para elegir y Enter para completar.',
   'State or province': 'Estado o provincia',
   'None saved.': 'No hay nada guardado.',
   'Couldn’t save that.': 'No se pudo guardar.',

@@ -854,7 +854,7 @@ for (const k of Object.keys(pageTools)) RENDER[k] = (p) => pageTools[k].render(p
 // Autofill's address and card dropdowns and Save bubble, the puzzle-piece
 // menu and the new tab page question, Report an issue (overlay-autofill.js,
 // overlay-extensions.js, overlay-help.js: they measure themselves).
-for (const ui of [autofillUi, extUi, helpUi]) for (const k of ui.KINDS) RENDER[k] = (p) => ui.render(k, p, card, api);
+for (const ui of [autofillUi, extUi, helpUi]) for (const k of ui.KINDS) RENDER[k] = (p, first) => ui.render(k, p, card, api, first);
 
 api.on('overlay-data', (p) => {
   if (p.op === 'in') { if (p.seq === seq && !entered) enter(); return; }

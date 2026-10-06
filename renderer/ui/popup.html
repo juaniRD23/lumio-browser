@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <title>Pop-up</title>
   <link rel="stylesheet" href="popup.css" />
+  <link rel="stylesheet" href="permission-chip.css" />
 </head>
 <body>
   <!-- A pop-up window's bar (main/popup-window.js). Its page is a view laid
@@ -11,6 +12,8 @@
   <header id="bar">
     <div id="where">
       <button id="site-icon" aria-label="View site information"></button>
+      <button id="perm-chip" aria-label="Site permissions" class="perm-chip" aria-haspopup="dialog" aria-expanded="false" hidden></button>
+      <span id="perm-live" class="sr-only" aria-live="polite"></span>
       <input id="address" type="text" readonly spellcheck="false" aria-label="Address of this pop-up" />
     </div>
     <span id="toast" role="status" hidden></span>

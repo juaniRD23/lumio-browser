@@ -17,10 +17,13 @@ import { siteIcon } from '/assets/site-icons.js';
 // isTyping: the person is typing in the address bar (the field can stay this
 // document's activeElement while the page has the keyboard, so that alone
 // doesn't say so).
-export function initPermissionChip({ api, getActiveTab, overlay, isTyping = () => false }) {
+// accept(request): which questions the chip takes (a pop-up window's bar
+// asks the others in its permission bar, renderer/ui/permbar.js).
+// anchor: the field the bubble opens under (the address bar).
+export function initPermissionChip({ api, getActiveTab, overlay, isTyping = () => false, accept = () => true, anchor = 'omnibox' }) {
   const chip = document.getElementById('perm-chip');
   const live = document.getElementById('perm-live');
-  const omnibox = document.getElementById('omnibox');
+  const omnibox = document.getElementById(anchor);
   const pages = new Map(); // wcId -> { requests: [], blocked: Map(cat -> info) }
   const seen = new Set(); // questions whose bubble already opened by itself
   let collapseTimer = 0;
@@ -101,6 +104,7 @@ export function initPermissionChip({ api, getActiveTab, overlay, isTyping = () =
   window.addEventListener('mousedown', (e) => { if (bubbleOpen() && !e.target.closest('#perm-chip')) { overlay.hide('permission'); render(); } });
 
   api.on('permission', (req) => {
+    if (!accept(req)) return;
     pageOf(req.wcId).requests.push(req);
     render();
     autoOpen();

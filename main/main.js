@@ -186,6 +186,9 @@ const tabOfWc = (wc) => {
   }
   return null;
 };
+// A site's page in a tab, a pop-up or an installed app's window: for what a
+// site gets in all of them (passwords, passkeys, autofill, its dialogs).
+const pageOfWc = (wc) => tabOfWc(wc) || apps?.holderOf(wc) || null;
 
 function setupTabSession(ses, { incognito = false } = {}) {
   ses.setUserAgent(app.userAgentFallback);
@@ -1001,15 +1004,17 @@ function announceUpdate(state) {
 
 // ---------------------------------------------------------------- IPC
 // Browser UI calls (shell + overlay) are routed to the window they came from.
+// An installed app's window answers only the calls for its dropdowns and
+// dialogs (main/apps.js UI_CHANNELS).
 function handle(channel, fn) {
   ipcMain.handle(channel, (e, ...args) => {
-    const w = windowOfWc(e.sender);
+    const w = windowOfWc(e.sender) || apps?.uiOwner(e.sender, channel);
     if (!w) throw new Error('Not allowed');
     return fn(w, ...args);
   });
 }
 function on(channel, fn) {
-  ipcMain.on(channel, (e, ...args) => { const w = windowOfWc(e.sender); if (w) fn(w, ...args); });
+  ipcMain.on(channel, (e, ...args) => { const w = windowOfWc(e.sender) || apps?.uiOwner(e.sender, channel); if (w) fn(w, ...args); });
 }
 
 // Internal pages (lumio://newtab etc.) run in normal tab views; only their
@@ -1135,7 +1140,7 @@ function registerIpc() {
   // A page's dialog in its tab was answered: only by the dialog view itself
   // (main/dialog-view.js), not the window's other views.
   ipcMain.on('dialog:answer', (e, answer) => {
-    const w = windowOfWc(e.sender);
+    const w = windowOfWc(e.sender) || apps?.uiOwner(e.sender);
     if (w && e.sender === w.dialogs?.view?.webContents) w.dialogs.answer(answer || {});
   });
   // "Press Esc to exit full screen" measured itself (main/access-notice.js).
@@ -1753,15 +1758,9 @@ function pointerLocked(wc) {
 ipcMain.on('js-dialog', (e, req) => {
   const reply = (value) => { try { e.returnValue = value ?? null; } catch { /* the page is gone */ } };
   const kind = ['alert', 'confirm', 'prompt'].includes(req?.kind) ? req.kind : null;
-  const found = kind && tabOfWc(e.sender);
+  // (An installed app's window asks over its page the same way: main/apps.js.)
+  const found = kind && pageOfWc(e.sender);
   const frame = e.senderFrame;
-  // An installed app's window (batch 7b): a plain dialog over it.
-  const aw = kind && !found && frame && frame === e.sender.mainFrame ? apps?.windowFor(e.sender) : null;
-  if (aw && kind !== 'prompt') {
-    dialog.showMessageBox(aw.win, { type: kind === 'alert' ? 'info' : 'question', message: String(req.message ?? '').slice(0, 2000), buttons: kind === 'alert' ? ['OK'] : ['OK', 'Cancel'], defaultId: 0, cancelId: kind === 'alert' ? 0 : 1 })
-      .then(({ response }) => reply(kind === 'confirm' ? response === 0 : null), () => reply(pageDialogs.blankAnswer(kind)));
-    return;
-  }
   if (!found || !frame || frame !== e.sender.mainFrame) { reply(pageDialogs.blankAnswer(kind)); return; }
   pageDialogs.jsDialog(found.tab, { kind, message: req.message, value: req.value, url: frame.url })
     .then(reply, () => reply(pageDialogs.blankAnswer(kind)));
@@ -1771,7 +1770,7 @@ ipcMain.on('js-dialog', (e, req) => {
 // in to access this site" over it. Anything else (Lumio's own requests, its
 // hidden pages) is cancelled, as Electron does by default.
 app.on('login', (event, wc, details, authInfo, callback) => {
-  const found = wc && tabOfWc(wc);
+  const found = wc && pageOfWc(wc);
   if (!found) return;
   event.preventDefault();
   pageDialogs.signIn(found.tab, { details, authInfo })
@@ -1938,12 +1937,12 @@ function openProfile(id) {
     safeStorage,
     settings: store,
     helper,
-    findTab: tabOfWc,
+    findTab: pageOfWc,
     toast: (w, text) => w.emit('toast', { text }),
   });
   profile.passwords = passwords;
   // Addresses, cards and form entries (main/autofill.js).
-  profile.autofill = new AutofillManager({ dir, safeStorage, settings: store, helper, findTab: tabOfWc, toast: (w, text) => w.emit('toast', { text }), openPage: (url) => openInternal(url) });
+  profile.autofill = new AutofillManager({ dir, safeStorage, settings: store, helper, findTab: pageOfWc, toast: (w, text) => w.emit('toast', { text }), openPage: (url) => openInternal(url) });
   store.historyFile.onSave(historyMenuSoon); // History › Recently Visited
   profile.permissions = new Permissions(ses, { store, emitFor, persist: true, openExternal: externalRequest, onPointerLock: pointerLocked });
   addProfileServices(profile);
@@ -2152,8 +2151,8 @@ function openGuest() {
     profile.permissions = new Permissions(ses, { store, emitFor, persist: false, openExternal: externalRequest, onPointerLock: pointerLocked });
     profile.account = new LumioAccount({ store, onChange: (state) => { wins().forEach((w) => { w.emit('account', state); w.ai.refreshCapabilities(); }); services.broadcastAIState(); } });
     watchLumioCookie(profile);
-    profile.passwords = new PasswordManager({ dir, safeStorage, settings: store, helper, findTab: tabOfWc, toast: (w, text) => w.emit('toast', { text }) });
-    profile.autofill = new AutofillManager({ dir, safeStorage, settings: store, helper, findTab: tabOfWc, toast: (w, text) => w.emit('toast', { text }), openPage: (url) => openInternal(url) });
+    profile.passwords = new PasswordManager({ dir, safeStorage, settings: store, helper, findTab: pageOfWc, toast: (w, text) => w.emit('toast', { text }) });
+    profile.autofill = new AutofillManager({ dir, safeStorage, settings: store, helper, findTab: pageOfWc, toast: (w, text) => w.emit('toast', { text }), openPage: (url) => openInternal(url) });
     Object.assign(profile, { workflows: new Workflows(dir), siteTips: new SiteTips(dir), projects: new Projects(dir), schedules: new Schedules(dir) });
     addProfileServices(profile);
     profile.siteControls = siteControlsFor(profile);
@@ -2335,11 +2334,10 @@ app.whenReady().then(async () => {
   // Each tab's password and passkey requests go to its own profile's manager.
   // An installed app's window (batch 7b) has no manager: its passkey requests
   // go to the browser's own WebAuthn (security keys) instead of failing.
-  PasswordManager.register((wc) => tabOfWc(wc)?.w.profile.passwords || null, {
-    orElse: (channel, e) => (channel === 'pk:request' && apps?.windowFor(e.sender) ? { native: true } : null),
-  });
-  // Addresses, cards and form entries go to the tab's profile's autofill too (main/autofill.js).
-  AutofillManager.registerPages((wc) => tabOfWc(wc)?.w.profile.autofill || null);
+  // A tab's, a pop-up's or an installed app's page: its own profile's passwords and passkeys.
+  PasswordManager.register((wc) => pageOfWc(wc)?.w.profile.passwords || null);
+  // Addresses, cards and form entries go to the page's profile's autofill too (main/autofill.js).
+  AutofillManager.registerPages((wc) => pageOfWc(wc)?.w.profile.autofill || null);
   screenAura.register();
 
   // Updates from GitHub Releases (packaged builds; tests point it at a mock).
@@ -2392,6 +2390,7 @@ app.whenReady().then(async () => {
     dir: app.getPath('userData'),
     session: (id) => appProfile(id).session,
     permissions: (id) => appProfile(id).permissions,
+    profile: (id) => appProfile(id),
     openUrl: openInProfile,
     cmd,
     restoreMenu: () => Menu.setApplicationMenu(buildMenu(cmd, menuState())),

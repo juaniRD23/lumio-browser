@@ -13,6 +13,7 @@ const { TabManager } = require('./tabs');
 const { BrowserWin } = require('./window');
 const { DialogView } = require('./dialog-view');
 const { AccessNotice } = require('./access-notice');
+const { lendOverlay, wireOverlay } = require('./overlay-host');
 const theme = require('./theme');
 
 const PRELOAD = path.join(__dirname, '..', 'preload', 'dist', 'shell.js');
@@ -96,6 +97,7 @@ class PopupWin {
     this.overlay = new WebContentsView({ webPreferences: { preload: PRELOAD, contextIsolation: true, sandbox: true, nodeIntegration: false } });
     this.overlay.setBackgroundColor('#00000000');
     this.overlay.webContents.loadURL('lumio://overlay/' + query);
+    wireOverlay(this);
 
     this.tabs = new PopupTabs({
       win: this.win,
@@ -200,8 +202,8 @@ class PopupWin {
   }
 }
 
-// Dropdowns (site information, passwords, blocked pop-ups) work as in a browser window.
-PopupWin.prototype.showOverlay = BrowserWin.prototype.showOverlay;
-PopupWin.prototype.hideOverlay = BrowserWin.prototype.hideOverlay;
+// Dropdowns (site information, passwords, blocked pop-ups, the permission
+// chip's bubble) work as in a browser window (main/overlay-host.js).
+lendOverlay(PopupWin, BrowserWin);
 
 module.exports = { PopupWin, popupBounds, BAR };
