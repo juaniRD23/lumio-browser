@@ -458,13 +458,31 @@ class TabManager {
       // The page would keep document.fullscreenElement, and its next
       // requestFullscreen() would resolve without enter-html-full-screen (no
       // full screen window, no notice). Once the window is out, so is the page.
-      const settle = () => {
+      // A page learns it's out only when its view's visual properties are
+      // sent again, which a resize does: the window's own resizes all came
+      // during the animation, and Electron re-sends them after it only for a
+      // window's own webContents, never a tab's view (the page's own
+      // exitFullscreen() then waits forever: CI run 5). So the view is made a
+      // pixel shorter and put back.
+      const settle = async () => {
         if (wc.isDestroyed() || M().fullscreenTab === tab.id) return;
-        Promise.resolve().then(() => wc.executeJavaScript('document.fullscreenElement ? document.exitFullscreen().then(() => true, () => false) : false', true)).catch(() => {});
+        const stuck = await Promise.resolve().then(() => wc.executeJavaScript('!!document.fullscreenElement', true)).catch(() => false);
+        if (stuck !== true || wc.isDestroyed() || M().fullscreenTab === tab.id) return;
+        const b = tab.view.getBounds?.();
+        if (b && b.height > 1) {
+          tab.view.setBounds({ ...b, height: b.height - 1 });
+          setTimeout(() => {
+            const now = !wc.isDestroyed() && tab.view.getBounds();
+            if (now && now.height === b.height - 1 && now.width === b.width) tab.view.setBounds(b);
+          }, 50).unref?.();
+        }
+        // (And the page asks, for an Electron that does tell it.)
+        wc.executeJavaScript('document.fullscreenElement ? document.exitFullscreen().then(() => true, () => false) : false', true).catch(() => {});
       };
-      // (Again a second later, in case the window said it was out before its animation ended.)
+      // (Again later, in case the window said it was out before its animation ended.)
       if (m.win.isFullScreen?.()) m.win.once('leave-full-screen', () => setTimeout(settle, 0));
       setTimeout(settle, 1000).unref?.();
+      setTimeout(settle, 2500).unref?.();
     });
     wc.on('found-in-page', (_e, result) => M().hooks.onFound?.(tab.id, result));
     // Split view: clicking into the other side's page makes it the focused side.

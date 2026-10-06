@@ -182,7 +182,9 @@ test('after leaving full screen, a page that still thinks it is full screen is l
   const win = { contentView: { children: [], addChildView() {}, removeChildView() {} }, getContentSize: () => [1200, 800], setFullScreen() {}, isFullScreen: () => true, once: (ev, fn) => { if (ev === 'leave-full-screen') leave = fn; } };
   const m = new TabManager({ win, session: {}, store: { settings: {}, isBookmarked: () => false }, emit: () => {}, hooks: {} });
   const wc = Object.assign(new EventEmitter(), { getURL: () => 'https://video.example/', setWindowOpenHandler() {}, isDestroyed: () => false, executeJavaScript: async (code, gesture) => { scripts.push([code, gesture]); return true; } });
-  const tab = { id: 4, owner: m, view: { webContents: wc, setBounds() {}, setVisible() {}, setBorderRadius() {} }, url: 'https://video.example/' };
+  let bounds = { x: 0, y: 80, width: 1200, height: 720 };
+  const sizes = [];
+  const tab = { id: 4, owner: m, view: { webContents: wc, setBounds(b) { bounds = { ...b }; sizes.push(b.height); }, getBounds: () => ({ ...bounds }), setVisible() {}, setBorderRadius() {} }, url: 'https://video.example/' };
   m.tabs.push(tab);
   m.activeId = 4;
   m.wire(tab);
@@ -190,11 +192,36 @@ test('after leaving full screen, a page that still thinks it is full screen is l
   wc.emit('leave-html-full-screen');
   assert.equal(typeof leave, 'function', 'waits for the window to be out (the Mac animates it)');
   assert.equal(scripts.length, 0);
+  bounds = { x: 0, y: 80, width: 1200, height: 720 };
+  sizes.length = 0;
   leave();
   await new Promise((r) => setTimeout(r, 10));
-  assert.equal(scripts.length, 1);
-  assert.match(scripts[0][0], /document\.fullscreenElement \? document\.exitFullscreen\(\)/);
-  assert.equal(scripts[0][1], true);
+  assert.deepEqual(scripts.map(([code, gesture]) => [code.slice(0, 40), gesture]), [['!!document.fullscreenElement', true], ['document.fullscreenElement ? document.ex', true]], 'it asks the page, then lets it out');
+  // Its view's size changes (so Chromium tells the page again, now out of full screen), and comes back.
+  assert.deepEqual(sizes, [719]);
+  await new Promise((r) => setTimeout(r, 80));
+  assert.deepEqual(sizes, [719, 720]);
+  assert.deepEqual(bounds, { x: 0, y: 80, width: 1200, height: 720 });
+});
+
+test('a page that left full screen by itself is left alone', async () => {
+  let leave = null;
+  const scripts = [];
+  const win = { contentView: { children: [], addChildView() {}, removeChildView() {} }, getContentSize: () => [1200, 800], setFullScreen() {}, isFullScreen: () => true, once: (ev, fn) => { if (ev === 'leave-full-screen') leave = fn; } };
+  const m = new TabManager({ win, session: {}, store: { settings: {}, isBookmarked: () => false }, emit: () => {}, hooks: {} });
+  const wc = Object.assign(new EventEmitter(), { getURL: () => 'https://video.example/', setWindowOpenHandler() {}, isDestroyed: () => false, executeJavaScript: async (code) => { scripts.push(code); return false; } });
+  const sizes = [];
+  const tab = { id: 5, owner: m, view: { webContents: wc, setBounds(b) { sizes.push(b.height); }, getBounds: () => ({ x: 0, y: 80, width: 1200, height: 720 }), setVisible() {}, setBorderRadius() {} }, url: 'https://video.example/' };
+  m.tabs.push(tab);
+  m.activeId = 5;
+  m.wire(tab);
+  wc.emit('enter-html-full-screen');
+  wc.emit('leave-html-full-screen');
+  sizes.length = 0;
+  leave();
+  await new Promise((r) => setTimeout(r, 80));
+  assert.deepEqual(scripts, ['!!document.fullscreenElement']);
+  assert.deepEqual(sizes, [], 'its view keeps its size');
 });
 
 // ---------------------------------------------------------------- files from Finder, the Dock, the command line

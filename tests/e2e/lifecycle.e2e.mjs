@@ -122,7 +122,13 @@ test('a page in full screen: "<site> is now full screen · Press Esc to exit ful
   await until(() => L.main(() => !global.lumio.win.isFullScreen()), 5000); // the Mac's animation
   // The page itself left too (on a Mac it used to stay full screen inside the
   // normal window, and its next request got no notice).
-  assert.ok(await until(async () => (await L.page('!document.fullscreenElement')) === true, 8000), 'and the page left full screen too');
+  const left = await until(async () => (await L.page('!document.fullscreenElement')) === true, 8000);
+  if (!left) {
+    console.error('the page is still full screen:', JSON.stringify(await L.main(() => ({
+      window: global.lumio.win.isFullScreen(), tab: global.lumio.tabs.fullscreenTab, view: global.lumio.tabs.active.view.getBounds(), content: global.lumio.win.getContentBounds(),
+    })).catch((e) => e.message)));
+  }
+  assert.ok(left, 'and the page left full screen too');
 });
 
 test('the notice goes by itself after a few seconds', async () => {
