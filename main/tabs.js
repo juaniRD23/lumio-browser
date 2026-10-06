@@ -455,7 +455,12 @@ class TabManager {
     });
     wc.on('found-in-page', (_e, result) => M().hooks.onFound?.(tab.id, result));
     // Split view: clicking into the other side's page makes it the focused side.
-    wc.on('focus', () => { const m = M(); if (tab.id !== m.activeId && m.split.isShown(tab.id)) m.activate(tab.id); });
+    // Either way the address bar lets go of the keyboard (renderer/ui/shell.js).
+    wc.on('focus', () => {
+      const m = M();
+      if (tab.id !== m.activeId && m.split.isShown(tab.id)) m.activate(tab.id);
+      if (tab.id === m.activeId) m.emit('page-focus');
+    });
     wc.on('zoom-changed', (_e, dir) => M().zoom(dir === 'in' ? 1 : -1, tab.id));
     // How far the page has got, for the address bar's progress line
     // (shell.js renderLoad): started, the new page answered, its document is

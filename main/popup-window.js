@@ -83,6 +83,10 @@ class PopupWin {
     });
     if (process.platform !== 'darwin') this.win.setMenuBarVisibility(false);
     const query = incognito ? '?appearance=dark' : '';
+    // The window is named after its page (onChanged below), never its bar's
+    // own <title>: Electron would retitle it "Pop-up" when the bar finishes
+    // loading, after the page's title had already come.
+    this.win.on('page-title-updated', (e) => e.preventDefault());
     this.win.loadURL('lumio://popup/' + query);
     this.win.once('ready-to-show', () => {
       if (!process.env.LUMIO_HIDDEN) this.win.show();

@@ -31,7 +31,10 @@ const until = async (fn, ms = 10_000) => {
 const title = () => L.main(() => global.lumio.tabs.wc().getTitle());
 const go = async (url, expect) => {
   await L.main((_e, u) => global.lumio.tabs.navigate(u), url);
-  assert.ok(await until(async () => (await title()) === expect), `loaded ${expect}`);
+  if (!(await until(async () => (await title()) === expect))) {
+    console.error(`not loaded: ${expect}`, JSON.stringify(await L.main(() => global.lumio.windows.map((w) => ({ current: w === global.lumio.current, incognito: w.incognito, tabs: w.tabs.tabs.map((t) => [t.title, t.view?.webContents?.getURL?.() ?? null, t.id === w.tabs.activeId]) }))).catch((e) => e.message)));
+  }
+  assert.equal(await title(), expect, `loaded ${expect}`);
   await until(() => L.page(`document.readyState === 'complete'`));
 };
 // Real (trusted) mouse and keyboard input, like a person. Like a person, it
@@ -196,8 +199,12 @@ test('form entries: suggested next time, removed with Shift+Delete, never in inc
     await L.wait(800);
     assert.equal(await store((s) => s.entries.length), 0);
   } finally {
-    // The next tests work in the normal window.
+    // The next tests work in the normal window. Closing it isn't at once: a
+    // page typed in (this one) runs its beforeunload first, and until then the
+    // incognito window is still the current one.
     await L.main(() => { for (const w of global.lumio.windows) if (w.incognito) w.close(); return true; });
+    const gone = () => L.main(() => !global.lumio.windows.some((w) => w.incognito) && !global.lumio.current?.incognito);
+    if (!(await until(gone))) console.error('the incognito window is still open:', JSON.stringify(await L.main(() => global.lumio.windows.map((w) => ({ incognito: w.incognito, closing: w.closing, confirming: !!w.confirming, tabs: w.tabs.tabs.map((t) => [t.title, !!t.touched, !!t.closing]) })))));
   }
 });
 

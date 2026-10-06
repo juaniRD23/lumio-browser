@@ -386,7 +386,12 @@ test('a bad certificate: "Your connection is not private", Advanced, Proceed onl
   assert.ok(await until(async () => (await title()) === 'Self-signed page'), 'went past it');
   const state = await L.main(() => global.lumio.tabs.state().tabs.find((t) => t.id === global.lumio.tabs.activeId));
   assert.equal(state.notSecure, true);
-  assert.ok(await until(() => L.shell(`document.getElementById('site-icon').textContent === 'Not secure'`)));
+  if (!(await until(() => L.shell(`document.getElementById('site-icon').textContent === 'Not secure'`)))) {
+    // What the address bar shows instead, and where the keyboard is.
+    console.error('site icon:', JSON.stringify(await L.shell(`({ text: document.getElementById('site-icon').textContent, title: document.getElementById('site-icon').title, cls: document.getElementById('site-icon').className, active: document.activeElement?.id || document.activeElement?.tagName, hasFocus: document.hasFocus(), omnibox: document.getElementById('omnibox').className, address: document.getElementById('address').value })`).catch((e) => e.message)),
+      JSON.stringify(await L.main(() => ({ pageFocused: global.lumio.tabs.wc().isFocused(), shellFocused: global.lumio.win.webContents.isFocused(), windowFocused: global.lumio.win.isFocused() }))));
+  }
+  assert.equal(await L.shell(`document.getElementById('site-icon').textContent`), 'Not secure');
   const info = await L.shell(`window.lumio.invoke('site:info')`);
   assert.deepEqual([info.secure, info.certBypass], [false, true]);
   await shot('75-not-secure');

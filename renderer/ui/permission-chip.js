@@ -14,7 +14,10 @@ import { siteIcon } from '/assets/site-icons.js';
 
 // overlay: { show(kind, rect, payload), hide(kind), picked(), kind() } from
 // shell.js, which keeps track of the one overlay a window has.
-export function initPermissionChip({ api, getActiveTab, overlay }) {
+// isTyping: the person is typing in the address bar (the field can stay this
+// document's activeElement while the page has the keyboard, so that alone
+// doesn't say so).
+export function initPermissionChip({ api, getActiveTab, overlay, isTyping = () => false }) {
   const chip = document.getElementById('perm-chip');
   const live = document.getElementById('perm-live');
   const omnibox = document.getElementById('omnibox');
@@ -81,10 +84,11 @@ export function initPermissionChip({ api, getActiveTab, overlay }) {
     render();
   }
 
-  // A question opens its bubble by itself once, unless something else is open.
+  // A question opens its bubble by itself once, unless something else is open
+  // or the person is typing an address.
   function autoOpen() {
     const now = current();
-    if (!now || now.mode !== 'ask' || seen.has(now.req.id) || overlay.kind() || document.activeElement?.id === 'address') return;
+    if (!now || now.mode !== 'ask' || seen.has(now.req.id) || overlay.kind() || isTyping()) return;
     seen.add(now.req.id);
     open(false);
   }

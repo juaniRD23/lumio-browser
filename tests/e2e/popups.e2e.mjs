@@ -36,6 +36,13 @@ const go = async (u, expect) => {
   assert.ok(await until(async () => (await title()) === expect), `loaded ${expect}`);
 };
 const tabCount = () => L.main(() => global.lumio.tabs.tabs.length);
+// Why a permission bubble didn't open (printed when it doesn't): the window's
+// overlay, the chip, and where the shell's keyboard is.
+const bubbleState = () => L.main(async () => {
+  const w = global.lumio.current;
+  const shell = await w.win.webContents.executeJavaScript(`({ active: document.activeElement?.id || document.activeElement?.tagName, hasFocus: document.hasFocus(), omnibox: document.getElementById('omnibox').className, chip: document.getElementById('perm-chip').hidden ? null : document.getElementById('perm-chip').textContent })`).catch((e) => e.message);
+  return { overlayKind: w.overlayKind, overlayIn: w.overlayIn, overlaySeq: w.overlaySeq, url: w.tabs.wc()?.getURL(), pageFocused: w.tabs.wc()?.isFocused(), shellFocused: w.win.webContents.isFocused(), shell };
+}).catch((e) => e.message);
 // A real click in the active tab's page (it counts as the person's).
 const clickPage = (sel) => L.main(async (_e, s) => {
   const wc = global.lumio.tabs.wc();
@@ -223,7 +230,9 @@ test('a sized pop-up opens in its own window with a bar, talks back to its page,
   // about:blank until its page gets there (the opener could still be writing into it), then the page's address.
   assert.ok(await until(async () => (await inBar(`document.getElementById('address').value`)) === `http://${host}/pay`), 'its bar shows where it really is');
   assert.equal(await inBar(`document.getElementById('site-icon').textContent`), 'Not secure', 'plain http says so');
-  assert.ok(await until(async () => (await L.main(() => global.lumio.popups[0].win.getTitle())) === 'Pay here'), 'the window’s title is the page’s');
+  const winTitle = () => L.main(() => global.lumio.popups[0].win.getTitle());
+  if (!(await until(async () => (await winTitle()) === 'Pay here'))) console.error('pop-up window title:', await winTitle().catch((e) => e.message), '| its page’s:', await inPopup('document.title').catch((e) => e.message));
+  assert.equal(await winTitle(), 'Pay here', 'the window’s title is the page’s');
   const b = await L.main(() => global.lumio.popups[0].tabs.active.view.getBounds());
   assert.equal(b.y, 40, 'the page is under the bar');
   assert.equal(b.width, 420, 'the width the page asked for');
@@ -431,7 +440,8 @@ test('window management asks first; sound waits for a click', async () => {
   await go(`${base}/target`, 'Target');
   await L.page(`window.getScreenDetails().then(() => { window.wm = 'yes'; }, (e) => { window.wm = e.name; }); true`);
   // The browser window asks in the address bar's chip and its bubble (batch 6), not a bar.
-  assert.ok(await until(() => L.main(() => ((w) => w.overlayKind === 'permission' && w.overlayIn === w.overlaySeq)(global.lumio.current))), 'the bubble opens by itself');
+  if (!(await until(() => L.main(() => ((w) => w.overlayKind === 'permission' && w.overlayIn === w.overlaySeq)(global.lumio.current))))) console.error('window management, no bubble:', JSON.stringify(await bubbleState()));
+  assert.ok(await L.main(() => ((w) => w.overlayKind === 'permission' && w.overlayIn === w.overlaySeq)(global.lumio.current)), 'the bubble opens by itself');
   const bubble = (code) => L.main((_e, c) => global.lumio.current.overlay.webContents.executeJavaScript(c), code);
   assert.match(await until(() => bubble(`document.querySelector('.pb [data-d=block]') && document.querySelector('.pb').innerText`)), new RegExp(`${new URL(base).host.replace(/\./g, '\\.')} wants to[\\s\\S]*Manage windows on all your displays`, 'i'));
   assert.equal(await L.shell(`!document.getElementById('perm-chip').hidden`), true, 'the chip shows');
