@@ -437,16 +437,19 @@ test('events reach a service worker the router lost track of (a reload, or liste
     session: { serviceWorkers: { startWorkerForScope: async (scope) => { scopes.push(scope); return { send: (...a) => sent.push(a) }; } } },
     ece: { ctx: { router: { listeners, sendEvent: (...a) => routed.push(a) } } },
   };
-  // The router knows the worker's listener: it delivers, as before.
+  // Even when the router knows the worker's listener, Lumio delivers (the router tries once).
   listeners.set('commands.onCommand', [{ type: 'service-worker', extensionId: id }]);
   shims.sendEvent(manager, id, 'commands.onCommand', 'open-page', { id: 3 });
-  assert.deepEqual(routed, [[id, 'commands.onCommand', 'open-page', { id: 3 }]]);
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(routed, []);
+  assert.deepEqual(sent.splice(0), [['crx-commands.onCommand', 'open-page', { id: 3 }]]);
+  scopes.length = 0;
   // It lost track (another extension's listener doesn't count): straight to the worker, once.
   listeners.set('commands.onCommand', [{ type: 'service-worker', extensionId: 'f'.repeat(32) }]);
   shims.sendEvent(manager, id, 'commands.onCommand', 'open-page', { id: 3 });
   shims.sendEvent(manager, id, 'lumio.alarms.onAlarm', { name: 'tick' });
   await new Promise((r) => setImmediate(r));
-  assert.equal(routed.length, 1);
+  assert.equal(routed.length, 0);
   assert.deepEqual(scopes, [`chrome-extension://${id}/`, `chrome-extension://${id}/`]);
   assert.deepEqual(sent, [['crx-commands.onCommand', 'open-page', { id: 3 }], ['crx-lumio.alarms.onAlarm', { name: 'tick' }]]);
   // No service worker (a background page): the router, as before.

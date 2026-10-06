@@ -452,6 +452,19 @@ class TabManager {
       m.layout();
       m.emit('fullscreen', false);
       m.hooks.onFullscreen?.(tab, false);
+      // A Mac window leaves full screen with an animation, and while it runs
+      // Electron still tells the page it is full screen
+      // (IsFullscreenForTabOrPending); nothing tells it otherwise afterwards.
+      // The page would keep document.fullscreenElement, and its next
+      // requestFullscreen() would resolve without enter-html-full-screen (no
+      // full screen window, no notice). Once the window is out, so is the page.
+      const settle = () => {
+        if (wc.isDestroyed() || M().fullscreenTab === tab.id) return;
+        Promise.resolve().then(() => wc.executeJavaScript('document.fullscreenElement ? document.exitFullscreen().then(() => true, () => false) : false', true)).catch(() => {});
+      };
+      // (Again a second later, in case the window said it was out before its animation ended.)
+      if (m.win.isFullScreen?.()) m.win.once('leave-full-screen', () => setTimeout(settle, 0));
+      setTimeout(settle, 1000).unref?.();
     });
     wc.on('found-in-page', (_e, result) => M().hooks.onFound?.(tab.id, result));
     // Split view: clicking into the other side's page makes it the focused side.

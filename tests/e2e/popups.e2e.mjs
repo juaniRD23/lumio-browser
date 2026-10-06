@@ -92,6 +92,9 @@ const PAGES = {
     <script>addEventListener('message', (e) => { if (e.origin === location.origin) document.title = 'Opener got ' + e.data; });</script>`,
   '/pay': `<title>Pay here</title><p>Paying</p><script>window.opener && window.opener.postMessage('paid', location.origin);</script>`,
   '/target': '<title>Target</title>',
+  // Chrome asks for window management only after a click (transient
+  // activation); without one, getScreenDetails() only checks, and rejects.
+  '/screens': `<title>Screens</title><button id="screens" style="width:200px;height:60px" onclick="window.wm = null; getScreenDetails().then(() => { window.wm = 'yes'; }, (e) => { window.wm = e.name; })">Screens</button>`,
   // A pop-up whose page never arrives (204), which the opener writes into instead.
   '/spoof': `<title>Spoof</title>
     <button id="go" onclick="const w = window.open('/nothing', 'fake', 'width=420,height=500'); w.document.write('<title>Your bank</title><h1>Sign in to your bank</h1>')">Go</button>`,
@@ -437,20 +440,31 @@ test('"Save Link As…" and "Save Image As…" always ask where; a normal downlo
 });
 
 test('window management asks first; sound waits for a click', async () => {
+  // Sound first: the click below leaves the site with user activation.
   await go(`${base}/target`, 'Target');
-  await L.page(`window.getScreenDetails().then(() => { window.wm = 'yes'; }, (e) => { window.wm = e.name; }); true`);
-  // The browser window asks in the address bar's chip and its bubble (batch 6), not a bar.
-  if (!(await until(() => L.main(() => ((w) => w.overlayKind === 'permission' && w.overlayIn === w.overlaySeq)(global.lumio.current))))) console.error('window management, no bubble:', JSON.stringify(await bubbleState()));
-  assert.ok(await L.main(() => ((w) => w.overlayKind === 'permission' && w.overlayIn === w.overlaySeq)(global.lumio.current)), 'the bubble opens by itself');
-  const bubble = (code) => L.main((_e, c) => global.lumio.current.overlay.webContents.executeJavaScript(c), code);
-  assert.match(await until(() => bubble(`document.querySelector('.pb [data-d=block]') && document.querySelector('.pb').innerText`)), new RegExp(`${new URL(base).host.replace(/\./g, '\\.')} wants to[\\s\\S]*Manage windows on all your displays`, 'i'));
-  assert.equal(await L.shell(`!document.getElementById('perm-chip').hidden`), true, 'the chip shows');
-  await bubble(`document.querySelector('.pb [data-d=block]').click(); true`);
-  assert.equal(await until(() => L.page('window.wm')), 'NotAllowedError');
-  await L.main((_e, origin) => global.lumio.profiles.normal.permissions.set(origin, 'windowManagement', undefined), base);
-
   // Chrome's autoplay rule: no sound until you click or type in the page.
   assert.equal(await L.page('new AudioContext().state'), 'suspended');
   await clickPage('body');
   assert.equal(await until(() => L.page(`(() => { const c = new AudioContext(); return c.state === 'running' && c.state; })()`)), 'running');
+
+  // Window management: a click on the page asks.
+  await go(`${base}/screens`, 'Screens');
+  await clickPage('#screens');
+  // The browser window asks in the address bar's chip and its bubble (batch 6), not a bar.
+  if (!(await until(() => L.main(() => ((w) => w.overlayKind === 'permission' && w.overlayIn === w.overlaySeq)(global.lumio.current))))) {
+    const page = await L.page(`(async () => ({ wm: window.wm, active: navigator.userActivation.isActive, been: navigator.userActivation.hasBeenActive, status: (await navigator.permissions.query({ name: 'window-management' }).catch((e) => ({ state: e.message }))).state }))()`).catch((e) => e.message);
+    const setting = await L.main((_e, o) => global.lumio.profiles.normal.permissions.settings.value(o, 'windowManagement'), base).catch((e) => e.message);
+    console.error('window management, no bubble:', JSON.stringify({ ...(await bubbleState()), page, setting }));
+  }
+  assert.ok(await L.main(() => ((w) => w.overlayKind === 'permission' && w.overlayIn === w.overlaySeq)(global.lumio.current)), 'the bubble opens by itself');
+  const bubble = (code) => L.main((_e, c) => global.lumio.current.overlay.webContents.executeJavaScript(c), code);
+  assert.match(await until(() => bubble(`document.querySelector('.pb [data-d=block]') && document.querySelector('.pb').innerText`)), new RegExp(`${new URL(base).host.replace(/\./g, '\\.')} wants to[\\s\\S]*Manage windows on all your displays`, 'i'));
+  assert.equal(await L.shell(`!document.getElementById('perm-chip').hidden`), true, 'the chip shows');
+  assert.equal(await L.page('window.wm'), null, 'the page waits for the answer');
+  await bubble(`document.querySelector('.pb [data-d=block]').click(); true`);
+  try {
+    assert.equal(await until(() => L.page('window.wm')), 'NotAllowedError');
+  } finally {
+    await L.main((_e, origin) => global.lumio.profiles.normal.permissions.set(origin, 'windowManagement', undefined), base);
+  }
 });

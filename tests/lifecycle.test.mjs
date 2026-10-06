@@ -176,6 +176,27 @@ test('entering and leaving full screen tells the window (for the notice)', () =>
   assert.deepEqual(calls, [['window', true], ['notice', 3, true], ['window', false], ['notice', 3, false]]);
 });
 
+test('after leaving full screen, a page that still thinks it is full screen is let out once the window is', async () => {
+  let leave = null;
+  const scripts = [];
+  const win = { contentView: { children: [], addChildView() {}, removeChildView() {} }, getContentSize: () => [1200, 800], setFullScreen() {}, isFullScreen: () => true, once: (ev, fn) => { if (ev === 'leave-full-screen') leave = fn; } };
+  const m = new TabManager({ win, session: {}, store: { settings: {}, isBookmarked: () => false }, emit: () => {}, hooks: {} });
+  const wc = Object.assign(new EventEmitter(), { getURL: () => 'https://video.example/', setWindowOpenHandler() {}, isDestroyed: () => false, executeJavaScript: async (code, gesture) => { scripts.push([code, gesture]); return true; } });
+  const tab = { id: 4, owner: m, view: { webContents: wc, setBounds() {}, setVisible() {}, setBorderRadius() {} }, url: 'https://video.example/' };
+  m.tabs.push(tab);
+  m.activeId = 4;
+  m.wire(tab);
+  wc.emit('enter-html-full-screen');
+  wc.emit('leave-html-full-screen');
+  assert.equal(typeof leave, 'function', 'waits for the window to be out (the Mac animates it)');
+  assert.equal(scripts.length, 0);
+  leave();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(scripts.length, 1);
+  assert.match(scripts[0][0], /document\.fullscreenElement \? document\.exitFullscreen\(\)/);
+  assert.equal(scripts[0][1], true);
+});
+
 // ---------------------------------------------------------------- files from Finder, the Dock, the command line
 test('files Lumio opens: web pages, PDFs, pictures and text that exist; nothing else', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lumio-open-'));
