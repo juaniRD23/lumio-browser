@@ -2398,6 +2398,8 @@ app.whenReady().then(async () => {
   sites = new SiteResolver(cookieProbe(session));
   const frontPasswords = {
     get entries() { return curProfile().passwords.store.entries; },
+    list: () => curProfile().passwords.store.list(),
+    get: (id) => curProfile().passwords.store.get(id),
     secret: (id) => curProfile().passwords.store.secret(id),
   };
   security = new Security({
