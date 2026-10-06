@@ -452,14 +452,25 @@ test('events reach a service worker the router lost track of (a reload, or liste
   // No service worker (a background page): the router, as before.
   shims.sendEvent(manager, page, 'commands.onCommand', 'go');
   assert.deepEqual(routed.at(-1), [page, 'commands.onCommand', 'go']);
-  // A worker that can't start doesn't throw.
+  // Just reloaded, the worker can't start for a moment: the event waits for it, and arrives once.
+  const retry = { ...shims.sendEvent.retry };
+  Object.assign(shims.sendEvent.retry, { ms: 200, every: 5 });
+  const start = manager.session.serviceWorkers.startWorkerForScope;
+  let failures = 2;
+  manager.session.serviceWorkers.startWorkerForScope = async (scope) => { if (failures-- > 0) throw new Error('Failed to start service worker.'); return start(scope); };
+  sent.length = 0;
+  shims.sendEvent(manager, id, 'commands.onCommand', 'later');
+  await new Promise((r) => setTimeout(r, 60));
+  assert.deepEqual(sent, [['crx-commands.onCommand', 'later']]);
+  // A worker that never starts doesn't throw: it's reported once the wait is over.
   manager.session.serviceWorkers.startWorkerForScope = async () => { throw new Error('gone'); };
   const warn = console.warn;
   const warned = [];
   console.warn = (...a) => warned.push(a.join(' '));
   try {
     shims.sendEvent(manager, id, 'commands.onCommand', 'open-page');
-    await new Promise((r) => setImmediate(r));
-  } finally { console.warn = warn; }
+    await new Promise((r) => setTimeout(r, 300));
+  } finally { console.warn = warn; Object.assign(shims.sendEvent.retry, retry); }
+  assert.equal(warned.length, 1);
   assert.match(warned.join('\n'), /couldn't send commands\.onCommand/);
 });

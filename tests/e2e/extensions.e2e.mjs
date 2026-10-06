@@ -48,6 +48,24 @@ const overlay = (code) => L.main((_e, c) => global.lumio.current.overlay.webCont
 const overlayKind = () => L.main(() => ((w) => (!w.overlayKind ? null : w.overlayIn === w.overlaySeq ? w.overlayKind : w.overlayKind + ':showing'))(global.lumio.current));
 const tabUrls = () => L.main(() => global.lumio.tabs.tabs.map((t) => t.pendingUrl || t.url));
 const pinnedButtons = () => L.shell(`document.querySelectorAll('#ext-actions .ext-action').length`);
+// When a check times out: what the extension looks like from main, and what
+// its worker said (the app's log), so a CI run shows why.
+const extDiag = async (what) => {
+  const state = await L.main(({ Menu, app }, id) => {
+    const m = global.lumio.extensions;
+    const r = m.ece?.ctx?.router;
+    const ext = m.api.getExtension(id);
+    const workers = Object.values(m.session.serviceWorkers.getAllRunning?.() || {}).filter((w) => String(w.scope).includes(id)).map((w) => w.scriptUrl);
+    const listeners = r?.listeners instanceof Map ? Object.fromEntries([...r.listeners].map(([k, v]) => [k, v.filter((l) => l.extensionId === id).map((l) => l.type)]).filter(([, v]) => v.length)) : null;
+    const items = Menu.getApplicationMenu()?.items.flatMap((top) => top.submenu?.items || []).filter((it) => String(it.id || '').startsWith(`ext-cmd:${id}:`)).map((it) => ({ id: it.id, accelerator: it.accelerator || null, enabled: it.enabled }));
+    // Without the sandbox (Playwright's default on Linux) no service-worker
+    // preload runs, so chrome.commands and Lumio's chrome.alarms are missing.
+    return { noSandbox: app.commandLine.hasSwitch('no-sandbox'), loaded: !!ext, path: ext?.path, permissions: ext?.manifest?.permissions, runningWorkers: workers, routerListeners: listeners, lumioAlarms: m.alarms?.all(id), menuItems: items, tabs: global.lumio.tabs.tabs.map((t) => t.pendingUrl || t.url) };
+  }, ID).catch((e) => `unavailable: ${e.message}`);
+  console.error(`[diag] ${what}:`, JSON.stringify(state, null, 1));
+  const log = L.logs.join('').split('\n').filter((l) => /\[extension worker\]|\[lumio\]|Extension Error|^\s+(Message|Context):/.test(l));
+  console.error(`[diag] extension output in the app's log (last ${Math.min(40, log.length)} of ${log.length} lines):\n` + log.slice(-40).join('\n'));
+};
 const menuItem = (id) => L.main(({ Menu }, i) => { const it = Menu.getApplicationMenu().getMenuItemById(i); return it ? { label: it.label, accelerator: it.accelerator || null } : null; }, id);
 
 // A Web Store extension already installed in the profile (with its key, so
@@ -167,7 +185,9 @@ test('keyboard shortcuts run extension commands from the menu bar', async () => 
     const item = await until(() => menuItem(`ext-cmd:${ID}:open-page`));
     assert.equal(item.accelerator, 'Alt+Shift+O', 'the manifest’s suggestion');
     await L.main(({ Menu }, id) => Menu.getApplicationMenu().getMenuItemById(`ext-cmd:${id}:open-page`).click(), ID);
-    assert.ok(await until(async () => (await tabUrls()).includes(`${base}/cmd-open-page`)), 'chrome.commands.onCommand ran');
+    const ran = await until(async () => (await tabUrls()).includes(`${base}/cmd-open-page`));
+    if (!ran) await extDiag('chrome.commands.onCommand did not open its page');
+    assert.ok(ran, 'chrome.commands.onCommand ran');
     await L.main(() => global.lumio.cmd.closeTab());
     // _execute_action opens its popup.
     await L.main(({ Menu }, id) => Menu.getApplicationMenu().getMenuItemById(`ext-cmd:${id}:_execute_action`).click(), ID);
@@ -180,7 +200,9 @@ test('keyboard shortcuts run extension commands from the menu bar', async () => 
     assert.match(reserved.error, /Lumio already uses/);
     const ok = await L.main((_e, id) => global.lumio.extensions.setShortcut(id, 'open-page', 'Alt+Shift+P', global.lumio.extUi.reservedAccelerators()), ID);
     assert.equal(ok.ok, true);
-    assert.ok(await until(async () => (await menuItem(`ext-cmd:${ID}:open-page`))?.accelerator === 'Alt+Shift+P'));
+    const changed = await until(async () => (await menuItem(`ext-cmd:${ID}:open-page`))?.accelerator === 'Alt+Shift+P');
+    if (!changed) await extDiag('the menu bar kept the old shortcut');
+    assert.ok(changed, 'the menu bar has the new shortcut');
     await go(`lumio://extensions/shortcuts`, 'Keyboard shortcuts');
     assert.ok(await until(() => L.page(`document.querySelectorAll('.sc-box').length === 2`)));
     assert.match(await L.page(`document.getElementById('sc-list').innerText`), /Lumio Store Test[\s\S]*Open the test page/);
@@ -193,7 +215,9 @@ test('keyboard shortcuts run extension commands from the menu bar', async () => 
 });
 
 test('chrome.alarms (Lumio’s stand-in) wakes the extension', async () => {
-  assert.ok(await until(async () => (await tabUrls()).includes(`${base}/alarm-tick`), 15_000), 'the alarm went off');
+  const rang = await until(async () => (await tabUrls()).includes(`${base}/alarm-tick`), 15_000);
+  if (!rang) await extDiag('the alarm did not open its page');
+  assert.ok(rang, 'the alarm went off');
 });
 
 test('the details page shows what the extension can do', async () => {

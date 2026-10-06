@@ -2032,7 +2032,7 @@ function openProfile(id) {
       removeWindow: (win) => alive().find((w) => w.win === win)?.close(),
       changed: () => { alive().filter((w) => !w.incognito && w.profile === profile).forEach((w) => w.emit('extensions-changed')); profile.extUi?.changed(); },
       activate: (extId) => profile.extUi?.activate(extId),
-      commandsChanged: () => menuChanged(),
+      commandsChanged: () => (profile.extUi ? profile.extUi.commandsChanged() : menuChanged()),
       toast: (text) => normalWin(profile)?.emit('toast', { text }),
     },
   });
