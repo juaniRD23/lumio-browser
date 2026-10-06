@@ -355,6 +355,9 @@ test('the dropdown draws every kind of row, with labels for screen readers and a
     assert.ok(contrast(fg, bg) >= 4.5, `${colorScheme}: “Switch to this tab” is ${contrast(fg, bg).toFixed(2)}:1`);
 
     // Clicks: the × removes; ⌘/Ctrl-click opens a new tab; middle click a background tab; right-click nothing.
+    // Measured once the dropdown has finished coming in (it scales up), or a
+    // slow machine clicks where the × was a moment ago.
+    await page.waitForFunction(() => !document.getElementById('card').getAnimations().length);
     const box = async (sel) => page.$eval(sel, (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
     const rm = await box('.row[data-i="6"] .rm');
     await page.mouse.move(rm.x, rm.y);
