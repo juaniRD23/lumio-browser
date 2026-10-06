@@ -1101,7 +1101,7 @@ function registerIpc() {
     w.showMenu(opts, buildBrowserMenu(cmd, {
       ...menuState(),
       zoom: wc ? Math.round(Math.pow(1.2, wc.getZoomLevel()) * 100) : 100,
-      bookmarked: w.profile.bookmarks.isBookmarked(url),
+      bookmarked: w.profile.store.isBookmarked(url), // (the BookmarksService has no isBookmarked: it's the store's)
       bookmarks: marks,
       open: (u) => openUrl(u, 'current', w),
       whatsNew: updater?.state?.notesUrl ? () => openUrl(updater.state.notesUrl, 'tab', w) : null,

@@ -56,3 +56,15 @@ test('Settings › Keyboard shortcuts lists the commands of every batch, and no 
   const keys = sc.effective(template, {}).filter((c) => c.accel).map((c) => c.accel);
   assert.deepEqual(keys.filter((k, i) => keys.indexOf(k) !== i), [], 'no shortcut belongs to two commands');
 });
+
+// ⋮ opens through main.js's app:menu, which asks the window's profile for its
+// bookmarks: a method that isn't the BookmarksService's (batch 5's, per
+// profile since 7a) threw there, and the menu never opened.
+test('main.js calls only methods a profile’s BookmarksService has', async () => {
+  const fs = await import('node:fs');
+  const { BookmarksService } = require('../main/bookmarks-service.js');
+  const src = fs.readFileSync(new URL('../main/main.js', import.meta.url), 'utf8');
+  const called = new Set([...src.matchAll(/profile\.bookmarks\??\.(\w+)\(/g)].map((m) => m[1]));
+  assert.ok(called.has('payload'));
+  for (const name of called) assert.equal(typeof BookmarksService.prototype[name], 'function', `BookmarksService.${name}`);
+});

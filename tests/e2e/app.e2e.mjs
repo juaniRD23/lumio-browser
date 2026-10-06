@@ -279,7 +279,8 @@ test('deny stops that action; Auto mode skips browser approvals', async () => {
   assert.match(await L.shell(`document.querySelector('.approval pre').textContent`), /echo lumio/);
   await L.shell(`document.querySelector('.approval [data-d="deny"]').click(); true`);
   await idle();
-  assert.equal(await L.shell(`[...document.querySelectorAll('.step')].at(-1).className`), 'step denied');
+  // (Its status class only: 'changed' just plays the spinner-to-result animation, batch 3.)
+  assert.equal(await L.shell(`[...[...document.querySelectorAll('.step')].at(-1).classList].filter((c) => c !== 'changed').join(' ')`), 'step denied');
 });
 
 test('shell commands run after approval', async () => {
