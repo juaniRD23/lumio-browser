@@ -5,7 +5,7 @@
 // strip, pulling tabs out into a window and onto another one, several tabs
 // at once, the Dock, the sad tab and the default-browser bar.
 // Run: npm run test:e2e   (GitHub CI; set LUMIO_SHOTS=/some/dir for screenshots)
-import { test, before, after } from 'node:test';
+import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import fs from 'node:fs';
@@ -50,6 +50,18 @@ const reset = () => L.main(async () => {
   const keep = w.tabs.create('lumio://newtab/');
   for (const t of w.tabs.tabs.slice()) if (t.id !== keep.id) w.tabs.close(t.id);
   return true;
+});
+
+// Diagnostics: a promise Playwright rejects on its own (CI saw ten "Target
+// crashed" after the sad-tab test crashed a renderer on purpose) fails the
+// whole file without saying where it came from. Say when, during which test,
+// and with the stack Playwright's server gave the error (it names the call).
+let current = 'before';
+let crashedAt = 0;
+beforeEach((t) => { current = t.name; });
+process.on('unhandledRejection', (e) => {
+  const since = crashedAt ? ` ${Date.now() - crashedAt}ms after the deliberate crash` : '';
+  console.error(`[tabs e2e] unhandled rejection during or after "${current}"${since}:`, e?.stack || e);
 });
 
 before(async () => {
@@ -354,6 +366,7 @@ test('a crashed tab shows a sad face in the strip and its page; Reload brings th
   await reset();
   await go(`${base}/before-crash`, 'Page before-crash');
   await go(`${base}/will-crash`, 'Page will-crash');
+  crashedAt = Date.now();
   await L.main(() => { global.lumio.tabs.wc().forcefullyCrashRenderer(); return true; });
   assert.ok(await until(() => L.main(() => global.lumio.tabs.active.crashed)), 'the tab knows it crashed');
   assert.ok(await until(() => L.shell(`!!document.querySelector('#tabs > .tab.active.crashed svg')`)), 'a sad face in the strip');
