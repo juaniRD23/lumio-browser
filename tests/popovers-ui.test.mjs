@@ -71,7 +71,9 @@ test('every dropdown comes in from its button each time, leaves first, and never
   await send(page, { op: 'in', seq: 5 });
   await page.waitForTimeout(250);
   assert.ok(!(await sent(page, 'overlay:gone')).some((p) => p.seq === 4));
-  // New content for what's showing changes it in place, without coming in again.
+  // New content for what's showing changes it in place, without coming in again
+  // (after its entrance has finished, which takes longer on a busy machine).
+  await page.waitForFunction(() => !document.getElementById('card').getAnimations().length);
   await send(page, { kind: 'downloads', items: [{ id: 'd1', name: 'file.zip', state: 'completed', total: 2048 }], width: 384, height: 200 });
   assert.match(await page.textContent('#card'), /file\.zip/);
   assert.equal(await page.$eval('#card', (el) => el.getAnimations().length), 0);

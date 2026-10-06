@@ -113,7 +113,10 @@ test('a finished download is announced once, politely', { skip }, async () => {
 test('Reduce Motion: from the system or from Settings, tabs and the chat appear without moving', { skip }, async () => {
   for (const how of ['system', 'setting']) {
     const { page } = await openPage(browser, base, { init: { ...THREE, panel: { open: true, width: 380 } }, reducedMotion: how === 'system' ? 'reduce' : 'no-preference' });
-    if (how === 'setting') await emit(page, 'ui-prefs', { reduceMotion: true });
+    if (how === 'setting') {
+      await emit(page, 'ui-prefs', { reduceMotion: true });
+      await page.waitForFunction(() => document.documentElement.hasAttribute('data-reduce-motion'));
+    }
     await emit(page, 'tabs', { activeId: 4, tabs: [tab(1), tab(2), tab(3), tab(4)] });
     const longest = await page.evaluate(() => Math.max(0, ...document.getAnimations().filter((a) => !a.effect?.target?.classList?.contains('spinner')).map((a) => {
       const t = a.effect.getComputedTiming();

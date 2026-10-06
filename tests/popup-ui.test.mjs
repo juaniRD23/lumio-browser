@@ -77,6 +77,7 @@ test('a pop-up’s bar: the lock and the read-only address, Open in tab, and the
   assert.equal(await page.getAttribute('#address', 'readonly'), '', 'the page can’t change it, and neither can you');
   assert.equal(await page.$eval('#site-icon', (el) => [el.textContent, el.classList.contains('clickable'), el.title].join('|')), '|true|Connection is secure · View site information');
   // The page goes right under the 40px bar (main/popup-window.js counts on it).
+  await page.waitForFunction(() => window.__sent.some(([c]) => c === 'layout:slot'));
   const slot = (await sent(page)).filter(([c]) => c === 'layout:slot').at(-1)[1];
   assert.deepEqual([slot.x, slot.y, slot.width, slot.height], [0, 40, 600, 460]);
   // Plain http says "Not secure" in words; past a certificate warning, in red.
