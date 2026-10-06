@@ -2563,11 +2563,25 @@ async function snapshot(w = cur()) {
   const { width: W, height: H } = base.getSize();
   const scale = W / win.getContentSize()[0];
   const out = Buffer.from(base.toBitmap());
+  // A view shown a moment ago may have no frame yet (macOS: UnknownVizError):
+  // it's tried again for a moment, then left out of the picture.
+  const capture = async (view) => {
+    for (let i = 0; ; i++) {
+      try {
+        const img = await view.webContents.capturePage();
+        if (!img.isEmpty()) return img;
+      } catch (e) { if (i >= 10) throw e; }
+      if (i >= 10) return null;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  };
   const paste = async (view) => {
     const b = view.getBounds();
     const bw = Math.round(b.width * scale);
     const bh = Math.round(b.height * scale);
-    const src = pixels(await view.webContents.capturePage()).resize({ width: bw, height: bh }).toBitmap();
+    const img = bw > 0 && bh > 0 ? await capture(view).catch(() => null) : null;
+    if (!img) return;
+    const src = pixels(img).resize({ width: bw, height: bh }).toBitmap();
     const x0 = Math.round(b.x * scale);
     const y0 = Math.round(b.y * scale);
     for (let y = 0; y < bh && y0 + y < H; y++) {
