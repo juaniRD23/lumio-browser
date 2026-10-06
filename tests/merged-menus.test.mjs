@@ -36,7 +36,9 @@ test('the ⋮ menu lists every batch’s commands', () => {
 
 test('every shortcut the ⋮ menu shows is one the application menu has', () => {
   const norm = (a) => sc.normalize(a);
-  const appKeys = new Set(flat(menuTemplate(cmd, STATE)).filter((i) => i.accelerator).map((i) => norm(i.accelerator)));
+  // Role items get their key from macOS/Electron, not the template (Quit is ⌘Q).
+  const ROLE_KEYS = MAC ? { quit: 'Cmd+Q' } : {};
+  const appKeys = new Set(flat(menuTemplate(cmd, STATE)).map((i) => i.accelerator || ROLE_KEYS[i.role]).filter(Boolean).map(norm));
   const dots = flat(buildBrowserMenu(cmd, STATE)).filter((i) => i.accel);
   assert.ok(dots.length > 10);
   for (const i of dots) assert.ok(appKeys.has(norm(i.accel)), `${[...i.trail, i.label].join(' › ')}: ${i.accel}`);
