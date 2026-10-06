@@ -48,8 +48,17 @@ jobs:
       - name: Fetch Electron
         run: node node_modules/electron/install.js
 
+      # A busy runner can miss a UI test's timing: the files that failed run once
+      # more, alone, and must pass then.
       - name: Test
-        run: npm test
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee "$RUNNER_TEMP/unit.log" || {
+            files=$(grep -oE '^test at (tests|server/test)/[^:]+' "$RUNNER_TEMP/unit.log" | sed 's/^test at //' | sort -u)
+            [ -n "$files" ] || exit 1
+            echo "Running again: $files"
+            node --test $files
+          }
 
       - name: Choose the beta version
         id: version

@@ -225,8 +225,9 @@ test('Read aloud: whole sentences go to Lumio’s voice, the one being read is h
   await page.waitForFunction(() => document.querySelector('[data-rd="play"] .rd-pl').textContent === 'Pause');
   // Next sentence: reading goes on from there.
   const asked = (await calls(page, 'ai:voice-speak')).length;
-  const now = Number(await page.$eval('.rs.on', (el) => el.dataset.s));
-  await page.click('[data-rd="next"]');
+  // Read the highlighted sentence and press Next in one go, so playback can't
+  // move on in between (it does on a slow machine).
+  const now = await page.evaluate(() => { const n = Number(document.querySelector('.rs.on').dataset.s); document.querySelector('[data-rd="next"]').click(); return n; });
   await page.waitForFunction((n) => window.__calls.filter(([c]) => c === 'ai:voice-speak').length > n, asked);
   const marked = Number(await page.$eval('.rs.on', (el) => el.dataset.s));
   assert.equal(marked, now + 1);
