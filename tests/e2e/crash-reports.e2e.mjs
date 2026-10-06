@@ -21,7 +21,7 @@ let L;
 let server;
 let base;
 let profile;
-const got = []; // what reached /api/crash: { kind: 'json' | 'dump', data, fields }
+const got = []; // what reached /api/crash: { kind: 'json' | 'dump' | 'unreadable', data, fields, url }
 const SECRET_TITLE = 'Statement for Sam Rivera';
 
 const until = async (fn, ms = 10_000) => {
@@ -52,16 +52,26 @@ before(async () => {
     const chunks = [];
     for await (const c of req) chunks.push(c);
     let body = Buffer.concat(chunks);
-    if (req.url === '/api/crash' && req.method === 'POST') {
-      if (body[0] === 0x1f && body[1] === 0x8b) body = zlib.gunzipSync(body);
-      const type = req.headers['content-type'] || '';
-      if (type.startsWith('multipart/form-data')) {
-        const form = await new Response(body, { headers: { 'content-type': type } }).formData();
-        const fields = {};
-        let dump = null;
-        for (const [k, v] of form) { if (typeof v === 'string') fields[k] = v; else dump = Buffer.from(await v.arrayBuffer()); }
-        got.push({ kind: 'dump', fields, dump, raw: body.toString('latin1') });
-      } else got.push({ kind: 'json', data: JSON.parse(body.toString()), raw: body.toString(), headers: req.headers });
+    // Crashpad adds ?product=…&version=…&guid=… to the submit URL (its
+    // identify_client_via_url default), so match the path like the server does.
+    if (new URL(req.url, base).pathname === '/api/crash' && req.method === 'POST') {
+      try {
+        if (body[0] === 0x1f && body[1] === 0x8b) body = zlib.gunzipSync(body);
+        const type = req.headers['content-type'] || '';
+        if (type.startsWith('multipart/form-data')) {
+          const form = await new Response(body, { headers: { 'content-type': type } }).formData();
+          const fields = {};
+          let dump = null;
+          for (const [k, v] of form) { if (typeof v === 'string') fields[k] = v; else dump = Buffer.from(await v.arrayBuffer()); }
+          got.push({ kind: 'dump', fields, dump, raw: body.toString('latin1'), url: req.url });
+        } else got.push({ kind: 'json', data: JSON.parse(body.toString()), raw: body.toString(), headers: req.headers, url: req.url });
+      } catch (err) {
+        // Answer anyway, so Crashpad doesn't sit on the request until it times out.
+        got.push({ kind: 'unreadable', error: String(err), type: req.headers['content-type'], url: req.url });
+        res.writeHead(400, { 'content-type': 'text/plain' });
+        res.end('unreadable');
+        return;
+      }
       res.writeHead(200, { 'content-type': 'text/plain' });
       res.end('cr_' + '0'.repeat(24));
       return;
@@ -179,7 +189,7 @@ test('turning it off stops uploads right away', async () => {
 test('a crash of the main process uploads a minidump with Lumio’s annotations', async () => {
   await L.main(() => { setTimeout(() => process.crash(), 200); return true; });
   const r = await until(async () => got.find((g) => g.kind === 'dump' && g.fields.process_type === 'browser'), 45_000);
-  assert.ok(r, 'Crashpad uploaded the dump');
+  assert.ok(r, `Crashpad uploaded the dump (got: ${JSON.stringify(got.map((g) => ({ kind: g.kind, url: g.url, process: g.fields?.process_type ?? g.data?.process, error: g.error })))})`);
   assert.equal(r.dump.subarray(0, 4).toString('latin1'), 'MDMP');
   assert.equal(r.fields._productName, 'Lumio Browser');
   assert.equal(r.fields._companyName, 'Lumio');
@@ -187,4 +197,6 @@ test('a crash of the main process uploads a minidump with Lumio’s annotations'
   assert.equal(r.fields.platform, process.platform);
   assert.equal(r.fields.arch, process.arch);
   assert.ok(!Object.values(r.fields).some((v) => /https?:\/\/|Statement|@example/.test(v)), 'no page data in the annotations');
+  // The query Crashpad adds names only the product, its version and the install's ID.
+  assert.deepEqual([...new URL(r.url, base).searchParams.keys()].filter((k) => !['product', 'version', 'guid'].includes(k)), [], r.url);
 });

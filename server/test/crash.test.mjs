@@ -92,14 +92,16 @@ function crashpadBody({ fields = FIELDS, dump = minidump(), gzip = true } = {}) 
   return { type: `multipart/form-data; boundary=${b}`, body: gzip ? zlib.gzipSync(raw) : raw, gzip };
 }
 
-function post(body, { type, gzip = false, ip = '203.0.113.7', headers = {} } = {}) {
-  return worker.fetch(new Request(SITE + '/api/crash', {
+// Crashpad adds the product, its version and the install's ID to the submit URL.
+const CRASHPAD_QUERY = `?product=Electron&version=43.7.7&guid=${GUID}`;
+function post(body, { type, gzip = false, ip = '203.0.113.7', headers = {}, query = '' } = {}) {
+  return worker.fetch(new Request(SITE + '/api/crash' + query, {
     method: 'POST',
     headers: { 'content-type': type, 'cf-connecting-ip': ip, ...(gzip ? { 'content-encoding': 'gzip' } : {}), ...headers },
     body,
   }), env, { waitUntil() {} });
 }
-const upload = (opts) => { const c = crashpadBody(opts); return post(c.body, { type: c.type, gzip: c.gzip, ip: opts?.ip }); };
+const upload = (opts) => { const c = crashpadBody(opts); return post(c.body, { type: c.type, gzip: c.gzip, ip: opts?.ip, query: CRASHPAD_QUERY }); };
 const report = (data, opts = {}) => post(JSON.stringify(data), { type: 'application/json', ...opts });
 const rows = () => sql.prepare('SELECT * FROM crashes ORDER BY created_at').all();
 
