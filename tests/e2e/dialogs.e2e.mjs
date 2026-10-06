@@ -130,6 +130,12 @@ after(async () => {
 });
 
 test('alert, confirm and prompt appear in the tab, named after the site, and the page gets the answer', async () => {
+  try { await alertsConfirmPrompt(); } finally {
+    // Never leave the page waiting on a dialog for the next test.
+    await L.main(() => { const t = global.lumio.tabs; if (t.active) t.dismiss(t.active); return true; }).catch(() => {});
+  }
+});
+async function alertsConfirmPrompt() {
   await go(`${base}/alerts`, 'Page alerts');
   const host = new URL(base).host;
   await L.page(`setTimeout(() => { alert('Saved!'); window.r0 = 'after alert'; }, 0); true`);
@@ -163,7 +169,7 @@ test('alert, confirm and prompt appear in the tab, named after the site, and the
   await key('Escape');
   assert.ok(await noDialog());
   assert.equal(await L.page('window.r3'), false, 'Esc cancels');
-});
+}
 
 test('dialogs in a row: the second offers "Don’t allow … to show more dialogs", and then they stop', async () => {
   // A tab of its own: dialogs in a row, and a site's block, are counted per tab.

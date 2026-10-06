@@ -52,7 +52,7 @@ export async function launch({ profile, env = {}, executablePath, args = [] } = 
     wait: (ms) => new Promise((r) => setTimeout(r, ms)),
     main: (fn, arg) => timed(run(fn, arg), brief(fn)),
     async shot(file) {
-      const b64 = await run(async () => global.lumio.snapshot());
+      const b64 = await timed(run(async () => global.lumio.snapshot()), 'shot');
       if (b64 && file) fs.writeFileSync(file, Buffer.from(b64, 'base64'));
       return b64;
     },
