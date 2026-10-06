@@ -111,12 +111,13 @@ export function renderRows(list, tabs, { activeId, shownId = null, rows, send, g
       let head = list._groups.get(g.id);
       if (!head) { head = groupRow(g, send); list._groups.set(g.id, head); }
       updateGroupRow(head, g);
+      head.classList.toggle('after-pins', firstOther && i > 0); // the line under the pinned tabs goes above the group
       order.push(head);
     }
     let el = rows.get(t.id);
     if (!el) { el = createRow(t.id, send); rows.set(t.id, el); }
     updateRow(el, t, { activeId, shownId });
-    el.classList.toggle('after-pins', !t.pinned && firstOther && i > 0);
+    el.classList.toggle('after-pins', !t.pinned && firstOther && i > 0 && !g);
     el.classList.toggle('grouped', !!g);
     el.classList.toggle('group-end', !!g && tabs[i + 1]?.groupId !== g.id);
     if (g) el.style.setProperty('--gc', `var(--group-${g.color})`); else el.style.removeProperty('--gc');

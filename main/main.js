@@ -342,11 +342,13 @@ const services = {
   },
   onPopupClosed: (p) => {
     popups.delete(p);
-    if (p.incognito && !tabHolders().some((x) => x.incognito)) endIncognito();
+    // Its profile's incognito session goes once nothing of that profile's incognito is left.
+    if (p.incognito && !tabHolders().some((x) => x.profile === p.profile)) endIncognito(p.profile.base);
+    if (p.profile.guest && !tabHolders().some((x) => x.profile === p.profile)) endGuest();
   },
   openFromPopup: (p, url) => {
     const home = popupHome(p);
-    const w = home || createWindow({ incognito: p.incognito, urls: [url] });
+    const w = home || createWindow({ profile: p.profile.base, incognito: p.incognito, urls: [url] });
     const tab = home ? w.tabs.create(url) : w.tabs.active;
     w.focus();
     return tab;
@@ -354,7 +356,7 @@ const services = {
   adoptFromPopup: (p, tab) => {
     const home = popupHome(p);
     if (home) home.tabs.adopt(tab);
-    (home || createWindow({ incognito: p.incognito, adopt: tab })).focus();
+    (home || createWindow({ profile: p.profile.base, incognito: p.incognito, adopt: tab })).focus();
   },
 };
 
@@ -1748,6 +1750,13 @@ ipcMain.on('js-dialog', (e, req) => {
   const kind = ['alert', 'confirm', 'prompt'].includes(req?.kind) ? req.kind : null;
   const found = kind && tabOfWc(e.sender);
   const frame = e.senderFrame;
+  // An installed app's window (batch 7b): a plain dialog over it.
+  const aw = kind && !found && frame && frame === e.sender.mainFrame ? apps?.windowFor(e.sender) : null;
+  if (aw && kind !== 'prompt') {
+    dialog.showMessageBox(aw.win, { type: kind === 'alert' ? 'info' : 'question', message: String(req.message ?? '').slice(0, 2000), buttons: kind === 'alert' ? ['OK'] : ['OK', 'Cancel'], defaultId: 0, cancelId: kind === 'alert' ? 0 : 1 })
+      .then(({ response }) => reply(kind === 'confirm' ? response === 0 : null), () => reply(pageDialogs.blankAnswer(kind)));
+    return;
+  }
   if (!found || !frame || frame !== e.sender.mainFrame) { reply(pageDialogs.blankAnswer(kind)); return; }
   pageDialogs.jsDialog(found.tab, { kind, message: req.message, value: req.value, url: frame.url })
     .then(reply, () => reply(pageDialogs.blankAnswer(kind)));
@@ -2319,7 +2328,11 @@ app.whenReady().then(async () => {
     onClosed: () => { if (!alive().length && !quitting && process.platform !== 'darwin') app.quit(); },
   });
   // Each tab's password and passkey requests go to its own profile's manager.
-  PasswordManager.register((wc) => tabOfWc(wc)?.w.profile.passwords || null);
+  // An installed app's window (batch 7b) has no manager: its passkey requests
+  // go to the browser's own WebAuthn (security keys) instead of failing.
+  PasswordManager.register((wc) => tabOfWc(wc)?.w.profile.passwords || null, {
+    orElse: (channel, e) => (channel === 'pk:request' && apps?.windowFor(e.sender) ? { native: true } : null),
+  });
   // Addresses, cards and form entries go to the tab's profile's autofill too (main/autofill.js).
   AutofillManager.registerPages((wc) => tabOfWc(wc)?.w.profile.autofill || null);
   screenAura.register();
@@ -2532,7 +2545,8 @@ app.on('before-quit', (e) => {
     return;
   }
   saveSession();
-  if (profiles && !quitting) profiles.setLastOpen([...new Set(alive().filter((w) => !w.profile.guest).map((w) => w.profile.id))]);
+  // (Started for an installed app and quit before the browser opened: the profiles that were waiting stay the ones to reopen.)
+  if (profiles && !quitting) profiles.setLastOpen([...new Set([...(waitingProfiles || []), ...alive().filter((w) => !w.profile.guest).map((w) => w.profile.id)])]);
   quitting = true;
   for (const w of alive()) w.ai.shutdown();
   helper?.stop();

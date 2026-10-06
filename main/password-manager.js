@@ -53,9 +53,10 @@ class PasswordManager {
 
   // Each profile has its own manager: pick(webContents) returns the one for
   // the tab that sent a message (null: nothing to answer).
-  static register(pick) {
+  // orElse(channel, e): the answer when no manager is (an installed app's window).
+  static register(pick, { orElse = () => null } = {}) {
     const on = (channel, fn) => ipcMain.on(channel, (e, ...args) => { const pm = pick(e.sender); if (pm) fn(pm, e, ...args); });
-    const handle = (channel, fn) => ipcMain.handle(channel, (e, ...args) => { const pm = pick(e.sender); return pm ? fn(pm, e, ...args) : null; });
+    const handle = (channel, fn) => ipcMain.handle(channel, (e, ...args) => { const pm = pick(e.sender); return pm ? fn(pm, e, ...args) : orElse(channel, e); });
     on('pw:captured', (pm, e, data) => pm.captured(e, data));
     handle('pw:query', (pm, e, data) => pm.query(e, data));
     on('pw:show', (pm, e, rect) => pm.show(e, rect));

@@ -81,8 +81,8 @@ body.vtabs-collapsed .vt-badge { display: none; }
 .vt-tab.pinned .audio svg { width: 10px; height: 10px; }
 .vt-tab.pinned .agent-dot { position: absolute; right: 4px; bottom: 4px; margin: 0; }
 /* A line between the pinned tabs and the others. */
-.vt-tab.after-pins { margin-top: 9px; }
-.vt-tab.after-pins::before { content: ''; position: absolute; left: 8px; right: 8px; top: -6px; height: 1px; background: var(--line); }
+:is(.vt-tab, .vt-group).after-pins { margin-top: 9px; }
+:is(.vt-tab, .vt-group).after-pins::before { content: ''; position: absolute; left: 8px; right: 8px; top: -6px; height: 1px; background: var(--line); }
 /* Dragging to reorder. */
 .vt-tab.dragging { z-index: 2; background: var(--tab-active); color: var(--text); box-shadow: var(--shadow-lift), inset 0 0 0 1px var(--line-strong); transition: none; }
 .vt-tab.shifting { transition: transform 160ms var(--ease); }
@@ -125,7 +125,7 @@ body.vtabs-flyout #card { padding: 6px 6px 8px; border-radius: 12px; box-shadow:
 /* Batch 5's groups in the column: a header row in the group's color (a
    click collapses it), and a line in that color beside its tabs. */
 .vt-group {
-  grid-column: 1 / -1; display: flex; align-items: center; gap: 8px;
+  grid-column: 1 / -1; position: relative; display: flex; align-items: center; gap: 8px;
   height: 28px; min-width: 0; margin-top: 4px; padding: 0 10px; border-radius: 9px;
   color: var(--text); font: inherit; font-size: 12px; font-weight: 600; text-align: left;
   transition: background 140ms var(--ease);
@@ -137,7 +137,7 @@ body.vtabs-flyout #card { padding: 6px 6px 8px; border-radius: 12px; box-shadow:
 .vt-group.untitled .vt-gname { display: none; }
 .vt-gcount { color: var(--dim); font-weight: 500; }
 .vt-group.collapsed .vt-gdot { box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px var(--gc); }
-.vt-tab.grouped::before {
+.vt-tab.grouped::after {
   content: ''; position: absolute; left: 3px; top: 7px; bottom: 7px; width: 3px; border-radius: 2px; background: var(--gc);
 }
 /* Collapsed to icons: the header is just its dot. */

@@ -90,11 +90,12 @@ class MediaHub {
     wc.once('destroyed', () => { if (tab.view?.webContents === wc || !tab.view) tab.media = null; this.changed(); });
   }
 
-  // Tabs with something to control, for windows like `w` (incognito ones see only incognito tabs).
+  // Tabs with something to control, for windows like `w`: the same profile
+  // (batch 7a; Guest is one too), and incognito ones see only incognito tabs.
   tabs(w) {
     const out = [];
     for (const x of this.windows()) {
-      if (x.incognito !== w.incognito) continue;
+      if (x.incognito !== w.incognito || x.profile?.base !== w.profile?.base) continue;
       for (const t of x.tabs.tabs) if (t.view && t.media?.heard) out.push({ w: x, tab: t });
     }
     return out;

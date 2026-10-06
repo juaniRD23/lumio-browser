@@ -69,8 +69,10 @@ function hostOf(url) {
 
 // Lumio's own pages that change its settings, extensions, experiments or
 // saved passwords, show its profile path, or hold the person's own choices
-// (the welcome screens' crash reports): the person uses them, never Lumio.
-const PRIVATE_PAGE = /^lumio:\/\/(settings|extensions|flags-lite|passwords|version|apps|welcome)(?![\w-])/i;
+// (the welcome screens' crash reports), and the downloads, history and
+// bookmarks pages (opening a flagged download, clearing history, reading it
+// all): the person uses them, never Lumio.
+const PRIVATE_PAGE = /^lumio:\/\/(settings|extensions|flags-lite|passwords|version|apps|welcome|downloads|history|bookmarks)(?![\w-])/i;
 
 // leaving: the tool only takes the tab elsewhere (navigate, go_back).
 function tabFor(ctx, id, { activate = false, leaving = false } = {}) {
@@ -80,7 +82,7 @@ function tabFor(ctx, id, { activate = false, leaving = false } = {}) {
   if (activate && ctx.tabs.activeId !== tab.id) ctx.tabs.activate(tab.id);
   const wc = tab.view.webContents;
   const url = wc.getURL() || tab.url || '';
-  if (PRIVATE_PAGE.test(url)) throw new Error("Lumio can't read or operate its own Settings, Extensions, Passwords, Version, Experiments or welcome pages. Ask the user to change these themselves.");
+  if (PRIVATE_PAGE.test(url)) throw new Error("Lumio can't read or operate its own Settings, Extensions, Passwords, Version, Experiments, welcome, Downloads, History or Bookmarks pages. Ask the user to change these themselves.");
   // Going past a security warning is the person's call alone.
   if (!leaving && url.startsWith('lumio://error/cert')) throw new Error("This tab shows a security warning (the site's certificate isn't valid). Lumio can't continue past it: ask the user what to do.");
   const note = dialogNote(tab);
@@ -114,7 +116,7 @@ function safeUrl(ctx, input) {
   const parsed = parseInput(input, ctx.tabs.searchTemplate());
   if (!parsed) throw new Error('Empty URL.');
   if (/^(file|view-source|data|javascript):/i.test(parsed.url)) throw new Error('Lumio can only open web pages (http/https).');
-  if (PRIVATE_PAGE.test(parsed.url)) throw new Error("Lumio can't open its own Settings, Extensions, Passwords, Version, Experiments or welcome pages.");
+  if (PRIVATE_PAGE.test(parsed.url)) throw new Error("Lumio can't open its own Settings, Extensions, Passwords, Version, Experiments, welcome, Downloads, History or Bookmarks pages.");
   if (/^lumio:\/\/(interstitial|error)/i.test(parsed.url)) throw new Error('Lumio can only open web pages (http/https).');
   return parsed.url;
 }

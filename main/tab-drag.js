@@ -19,7 +19,7 @@ class TabDrag {
 
   // The window whose tab strip is under a screen point (not the one being dragged).
   targetAt(x, y, except) {
-    const wins = this.deps.alive().filter((w) => w !== except && w.incognito === this.drag.win.incognito && !w.win.isMinimized() && w.win.isVisible());
+    const wins = this.deps.alive().filter((w) => w !== except && w.incognito === this.drag.win.incognito && w.profile === this.drag.win.profile && !w.win.isMinimized() && w.win.isVisible());
     const front = this.deps.cur();
     wins.sort((a, b) => (b === front) - (a === front));
     for (const w of wins) {

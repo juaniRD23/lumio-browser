@@ -475,7 +475,7 @@ test('tabs to the side: groups get a header row (click collapses), their tabs a 
   assert.deepEqual(order, ['1', '2', '3', '[gA]', '4', '5', '[gB]', '6']);
   assert.equal(await page.getAttribute('.vt-group[data-group="gA"]', 'aria-label'), 'Trip, 2 tabs, expanded');
   assert.equal(await page.isVisible('#vtabs .vt-tab[data-id="6"]'), false, 'a collapsed group’s tab is hidden');
-  assert.equal(await page.$eval('#vtabs .vt-tab[data-id="4"]', (el) => el.classList.contains('grouped') && getComputedStyle(el, '::before').backgroundColor !== 'rgba(0, 0, 0, 0)'), true);
+  assert.equal(await page.$eval('#vtabs .vt-tab[data-id="4"]', (el) => el.classList.contains('grouped') && getComputedStyle(el, '::after').backgroundColor !== 'rgba(0, 0, 0, 0)'), true);
   await page.click('.vt-group[data-group="gA"]');
   assert.deepEqual(await lastSent(page, 'groups:update'), { id: 'gA', collapsed: true });
   // Hover cards beside the column.

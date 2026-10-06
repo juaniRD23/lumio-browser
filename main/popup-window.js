@@ -109,7 +109,7 @@ class PopupWin {
         focusWindow: () => this.focus(),
         onLastTabClosed: () => this.close(),
         onViewDestroyed: (wc) => profile.permissions.dropFor(wc.id),
-        openInNewWindow: (u, inc) => app.createWindow({ incognito: inc, urls: [u] }),
+        openInNewWindow: (u, inc) => app.createWindow({ profile: profile.base, incognito: inc, urls: [u] }),
         openPopup: (tab, opts) => app.openPopup(this, tab, opts),
         openExternal: (tab, req) => app.openExternal(this, tab, req),
         dialogInProcess: (wc) => app.dialogInProcess(wc),

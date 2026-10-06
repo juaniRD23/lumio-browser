@@ -129,7 +129,7 @@ class TabStrip {
       pinned: tabs.every((t) => t.pinned),
       siteMuted: this.allMuted(w, tabs),
       canNewWindow: m.tabs.length > tabs.length,
-      windows: this.deps.alive().filter((x) => x !== w && x.incognito === w.incognito).map((x) => ({ id: x.id, label: windowLabel(x) })),
+      windows: this.deps.alive().filter((x) => x !== w && x.incognito === w.incognito && x.profile === w.profile).map((x) => ({ id: x.id, label: windowLabel(x) })),
       othersClosable: m.tabs.some((t) => !ids.includes(t.id) && !t.pinned),
       rightClosable: m.tabs.slice(last + 1).some((t) => !ids.includes(t.id) && !t.pinned),
       closedCount: this.closedCount(w),
@@ -162,7 +162,7 @@ class TabStrip {
       case 'newRight': return m.create(NEWTAB, { index: m.tabs.indexOf(m.get(id)) + 1, groupId: m.get(id)?.groupId || null });
       case 'moveToNew': return this.moveToNewWindow(w, live());
       case 'moveTo': {
-        const to = this.deps.alive().find((x) => x.id === arg && x.incognito === w.incognito);
+        const to = this.deps.alive().find((x) => x.id === arg && x.incognito === w.incognito && x.profile === w.profile);
         return to ? this.moveTabs(w, live(), to) : null;
       }
       case 'reload': for (const t of live().map((x) => m.get(x))) if (!(t.crashed && reloadCrashed(w, t))) t.view?.webContents.reload(); return null;
@@ -219,7 +219,8 @@ class TabStrip {
   // Into another window, at index (the end by default). The last one moved
   // is the tab you're on there. A window left with no tabs closes.
   moveTabs(from, ids, to, { index = null, focus = true } = {}) {
-    if (to === from || to.incognito !== from.incognito) return null;
+    // A tab keeps its page and session: only to another window of the same profile (and incognito or not).
+    if (to === from || to.incognito !== from.incognito || to.profile !== from.profile) return null;
     const tabs = this.detachTabs(from, ids);
     if (!tabs.length) return null;
     let at = index == null ? to.tabs.tabs.length : index;
@@ -236,7 +237,7 @@ class TabStrip {
     const active = ids.includes(from.tabs.activeId) ? from.tabs.activeId : ids[0];
     const tabs = this.detachTabs(from, ids);
     if (!tabs.length) return null;
-    const w = this.deps.createWindow({ ...opts, incognito: from.incognito, adopt: tabs[0] });
+    const w = this.deps.createWindow({ ...opts, profile: from.profile?.base, incognito: from.incognito, adopt: tabs[0] });
     for (const tab of tabs.slice(1)) w.tabs.adopt(tab, { active: false });
     w.tabs.activate((tabs.find((t) => t.id === active) || tabs[0]).id);
     return w;

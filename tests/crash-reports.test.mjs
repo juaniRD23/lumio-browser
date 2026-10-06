@@ -241,15 +241,15 @@ test('Lumio AI can’t open or operate the welcome screens or Settings, where th
     tabs: { searchTemplate: () => 'https://search.test/?q=%s', active: tabOn(url), activeId: 1, get: () => tabOn(url), ensureView() {}, activate() {}, navigate() {}, create: (u) => { created.push(u); throw new Error('opened'); } },
   });
   for (const url of ['lumio://welcome/', 'LUMIO://Welcome/#done', 'lumio://settings/#privacy']) {
-    await assert.rejects(() => tool('navigate').run({ url }, ctx('https://example.com/')), /can't open its own Settings,.* or welcome pages/, url);
-    await assert.rejects(() => tool('open_tab').run({ url }, ctx('https://example.com/')), /can't open its own Settings,.* or welcome pages/, url);
+    await assert.rejects(() => tool('navigate').run({ url }, ctx('https://example.com/')), /can't open its own Settings,.* welcome/, url);
+    await assert.rejects(() => tool('open_tab').run({ url }, ctx('https://example.com/')), /can't open its own Settings,.* welcome/, url);
     for (const name of ['read_page', 'click', 'press_key']) {
-      await assert.rejects(() => tool(name).run({ ref: 1, key: 'Space' }, ctx(url)), /can't read or operate its own Settings,.* or welcome pages/, `${name} on ${url}`);
+      await assert.rejects(() => tool(name).run({ ref: 1, key: 'Space' }, ctx(url)), /can't read or operate its own Settings,.* welcome/, `${name} on ${url}`);
     }
   }
   assert.deepEqual(created, [], 'no tab was opened');
   // Other Lumio pages are still fine to open.
-  await assert.rejects(() => tool('open_tab').run({ url: 'lumio://history/' }, ctx('https://example.com/')), /opened/);
+  await assert.rejects(() => tool('open_tab').run({ url: 'lumio://newtab/' }, ctx('https://example.com/')), /opened/);
 });
 
 test('the privacy page and the owner’s steps match what the app and server do', () => {

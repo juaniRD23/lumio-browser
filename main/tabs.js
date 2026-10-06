@@ -1153,8 +1153,11 @@ class TabManager {
   // kept as the page that failed. history: with each tab's back/forward pages.
   // An extension's new tab page is saved as the new tab page, so it follows
   // if the extension goes. Split views keep their pairs (main/split-view.js).
+  sessionUrl(t) { const raw = t.pendingUrl || t.url || ''; return this.isExtensionNewTab(raw) ? NEWTAB : sessions.realUrl(raw); }
+  // The active tab's place among the tabs sessionTabs() keeps.
+  sessionActive() { return Math.max(0, this.tabs.filter((t) => this.sessionUrl(t)).findIndex((t) => t.id === this.activeId)); }
   sessionTabs({ history = false } = {}) {
-    const urlOf = (t) => { const raw = t.pendingUrl || t.url || ''; return this.isExtensionNewTab(raw) ? NEWTAB : sessions.realUrl(raw); };
+    const urlOf = (t) => this.sessionUrl(t);
     const saved = this.tabs.filter((t) => urlOf(t));
     return saved.map((t) => {
       const h = history ? sessions.historyOf(t) : null;

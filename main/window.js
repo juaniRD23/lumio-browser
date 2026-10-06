@@ -457,7 +457,7 @@ class BrowserWin {
     return {
       tabs: this.tabs.sessionTabs({ history: true }),
       groups: this.tabs.groups.session(),
-      active: Math.max(0, this.tabs.tabs.findIndex((t) => t.id === this.tabs.activeId)),
+      active: this.tabs.sessionActive(), // (among the tabs kept: one with nothing to save is left out)
       bounds: this.win.isMaximized() ? this.win.getNormalBounds() : this.win.getBounds(),
       ...(this.win.isMaximized() ? { maximized: true } : {}),
       layout: this.tabLayout, // tabs to the side, split view (main/tab-layout.js)

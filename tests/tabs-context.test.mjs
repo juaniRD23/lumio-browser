@@ -69,10 +69,11 @@ test('tabPdf refuses tabs that are not PDFs', async () => {
 });
 
 test('the AI keeps out of Lumio’s Settings, Extensions, Passwords, Version and Experiments pages', () => {
-  for (const url of ['lumio://settings/', 'lumio://extensions/?id=abc', 'lumio://extensions/shortcuts', 'lumio://flags-lite/', 'LUMIO://passwords/', 'lumio://version/']) {
+  for (const url of ['lumio://settings/', 'lumio://extensions/?id=abc', 'lumio://extensions/shortcuts', 'lumio://flags-lite/', 'LUMIO://passwords/', 'lumio://version/',
+    'lumio://apps/', 'lumio://welcome/', 'lumio://downloads/', 'lumio://history/', 'lumio://bookmarks/']) { // (opening a flagged download, clearing or reading all history)
     assert.ok(PRIVATE_PAGE.test(url), url);
   }
-  for (const url of ['lumio://newtab/', 'lumio://history/', 'lumio://settingsx/', 'https://example.com/lumio://settings']) {
+  for (const url of ['lumio://newtab/', 'lumio://historyx/', 'lumio://settingsx/', 'https://example.com/lumio://settings']) {
     assert.ok(!PRIVATE_PAGE.test(url), url);
   }
 });
