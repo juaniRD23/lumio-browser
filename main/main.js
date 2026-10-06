@@ -293,7 +293,12 @@ const services = {
     w.profile.base.reader?.wire(tab);
     media?.wire(tab);
     shareTools?.wire(tab);
-    if (!w.incognito && tab.view) w.profile.extensions?.addTab(tab.view.webContents, w.win);
+    if (!w.incognito && tab.view) {
+      w.profile.extensions?.addTab(tab.view.webContents, w.win);
+      // A tab already in the strip that isn't the one shown (opened in the background).
+      const shown = w.tabs.active?.view?.webContents;
+      if (shown && w.tabs.tabs.includes(tab) && tab.id !== w.tabs.activeId) w.profile.extensions?.selectTab(shown);
+    }
     if (!w.incognito && tab.view) w.profile.omnibox?.watchTab(tab.view.webContents); // sites' OpenSearch engines
   },
   onPasskeyPromptClosed: (w) => w.profile.passwords?.passkeyClosed(w),
@@ -2576,20 +2581,31 @@ async function snapshot(w = cur()) {
   const out = Buffer.from(base.toBitmap());
   // A page waiting on its alert()/confirm() (a synchronous message to Lumio)
   // can't paint: if its view changed size since its last frame, capturePage
-  // never settles. Leave such a view out rather than hang.
-  const capture = (wc) => {
+  // never settles. A view shown a moment ago may have no frame yet (macOS:
+  // UnknownVizError), so that's tried again for a moment. Either way the view
+  // is left out of the picture rather than hang or fail the whole snapshot.
+  const captureOnce = (wc) => {
     let timer;
     return Promise.race([
-      wc.capturePage().catch(() => null),
+      wc.capturePage(),
       new Promise((r) => { timer = setTimeout(() => r(null), 3000); }),
     ]).finally(() => clearTimeout(timer));
+  };
+  const capture = async (wc) => {
+    for (let i = 0; i <= 10; i++) {
+      const img = await captureOnce(wc).catch(() => undefined);
+      if (img === null) return null; // never settled: blocked on a dialog
+      if (img && !img.isEmpty()) return img;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return null;
   };
   const paste = async (view) => {
     const b = view.getBounds();
     const bw = Math.round(b.width * scale);
     const bh = Math.round(b.height * scale);
-    const img = await capture(view.webContents);
-    if (!img || img.isEmpty() || !bw || !bh) return;
+    const img = bw > 0 && bh > 0 ? await capture(view.webContents) : null;
+    if (!img) return;
     const src = pixels(img).resize({ width: bw, height: bh }).toBitmap();
     const x0 = Math.round(b.x * scale);
     const y0 = Math.round(b.y * scale);

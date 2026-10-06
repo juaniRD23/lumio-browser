@@ -101,17 +101,28 @@ test('tab groups: a chip in the strip, collapse, the editor, and the session kee
 });
 
 test('a tab opened from a grouped tab joins the group; ungroup keeps the tabs', async () => {
-  const a = await open('one');
-  const g = await L.main((_e, id) => global.lumio.tabs.groups.create([id]).id, a);
-  await L.page(`(() => { const l = document.createElement('a'); l.href = '/two'; l.target = '_blank'; document.body.append(l); l.click(); return true; })()`);
-  assert.ok(await until(async () => (await L.main(() => global.lumio.tabs.tabs.length)) === 3));
-  assert.equal(await L.main(() => global.lumio.tabs.tabs.filter((t) => t.groupId).length), 2);
-  await L.main((_e, id) => global.lumio.tabs.groups.ungroup(id), g);
-  await L.wait(100);
-  assert.equal(await L.main(() => global.lumio.tabs.tabs.filter((t) => t.groupId).length), 0);
-  assert.equal(await L.main(() => global.lumio.tabs.tabs.length), 3);
-  assert.equal(await L.shell(`document.querySelectorAll('.tab-group-chip').length`), 0);
-  await reset();
+  try {
+    const a = await open('one');
+    const g = await L.main((_e, id) => global.lumio.tabs.groups.create([id]).id, a);
+    // A real click on a link to a new tab (the pop-up blocker lets only the person's clicks open one).
+    const at = await L.page(`(() => { const l = document.createElement('a'); l.href = '/two'; l.target = '_blank'; l.textContent = 'Two'; l.style = 'position:fixed;left:20px;top:20px;font-size:30px'; document.body.append(l); const r = l.getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; })()`);
+    await L.main((_e, p) => {
+      const wc = global.lumio.tabs.wc();
+      wc.focus();
+      wc.sendInputEvent({ type: 'mouseDown', x: p.x, y: p.y, button: 'left', clickCount: 1 });
+      wc.sendInputEvent({ type: 'mouseUp', x: p.x, y: p.y, button: 'left', clickCount: 1 });
+      return true;
+    }, at);
+    assert.ok(await until(async () => (await L.main(() => global.lumio.tabs.tabs.length)) === 3));
+    assert.equal(await L.main(() => global.lumio.tabs.tabs.filter((t) => t.groupId).length), 2);
+    await L.main((_e, id) => global.lumio.tabs.groups.ungroup(id), g);
+    await L.wait(100);
+    assert.equal(await L.main(() => global.lumio.tabs.tabs.filter((t) => t.groupId).length), 0);
+    assert.equal(await L.main(() => global.lumio.tabs.tabs.length), 3);
+    assert.equal(await L.shell(`document.querySelectorAll('.tab-group-chip').length`), 0);
+  } finally {
+    await reset();
+  }
 });
 
 test('move group to new window takes its pages along, still grouped', async () => {

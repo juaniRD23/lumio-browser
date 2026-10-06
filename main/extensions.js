@@ -117,6 +117,7 @@ class ExtensionManager {
     this.errors = new Map(); // id or path -> last load error
     this.loadedVia = new Map(); // id -> the folder Lumio loaded it from
     this.justAdded = null; // { id, name } while a Web Store install finishes
+    this.adding = null; // the tab being added (see addTab)
   }
 
   get api() { return this.session.extensions; }
@@ -130,7 +131,7 @@ class ExtensionManager {
       license: 'GPL-3.0',
       session: this.session,
       createTab: (details) => this.hooks.createTab(details),
-      selectTab: (wc) => this.hooks.selectTab(wc),
+      selectTab: (wc) => { if (wc !== this.adding) this.hooks.selectTab(wc); },
       removeTab: (wc) => this.hooks.removeTab(wc),
       createWindow: (details) => this.hooks.createWindow(details),
       removeWindow: (win) => this.hooks.removeWindow(win),
@@ -606,8 +607,14 @@ class ExtensionManager {
     return null;
   }
 
-  // Tab bookkeeping for chrome.tabs.
-  addTab(wc, win) { try { this.ece?.addTab(wc, win); } catch { /* other session */ } }
+  // Tab bookkeeping for chrome.tabs. electron-chrome-extensions calls a tab
+  // it starts tracking the active one and asks to show it: a tab whose page
+  // is made after it's in the strip (opened in the background, a page made
+  // again) stays where it is, and the caller says which tab is active.
+  addTab(wc, win) {
+    this.adding = wc;
+    try { this.ece?.addTab(wc, win); } catch { /* other session */ } finally { this.adding = null; }
+  }
   removeTab(wc) { try { this.ece?.removeTab(wc); } catch { /* not tracked */ } }
   selectTab(wc) { try { this.ece?.selectTab(wc); } catch { /* not tracked */ } }
   contextMenuItems(wc, params) {

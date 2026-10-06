@@ -20,7 +20,11 @@ class PageHud {
     this.url = '';
     this.side = 'left';
     this.mouseWc = null;
-    this.onMouse = (_e, m) => this.avoid(m);
+    this.mouse = null; // where the last mouse event in mouseWc was (page coordinates)
+    this.onMouse = (_e, m) => {
+      if (m?.type === 'mouseMove') this.mouse = { type: 'mouseMove', x: m.x, y: m.y };
+      this.avoid(m);
+    };
   }
 
   view(kind) {
@@ -110,10 +114,12 @@ class PageHud {
     return true;
   }
 
-  // Where the pointer is on the page now (it may not have moved since the link showed).
+  // Where the pointer is on the page now (it may not have moved since the link
+  // showed): the page's last mouse event once there is one, else the screen's.
   pointer() {
     const page = this.page();
     if (!page) return null;
+    if (this.mouse) return this.mouse;
     const at = screen.getCursorScreenPoint();
     const content = this.w.win.getContentBounds();
     return { type: 'mouseMove', x: at.x - content.x - page.x, y: at.y - content.y - page.y };
@@ -122,6 +128,7 @@ class PageHud {
   watchMouse(tab) {
     const wc = tab?.view?.webContents || null;
     if (wc === this.mouseWc) return;
+    this.mouse = null;
     if (this.mouseWc && !this.mouseWc.isDestroyed()) this.mouseWc.removeListener('before-mouse-event', this.onMouse);
     this.mouseWc = wc;
     if (wc) wc.on('before-mouse-event', this.onMouse);

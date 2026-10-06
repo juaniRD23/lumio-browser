@@ -176,8 +176,8 @@ class TabManager {
       // If the history didn't take, the address alone. (A page that just
       // failed to load keeps its history: its error page shows.)
       const fallback = () => {
-        const wc = view.webContents;
-        if (!wc.isDestroyed() && !wc.navigationHistory.length()) wc.loadURL(url).catch(() => {});
+        const wc = view.webContents; // (none once the tab closed meanwhile)
+        if (wc && !wc.isDestroyed() && !wc.navigationHistory.length()) wc.loadURL(url).catch(() => {});
       };
       try { view.webContents.navigationHistory.restore(saved).catch(fallback); } catch { fallback(); }
     } else {
@@ -188,13 +188,16 @@ class TabManager {
 
   // Memory Saver: closes the page of a tab you haven't looked at for a while,
   // keeping its address, title, icon and history; it reloads when you return.
-  // Never the tab you're on, one playing sound, loading, being captured
-  // (screen share, camera), with devtools open, or a Lumio AI working in it.
+  // Never the tab you're on, one playing sound, loading, capturing or being
+  // captured (its camera, microphone or screen dot, or shared to another
+  // page: main/capture.js), with devtools open, or a Lumio AI working in it.
+  // (Not webContents.isBeingCaptured(): it misses the camera, and DevTools'
+  // focus emulation, which test drivers turn on, counts as a capture.)
   discard(id) {
     const tab = this.get(id);
     if (!tab?.view || tab.id === this.activeId || this.split.isShown(tab.id) || tab.audible || tab.agent || tab.dialogs?.length || tab.closing) return false;
     const wc = tab.view.webContents;
-    if (wc.isDestroyed() || wc.isLoading() || wc.isCurrentlyAudible() || wc.isBeingCaptured() || wc.isDevToolsOpened()) return false;
+    if (wc.isDestroyed() || wc.isLoading() || wc.isCurrentlyAudible() || this.hooks.captureOf?.(tab) || wc.isDevToolsOpened()) return false;
     const url = wc.getURL();
     if (!url || url.startsWith('lumio://')) return false; // internal pages are cheap
     this.putToSleep(tab, this.snapshot(tab));
