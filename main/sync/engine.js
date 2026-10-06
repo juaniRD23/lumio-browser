@@ -1,7 +1,8 @@
-// Lumio Sync on this computer: keeps bookmarks, passwords, history, chats,
-// workflows, settings and open tabs the same on every device signed in to the
-// same Lumio account. Records are encrypted here (main/sync/crypto.js) before
-// they leave; the server stores ciphertext.
+// Lumio Sync on this computer: keeps bookmarks, passwords, passkeys,
+// addresses, cards (when turned on), history, chats, workflows, settings and
+// open tabs the same on every device signed in to the same Lumio account.
+// Records are encrypted here (main/sync/crypto.js) before they leave; the
+// server stores ciphertext.
 //
 // How it works: each collection (main/sync/adapters.js) lists its records
 // with a hash. The engine remembers the hash of every record as last synced;
@@ -15,7 +16,14 @@ const crypto = require('crypto');
 const { JsonFile } = require('../store');
 const C = require('./crypto');
 
-const TYPES = ['bookmarks', 'passwords', 'history', 'chats', 'workflows', 'projects', 'settings', 'tabs'];
+const TYPES = ['bookmarks', 'passwords', 'passkeys', 'addresses', 'cards', 'history', 'chats', 'workflows', 'projects', 'settings', 'tabs'];
+// Synced only after the person turns them on: card numbers stay on each computer by default.
+const OFF_BY_DEFAULT = new Set(['cards']);
+// Collections added after the first release of Lumio Sync. A server that
+// doesn't know them yet refuses them; the rest still sync, and they're tried
+// again in an hour.
+const NEWER = new Set(['passkeys', 'addresses', 'cards']);
+const RETRY_NEWER = 60 * 60 * 1000;
 const BATCH = 100;
 const EVERY = 60 * 1000;
 const SOON = 4000;
@@ -69,7 +77,7 @@ class SyncEngine {
   // ---------------------------------------------------------------- settings
   get prefs() {
     const s = this.store.settings.sync || {};
-    return { on: s.on !== false, types: Object.fromEntries(TYPES.map((t) => [t, s.types?.[t] !== false])) };
+    return { on: s.on !== false, types: Object.fromEntries(TYPES.map((t) => [t, (s.types?.[t] ?? !OFF_BY_DEFAULT.has(t)) !== false])) };
   }
   setPrefs({ on, types } = {}) {
     const cur = this.prefs;
@@ -353,8 +361,9 @@ class SyncEngine {
   async push() {
     const records = this.file.data.records;
     const out = [];
+    this.refused ||= new Map(); // newer collection -> when to try it again
     for (const [type, adapter] of this.adapters) {
-      if (!this.syncs(adapter)) continue;
+      if (!this.syncs(adapter) || this.refused.get(type) > Date.now()) continue;
       const seen = new Set();
       for (const e of adapter.entries()) {
         const id = await this.idFor(type, e.key);
@@ -370,8 +379,12 @@ class SyncEngine {
         out.push({ id, type, key: r.k, deleted: true });
       }
     }
-    for (let i = 0; i < out.length; i += BATCH) {
-      const batch = out.slice(i, i + BATCH);
+    // Newer collections go in batches of their own, after the rest.
+    const batches = [];
+    for (const group of [out.filter((it) => !NEWER.has(it.type)), ...[...NEWER].map((t) => out.filter((it) => it.type === t))]) {
+      for (let i = 0; i < group.length; i += BATCH) batches.push(group.slice(i, i + BATCH));
+    }
+    for (const batch of batches) {
       const items = [];
       for (const it of batch) {
         if (it.deleted) { items.push({ id: it.id, collection: it.type, deleted: true }); continue; }
@@ -379,7 +392,15 @@ class SyncEngine {
         if (json.length > MAX_RECORD) { records[it.id] = { c: it.type, k: it.key, h: it.hash }; continue; } // too big to sync
         items.push({ id: it.id, collection: it.type, data: await C.seal(this.keys, it.type, it.id, { k: it.key, r: it.record }), updatedAt: Date.now() });
       }
-      if (items.length) await this.api('/api/sync/push', { method: 'POST', body: { device: this.deviceId, items } });
+      if (items.length) {
+        try {
+          await this.api('/api/sync/push', { method: 'POST', body: { device: this.deviceId, items } });
+        } catch (err) {
+          if (!(err.status === 400 && NEWER.has(batch[0].type))) throw err;
+          this.refused.set(batch[0].type, Date.now() + RETRY_NEWER); // an older server
+          continue;
+        }
+      }
       for (const it of batch) {
         if (it.deleted) delete records[it.id];
         else records[it.id] = { c: it.type, k: it.key, h: it.hash };

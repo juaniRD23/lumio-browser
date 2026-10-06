@@ -17,6 +17,11 @@ function snapshot(opts) {
   ].join(',');
 
   const clean = (s, n = 80) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, n);
+  // Card numbers and security codes never go to the AI: only that they're filled.
+  const luhn = (n) => { let sum = 0; for (let i = 0; i < n.length; i++) { let d = Number(n[n.length - 1 - i]); if (i % 2) { d *= 2; if (d > 9) d -= 9; } sum += d; } return sum % 10 === 0; };
+  const cardField = (el) => /(^|\s)cc-(number|csc)\b/.test(el.getAttribute('autocomplete') || '')
+    || /(card.?num|cc.?num|cvv|cvc|csc|security.?code)/i.test([el.name, el.id, el.getAttribute('aria-label'), el.placeholder].join(' '))
+    || (/^\d{12,19}$/.test(el.value.replace(/[\s-]/g, '')) && luhn(el.value.replace(/[\s-]/g, '')));
   const visibleRect = (el) => {
     const r = el.getBoundingClientRect();
     if (r.width < 2 || r.height < 2) return null;
@@ -100,7 +105,7 @@ function snapshot(opts) {
     if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
       const t = (el.type || '').toLowerCase();
       if (t === 'checkbox' || t === 'radio') { if (el.checked) line += ' checked'; }
-      else if (t === 'password') { if (el.value) line += ' (filled)'; }
+      else if (t === 'password' || (el.value && cardField(el))) { if (el.value) line += ' (filled)'; }
       else if (el.value) line += ` value="${clean(el.value, 60)}"`;
       if (!name && el.placeholder) line += ` placeholder="${clean(el.placeholder, 40)}"`;
     } else if (el.tagName === 'SELECT') {
@@ -192,6 +197,32 @@ function focusCheck() {
     || /(password|passcode|passwd|card.?number|credit.?card|cc.?num|cvv|cvc|csc|security code|expir|iban|routing|account.?number|ssn|social security|passport|\bpin\b)/.test(hints);
   if (sensitive) el.blur();
   return { sensitive };
+}
+
+// While Lumio takes a screenshot for the AI, card numbers and security codes
+// in fields show as dots (the person sees them again right after). Runs in
+// Lumio's isolated world, so the page can't see what it keeps.
+function maskCards(opts) {
+  const luhn = (n) => { let sum = 0; for (let i = 0; i < n.length; i++) { let d = Number(n[n.length - 1 - i]); if (i % 2) { d *= 2; if (d > 9) d -= 9; } sum += d; } return sum % 10 === 0; };
+  const cardField = (el) => /(^|\s)cc-(number|csc)\b/.test(el.getAttribute('autocomplete') || '')
+    || /(card.?num|cc.?num|cvv|cvc|csc|security.?code)/i.test([el.name, el.id, el.getAttribute('aria-label'), el.placeholder].join(' '))
+    || (/^\d{12,19}$/.test(el.value.replace(/[\s-]/g, '')) && luhn(el.value.replace(/[\s-]/g, '')));
+  const masked = (window.__lumioMasked ||= new Map()); // field -> its own text-security style
+  if (opts.on) {
+    for (const el of document.querySelectorAll('input')) {
+      if (!el.value || el.type === 'password' || masked.has(el) || !cardField(el)) continue;
+      masked.set(el, [el.style.getPropertyValue('-webkit-text-security'), el.style.getPropertyPriority('-webkit-text-security')]);
+      el.style.setProperty('-webkit-text-security', 'disc', 'important');
+    }
+    // Answers once the dots are painted (a hidden tab paints no frames, so not forever).
+    if (masked.size) return new Promise((done) => { requestAnimationFrame(() => requestAnimationFrame(() => done(masked.size))); setTimeout(() => done(masked.size), 120); });
+  } else {
+    for (const [el, [value, priority]] of masked) {
+      if (value) el.style.setProperty('-webkit-text-security', value, priority); else el.style.removeProperty('-webkit-text-security');
+    }
+    masked.clear();
+  }
+  return masked.size;
 }
 
 // Selects the current contents of a field so the next insertText replaces it.
@@ -474,4 +505,4 @@ function serp(opts) {
   };
 }
 
-module.exports = { domClick, domType, domScroll, youtube, snapshot, locate, focusCheck, selectContents, selectOption, scrollInfo, cursor, aura, serp };
+module.exports = { domClick, domType, domScroll, youtube, snapshot, locate, focusCheck, selectContents, selectOption, scrollInfo, cursor, aura, serp, maskCards };

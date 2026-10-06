@@ -1,7 +1,8 @@
 // lumio:// serves the browser's own UI and internal pages from disk.
 //   lumio://shell/, overlay/, aura/, dialog/, popup/, notice/, picker/, taskmanager/, print/ -> renderer/ui (default session only)
 //   lumio://newtab/, settings, history, downloads, bookmarks, extensions,
-//   error, welcome, credits, interstitial (warning pages), apps -> renderer/pages (tab sessions)
+//   error, welcome, credits, interstitial (warning pages), apps, version, flags-lite -> renderer/pages (tab sessions)
+//   a page's sub-pages (lumio://extensions/shortcuts, lumio://settings/content) -> that page's HTML
 //   */assets/*  -> renderer/assets,  */vendor/* -> whitelisted node_modules files
 //   shell/ai-files/* -> pictures Lumio made (userData/ai-files)
 //   shell/web/*      -> Lumio Chat's file code (docmaker, attach) and its libraries, copied at build
@@ -21,7 +22,7 @@ const VENDOR = {
 };
 
 const UI_HOSTS = new Set(['shell', 'overlay', 'aura', 'dialog', 'popup', 'notice', 'picker', 'taskmanager', 'print']);
-const PAGE_HOSTS = new Set(['newtab', 'settings', 'history', 'downloads', 'bookmarks', 'extensions', 'passwords', 'error', 'welcome', 'credits', 'interstitial', 'apps']);
+const PAGE_HOSTS = new Set(['newtab', 'settings', 'history', 'downloads', 'bookmarks', 'extensions', 'passwords', 'error', 'welcome', 'credits', 'interstitial', 'apps', 'version', 'flags-lite']);
 const CHROMIUM_CREDITS = 'LICENSES.chromium.html';
 // Settings' sub-pages are pages of their own under the same host, like
 // chrome://settings/content/… and chrome://settings/clearBrowserData.
@@ -76,6 +77,7 @@ function resolveFile(url, hosts) {
   if (pathname === '/' || pathname === '') return path.join(base, host + '.html');
   const sub = host === 'settings' && !path.extname(pathname) && SETTINGS_PAGES[pathname.split('/')[1]];
   if (sub) return path.join(PAGES_DIR, sub);
+  if (!UI_HOSTS.has(host) && !path.extname(pathname)) return path.join(base, host + '.html'); // the page routes it
   const f = path.join(base, pathname.slice(1));
   return inside(base, f) ? f : null;
 }

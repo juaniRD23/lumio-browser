@@ -345,10 +345,12 @@ test('extensions: content scripts, toolbar popup, chrome.tabs, turn off and remo
   await go(`${base}/with-extension`, 'with-extension');
   assert.ok(await until(() => L.page(`document.documentElement.dataset.lumioExt === 'content-script-ran'`)), 'content script ran');
   assert.ok(await until(async () => Number(await L.page(`document.documentElement.dataset.lumioExtTabs`)) >= 1), 'background worker answered chrome.tabs.query');
-  // Toolbar button with the extension's icon.
-  assert.ok(await until(() => L.shell(`document.getElementById('ext-actions').shadowRoot?.querySelectorAll('.action').length === 1`)));
+  // New extensions start in the puzzle menu; pinned, the button shows its icon on the toolbar.
+  assert.equal(await L.shell(`document.querySelectorAll('#ext-actions .ext-action').length`), 0);
+  await L.main((_e, id) => global.lumio.extensions.setPinned(id, true), res.id);
+  assert.ok(await until(() => L.shell(`document.querySelectorAll('#ext-actions .ext-action').length === 1`)));
   // Its popup opens under the button and can open tabs.
-  await L.shell(`document.getElementById('ext-actions').shadowRoot.querySelector('.action').click(); true`);
+  await L.shell(`document.querySelector('#ext-actions .ext-action').click(); true`);
   const popup = () => L.main(({ BrowserWindow }) => {
     const w = BrowserWindow.getAllWindows().find((x) => x.webContents.getURL().includes('popup.html'));
     return w ? { visible: w.isVisible(), bounds: w.getBounds() } : null;
@@ -376,7 +378,7 @@ test('extensions: content scripts, toolbar popup, chrome.tabs, turn off and remo
   await until(() => L.page(`document.querySelector('.ext').classList.contains('off')`));
   await go(`${base}/without-extension`, 'without-extension');
   assert.equal(await L.page(`document.documentElement.dataset.lumioExt || 'none'`), 'none');
-  assert.ok(await until(() => L.shell(`document.getElementById('ext-actions').shadowRoot?.querySelectorAll('.action').length === 0`)));
+  assert.ok(await until(() => L.shell(`document.querySelectorAll('#ext-actions .ext-action').length === 0`)));
   // On again, then remove.
   const key = await L.main(() => global.lumio.extensions.list()[0].key);
   await L.main((_e, k) => global.lumio.extensions.setEnabled(k, true), key);

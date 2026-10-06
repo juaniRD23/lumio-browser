@@ -92,6 +92,8 @@ function macOptions(arch, helper) {
       NSLocationWhenInUseUsageDescription: 'Websites you allow can see your location.',
       // Web Bluetooth: macOS ends an app that uses Bluetooth without this.
       NSBluetoothAlwaysUsageDescription: 'Websites can connect to the Bluetooth devices you choose.',
+      // Handoff: the page you're on continues on your iPhone, iPad or other Mac (main/mac-integration.js).
+      NSUserActivityTypes: ['NSUserActivityTypeBrowsingWeb'],
       CFBundleDocumentTypes: MAC_DOCUMENT_TYPES,
     },
   };

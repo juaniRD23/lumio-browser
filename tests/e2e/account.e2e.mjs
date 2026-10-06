@@ -119,7 +119,7 @@ test('passkeys: a site saves one after the person confirms, signs in with it, an
   const [att] = cborDecode(Buffer.from(reg.attestationObject, 'base64url'));
   const authData = att.get('authData');
   assert.deepEqual(authData.subarray(0, 32), sha('localhost'));
-  assert.equal(authData[32], 0x45, 'user present and verified');
+  assert.equal(authData[32], 0x4d, 'user present and verified, can be synced (not yet)');
   assert.deepEqual((await L.main(() => global.lumio.passwords.passkeys.list())).map((k) => [k.rpId, k.userName]), [['localhost', 'sam@example.com']]);
 
   // Sign in: pick the account, confirm, and the site gets a valid signature.

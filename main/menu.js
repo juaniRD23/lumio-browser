@@ -3,6 +3,7 @@
 // Windows the menu bar is hidden: the same menu still provides the shortcuts.
 // The ⋮ button opens buildBrowserMenu() on every platform.
 const { Menu } = require('electron');
+const extras = require('./menu-extras');
 
 const MAC = process.platform === 'darwin';
 
@@ -98,6 +99,7 @@ function buildMenu(cmd, state = {}) {
         { label: 'Find Previous', accelerator: 'CmdOrCtrl+Shift+G', click: () => cmd.findStep(false) },
         ...(MAC ? [{ label: 'Use Selection for Find', accelerator: 'Cmd+E', click: cmd.useSelectionForFind }] : []),
         ...(MAC ? [] : [hidden('F3', () => cmd.findStep(true)), hidden('Shift+F3', () => cmd.findStep(false))]),
+        ...extras.editExtras(state, cmd),
       ],
     },
     {
@@ -105,7 +107,8 @@ function buildMenu(cmd, state = {}) {
       submenu: [
         { label: 'Reload Page', accelerator: 'CmdOrCtrl+R', click: () => cmd.reload(false) },
         { label: 'Force Reload', accelerator: 'CmdOrCtrl+Shift+R', click: () => cmd.reload(true) },
-        ...(MAC ? [{ label: 'Stop', accelerator: 'Cmd+.', click: cmd.stop }] : [hidden('F5', () => cmd.reload(false)), hidden('Ctrl+F5', () => cmd.reload(true)), hidden('Shift+F5', () => cmd.reload(true))]),
+        ...(MAC ? [] : [hidden('F5', () => cmd.reload(false)), hidden('Ctrl+F5', () => cmd.reload(true)), hidden('Shift+F5', () => cmd.reload(true))]),
+        { label: 'Stop', ...(MAC ? { accelerator: 'Cmd+.' } : {}), click: cmd.stop },
         { type: 'separator' },
         { label: 'Zoom In', accelerator: 'CmdOrCtrl+Plus', click: () => cmd.zoom(1) },
         hidden('CmdOrCtrl+=', () => cmd.zoom(1)),
@@ -124,11 +127,7 @@ function buildMenu(cmd, state = {}) {
         { label: 'Reading Mode', click: cmd.readingMode },
         { label: 'Translate Page…', click: cmd.translatePage },
         { type: 'separator' },
-        { label: 'View Page Source', accelerator: MAC ? 'Cmd+Alt+U' : 'Ctrl+U', click: cmd.viewSource },
-        { label: 'Developer Tools', accelerator: MAC ? 'Cmd+Alt+I' : 'Ctrl+Shift+I', click: cmd.devtools },
-        { label: 'JavaScript Console', accelerator: MAC ? 'Cmd+Alt+J' : 'Ctrl+Shift+J', click: cmd.console },
-        ...(MAC ? [] : [hidden('F12', cmd.devtools)]),
-        ...(cmd.isDev ? [{ label: 'Browser UI Developer Tools', accelerator: 'CmdOrCtrl+Alt+Shift+I', click: cmd.shellDevtools }] : []),
+        extras.developerMenu(state, cmd, hidden),
         { type: 'separator' },
         { role: 'togglefullscreen', ...(MAC ? {} : { accelerator: 'F11' }) },
       ],
@@ -146,6 +145,7 @@ function buildMenu(cmd, state = {}) {
         ...(state.recentlyClosed || []).map((e) => (e.tabs?.length > 1
           ? { label: short(e.label), translate: false, submenu: [{ label: 'Restore Window', click: () => cmd.reopenClosed(e.index) }, { type: 'separator' }, ...e.tabs.map((t, i) => ({ label: short(t), translate: false, click: () => cmd.reopenClosed(e.index, i) }))] }
           : { label: short(e.label), translate: false, click: () => cmd.reopenClosed(e.index) })),
+        ...extras.historyItems(state, cmd),
         { type: 'separator' },
         { label: 'Show All History', accelerator: MAC ? 'Cmd+Y' : 'Ctrl+H', click: cmd.history },
         { label: 'Downloads', accelerator: MAC ? 'Cmd+Alt+L' : 'Ctrl+J', click: cmd.downloads },
@@ -162,47 +162,45 @@ function buildMenu(cmd, state = {}) {
         { type: 'separator' },
         { label: 'Add Tab to Reading List', click: cmd.addToReadingList },
         { label: 'Show Reading List', click: () => cmd.sidePanel('reading') },
+        ...extras.bookmarkItems(state, cmd),
       ],
     },
-    {
+    // The Mac's Profiles and Tab menus (Windows keeps profiles in the account menu).
+    ...(MAC ? [{
       label: 'Profiles',
       submenu: [
         ...(state.profiles || []).map((p) => ({ label: p.name, translate: false, type: 'checkbox', checked: !!p.current, click: () => cmd.openProfile(p.id) })),
+        { type: 'separator' },
+        { label: 'Customize Profile…', click: cmd.customizeProfile },
+        { label: state.signedIn ? 'Manage Your Lumio Account…' : 'Sign In to Lumio…', click: cmd.lumioAccount },
         { type: 'separator' },
         { label: 'Manage Profiles…', click: cmd.profilePicker },
         { label: 'Add Profile…', click: cmd.addProfile },
         { label: 'Open Guest Window', click: cmd.newGuest },
       ],
-    },
+    }, extras.tabMenu(cmd)] : []),
     {
       label: 'Window',
+      // The Mac lists the open windows at the end of its Window menu.
+      ...(MAC ? { role: 'window' } : {}),
       submenu: [
         ...(MAC ? [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }] : []),
         { label: 'Task Manager', ...(MAC ? {} : { accelerator: 'Shift+Escape' }), click: cmd.taskManager },
         { type: 'separator' },
-        { label: 'Pin/Unpin Tab', click: cmd.pinTab },
-        { label: 'Move Tab to New Window', click: cmd.moveTabToNewWindow },
+        // (The Mac has these in its Tab menu.)
+        ...(MAC ? [] : [{ label: 'Pin/Unpin Tab', click: cmd.pinTab }, { label: 'Move Tab to New Window', click: cmd.moveTabToNewWindow }]),
         { label: 'Search Tabs…', accelerator: 'CmdOrCtrl+Shift+A', click: cmd.tabSearch },
         { type: 'separator' },
         { label: 'Show Next Tab', accelerator: MAC ? 'Cmd+Shift+]' : 'Ctrl+PageDown', click: () => cmd.cycle(1) },
         { label: 'Show Previous Tab', accelerator: MAC ? 'Cmd+Shift+[' : 'Ctrl+PageUp', click: () => cmd.cycle(-1) },
         hidden('Ctrl+Tab', () => cmd.cycle(1)),
         hidden('Ctrl+Shift+Tab', () => cmd.cycle(-1)),
-        ...(MAC ? [hidden('Cmd+Alt+Right', () => cmd.cycle(1)), hidden('Cmd+Alt+Left', () => cmd.cycle(-1))] : []),
         ...tabKeys,
-        ...(MAC ? [{ type: 'separator' }, { role: 'front' }] : []),
+        ...(state.extensionKeys || []), // extension commands' shortcuts (main/extensions-ui.js)
+        ...(MAC ? [{ type: 'separator' }, { label: 'Downloads', click: cmd.downloads }, { label: 'Extensions', click: cmd.extensions }, { type: 'separator' }, { role: 'front' }] : []),
       ],
     },
-    {
-      role: 'help', // the Mac adds its menu search here
-      submenu: [
-        { label: 'Lumio Browser Help', ...(MAC ? {} : { accelerator: 'F1' }), click: cmd.help },
-        { type: 'separator' },
-        { label: 'Terms of Service', click: cmd.terms },
-        { label: 'Privacy Policy', click: cmd.privacy },
-        { label: 'Open-Source Licenses', click: cmd.credits },
-      ],
-    },
+    extras.helpMenu(cmd),
   ];
   return Menu.buildFromTemplate(template);
 }
@@ -291,9 +289,11 @@ function buildBrowserMenu(cmd, state = {}) {
       icon: 'info',
       submenu: [
         { label: 'About Lumio Browser', icon: 'info', run: cmd.about },
-        // The release notes, once the updater has looked them up (menuModel()
-        // leaves it out until then).
-        { label: 'What’s new', icon: 'external', run: state.whatsNew },
+        { label: 'Help center', icon: 'external', run: cmd.helpCenter },
+        { label: 'Report an issue…', icon: 'page', accel: 'Alt+Shift+I', run: cmd.reportIssue },
+        // The release notes (the updater's once it has looked them up; menuModel()
+        // leaves it out when there's neither).
+        { label: 'What’s new', icon: 'external', run: state.whatsNew || cmd.whatsNew },
         SEP,
         { label: 'Terms of Service', icon: 'page', run: cmd.terms },
         { label: 'Privacy Policy', icon: 'page', run: cmd.privacy },

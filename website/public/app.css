@@ -180,3 +180,9 @@ body.app { min-height: 100svh; display: flex; flex-direction: column; }
 .cancel-panel .cancel-msg { min-height: 18px; margin-top: 8px; color: var(--warn); font-size: 13px; }
 .cancel-panel .cancel-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
 @media (max-width: 640px) { .cancel-panel .reasons { grid-template-columns: 1fr; } }
+/* issue reports on /admin */
+.report { padding: 12px 0 4px; border-top: 1px solid var(--line); }
+.report-top { display: flex; gap: 10px; align-items: center; font-size: 13px; color: var(--dim); }
+.report-top .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spend .report-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.spend .fine.report-meta { margin-top: 6px; overflow-wrap: anywhere; }

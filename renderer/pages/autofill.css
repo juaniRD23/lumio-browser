@@ -1,0 +1,28 @@
+/* Settings › Addresses, Payment methods and form entries (settings-autofill.js). */
+.af-item { gap: 12px; }
+.af-ic { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; background: var(--overlay-3); color: var(--dim); flex: none; }
+/* The card's brand as a small plate, in theme colors (brand colors would only suit one appearance). */
+.af-brand { min-width: 46px; height: 30px; padding: 0 6px; border-radius: 7px; border: 1px solid var(--line-strong); background: var(--card2); display: grid; place-items: center; font: 650 10px var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--text-soft); flex: none; }
+.af-item .icon-btn { width: 32px; height: 32px; padding: 0; display: grid; place-items: center; }
+.af-item .pill { height: 20px; font-size: 11px; padding: 0 8px; margin-left: 6px; vertical-align: 1px; }
+.af-form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; padding: 16px 20px 18px; border-top: 1px solid var(--line); background: var(--card2); }
+.af-form + .row { border-top: 1px solid var(--line); }
+.af-form:last-child { border-radius: 0 0 20px 20px; } /* the card's own corners */
+.af-form .wide { grid-column: 1 / -1; }
+.af-f { display: flex; flex-direction: column; gap: 5px; min-width: 0; font-size: 12.5px; color: var(--dim); }
+.af-f .field { width: 100%; color: var(--text); }
+.af-f textarea.field { height: auto; min-height: 62px; padding: 9px 12px; resize: vertical; font: 13.5px/1.45 var(--sans); }
+.af-num, .af-exp { display: flex; gap: 8px; }
+.af-num .field { flex: 1; font-family: var(--mono); letter-spacing: .03em; }
+.af-exp .field { flex: 1; min-width: 0; }
+.af-hint { margin: 0; color: var(--label); font-size: 12px; }
+.af-sites { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.af-site { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--overlay-2); color: var(--text-soft); font-size: 12.5px; cursor: pointer; }
+.af-site:hover { background: var(--overlay-4); color: var(--text); }
+.af-site span { color: var(--muted); font-size: 14px; line-height: 1; }
+.af-site:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.af-actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; }
+.af-actions .err { margin-right: auto; }
+.af-item .btn:focus-visible, .af-form .btn:focus-visible, #form-history-clear:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+@media (prefers-reduced-motion: no-preference) { .af-form { animation: rise .22s var(--ease); } }
+@media (max-width: 620px) { .af-form { grid-template-columns: 1fr; } }

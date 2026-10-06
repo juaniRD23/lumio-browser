@@ -12,6 +12,8 @@ if (process.env.LUMIO_USER_DATA) app.setPath('userData', process.env.LUMIO_USER_
 else if (FLAVOR.beta) app.setPath('userData', path.join(app.getPath('appData'), FLAVOR.name));
 if (process.env.LUMIO_DOWNLOADS) app.setPath('downloads', process.env.LUMIO_DOWNLOADS); // tests
 app.setName(FLAVOR.name);
+// Experiments (lumio://flags-lite) are Chromium switches, so they're set before the app starts.
+require('./flags').applyAtStartup(app, app.getPath('userData'));
 
 // Before Electron starts: Lumio's language and graphics acceleration
 // (Settings › Languages and › System), which apply from launch.
@@ -50,8 +52,15 @@ const searchEngines = require('./search-engines');
 const { ChatStore } = require('./ai/chats');
 const { MacHelper } = require('./mac/helper');
 const { ExtensionManager } = require('./extensions');
+const { ExtensionsUI } = require('./extensions-ui');
+const { Help } = require('./help');
+const devtools = require('./devtools');
+const menuExtras = require('./menu-extras');
+const { menuCommands } = require('./menu-commands');
+const { Handoff, contextMenuItems: macContextItems } = require('./mac-integration');
 const { LumioAccount } = require('./account');
 const { PasswordManager } = require('./password-manager');
+const { AutofillManager, attachAutofill } = require('./autofill');
 const screenAura = require('./ai/screen-aura');
 const { Updater, LATEST, BETAS, compareVersions } = require('./updater');
 const { generatePassword } = require('./passwords');
@@ -136,6 +145,8 @@ let screenshots = null; // the screenshot tool (main/screenshot.js)
 let apps = null; // installed web apps (main/apps.js), each kept with the profile it came from
 let pageMenu = null; // the page tools' right-click items (main/page-menu.js)
 let waitingProfiles = null; // started for an installed app: the profiles whose windows come back once the browser is opened
+let help = null; // Help menu, Report an issue, lumio://version and flags-lite (main/help.js), for every profile
+const handoff = new Handoff(app); // the page you're on, offered to your other Apple devices
 let quitting = false;
 let launched = false; // the first windows are open: links and files from other apps open right away
 const windows = new Set();
@@ -170,6 +181,7 @@ const tabOfWc = (wc) => {
 function setupTabSession(ses, { incognito = false } = {}) {
   ses.setUserAgent(app.userAgentFallback);
   registerPagesProtocol(ses, { dark: incognito });
+  attachAutofill(ses); // (Edit › Spelling and Grammar follows each profile's setting: main/languages.js)
 }
 
 // Each profile's incognito windows share one in-memory session, wiped when
@@ -225,6 +237,7 @@ const services = {
   onFocus: (w) => {
     const switched = lastFocused?.profile.base !== w.profile.base;
     lastFocused = w;
+    handoff.update(w);
     if (!w.profile.guest) profiles.setLastUsed(w.profile.id);
     if (switched) menuChanged(); // the menu shows this profile's bookmarks bar and closed tabs
   },
@@ -242,6 +255,7 @@ const services = {
     // "Delete data … when you close all windows": on the Mac that's quitting.
     if (!quitting && process.platform !== 'darwin' && !w.incognito && !w.profile.guest && !alive().some((x) => !x.incognito && x.profile === w.profile)) w.profile.siteControls?.clearSessionData();
     saveSession();
+    handoff.update(cur());
   },
   onTabClosed: (w, entry) => {
     if (quitting || w.closing) return;
@@ -254,7 +268,7 @@ const services = {
     if (recentlyClosed.length > 25) recentlyClosed.shift();
     menuChanged();
   },
-  onSessionChanged: () => { saveSessionSoon(); for (const p of openProfiles()) p.groups?.follow(); },
+  onSessionChanged: () => { saveSessionSoon(); handoff.update(cur()); for (const p of openProfiles()) p.groups?.follow(); },
   addToReadingList: (w, url, title) => w.profile.sidePanel?.add(w, url, title),
   // Closing a window may cancel downloads: what, and asking first.
   downloadsAtRisk: (holder) => downloadsAtRisk(holder),
@@ -289,12 +303,18 @@ const services = {
   print: (w, tab) => printPreview.open(w, tab),
   savePage: (w, tab) => savePage(w, tab),
   pageMenu: (w, section, tab, params) => pageMenu?.items(w, section, tab, params) || [],
-  contextMenuExtras: (w, tab, params) => {
+  // existing: the menu so far (Look Up and Speech only when page tools didn't add them).
+  contextMenuExtras: (w, tab, params, existing = []) => {
     const base = w.profile.base;
     const tools = [...(base.reader?.menuItems(w, tab, params) || []), ...(base.translator?.menuItems(w, tab, params) || [])];
     const ext = w.incognito || !tab.view ? [] : w.profile.extensions?.contextMenuItems(tab.view.webContents, params) || [];
-    return tools.length && ext.length ? [...tools, { type: 'separator' }, ...ext] : [...tools, ...ext];
+    const mac = tab.view ? macContextItems(tab.view.webContents, params, existing) : []; // Look Up and Speech on the Mac
+    return [tools, ext, mac].filter((g) => g.length).flatMap((g, i) => (i ? [{ type: 'separator' }, ...g] : g));
   },
+  // An extension's new tab page (chrome_url_overrides), if one replaces Lumio's
+  // (the window's profile's extensions; never in incognito or Guest).
+  newTabUrl: (w) => (w.incognito ? null : w.profile.base.extUi?.newTabUrl(w) || null),
+  isNewTabUrl: (url) => openProfiles().some((p) => p.extUi?.isNewTabUrl(url)),
   broadcastAIState: () => alive().forEach((w) => w.ai.emitState()),
   openExternal: (w, tab, req) => openExternalLink(w, tab, req),
   // Is a page in this page's process waiting on its alert()/confirm()/prompt()?
@@ -423,10 +443,24 @@ function menuChanged() {
   clearTimeout(menuTimer);
   menuTimer = setTimeout(() => Menu.setApplicationMenu(apps?.focusedMenu() || buildMenu(cmd, menuState())), 50); // an app window in front keeps its own
 }
+// History changes with every page, so its menu items follow a little later,
+// and only when they changed (a rebuild closes an open menu on the Mac).
+let historyMenuTimer = null;
+let historyMenuItems = '';
+function historyMenuSoon() {
+  clearTimeout(historyMenuTimer);
+  historyMenuTimer = setTimeout(() => {
+    const now = JSON.stringify(menuExtras.recentHistory(curProfile().store));
+    if (now !== historyMenuItems) { historyMenuItems = now; menuChanged(); }
+  }, 2000);
+}
 // The menu follows the front window's profile (before any window: the first profile's).
 function menuState() {
   const id = cur()?.profile.id || DEFAULT_PROFILE;
   return {
+    // Its history, bookmarks, name and account (main/menu-extras.js); DevTools' dock is Lumio's.
+    ...menuExtras.state({ store: (cur()?.profile || loaded.get(DEFAULT_PROFILE))?.store || rootStore, account: (cur()?.profile || loaded.get(DEFAULT_PROFILE))?.account, devtoolsDock: devtools.mode(rootStore) }),
+    extensionKeys: (cur()?.profile.base || loaded.get(DEFAULT_PROFILE))?.extUi?.menuKeys() || [],
     bookmarksBar: !!(cur()?.profile.store || rootStore).settings.showBookmarksBar,
     appearance: theme.appearance(),
     profiles: profiles ? (cur() ? profilesFor(cur()) : profilesList()) : [],
@@ -531,7 +565,7 @@ const cmd = {
   togglePanel: () => cur()?.emit('panel-toggle'),
   toggleSidebar: () => cur()?.emit('sidebar-toggle'),
   focusAI: () => { const w = cur(); if (!w) return; w.win.webContents.focus(); w.emit('ai-focus'); },
-  devtools: () => pageWin()?.tabs.wc()?.openDevTools({ mode: 'detach' }),
+  devtools: () => devtools.open(pageWin()?.tabs.wc(), rootStore), // docked where they were last (main/devtools.js)
   shellDevtools: () => cur()?.win.webContents.openDevTools({ mode: 'detach' }),
   back: () => pageWin()?.tabs.back(),
   forward: () => pageWin()?.tabs.forward(),
@@ -970,7 +1004,7 @@ function internalHandle(channel, hosts, fn) {
   });
 }
 
-const ALL_PAGES = ['newtab', 'error', 'history', 'settings', 'downloads', 'bookmarks', 'extensions', 'passwords', 'welcome', 'credits'];
+const ALL_PAGES = ['newtab', 'error', 'history', 'settings', 'downloads', 'bookmarks', 'extensions', 'passwords', 'welcome', 'credits', 'version', 'flags-lite'];
 
 function registerIpc() {
   handle('shell:init', (w) => {
@@ -1189,7 +1223,6 @@ function registerIpc() {
   on('passwords:passkey', (w, d) => w.profile.passwords?.passkeyDecide(w, d || {}));
   handle('passwords:reveal-pending', (w, id) => w.profile.passwords?.revealPending(w, Number(id)) ?? null);
   on('passwords:manage', (w) => { w.hideOverlay(); openInternal('lumio://passwords/'); });
-  on('extensions:manage', () => openInternal('lumio://extensions/'));
 
   // ---- updates ----
   handle('update:state', () => updater?.state || null);
@@ -1706,6 +1739,9 @@ app.on('certificate-error', (event, wc, url, error, cert, callback, isMainFrame)
   callback(ok);
 });
 
+// A page handed off from an iPhone, iPad or another Mac.
+handoff.listen((url) => { if (launched && windows.size) openExternalUrls([url]); else pendingUrls.push(url); });
+
 app.on('second-instance', (_e, argv) => {
   if (apps?.launch(argv)) return; // an installed app's launcher (main/app-launchers.js)
   const urls = launchTargets(argv.slice(1));
@@ -1775,6 +1811,7 @@ function addProfileServices(profile) {
   profile.reader = new Reader({ store });
   profile.translator.register(ipc);
   profile.reader.register(ipc);
+  profile.autofill?.register({ ...ipc, pages: false }); // (the pages' own messages: AutofillManager.registerPages)
   profile.bookmarks.register(ipc);
   profile.groups.register(ipc);
   profile.sidePanel.register(ipc);
@@ -1813,6 +1850,7 @@ function openProfile(id) {
       wins().forEach((w) => { w.emit('account', state); w.ai.refreshCapabilities(); });
       services.broadcastAIState();
       profile.sync?.soon(500);
+      menuChanged(); // Profiles › Sign In / Manage Your Lumio Account
       // The picker shows who's signed in (kept while offline, cleared on sign-out).
       const known = state.signedIn || !account.token();
       if (known && profiles.remember(id, { email: state.email, accountName: state.name })) profilesChanged();
@@ -1849,6 +1887,9 @@ function openProfile(id) {
     toast: (w, text) => w.emit('toast', { text }),
   });
   profile.passwords = passwords;
+  // Addresses, cards and form entries (main/autofill.js).
+  profile.autofill = new AutofillManager({ dir, safeStorage, settings: store, helper, findTab: tabOfWc, toast: (w, text) => w.emit('toast', { text }), openPage: (url) => openInternal(url) });
+  store.historyFile.onSave(historyMenuSoon); // History › Recently Visited
   profile.permissions = new Permissions(ses, { store, emitFor, persist: true, openExternal: externalRequest, onPointerLock: pointerLocked });
   addProfileServices(profile);
 
@@ -1876,6 +1917,9 @@ function openProfile(id) {
     syncAdapters.savedGroups(profile.groups.saved),
     syncAdapters.history(store),
     syncAdapters.passwords(passwords.store),
+    syncAdapters.passkeys(passwords.passkeys),
+    syncAdapters.addresses(profile.autofill.store),
+    syncAdapters.cards(profile.autofill.store),
     syncAdapters.chats(profile.chats),
     syncAdapters.workflows(workflows),
     syncAdapters.projects(projects),
@@ -1889,7 +1933,9 @@ function openProfile(id) {
     }),
   ]);
   const syncSoon = () => sync.soon();
-  for (const f of [store.bookmarksFile, store.historyFile, store.settingsFile, store.chatsFile, store.sessionFile, passwords.store.file]) f.onSave(syncSoon);
+  for (const f of [store.bookmarksFile, store.historyFile, store.settingsFile, store.chatsFile, store.sessionFile, passwords.store.file, passwords.passkeys.file, profile.autofill.store.file]) f.onSave(syncSoon);
+  // Passkeys tell sites they're backed up while Lumio Sync carries them.
+  passwords.passkeys.backedUp = () => sync.status === 'ready' && sync.prefs.on && sync.prefs.types.passkeys;
   workflows.onChange(syncSoon);
   profile.sidePanel.reading.onChange(syncSoon);
   profile.groups.saved.onChange(syncSoon);
@@ -1929,10 +1975,22 @@ function openProfile(id) {
         return createWindow({ profile, urls }).win;
       },
       removeWindow: (win) => alive().find((w) => w.win === win)?.close(),
-      changed: () => alive().filter((w) => !w.incognito && w.profile === profile).forEach((w) => w.emit('extensions-changed')),
+      changed: () => { alive().filter((w) => !w.incognito && w.profile === profile).forEach((w) => w.emit('extensions-changed')); profile.extUi?.changed(); },
+      activate: (extId) => profile.extUi?.activate(extId),
+      commandsChanged: () => menuChanged(),
+      toast: (text) => normalWin(profile)?.emit('toast', { text }),
     },
   });
   profile.extensions = extensions;
+  // The toolbar's pinned extensions, the puzzle menu, shortcuts and an
+  // extension's new tab page (main/extensions-ui.js).
+  profile.extUi = new ExtensionsUI({
+    extensions, store,
+    windows: () => alive().filter((w) => w.profile === profile),
+    current: () => (cur()?.profile === profile ? cur() : normalWin(profile)),
+    openInternal, menuChanged,
+  });
+  profile.extUi.register(profileIpc(profile));
   // Load extensions before restoring tabs so their content scripts run there,
   // but never hold up the first window for long.
   profile.ready = Promise.race([
@@ -2036,6 +2094,7 @@ function openGuest() {
     profile.account = new LumioAccount({ store, onChange: (state) => { wins().forEach((w) => { w.emit('account', state); w.ai.refreshCapabilities(); }); services.broadcastAIState(); } });
     watchLumioCookie(profile);
     profile.passwords = new PasswordManager({ dir, safeStorage, settings: store, helper, findTab: tabOfWc, toast: (w, text) => w.emit('toast', { text }) });
+    profile.autofill = new AutofillManager({ dir, safeStorage, settings: store, helper, findTab: tabOfWc, toast: (w, text) => w.emit('toast', { text }), openPage: (url) => openInternal(url) });
     Object.assign(profile, { workflows: new Workflows(dir), siteTips: new SiteTips(dir), projects: new Projects(dir), schedules: new Schedules(dir) });
     addProfileServices(profile);
     profile.siteControls = siteControlsFor(profile);
@@ -2167,6 +2226,35 @@ app.whenReady().then(async () => {
   });
   session.defaultSession.setPermissionCheckHandler((wc, permission, origin) => permission !== 'media' || (isShell(wc) && String(origin).startsWith('lumio://shell')));
 
+  // The Mac menu bar's Tab, Profiles and View › Developer menus, History and
+  // Bookmarks items (main/menu-extras.js), and Help: for the front window's
+  // profile (spelling is each profile's, main/languages.js; DevTools' dock is Lumio's).
+  const frontStore = {
+    get settings() { return { ...curProfile().store.settings, devtoolsDock: rootStore.settings.devtoolsDock }; },
+    setSetting: (key, value) => (key === 'devtoolsDock' ? rootStore : curProfile().store).setSetting(key, value),
+  };
+  // (Batch 4's stop and View Source in main/navigation.js stay.)
+  for (const [name, fn] of Object.entries(menuCommands({
+    cur,
+    store: frontStore,
+    sessions: () => [], // (languages.attach turns spelling on and off in the profile's sessions)
+    openUrl,
+    openInternal,
+    signedIn: () => !!curProfile().account.state().signedIn,
+    signIn,
+    openAccountPage,
+    menuChanged,
+  }))) cmd[name] ??= fn;
+  help = new Help({
+    accountOf: (w) => (w && !w.closed ? w.profile.base : curProfile()).account,
+    store: rootStore, // the experiments (lumio://flags-lite) are Lumio's
+    current: cur,
+    profileDir: (w) => (w?.profile.base || curProfile()).dir,
+    // The help center and release notes open in a normal window of the front profile.
+    openUrl: (url) => { const w = normalWin(); if (w) { w.tabs.create(url); w.focus(); } else createWindow({ urls: [url] }); },
+    openInternal,
+  });
+  Object.assign(cmd, help.commands());
   setInterval(runDueSchedules, 20 * 1000).unref?.();
   setTimeout(runDueSchedules, 8000).unref?.(); // catch up after launch, once tabs and sign-in are back
   perf = new PerformanceManager({ store: rootStore, windows: alive, toast: (w, text) => w.emit('toast', { text }) });
@@ -2187,6 +2275,8 @@ app.whenReady().then(async () => {
   });
   // Each tab's password and passkey requests go to its own profile's manager.
   PasswordManager.register((wc) => tabOfWc(wc)?.w.profile.passwords || null);
+  // Addresses, cards and form entries go to the tab's profile's autofill too (main/autofill.js).
+  AutofillManager.registerPages((wc) => tabOfWc(wc)?.w.profile.autofill || null);
   screenAura.register();
 
   // Updates from GitHub Releases (packaged builds; tests point it at a mock).
@@ -2276,6 +2366,7 @@ app.whenReady().then(async () => {
 
   registerIpc();
   security.registerIpc({ on, internalHandle });
+  help.register({ handle, on, internalHandle });
   Menu.setApplicationMenu(buildMenu(cmd, menuState()));
 
   osIntegration.start(); // the Dock menu and download progress
@@ -2455,6 +2546,10 @@ global.lumio = {
   // The front window's profile's (the first profile's before any window opens).
   get store() { return (cur()?.profile || openProfile(DEFAULT_PROFILE)).store; },
   get extensions() { return curProfile().extensions; },
+  get extUi() { return curProfile().extUi; },
+  get help() { return help; },
+  handoff,
+  get autofill() { return curProfile().autofill; },
   get account() { return curProfile().account; },
   get passwords() { return curProfile().passwords; },
   get workflows() { return curProfile().workflows; },

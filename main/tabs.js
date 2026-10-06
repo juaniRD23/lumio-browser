@@ -93,12 +93,15 @@ class TabManager {
   // groupId: the group it opens in (a link opened from a grouped tab).
   create(url = NEWTAB, { active = true, index, title, lazy = false, pinned = false, webContents = null, history = null, groupId = null } = {}) {
     if (webContents) url = 'about:blank';
+    const newTab = url === NEWTAB;
+    // An extension may replace the new tab page (chrome_url_overrides.newtab).
+    if (newTab) url = this.hooks.newTabUrl?.() || url;
     const tab = {
       id: nextId++,
       owner: this,
       view: null,
       url,
-      title: title || (url === NEWTAB ? 'New Tab' : displayUrl(url)),
+      title: title || (newTab ? 'New Tab' : displayUrl(url)),
       favicon: null,
       loading: false,
       canGoBack: false,
@@ -1059,7 +1062,7 @@ class TabManager {
   // ---------- state for the shell ----------
   displayUrl(tab) {
     const url = tab.pendingUrl || tab.url || '';
-    if (url.startsWith(NEWTAB)) return '';
+    if (url.startsWith(NEWTAB) || this.isExtensionNewTab(url)) return '';
     if (url.startsWith('lumio://error') || url.startsWith('lumio://interstitial')) {
       try { return new URL(url).searchParams.get('url') || url; } catch { return url; }
     }
@@ -1111,13 +1114,19 @@ class TabManager {
     };
   }
 
+  // An extension's new tab page shows an empty address bar, like Lumio's own.
+  isExtensionNewTab(url) { return url.startsWith('chrome-extension://') && !!this.hooks.isNewTabUrl?.(url); }
+
   // What the session file keeps for this window. A tab on an error page is
   // kept as the page that failed. history: with each tab's back/forward pages.
+  // An extension's new tab page is saved as the new tab page, so it follows
+  // if the extension goes.
   sessionTabs({ history = false } = {}) {
     return this.tabs
       .map((t) => {
         const h = history ? sessions.historyOf(t) : null;
-        return { url: sessions.realUrl(t.pendingUrl || t.url), title: t.title, ...(t.pinned ? { pinned: true } : {}), ...(t.groupId ? { group: t.groupId } : {}), ...(h ? { history: h } : {}) };
+        const raw = t.pendingUrl || t.url || '';
+        return { url: this.isExtensionNewTab(raw) ? NEWTAB : sessions.realUrl(raw), title: t.title, ...(t.pinned ? { pinned: true } : {}), ...(t.groupId ? { group: t.groupId } : {}), ...(h ? { history: h } : {}) };
       })
       .filter((t) => t.url);
   }
@@ -1239,7 +1248,7 @@ class TabManager {
       );
       sep();
     }
-    const extra = this.hooks.contextMenuExtras?.(tab, params) || [];
+    const extra = this.hooks.contextMenuExtras?.(tab, params, items) || [];
     if (extra.length) { items.push(...extra); sep(); }
     items.push({ label: 'Inspect Element', click: () => wc.inspectElement(params.x, params.y) });
     Menu.buildFromTemplate(items).popup({ window: this.win });

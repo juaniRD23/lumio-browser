@@ -1,0 +1,20 @@
+/* The toolbar's pinned extension buttons (renderer/ui/extensions-bar.js). The
+   badge's colors come from the extension itself (set inline by the library). */
+#ext-actions { display: flex; align-items: center; gap: 2px; }
+#ext-actions:empty { display: none; }
+.ext-action {
+  position: relative; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 8px;
+  background: transparent center / 18px no-repeat; outline: none; flex: none;
+}
+.ext-action:hover { background-color: var(--hover); }
+.ext-action:focus-visible { box-shadow: 0 0 0 2px var(--focus-ring); }
+/* No icon: its first letter on a tile. */
+.ext-action.no-icon::after {
+  content: attr(data-letter); position: absolute; inset: 6px; display: grid; place-items: center;
+  border-radius: 5px; font-size: 11px; font-weight: 600; text-transform: uppercase;
+  background: var(--overlay-6); color: var(--text);
+}
+.ext-action .badge {
+  position: absolute; right: 0; bottom: 1px; max-width: 100%; height: 12px; padding: 0 3px;
+  border-radius: 4px; font-size: 9px; line-height: 12px; overflow: hidden; white-space: nowrap; pointer-events: none;
+}

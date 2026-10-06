@@ -505,7 +505,7 @@ test('settings sub-pages have their own files; IndexedDB folders name their site
   assert.equal(page('lumio://settings/cookies'), 'site-settings.html');
   assert.equal(page('lumio://settings/clearBrowserData'), 'clear-data.html');
   assert.equal(page('lumio://settings/site-settings.js'), 'site-settings.js');
-  assert.equal(page('lumio://history/content'), 'content', 'only under Settings');
+  assert.equal(page('lumio://history/content'), 'history.html', 'other pages route their own sub-pages (batch 7c: lumio://extensions/shortcuts)');
   const dir = tmp();
   fs.mkdirSync(path.join(dir, 'IndexedDB', 'https_www.example.com_0.indexeddb.leveldb'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'IndexedDB', 'http_localhost_3000.indexeddb.leveldb'), { recursive: true });

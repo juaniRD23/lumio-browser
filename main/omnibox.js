@@ -14,9 +14,10 @@ function parseInput(raw, searchTemplate = 'https://www.google.com/search?q=%s') 
   const text = String(raw || '').trim();
   if (!text) return null;
   if (/^javascript:/i.test(text)) return { url: searchUrl(text, searchTemplate), isSearch: true };
-  // chrome://history, chrome://extensions etc. open Lumio's own pages.
-  const page = /^(?:chrome|about):\/*(history|downloads|bookmarks|extensions|settings|passwords|newtab)\/?(.*)$/i.exec(text);
-  if (page) return { url: `lumio://${page[1].toLowerCase()}/${page[2]}`, isSearch: false };
+  // chrome://history, chrome://extensions etc. open Lumio's own pages
+  // (chrome://flags is Lumio's short list of experiments).
+  const page = /^(?:chrome|about):\/*(history|downloads|bookmarks|extensions|settings|passwords|newtab|version|flags)\/?(.*)$/i.exec(text);
+  if (page) return { url: `lumio://${page[1].toLowerCase().replace(/^flags$/, 'flags-lite')}/${page[2]}`, isSearch: false };
   if (/^chrome-extension:\/\/[a-p]{32}(\/|$)/.test(text)) return { url: text, isSearch: false };
   if (SCHEME_RE.test(text)) {
     if (/^(https?|file|lumio):/i.test(text)) {

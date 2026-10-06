@@ -59,6 +59,7 @@ class BookmarksService {
         if (wc && !wc.isDestroyed() && (t.url || '').startsWith('lumio://bookmarks')) wc.send('bookmarks-changed');
       }
     }
+    this.menuChanged?.(); // the Bookmarks menu lists them (main/menu-extras.js)
   }
 
   setBar(show) {

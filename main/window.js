@@ -138,9 +138,11 @@ class BrowserWin {
         saveAs: (wc, url) => profile.downloads.saveAs(wc, url),
         savePage: (tab) => app.savePage(this, tab),
         print: (tab) => app.print(this, tab),
-        contextMenuExtras: (tab, params) => app.contextMenuExtras(this, tab, params),
+        contextMenuExtras: (tab, params, existing) => app.contextMenuExtras(this, tab, params, existing),
         readingList: (url, title) => app.addToReadingList(this, url, title),
         pageMenu: (section, tab, params) => app.pageMenu?.(this, section, tab, params),
+        newTabUrl: () => app.newTabUrl?.(this),
+        isNewTabUrl: (url) => !!app.isNewTabUrl?.(url),
       },
     });
     this.indicator = new PageIndicator(this);
@@ -342,6 +344,7 @@ class BrowserWin {
     if (kind === 'passkey') this.app.onPasskeyPromptClosed?.(this);
     if (kind === 'screenshare') this.app.onScreenSharePickerClosed?.(this);
     if (kind) this.app.onOverlayClosed?.(this, kind);
+    if (kind === 'feedback') this.feedback = null; // the report's screenshot isn't kept (main/help.js)
     if (kind === 'menu') this.menuClosed();
     if (kind && !quiet) this.emit('overlay-state', { kind, closed: true });
   }

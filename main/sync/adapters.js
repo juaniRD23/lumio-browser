@@ -8,7 +8,7 @@ const DAY = 24 * 3600 * 1000;
 const HISTORY_DAYS = 30;
 const HISTORY_MAX = 2000;
 const CHAT_MAX = 400 * 1024;
-const SETTINGS = ['searchEngine', 'approvalMode', 'reasoning', 'showBookmarksBar', 'memorySaver', 'memorySaverMinutes', 'memorySaverMode', 'startup', 'offerPasswords', 'autofillPasswords', 'profile', 'appearance', 'newTab', 'startupPages', 'showHome', 'homePage', 'searchEngines', 'searchSuggest', 'languages', 'spellcheck'];
+const SETTINGS = ['searchEngine', 'approvalMode', 'reasoning', 'showBookmarksBar', 'memorySaver', 'memorySaverMinutes', 'memorySaverMode', 'startup', 'offerPasswords', 'autofillPasswords', 'profile', 'appearance', 'newTab', 'startupPages', 'showHome', 'homePage', 'searchEngines', 'searchSuggest', 'languages', 'spellcheck', 'autofillAddresses', 'autofillCards', 'formHistory'];
 
 function simple(name, { entries, apply, keepAbsent }) {
   return {
@@ -117,6 +117,46 @@ function passwords(vault) {
       vault.file.save(true);
       return rejected;
     },
+  };
+}
+
+// ---------------------------------------------------------------- passkeys
+// Lumio's own passkeys, private key included: decrypted from this computer's
+// keychain only to be encrypted again for sync. Passkeys made before syncing
+// existed told their sites they're device-bound, so they stay on their computer.
+function passkeys(store) {
+  const meta = (k) => ({ rpId: k.rpId, userId: k.userId, userName: k.userName, displayName: k.displayName, created: k.created });
+  return {
+    name: 'passkeys',
+    hashOf: (r) => hash(meta(r)),
+    entries() {
+      if (!store.available()) return [];
+      return store.keys.filter((k) => k.be).map((k) => ({ key: k.id, hash: hash(meta(k)), get: () => store.syncRecord(k.id) }));
+    },
+    apply: (changes) => store.applySynced(changes),
+  };
+}
+
+// ---------------------------------------------------------------- addresses and cards
+// Like passwords: noticed by their "updated" time, decrypted only to be
+// encrypted again for sync. Cards sync only after the person turns on
+// "Payment methods" in Settings › Sync (see OFF_BY_DEFAULT in engine.js).
+function addresses(store) {
+  const meta = (r) => ({ created: r.created, updated: r.updated });
+  return {
+    name: 'addresses',
+    hashOf: (r) => hash(meta(r)),
+    entries: () => (store.available() ? store.addressEntries.map((e) => ({ key: e.id, hash: hash(meta(e)), get: () => store.addressRecord(e.id) })) : []),
+    apply: (changes) => store.applySyncedAddresses(changes),
+  };
+}
+function cards(store) {
+  const meta = (r) => ({ created: r.created, updated: r.updated });
+  return {
+    name: 'cards',
+    hashOf: (r) => hash(meta(r)),
+    entries: () => (store.available() ? store.cardEntries.map((c) => ({ key: c.id, hash: hash(meta(c)), get: () => store.cardRecord(c.id) })) : []),
+    apply: (changes) => store.applySyncedCards(changes),
   };
 }
 
@@ -232,4 +272,4 @@ function tabs({ deviceId, deviceName, platform, windows, remote, onApplied = () 
   };
 }
 
-module.exports = { bookmarks, bookmarkTree, readingList, savedGroups, history, passwords, chats, workflows, projects, settings, tabs, shrinkChat, SETTINGS };
+module.exports = { bookmarks, bookmarkTree, readingList, savedGroups, history, passwords, passkeys, addresses, cards, chats, workflows, projects, settings, tabs, shrinkChat, SETTINGS };

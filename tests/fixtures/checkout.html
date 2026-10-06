@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Checkout — Test Shop</title>
+  <style>
+    body { font: 16px/1.5 -apple-system, sans-serif; max-width: 560px; margin: 30px auto; padding: 0 20px; }
+    label, input, select { display: block; width: 100%; box-sizing: border-box; margin: 4px 0 8px; }
+    input, select { padding: 6px; font: inherit; }
+  </style>
+</head>
+<body>
+  <h1>Pay</h1>
+  <form id="pay" action="/paid.html" method="get">
+    <label>Name on card <input id="ccname" name="ccname" /></label>
+    <label>Card number <input id="cardnumber" name="cardnumber" inputmode="numeric" /></label>
+    <select id="mm" name="exp-month" aria-label="Expiration month"><option value="">MM</option><option value="1">01</option><option value="2">02</option><option value="3">03</option><option value="4">04</option><option value="5">05</option><option value="6">06</option><option value="7">07</option><option value="8">08</option><option value="9">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option></select>
+    <select id="yy" name="exp-year" aria-label="Expiration year"><option value="">YYYY</option><option>2029</option><option>2030</option><option>2031</option><option>2032</option></select>
+    <label>CVC <input id="cvc" name="cvc" inputmode="numeric" /></label>
+    <button id="pay-go" type="submit">Pay $20</button>
+  </form>
+
+  <h2>Another shop</h2>
+  <form id="pay2" action="/paid.html" method="get">
+    <input id="n2" autocomplete="cc-number" name="n2" />
+    <input id="e2" autocomplete="cc-exp" name="e2" placeholder="MM / YY" />
+    <input id="c2" autocomplete="cc-csc" name="c2" />
+    <button type="submit">Pay</button>
+  </form>
+  <script>
+    document.addEventListener('submit', (e) => { e.preventDefault(); window.sent = (window.sent || 0) + 1; document.title = 'Paid — Test Shop'; });
+  </script>
+</body>
+</html>

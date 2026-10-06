@@ -1,9 +1,9 @@
 // Lumio Sync and the phone companion's relay.
 //
 // Sync: devices store end-to-end encrypted records here (bookmarks, passwords,
-// history, chats, workflows, settings, open tabs). The server only ever sees
-// ciphertext, opaque ids and the collection names; the key stays on the
-// devices (see main/sync/crypto.js). Each change gets a new sequence number,
+// passkeys, addresses, cards, history, chats, workflows, settings, open
+// tabs). The server only ever sees ciphertext, opaque ids and the collection
+// names; the key stays on the devices (see main/sync/crypto.js). Each change gets a new sequence number,
 // and devices pull what changed since the last one they saw.
 //
 // Pairing: a new device posts its public key; a device that has the key
@@ -21,8 +21,9 @@ import { AgentError, type Env, fail, json, randomHex } from './util.ts';
 type User = { id: string; plan: Plan };
 
 // bookmarkTree (bookmark folders), readingList and savedGroups (tab groups): newer
-// browsers sync these only when this lists them.
-const COLLECTIONS = new Set(['bookmarks', 'bookmarkTree', 'readingList', 'savedGroups', 'passwords', 'history', 'chats', 'workflows', 'projects', 'settings', 'tabs']);
+// browsers sync these only when this lists them. passkeys, addresses and cards:
+// newer browsers retry them later when an older server refuses them.
+const COLLECTIONS = new Set(['bookmarks', 'bookmarkTree', 'readingList', 'savedGroups', 'passwords', 'passkeys', 'addresses', 'cards', 'history', 'chats', 'workflows', 'projects', 'settings', 'tabs']);
 const MAX_ITEM = 600_000; // base64 ciphertext per record
 const MAX_TOTAL = 60 * 1024 * 1024; // per account
 const MAX_PUSH = 200; // records per request

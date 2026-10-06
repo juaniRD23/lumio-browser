@@ -3,28 +3,44 @@
 <head>
   <meta charset="utf-8" />
   <title>Extensions</title>
-  <link rel="stylesheet" href="pages.css" />
-  <link rel="stylesheet" href="lists.css" />
+  <link rel="stylesheet" href="/pages.css" />
+  <link rel="stylesheet" href="/lists.css" />
+  <link rel="stylesheet" href="/extensions.css" />
 </head>
 <body>
   <div class="wrap wide">
-    <div class="top">
-      <h1>Extensions</h1>
-      <span class="grow"></span>
-      <label class="bar-toggle">Developer mode <span class="switch"><input type="checkbox" id="dev"><i></i></span></label>
-    </div>
-    <div class="devbar" id="devbar" hidden>
-      <button class="btn small" id="load">Load unpacked…</button>
-      <span class="note" style="margin:0">Load an extension folder you’re building. Lumio remembers it and reloads it at startup.</span>
-    </div>
-    <div class="top">
-      <span class="note" style="margin:0">Add extensions from the Chrome Web Store. Most work in Lumio; a few that rely on Chrome-only features may not. Extensions don’t run in incognito windows.</span>
-      <span class="grow"></span>
-      <button class="btn small primary" id="store">Chrome Web Store</button>
-    </div>
-    <div id="msg" class="note" hidden></div>
-    <div id="grid" class="ext-grid"></div>
+    <section id="view-list" aria-labelledby="list-title">
+      <div class="top">
+        <h1 id="list-title">Extensions</h1>
+        <span class="grow"></span>
+        <button class="btn small ghost" id="to-shortcuts" type="button">Keyboard shortcuts</button>
+        <label class="bar-toggle">Developer mode <span class="switch"><input type="checkbox" id="dev"><i></i></span></label>
+      </div>
+      <div class="devbar" id="devbar" hidden>
+        <button class="btn small" id="load" type="button">Load unpacked…</button>
+        <button class="btn small" id="pack" type="button">Pack extension…</button>
+        <button class="btn small" id="update" type="button" title="Reload unpacked extensions and check for new versions">Update</button>
+        <span class="note" style="margin:0">Load an extension folder you’re building. Lumio remembers it and reloads it at startup.</span>
+      </div>
+      <div class="top">
+        <span class="note" style="margin:0">Add extensions from the Chrome Web Store. Most work in Lumio; a few that rely on Chrome-only features may not. Extensions don’t run in incognito windows.</span>
+        <span class="grow"></span>
+        <button class="btn small primary" id="store" type="button">Chrome Web Store</button>
+      </div>
+      <div id="msg" class="note" role="status" hidden></div>
+      <div id="grid" class="ext-grid"></div>
+    </section>
+
+    <section id="view-details" hidden aria-live="polite"></section>
+
+    <section id="view-shortcuts" hidden aria-labelledby="sc-title">
+      <button class="back" type="button" data-go="/" aria-label="Back to extensions"><span aria-hidden="true">‹</span> Extensions</button>
+      <h1 id="sc-title">Keyboard shortcuts</h1>
+      <p class="sub">Shortcuts work while a Lumio window is in front. Click a box and press the keys; Backspace clears it.</p>
+      <div id="sc-msg" class="note" role="status" hidden></div>
+      <div id="sc-list"></div>
+    </section>
   </div>
-  <script type="module" src="extensions.js"></script>
+  <script type="module" src="/extensions.js"></script>
 </body>
 </html>

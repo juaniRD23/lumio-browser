@@ -209,7 +209,7 @@ function renderPasskeys() {
   $('#passkeys-title').hidden = !keys.length;
   $('#passkeys').hidden = !keys.length;
   const date = (t) => new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-  $('#passkeys').innerHTML = keys.map((k) => `<div class="row"><div class="grow"><div class="title">${esc(k.rpId)}</div><div class="desc">${esc(k.userName || k.displayName || 'Account')} · created ${esc(date(k.created))}${k.lastUsed && k.lastUsed !== k.created ? ` · last used ${esc(date(k.lastUsed))}` : ''}</div></div><button class="btn small danger" data-passkey="${esc(k.id)}">Delete</button></div>`).join('');
+  $('#passkeys').innerHTML = keys.map((k) => `<div class="row"><div class="grow"><div class="title">${esc(k.rpId)}</div><div class="desc">${esc(k.userName || k.displayName || 'Account')} · created ${esc(date(k.created))}${k.lastUsed && k.lastUsed !== k.created ? ` · last used ${esc(date(k.lastUsed))}` : ''}${k.syncable ? '' : ' · this computer only'}</div></div><button class="btn small danger" data-passkey="${esc(k.id)}">Delete</button></div>`).join('');
 }
 $('#passkeys').addEventListener('click', async (e) => {
   const id = e.target.closest('[data-passkey]')?.dataset.passkey;

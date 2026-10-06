@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="search-engines.css" />
   <link rel="stylesheet" href="settings-perf.css" />
   <link rel="stylesheet" href="settings-extra.css" />
+  <link rel="stylesheet" href="autofill.css" />
 </head>
 <body>
   <div class="layout">
@@ -23,6 +24,8 @@
       <a href="#site-tips">Site tips</a>
       <a href="#scheduled">Scheduled tasks</a>
       <a href="#autofill">Passwords and autofill</a>
+      <a href="#addresses">Addresses</a>
+      <a href="#payments">Payment methods</a>
       <a href="#safety">Safety check</a>
       <a href="#privacy">Privacy and security</a>
       <a href="#appearance">Appearance</a>
@@ -254,7 +257,25 @@
             <div class="grow"><div class="title">Password Manager</div><div class="desc">See, edit, import and export your saved passwords.</div></div>
             <a class="btn" href="lumio://passwords/" style="display:inline-flex;align-items:center">Open</a>
           </div>
+          <label class="row" style="cursor:pointer">
+            <div class="grow"><div class="title">Suggest earlier form entries</div><div class="desc">Remember what you type in forms, like a city or a username, and suggest it next time. Never in Incognito, and never passwords or card numbers.</div></div>
+            <span class="switch"><input type="checkbox" id="form-history"><i></i></span>
+          </label>
+          <div class="row">
+            <div class="grow"><div class="title">Form entries</div><div class="desc" id="form-history-count">…</div></div>
+            <button class="btn" id="form-history-clear">Clear</button>
+          </div>
         </div>
+      </section>
+
+      <!-- Addresses and payment methods (settings-autofill.js) -->
+      <section id="addresses">
+        <h2>Addresses</h2>
+        <div class="card" id="addr-card"></div>
+      </section>
+      <section id="payments">
+        <h2>Payment methods</h2>
+        <div class="card" id="pay-card"></div>
       </section>
 
       <!-- Safety check (renderer/pages/settings-safety.js) -->
@@ -516,5 +537,6 @@
   <script type="module" src="settings-safety.js"></script>
   <script type="module" src="settings-perf.js"></script>
   <script type="module" src="settings-profiles.js"></script>
+  <script type="module" src="settings-autofill.js"></script>
 </body>
 </html>

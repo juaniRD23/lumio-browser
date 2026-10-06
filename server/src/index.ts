@@ -19,6 +19,8 @@
 //   POST /v1/extract, POST /v1/voice/transcribe, POST /v1/voice/speak, POST /v1/translate (Lumio Browser)
 //   GET  /api/admin/spend   AI spend vs OpenRouter (the owner only; the /admin page)
 //   GET|POST /api/admin/codes  one-time plan codes (the owner only); POST /api/billing/redeem uses one
+//   POST /api/feedback      Lumio Browser's "Report an issue" (signed in or not)
+//   GET  /api/admin/feedback, GET /api/admin/feedback/:id/screenshot, DELETE /api/admin/feedback/:id (the owner only)
 //
 // Every 5 minutes (cron trigger) recent AI calls are checked against
 // OpenRouter's records of what they cost (spend.ts).
@@ -41,6 +43,7 @@ import {
 } from './sync.ts';
 import { spendReport, verifySpend } from './spend.ts';
 import { createCodes, listCodes, redeemCode } from './codes.ts';
+import { deleteFeedback, feedbackCleanup, feedbackScreenshot, listFeedback, postFeedback } from './feedback.ts';
 import { PLANS, allowance } from './usage.ts';
 import { AgentError, type Env, fail, json, sameOrigin } from './util.ts';
 
@@ -81,6 +84,9 @@ export default {
         return json({ usage: await allowance(env, user.id, user.plan) });
       }
 
+      // Anyone may report an issue (the sender's account is noted when signed in).
+      if (path === '/api/feedback' && method === 'POST') return await postFeedback(request, env, user);
+
       const route = routeFor(path, method);
       if (!route) {
         if (path.startsWith('/api/') || path.startsWith('/v1/')) return fail('Not found.', 404, 'not_found');
@@ -101,6 +107,7 @@ export default {
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(verifySpend(env).then((r) => { if (r.fixed) console.log('lumio spend: corrected', r.fixed, 'of', r.checked, 'calls'); }));
     ctx.waitUntil(syncCleanup(env).catch((err) => console.error('lumio sync cleanup', err)));
+    ctx.waitUntil(feedbackCleanup(env).catch((err) => console.error('lumio feedback cleanup', err)));
   },
 };
 
@@ -134,6 +141,10 @@ function routeFor(path: string, method: string): Route | null {
   if (path === '/api/admin/codes' && method === 'GET') return (_r, env, _c, user) => listCodes(env, user);
   if (path === '/api/admin/codes' && method === 'POST') return (r, env, _c, user) => createCodes(r, env, user);
   if (path === '/api/billing/resume' && method === 'POST') return (_r, env, _c, user) => resumePlan(env, user);
+  if (path === '/api/admin/feedback' && method === 'GET') return (_r, env, _c, user) => listFeedback(env, user);
+  const fb = /^\/api\/admin\/feedback\/(fb_[a-f0-9]{24})(\/screenshot)?$/.exec(path);
+  if (fb && fb[2] && method === 'GET') return (_r, env, _c, user) => feedbackScreenshot(env, user, fb[1]);
+  if (fb && !fb[2] && method === 'DELETE') return (_r, env, _c, user) => deleteFeedback(env, user, fb[1]);
   if (path === '/api/chats' && method === 'GET') return (_r, env, _c, user) => listChats(env, user);
   if (path === '/api/chat' && method === 'POST') return send;
   if (path === '/api/chat/models' && method === 'GET') return async (_r, _env, _c, user) => chatModels(user);

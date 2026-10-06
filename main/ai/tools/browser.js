@@ -67,6 +67,10 @@ function hostOf(url) {
   try { return new URL(url).host || url; } catch { return url; }
 }
 
+// Lumio's own pages that change its settings, extensions, experiments or
+// saved passwords, or show its profile path: the person uses them, never Lumio.
+const PRIVATE_PAGE = /^lumio:\/\/(settings|extensions|flags-lite|passwords|version|apps)(?![\w-])/i;
+
 // leaving: the tool only takes the tab elsewhere (navigate, go_back).
 function tabFor(ctx, id, { activate = false, leaving = false } = {}) {
   const tab = id ? ctx.tabs.get(id) : ctx.tabs.active;
@@ -75,7 +79,7 @@ function tabFor(ctx, id, { activate = false, leaving = false } = {}) {
   if (activate && ctx.tabs.activeId !== tab.id) ctx.tabs.activate(tab.id);
   const wc = tab.view.webContents;
   const url = wc.getURL() || tab.url || '';
-  if (url.startsWith('lumio://settings')) throw new Error("Lumio can't read or operate its own Settings page. Ask the user to change settings themselves.");
+  if (PRIVATE_PAGE.test(url)) throw new Error("Lumio can't read or operate its own Settings, Extensions, Passwords, Version or Experiments pages. Ask the user to change these themselves.");
   // Going past a security warning is the person's call alone.
   if (!leaving && url.startsWith('lumio://error/cert')) throw new Error("This tab shows a security warning (the site's certificate isn't valid). Lumio can't continue past it: ask the user what to do.");
   const note = dialogNote(tab);
@@ -109,7 +113,7 @@ function safeUrl(ctx, input) {
   const parsed = parseInput(input, ctx.tabs.searchTemplate());
   if (!parsed) throw new Error('Empty URL.');
   if (/^(file|view-source|data|javascript):/i.test(parsed.url)) throw new Error('Lumio can only open web pages (http/https).');
-  if (/^lumio:\/\/settings/i.test(parsed.url)) throw new Error("Lumio can't open its own Settings page.");
+  if (PRIVATE_PAGE.test(parsed.url)) throw new Error("Lumio can't open its own Settings, Extensions, Passwords, Version or Experiments pages.");
   if (/^lumio:\/\/(interstitial|error)/i.test(parsed.url)) throw new Error('Lumio can only open web pages (http/https).');
   return parsed.url;
 }
@@ -462,8 +466,12 @@ const tools = [
       const { tab, wc } = tabFor(ctx, a.tab_id);
       const bounds = tab.view.getBounds();
       await ctx.onCapture?.(wc, true); // keep Lumio's own glow out of the picture
+      await inPage(wc, scripts.maskCards, { on: true }).catch(() => {}); // and card numbers
       let img;
-      try { img = await wc.capturePage(); } finally { await ctx.onCapture?.(wc, false); }
+      try { img = await wc.capturePage(); } finally {
+        await inPage(wc, scripts.maskCards, { on: false }).catch(() => {});
+        await ctx.onCapture?.(wc, false);
+      }
       const width = Math.min(1280, bounds.width);
       const shot = img.resize({ width, quality: 'good' });
       const size = shot.getSize();
@@ -667,4 +675,4 @@ async function tabPdf(tabs, tabId) {
   }
 }
 
-module.exports = { tools, clearCursors, pageContext, allTabsContext, tabPdf, YOUTUBE_VIDEO, videoText, pressKey, inPage, settle };
+module.exports = { tools, clearCursors, pageContext, allTabsContext, tabPdf, YOUTUBE_VIDEO, videoText, pressKey, inPage, settle, PRIVATE_PAGE };

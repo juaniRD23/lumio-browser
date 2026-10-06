@@ -6,8 +6,8 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 const { injectBrowserAction } = require('electron-chrome-extensions/browser-action');
 
-const INVOKE = /^(shell|omnibox|ai|site|account|passwords|update|popup|side|profiles|taskmanager|perf|print|translate|reader|share|media|shot|apps):/;
-const SEND = /^(layout|panel|sidebar|tab|overlay|find|download|permission|ai|bookmarks|site|window|extensions|account|passwords|app|aura|update|dialog|popup|notice|hud|omnibox|groups|side|security|capture|profiles|taskmanager|perf|print|translate|reader|share|media|shot|apps):|^open-url$/;
+const INVOKE = /^(shell|omnibox|ai|site|account|passwords|update|popup|side|profiles|taskmanager|perf|print|translate|reader|share|media|shot|apps|extensions|help):/;
+const SEND = /^(layout|panel|sidebar|tab|overlay|find|download|permission|ai|bookmarks|site|window|extensions|account|passwords|autofill|app|aura|update|dialog|popup|notice|hud|omnibox|groups|side|security|capture|profiles|taskmanager|perf|print|translate|reader|share|media|shot|apps|help):|^open-url$/;
 const EVENTS = new Set([
   'tabs', 'downloads', 'permission', 'permission-cancel', 'permission-blocked', 'permission-reset', 'permission-focus', 'find-result', 'find-open', 'find-close', 'find-step',
   'focus-omnibox', 'panel-toggle', 'panel-open', 'ai-focus', 'ai-prefill', 'ai-event', 'ai-state', 'overlay-data',
@@ -21,6 +21,7 @@ const EVENTS = new Set([
   'profiles-changed', 'perf-alert', 'perf-state', // profiles, performance
   'translate-prompt', 'reader-open', // page tools
   'share-open', 'media', 'ai-attach', 'shot-data', 'app-state',
+  'ext-activate', 'ext-menu-closed', // extensions
 ]);
 
 contextBridge.exposeInMainWorld('lumio', {

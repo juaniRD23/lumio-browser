@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-const { pageContext, allTabsContext, tabPdf } = require('../main/ai/tools/browser.js');
+const { pageContext, allTabsContext, tabPdf, PRIVATE_PAGE } = require('../main/ai/tools/browser.js');
 
 // A tab whose page answers Lumio's in-page scripts.
 function tab(id, url, { text = '', video = null, asleep = false, pdf = false, title = `Tab ${id}` } = {}) {
@@ -66,4 +66,13 @@ test('a video without a transcript says so', async () => {
 test('tabPdf refuses tabs that are not PDFs', async () => {
   const got = await tabPdf(tabSet([tab(1, 'https://example.com/')]), null);
   assert.match(got.error, /isn’t showing a PDF/);
+});
+
+test('the AI keeps out of Lumio’s Settings, Extensions, Passwords, Version and Experiments pages', () => {
+  for (const url of ['lumio://settings/', 'lumio://extensions/?id=abc', 'lumio://extensions/shortcuts', 'lumio://flags-lite/', 'LUMIO://passwords/', 'lumio://version/']) {
+    assert.ok(PRIVATE_PAGE.test(url), url);
+  }
+  for (const url of ['lumio://newtab/', 'lumio://history/', 'lumio://settingsx/', 'https://example.com/lumio://settings']) {
+    assert.ok(!PRIVATE_PAGE.test(url), url);
+  }
 });

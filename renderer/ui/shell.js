@@ -20,6 +20,7 @@ import { initTranslate } from './translate.js';
 import { initReadingMode } from './reading-mode.js';
 import { initShare } from './share.js';
 import { initMedia } from './media.js';
+import { initExtensionsBar } from './extensions-bar.js';
 import './keys.js';
 import '/assets/ui-prefs.js';
 import { initA11y, textScale } from './a11y.js';
@@ -1009,9 +1010,6 @@ window.addEventListener('keydown', (e) => {
 // It was placed for this window's size.
 window.addEventListener('resize', () => { if (overlayKind === 'menu') hideOverlay(); });
 
-// ------------------------------------------------------------------ extensions
-$('#ext-btn').addEventListener('click', () => api.send('extensions:manage'));
-
 // ------------------------------------------------------------------ bars over the page
 initInfobars({ api }); // Restore pages?, the default browser
 
@@ -1214,6 +1212,9 @@ $('#beta-badge').hidden = !init.beta; // Lumio Beta (main/flavor.js)
 $('#ext-area').hidden = !init.extensions;
 if (init.extensions && init.partition) $('#ext-actions').setAttribute('partition', init.partition); // this profile's extensions
 initPerf(api, init);
+// The pinned extension buttons and the puzzle-piece menu (renderer/ui/extensions-bar.js),
+// with this profile's extensions.
+if (init.extensions) initExtensionsBar({ api, button: $('#ext-btn'), list: $('#ext-actions'), partition: init.partition });
 renderTabs();
 renderToolbar();
 renderLoad(activeTab(), true);
