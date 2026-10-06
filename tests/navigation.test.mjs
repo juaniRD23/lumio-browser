@@ -26,12 +26,14 @@ const electron = {
   ipcMain: { on: (channel, fn) => { ipc[channel] = fn; } },
   session: { defaultSession: { fetch: async () => ({ ok: false }) } },
   WebContentsView: class {},
+  screen: { getCursorScreenPoint: () => ({ x: 0, y: 0 }) }, // where the real pointer is: nowhere near the page
 };
 const electronPath = require.resolve('electron');
 require.cache[electronPath] = { id: electronPath, filename: electronPath, loaded: true, exports: electron, children: [] };
 
 const { Navigation, historyItems, dispositionOf, menuLabel, saveType, SAVE_FILTERS, SWIPE_DISTANCE } = require('../main/navigation.js');
 const { buildMenu, buildBrowserMenu } = require('../main/menu.js');
+const { PageHud } = require('../main/page-hud.js');
 const { Store } = require('../main/store.js');
 
 const MAC = process.platform === 'darwin';
@@ -65,6 +67,7 @@ function page(entries, index = entries.length - 1) {
     downloadURL(url) { this.downloaded = url; },
     executeJavaScriptInIsolatedWorld: async () => '  some\nselected   words ',
     on(ev, fn) { (on[ev] ||= []).push(fn); return this; },
+    removeListener(ev, fn) { on[ev] = (on[ev] || []).filter((f) => f !== fn); return this; },
     emit(ev, ...args) { (on[ev] || []).forEach((fn) => fn(...args)); },
   };
 }
@@ -249,6 +252,36 @@ test('a two-finger swipe shows the arrow and goes back once it’s far enough (M
   assert.deepEqual(arrows, []);
   assert.equal(wc.navigationHistory.index, 0);
   swipePref = '';
+});
+
+test('the status bubble moves to the other corner when the page’s pointer is near it, and stays there as it resizes', () => {
+  const { win } = setup();
+  const w = win();
+  const tab = w.tabs.add(ENTRIES, 1);
+  const wc = tab.view.webContents;
+  const pageBounds = { x: 0, y: 80, width: 1000, height: 600 };
+  tab.view.getBounds = () => pageBounds;
+  w.win = { contentView: { children: [], addChildView() {}, removeChildView() {} }, getContentBounds: () => ({ x: 500, y: 300, width: 1000, height: 680 }) };
+  const hud = new PageHud(w);
+  const sent = [];
+  const view = { webContents: { send: (_ch, msg) => sent.push(msg), isDestroyed: () => false }, setBounds(b) { this.bounds = b; }, setVisible() {} };
+  hud.views.status = view;
+  hud.status('https://a.example/far', tab);
+  hud.onSize(view.webContents, { width: 300, height: 30 });
+  assert.equal(hud.side, 'left', 'the real pointer is far from the bubble');
+  // The pointer on a link in the bubble's corner (a mouse event in the page).
+  wc.emit('before-mouse-event', {}, { type: 'mouseMove', x: 40, y: 590 });
+  hud.status('https://a.example/corner', tab);
+  assert.equal(hud.side, 'right');
+  // The new address makes the bubble smaller: it stays away from that pointer.
+  hud.onSize(view.webContents, { width: 200, height: 30 });
+  assert.equal(hud.side, 'right', 'the page’s last mouse event, not the screen’s pointer');
+  assert.equal(view.bounds.x + view.bounds.width, pageBounds.x + pageBounds.width);
+  wc.emit('before-mouse-event', {}, { type: 'mouseMove', x: 500, y: 300 });
+  assert.equal(hud.side, 'left');
+  // Off the links, the page's pointer is forgotten (it's no longer watched).
+  hud.status('', null);
+  assert.equal(hud.mouse, null);
 });
 
 test('tab pages: pinch zoom on, Esc stops loading, Alt-click downloads only web links', () => {
