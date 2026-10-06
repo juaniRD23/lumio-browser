@@ -266,3 +266,24 @@ test('alert(), confirm() and prompt() in an app window: Lumio’s card over the 
   aw.win.close();
   assert.equal(await closing, null);
 });
+
+test('a dropdown asked for before the window’s overlay has loaded is shown once it has; one closed meanwhile isn’t', () => {
+  const { aw, overlaySent } = openApp('mailapp', `${SITE}/login`);
+  const shows = () => overlaySent.filter(([c, p]) => c === 'overlay-data' && p.op === 'show').map(([, p]) => p.kind);
+  assert.equal(aw.overlayLoaded, false);
+  aw.showOverlay({ x: 10, y: 60, width: 300, height: 120 }, { kind: 'autofill', host: 'mail.example', accounts: [] });
+  assert.deepEqual(shows(), ['autofill'], 'sent, but nobody was listening yet');
+  aw.overlay.webContents.emit('did-finish-load');
+  assert.deepEqual(shows(), ['autofill', 'autofill'], 'shown again once it can hear it');
+  assert.equal(aw.overlayKind, 'autofill');
+  aw.hideOverlay({ now: true });
+  aw.win.close();
+
+  const { aw: second, overlaySent: sent2 } = openApp('mailapp', `${SITE}/login`);
+  second.showOverlay({ x: 10, y: 60, width: 300, height: 120 }, { kind: 'autofill', host: 'mail.example', accounts: [] });
+  second.hideOverlay({ now: true });
+  second.overlay.webContents.emit('did-finish-load');
+  assert.equal(sent2.filter(([c, p]) => c === 'overlay-data' && p.op === 'show').length, 1, 'closed before it loaded: not shown again');
+  assert.equal(second.overlayKind, null);
+  second.win.close();
+});

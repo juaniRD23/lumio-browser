@@ -89,6 +89,14 @@ class PopupWin {
     // loading, after the page's title had already come.
     this.win.on('page-title-updated', (e) => e.preventDefault());
     this.win.loadURL('lumio://popup/' + query);
+    // Its page can ask for a permission (or sign in) as it opens, before the
+    // bar has loaded: what's for the bar waits for it.
+    this.barQueue = [];
+    this.win.webContents.once('did-finish-load', () => {
+      const queued = this.barQueue || [];
+      this.barQueue = null;
+      for (const [channel, payload] of queued) this.emit(channel, payload);
+    });
     this.win.once('ready-to-show', () => {
       if (!process.env.LUMIO_HIDDEN) this.win.show();
       this.tabs.wc()?.focus();
@@ -161,7 +169,9 @@ class PopupWin {
   get closed() { return this.win.isDestroyed(); }
 
   emit(channel, payload) {
-    if (!this.win.isDestroyed()) this.win.webContents.send(channel, payload);
+    if (this.win.isDestroyed()) return;
+    if (this.barQueue) { if (this.barQueue.length < 200) this.barQueue.push([channel, payload]); return; }
+    this.win.webContents.send(channel, payload);
   }
 
   focus() {

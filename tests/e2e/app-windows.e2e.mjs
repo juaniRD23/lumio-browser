@@ -103,7 +103,7 @@ test('passwords in an app window: Lumio’s dropdown fills a saved one, and "Sav
     await openApp(`${base}/login.html`, 'Test Login');
     await clickInApp('#user');
     assert.ok(await until(async () => (await appOverlayKind()) === 'autofill'), 'the passwords dropdown over the app’s page');
-    assert.match(await appOverlay('document.body.innerText'), /app@example\.com/);
+    assert.ok(await until(async () => /app@example\.com/.test(await appOverlay('document.body.innerText'))), 'the saved account in it');
     assert.ok(!(await appOverlay('document.body.innerText')).includes('app-pass-1'), 'never the password itself');
     await shot('app-01-password-dropdown');
     await appOverlayPress('[data-fill]');
@@ -160,7 +160,7 @@ test('addresses in an app window: the dropdown under the field, read to screen r
     await openApp(`${base}/address.html`, 'Shipping — Test Shop');
     await clickInApp('#a1');
     assert.ok(await until(async () => (await appOverlayKind()) === 'formfill'), 'the dropdown over the app’s page');
-    assert.match(await appOverlay('document.body.innerText'), /123 Ocean Drive/);
+    assert.ok(await until(async () => /123 Ocean Drive/.test(await appOverlay('document.body.innerText'))), 'the saved address in it');
     assert.equal(await appOverlay(`document.querySelector('[role=listbox]').getAttribute('aria-label')`), 'Saved addresses');
     assert.match(await appOverlay(`document.getElementById('ff-live').textContent`), /^Saved addresses, 1\. Use the arrow keys/);
     await shot('app-04-address-dropdown');
