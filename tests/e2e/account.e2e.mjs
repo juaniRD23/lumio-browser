@@ -102,8 +102,11 @@ test('passkeys: a site saves one after the person confirms, signs in with it, an
   // Create: Lumio asks first.
   await L.page(`register(); true`);
   assert.ok(await until(async () => (await overlayKind()) === 'passkey'));
-  const ask = await L.main(() => global.lumio.current.overlay.webContents.executeJavaScript('document.body.innerText'));
-  assert.match(ask, /Save a passkey for localhost\?[\s\S]*Sam Tester[\s\S]*sam@example\.com/);
+  // What the prompt says, once the overlay has drawn it.
+  const promptText = () => L.main(() => global.lumio.current.overlay.webContents.executeJavaScript('document.body.innerText'));
+  const SAVE = /Save a passkey for localhost\?[\s\S]*Sam Tester[\s\S]*sam@example\.com/;
+  await until(async () => SAVE.test(await promptText()));
+  assert.match(await promptText(), SAVE);
   await L.wait(300);
   await shot('30-passkey-save');
   await overlayClick('[data-pk="ok"]');
@@ -125,7 +128,8 @@ test('passkeys: a site saves one after the person confirms, signs in with it, an
   // Sign in: pick the account, confirm, and the site gets a valid signature.
   await L.page(`login(); true`);
   assert.ok(await until(async () => (await overlayKind()) === 'passkey'));
-  assert.match(await L.main(() => global.lumio.current.overlay.webContents.executeJavaScript('document.body.innerText')), /Sign in to localhost[\s\S]*Sam Tester/);
+  await until(async () => /Sign in to localhost[\s\S]*Sam Tester/.test(await promptText()));
+  assert.match(await promptText(), /Sign in to localhost[\s\S]*Sam Tester/);
   await shot('31-passkey-signin');
   await overlayClick('[data-pk="ok"]');
   assert.ok(await until(() => L.page(`!!(window.state.auth || window.state.authError)`)));

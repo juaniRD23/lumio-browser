@@ -3,7 +3,7 @@
 // from the last session are created lazily (their page loads the first time
 // they're activated). A tab can move to another window (detach + adopt), so
 // its event handlers always look up the manager that currently owns it.
-const { WebContentsView, Menu, clipboard, app } = require('electron');
+const { WebContentsView, Menu, clipboard, app, BrowserWindow } = require('electron');
 const { isSynthetic } = require('./synthetic-input');
 const path = require('path');
 const { parseInput, displayUrl } = require('./omnibox');
@@ -828,6 +828,12 @@ class TabManager {
     const partner = this.get(this.split.partnerOf(id));
     if (partner) this.ensureView(partner);
     for (const t of this.tabs) if (t.view) { t.view.setVisible(t === tab || t === partner); t.view.lumioCovered = false; }
+    // The keyboard goes with the focused side. Left in the other side's page,
+    // a click there would tell us nothing: a page that already has the
+    // keyboard gets no 'focus' event, so it could never become the focused
+    // side. (Not when another window is in front: focusing would raise this one.)
+    const front = BrowserWindow?.getFocusedWindow?.();
+    if (partner?.view && !partner.view.webContents.isDestroyed() && partner.view.webContents.isFocused?.() && (!front || front === this.win)) tab.view.webContents.focus();
     // Keep the active page on top of the other tabs (and below any overlay).
     // Re-adding a view detaches it briefly, so skip it when it's already on
     // top (or its other side is: switching sides must not interrupt a click).

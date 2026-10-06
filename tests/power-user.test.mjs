@@ -497,6 +497,16 @@ test('power-user.js: a page registers a handler, the bar answers, Settings lists
   fromShell('permission:respond', { id: bar.id, allow: true, remember: true });
   assert.deepEqual(ask('page:power-state').protocolHandlers.map((h) => [h.host, h.allowed]), [['mail.example', true]]);
   assert.deepEqual(ask('page:protocol-handler-remove', 'mailto', 'https://mail.example').protocolHandlers, []);
+  // The browser window's chip bubble (batch 6, renderer/ui/overlay-site.js) shows cats[].prompt
+  // and answers with a decision; that's what tests/e2e/power-user.e2e.mjs clicks.
+  register(page.mainFrame, { scheme: 'mailto', url: 'https://mail.example/c?to=%s' });
+  const [, ask2] = W.sent.filter(([c]) => c === 'permission').at(-1);
+  assert.notEqual(ask2.id, bar.id);
+  assert.deepEqual(ask2.cats.map((c) => [c.id, c.prompt, c.chip]), [['protocolHandler', 'Open all email links', 'Open these links?']]);
+  assert.equal(ask2.quiet, false, 'the bubble opens by itself');
+  fromShell('permission:respond', { id: ask2.id, decision: 'allow' });
+  assert.deepEqual(ask('page:power-state').protocolHandlers.map((h) => [h.host, h.allowed, h.url]), [['mail.example', true, 'https://mail.example/c?to=%s']]);
+  ask('page:protocol-handler-remove', 'mailto', 'https://mail.example');
 });
 
 test('power-user.js: a new shortcut rebuilds the menu and reaches every window’s tooltips', () => {
@@ -541,8 +551,9 @@ test('the menus: View › Caret Browsing (F7) and Window › Name Window…', ()
   assert.equal(find(t, 'View').submenu.includes(caretItem), true);
   const windowMenu = find(t, 'Window');
   assert.ok(windowMenu.submenu.some((i) => i.label === 'Name Window…'));
-  // On the Mac it's the system's Window menu, which lists the windows by name.
-  assert.equal(windowMenu.role, MAC ? 'windowMenu' : undefined);
+  // On the Mac it's the system's Window menu, which lists the windows by name
+  // (role 'window', as main/menu.js has it since the merge; tests/menus.test.mjs too).
+  assert.equal(windowMenu.role, MAC ? 'window' : undefined);
 });
 
 // ---------------------------------------------------------------- in headless Chrome

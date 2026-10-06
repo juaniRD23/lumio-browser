@@ -106,13 +106,27 @@ test('the button shows for a page in another language and opens the bubble from 
 test('the bubble opens by itself for a new page, but not while you type in the address bar', { skip }, async () => {
   const { page, errors } = await open('shell', { answers: { 'translate:bubble': BUBBLE } });
   await page.waitForSelector('#translate-btn:not([hidden])');
+  const bubbles = async () => (await sent(page, 'overlay:show')).filter((s) => s.payload?.kind === 'translate');
   await page.focus('#address');
+  await page.keyboard.type('le');
   await page.evaluate(() => window.__emit('translate-prompt', { tabId: 1 }));
   await page.waitForTimeout(100);
-  assert.equal((await sent(page, 'overlay:show')).length, 0);
+  assert.equal((await bubbles()).length, 0);
   await page.evaluate(() => document.getElementById('address').blur());
   await page.evaluate(() => window.__emit('translate-prompt', { tabId: 1 }));
-  await page.waitForFunction(() => window.__sent.some(([c]) => c === 'overlay:show'));
+  await page.waitForFunction(() => window.__sent.some(([c, p]) => c === 'overlay:show' && p.payload?.kind === 'translate'));
+  // The address bar focused but untouched (the new tab page puts the caret
+  // there, then a page opens from elsewhere) isn't typing, and a tab's hover
+  // card gives way: the bubble still offers itself.
+  await page.evaluate(() => window.__emit('overlay-picked', { kind: 'translate' }));
+  await page.focus('#address');
+  await page.evaluate(() => window.__emit('translate-prompt', { tabId: 1 }));
+  await page.waitForFunction(() => window.__sent.filter(([c, p]) => c === 'overlay:show' && p.payload?.kind === 'translate').length === 2);
+  await page.evaluate(() => { document.getElementById('address').blur(); window.__emit('overlay-picked', { kind: 'translate' }); });
+  await page.hover('#tabs .tab');
+  await page.waitForFunction(() => window.__sent.some(([c, p]) => c === 'tab:hovercard' && !p.hide));
+  await page.evaluate(() => window.__emit('translate-prompt', { tabId: 1 }));
+  await page.waitForFunction(() => window.__sent.filter(([c, p]) => c === 'overlay:show' && p.payload?.kind === 'translate').length === 3);
   // View › Translate Page… opens it with the keyboard in it.
   await page.evaluate(() => window.__emit('overlay-picked', { kind: 'translate' }));
   await page.evaluate(() => window.__emit('translate-prompt', { tabId: 1, force: true }));

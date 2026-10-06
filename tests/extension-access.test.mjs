@@ -424,3 +424,42 @@ test('the stand-ins: alarms through the router, the side panel in a tab, sign-in
   await assert.rejects(closed, /did not approve/);
   await assert.rejects(f.call('identity.launchWebAuthFlow', { url: 'javascript:alert(1)' }), /could not be loaded/);
 });
+
+test('events reach a service worker the router lost track of (a reload, or listeners added before it was listening)', async () => {
+  const id = 'd'.repeat(32);
+  const page = 'e'.repeat(32);
+  const routed = [];
+  const sent = [];
+  const scopes = [];
+  const listeners = new Map();
+  const manager = {
+    api: { getExtension: (x) => (x === id ? { id, manifest: { background: { service_worker: 'sw.js' } } } : x === page ? { id: x, manifest: { background: { page: 'bg.html' } } } : null) },
+    session: { serviceWorkers: { startWorkerForScope: async (scope) => { scopes.push(scope); return { send: (...a) => sent.push(a) }; } } },
+    ece: { ctx: { router: { listeners, sendEvent: (...a) => routed.push(a) } } },
+  };
+  // The router knows the worker's listener: it delivers, as before.
+  listeners.set('commands.onCommand', [{ type: 'service-worker', extensionId: id }]);
+  shims.sendEvent(manager, id, 'commands.onCommand', 'open-page', { id: 3 });
+  assert.deepEqual(routed, [[id, 'commands.onCommand', 'open-page', { id: 3 }]]);
+  // It lost track (another extension's listener doesn't count): straight to the worker, once.
+  listeners.set('commands.onCommand', [{ type: 'service-worker', extensionId: 'f'.repeat(32) }]);
+  shims.sendEvent(manager, id, 'commands.onCommand', 'open-page', { id: 3 });
+  shims.sendEvent(manager, id, 'lumio.alarms.onAlarm', { name: 'tick' });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(routed.length, 1);
+  assert.deepEqual(scopes, [`chrome-extension://${id}/`, `chrome-extension://${id}/`]);
+  assert.deepEqual(sent, [['crx-commands.onCommand', 'open-page', { id: 3 }], ['crx-lumio.alarms.onAlarm', { name: 'tick' }]]);
+  // No service worker (a background page): the router, as before.
+  shims.sendEvent(manager, page, 'commands.onCommand', 'go');
+  assert.deepEqual(routed.at(-1), [page, 'commands.onCommand', 'go']);
+  // A worker that can't start doesn't throw.
+  manager.session.serviceWorkers.startWorkerForScope = async () => { throw new Error('gone'); };
+  const warn = console.warn;
+  const warned = [];
+  console.warn = (...a) => warned.push(a.join(' '));
+  try {
+    shims.sendEvent(manager, id, 'commands.onCommand', 'open-page');
+    await new Promise((r) => setImmediate(r));
+  } finally { console.warn = warn; }
+  assert.match(warned.join('\n'), /couldn't send commands\.onCommand/);
+});

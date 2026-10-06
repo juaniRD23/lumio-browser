@@ -18,6 +18,32 @@ const MIN_ALARM_MS = 30_000; // Chrome's shortest alarm
 function attach(ses) {
   ses.registerPreloadScript({ type: 'frame', id: 'lumio-extension-shims', filePath: PRELOAD });
   ses.registerPreloadScript({ type: 'service-worker', id: 'lumio-extension-shims-sw', filePath: PRELOAD });
+  // Test runs: an extension worker's warnings and errors go in the app's log.
+  if (process.env.LUMIO_TEST) {
+    ses.serviceWorkers?.on?.('console-message', (_e, m) => {
+      if (m?.level >= 2 && String(m.sourceUrl || '').startsWith('chrome-extension://')) console.warn(`[extension worker] ${m.message} (${m.sourceUrl}:${m.lineNumber})`);
+    });
+  }
+}
+
+// Sends one extension an event (chrome.commands.onCommand, Lumio's
+// chrome.alarms.onAlarm). The library's router only delivers to listeners it
+// saw being added, and drops an extension's when it's unloaded (a site access
+// change reloads it). A service worker that kept running through the reload,
+// or whose addListener calls came before the library was listening to it,
+// would never hear the event. So when the router knows no listener of that
+// extension's, the event goes straight to its service worker (woken if it's
+// asleep), on the channel the worker's preloads listen on.
+function sendEvent(manager, id, eventName, ...args) {
+  const router = manager.ece?.ctx?.router;
+  if (!router) return;
+  const known = !(router.listeners instanceof Map) || (router.listeners.get(eventName) || []).some((l) => l.extensionId === id);
+  const workers = manager.session?.serviceWorkers;
+  const hasWorker = !!manager.api?.getExtension?.(id)?.manifest?.background?.service_worker;
+  if (known || !hasWorker || typeof workers?.startWorkerForScope !== 'function') { router.sendEvent(id, eventName, ...args); return; }
+  workers.startWorkerForScope(`chrome-extension://${id}/`)
+    .then((sw) => sw.send(`crx-${eventName}`, ...args))
+    .catch((err) => console.warn(`[lumio] couldn't send ${eventName} to extension ${id}:`, err?.message || err));
 }
 
 // The extension a call came from, checked against the page or worker that
@@ -145,7 +171,7 @@ function register(manager) {
   const handle = (name, fn) => router.handle(`lumio.${name}`, (event, ...args) => fn(callerId(event), ...args));
 
   // The profile's alarms (manager.dir: its folder).
-  const alarms = new Alarms(path.join(manager.dir || app.getPath('userData'), 'extension-alarms.json'), (id, alarm) => router.sendEvent(id, 'lumio.alarms.onAlarm', alarm));
+  const alarms = new Alarms(path.join(manager.dir || app.getPath('userData'), 'extension-alarms.json'), (id, alarm) => sendEvent(manager, id, 'lumio.alarms.onAlarm', alarm));
   manager.alarms = alarms;
   handle('alarms.create', (id, name, info) => { alarms.create(id, name, info || {}); });
   handle('alarms.get', (id, name) => alarms.get(id, name));
@@ -191,4 +217,4 @@ function register(manager) {
   handle('identity.launchWebAuthFlow', (id, details) => webAuthFlow(id, details, manager.session));
 }
 
-module.exports = { attach, register, Alarms, webAuthFlow, callerId, PRELOAD };
+module.exports = { attach, register, sendEvent, Alarms, webAuthFlow, callerId, PRELOAD };

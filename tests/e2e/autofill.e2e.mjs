@@ -34,9 +34,16 @@ const go = async (url, expect) => {
   assert.ok(await until(async () => (await title()) === expect), `loaded ${expect}`);
   await until(() => L.page(`document.readyState === 'complete'`));
 };
-// Real (trusted) mouse and keyboard input, like a person.
+// Real (trusted) mouse and keyboard input, like a person. Like a person, it
+// scrolls a field below the fold into view first: on a small screen (CI's
+// Macs) with the AI panel and the bookmarks bar open, the end of a long form
+// is off the page, and a click there would land on nothing. It waits a
+// moment after scrolling so the page's scroll event comes before the click
+// (a scroll closes Lumio's dropdown under a field).
 const clickOnce = (sel) => L.main(async (_e, s) => {
   const wc = global.lumio.tabs.wc();
+  const moved = await wc.executeJavaScript(`(() => { const y = scrollY, x = scrollX; document.querySelector(${JSON.stringify(s)}).scrollIntoView({ block: 'nearest', inline: 'nearest' }); return scrollY !== y || scrollX !== x })()`);
+  if (moved) await new Promise((res) => setTimeout(res, 150));
   const r = await wc.executeJavaScript(`(() => { const b = document.querySelector(${JSON.stringify(s)}).getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 } })()`);
   wc.focus();
   wc.sendInputEvent({ type: 'mouseDown', x: r.x, y: r.y, button: 'left', clickCount: 1 });
@@ -157,11 +164,14 @@ test('a card is saved without its security code, filled only after confirming, a
   assert.match(snap, /Card number\\" \(filled\)/);
   // Turned off in Settings: no card suggestions.
   await L.main(() => global.lumio.store.setSetting('autofillCards', false));
-  await go(`${base}/checkout.html?off`, 'Checkout — Test Shop');
-  await clickEl('#cardnumber');
-  await L.wait(800);
-  assert.notEqual(await overlayKind(), 'formfill');
-  await L.main(() => global.lumio.store.setSetting('autofillCards', true));
+  try {
+    await go(`${base}/checkout.html?off`, 'Checkout — Test Shop');
+    await clickEl('#cardnumber');
+    await L.wait(800);
+    assert.notEqual(await overlayKind(), 'formfill');
+  } finally {
+    await L.main(() => global.lumio.store.setSetting('autofillCards', true));
+  }
 });
 
 test('form entries: suggested next time, removed with Shift+Delete, never in incognito', async () => {
@@ -178,13 +188,17 @@ test('form entries: suggested next time, removed with Shift+Delete, never in inc
   assert.ok(await until(async () => (await store((s) => s.suggestEntries('nickname', '').length)) === 0), 'removed');
   // Incognito never remembers.
   await L.main((_e, u) => { global.lumio.createWindow({ incognito: true, urls: [u] }); return true; }, `${base}/address.html?incognito`);
-  assert.ok(await until(async () => (await title()) === 'Shipping — Test Shop' && (await L.main(() => global.lumio.current.incognito))));
-  await until(() => L.page(`document.readyState === 'complete'`));
-  await clickEl('#nick'); await typeText('Secret Sam');
-  await clickEl('#join');
-  await L.wait(800);
-  assert.equal(await store((s) => s.entries.length), 0);
-  await L.main(() => { global.lumio.current.close(); return true; });
+  try {
+    assert.ok(await until(async () => (await title()) === 'Shipping — Test Shop' && (await L.main(() => global.lumio.current.incognito))));
+    await until(() => L.page(`document.readyState === 'complete'`));
+    await clickEl('#nick'); await typeText('Secret Sam');
+    await clickEl('#join');
+    await L.wait(800);
+    assert.equal(await store((s) => s.entries.length), 0);
+  } finally {
+    // The next tests work in the normal window.
+    await L.main(() => { for (const w of global.lumio.windows) if (w.incognito) w.close(); return true; });
+  }
 });
 
 test('security keys: a site that asks for one gets the browser’s own WebAuthn (a virtual USB key here), not a Lumio passkey', async () => {

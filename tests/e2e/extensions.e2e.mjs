@@ -163,27 +163,33 @@ test('site access: only when clicked, on this site, or on all sites', async () =
 });
 
 test('keyboard shortcuts run extension commands from the menu bar', async () => {
-  const item = await until(() => menuItem(`ext-cmd:${ID}:open-page`));
-  assert.equal(item.accelerator, 'Alt+Shift+O', 'the manifest’s suggestion');
-  await L.main(({ Menu }, id) => Menu.getApplicationMenu().getMenuItemById(`ext-cmd:${id}:open-page`).click(), ID);
-  assert.ok(await until(async () => (await tabUrls()).includes(`${base}/cmd-open-page`)), 'chrome.commands.onCommand ran');
-  await L.main(() => global.lumio.cmd.closeTab());
-  // _execute_action opens its popup.
-  await L.main(({ Menu }, id) => Menu.getApplicationMenu().getMenuItemById(`ext-cmd:${id}:_execute_action`).click(), ID);
-  const popup = () => L.main(({ BrowserWindow }) => BrowserWindow.getAllWindows().some((w) => w.webContents.getURL().endsWith('/popup.html') && w.isVisible()));
-  assert.ok(await until(popup), 'popup open');
-  await L.main(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().endsWith('/popup.html'))?.close());
+  try {
+    const item = await until(() => menuItem(`ext-cmd:${ID}:open-page`));
+    assert.equal(item.accelerator, 'Alt+Shift+O', 'the manifest’s suggestion');
+    await L.main(({ Menu }, id) => Menu.getApplicationMenu().getMenuItemById(`ext-cmd:${id}:open-page`).click(), ID);
+    assert.ok(await until(async () => (await tabUrls()).includes(`${base}/cmd-open-page`)), 'chrome.commands.onCommand ran');
+    await L.main(() => global.lumio.cmd.closeTab());
+    // _execute_action opens its popup.
+    await L.main(({ Menu }, id) => Menu.getApplicationMenu().getMenuItemById(`ext-cmd:${id}:_execute_action`).click(), ID);
+    const popup = () => L.main(({ BrowserWindow }) => BrowserWindow.getAllWindows().some((w) => w.webContents.getURL().endsWith('/popup.html') && w.isVisible()));
+    assert.ok(await until(popup), 'popup open');
+    await L.main(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().endsWith('/popup.html'))?.close());
 
-  // Changed on lumio://extensions/shortcuts: Lumio's own shortcuts are refused.
-  const reserved = await L.main((_e, id) => global.lumio.extensions.setShortcut(id, 'open-page', process.platform === 'darwin' ? 'Command+T' : 'Ctrl+T', global.lumio.extUi.reservedAccelerators()), ID);
-  assert.match(reserved.error, /Lumio already uses/);
-  const ok = await L.main((_e, id) => global.lumio.extensions.setShortcut(id, 'open-page', 'Alt+Shift+P', global.lumio.extUi.reservedAccelerators()), ID);
-  assert.equal(ok.ok, true);
-  assert.ok(await until(async () => (await menuItem(`ext-cmd:${ID}:open-page`))?.accelerator === 'Alt+Shift+P'));
-  await go(`lumio://extensions/shortcuts`, 'Keyboard shortcuts');
-  assert.ok(await until(() => L.page(`document.querySelectorAll('.sc-box').length === 2`)));
-  assert.match(await L.page(`document.getElementById('sc-list').innerText`), /Lumio Store Test[\s\S]*Open the test page/);
-  await shot('ext-03-shortcuts');
+    // Changed on lumio://extensions/shortcuts: Lumio's own shortcuts are refused.
+    const reserved = await L.main((_e, id) => global.lumio.extensions.setShortcut(id, 'open-page', process.platform === 'darwin' ? 'Command+T' : 'Ctrl+T', global.lumio.extUi.reservedAccelerators()), ID);
+    assert.match(reserved.error, /Lumio already uses/);
+    const ok = await L.main((_e, id) => global.lumio.extensions.setShortcut(id, 'open-page', 'Alt+Shift+P', global.lumio.extUi.reservedAccelerators()), ID);
+    assert.equal(ok.ok, true);
+    assert.ok(await until(async () => (await menuItem(`ext-cmd:${ID}:open-page`))?.accelerator === 'Alt+Shift+P'));
+    await go(`lumio://extensions/shortcuts`, 'Keyboard shortcuts');
+    assert.ok(await until(() => L.page(`document.querySelectorAll('.sc-box').length === 2`)));
+    assert.match(await L.page(`document.getElementById('sc-list').innerText`), /Lumio Store Test[\s\S]*Open the test page/);
+    await shot('ext-03-shortcuts');
+  } finally {
+    // Whatever happened, no pop-up or page it opened is left for the next tests.
+    await L.main(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter((w) => w.webContents.getURL().endsWith('/popup.html')).forEach((w) => w.close()));
+    await L.main((_e, b) => { const t = global.lumio.tabs; t.tabs.filter((x) => String(x.pendingUrl || x.url).startsWith(`${b}/cmd-`)).forEach((x) => t.close(x.id)); }, base);
+  }
 });
 
 test('chrome.alarms (Lumio’s stand-in) wakes the extension', async () => {
