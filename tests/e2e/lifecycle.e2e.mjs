@@ -125,8 +125,19 @@ test('a page in full screen: "<site> is now full screen · Press Esc to exit ful
 test('the notice goes by itself after a few seconds', async () => {
   // The video page (already open after the test above, unless that one was skipped).
   if (!(await L.main(() => global.lumio.tabs.wc().getURL())).endsWith('/video')) await go(`${base}/video`, 'Video');
+  // The window must be out of full screen first. On CI's Macs leaving it (the
+  // Spaces animation) took longer than the test above waits, and a page that
+  // asks while the window is still on its way out gets nothing from Electron
+  // (IsFullscreenForTabOrPending is true during an HTML full-screen
+  // transition): no enter-html-full-screen, so no notice to see.
+  const fsState = () => L.main(() => ({ window: global.lumio.win.isFullScreen(), tab: global.lumio.tabs.fullscreenTab, notice: global.lumio.current.notice.data }));
+  if (!(await until(async () => !(await fsState()).window, 20_000))) console.error('still full screen before asking again:', JSON.stringify(await fsState()));
+  await L.wait(1500); // the end of the animation, after the window's style changes
   await L.main(() => global.lumio.tabs.wc().executeJavaScript('document.getElementById("v").requestFullscreen().then(() => true)', true));
-  assert.ok(await until(async () => (await notice()).shown));
+  if (!(await until(async () => (await notice()).shown))) {
+    console.error('no notice:', JSON.stringify({ ...(await fsState()), page: await L.page('!!document.fullscreenElement').catch((e) => e.message), view: await L.main(() => ({ made: !!global.lumio.current.notice.view, ready: global.lumio.current.notice.ready })) }));
+  }
+  assert.ok((await notice()).shown, 'the notice shows');
   assert.ok(await until(async () => !(await notice()).shown, 8000), 'gone after about four seconds, still in full screen');
   assert.notEqual(await L.main(() => global.lumio.tabs.fullscreenTab), null);
   await pressEsc();

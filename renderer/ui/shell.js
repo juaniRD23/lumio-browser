@@ -646,13 +646,14 @@ address.addEventListener('mouseup', (e) => {
   e.preventDefault();
   address.select();
 });
-address.addEventListener('blur', () => {
+function addressBlurred() {
   omniFocused = false;
   omnibox.classList.remove('focused');
   omni.onBlur();
   setTimeout(() => { if (!omniFocused && overlayKind === 'suggest') hideOverlay(); }, 160);
   swapSiteIcon(renderToolbar);
-});
+}
+address.addEventListener('blur', addressBlurred);
 // Focusing the field turns the lock into a search icon (and back): a quick crossfade.
 function swapSiteIcon(change) {
   const el = $('#site-icon');
@@ -735,6 +736,15 @@ pwKey.addEventListener('click', () => {
 });
 
 api.on('focus-omnibox', () => { address.focus(); address.select(); });
+// The page took the keyboard (a click in it, or Lumio moving it there): the
+// address bar is no longer focused. The field stays this document's
+// activeElement when only the page view gets focus, and a Mac window doesn't
+// always tell this document it lost the keyboard, so it's let go here (its
+// blur puts the site's icon back: "Not secure", the lock).
+api.on('page-focus', () => {
+  if (document.activeElement === address) address.blur();
+  if (omniFocused) addressBlurred();
+});
 
 // ------------------------------------------------------------------ site info
 const siteBtn = $('#site-icon');
@@ -1057,6 +1067,7 @@ initInfobars({ api }); // Restore pages?, the default browser
 const permChip = initPermissionChip({
   api,
   getActiveTab: activeTab,
+  isTyping: () => omniFocused && omniEdited,
   overlay: {
     show: (kind, rect, payload) => { overlayKind = kind; api.send('overlay:show', { rect, payload }); },
     hide: (kind) => { if (overlayKind === kind) hideOverlay(); },

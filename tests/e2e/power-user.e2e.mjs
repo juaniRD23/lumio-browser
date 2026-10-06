@@ -214,7 +214,15 @@ test('Protocol handlers: a site asks, Allow sends its mailto: links to it, Setti
   const bubble = (code) => L.main((_e, c) => global.lumio.current.overlay.webContents.executeJavaScript(c), code);
   const asks = () => L.main(() => ((w) => w.overlayKind === 'permission' && w.overlayIn === w.overlaySeq)(global.lumio.current))
     .then((open) => open && bubble(`document.querySelector('.pb [data-d=allow]') && document.querySelector('.pb').innerText`));
-  assert.ok(await until(async () => /open all email links/i.test(await asks() || '')), `the bubble asks: ${await asks()}`);
+  if (!(await until(async () => /open all email links/i.test(await asks() || '')))) {
+    // Why not: the window's overlay, the chip, and where the shell's keyboard is.
+    console.error('protocol handler, no bubble:', JSON.stringify(await L.main(async () => {
+      const w = global.lumio.current;
+      const shell = await w.win.webContents.executeJavaScript(`({ active: document.activeElement?.id || document.activeElement?.tagName, hasFocus: document.hasFocus(), omnibox: document.getElementById('omnibox').className, chip: document.getElementById('perm-chip').hidden ? null : document.getElementById('perm-chip').textContent })`).catch((e) => e.message);
+      return { overlayKind: w.overlayKind, overlayIn: w.overlayIn, overlaySeq: w.overlaySeq, url: w.tabs.wc()?.getURL(), pageFocused: w.tabs.wc()?.isFocused(), shellFocused: w.win.webContents.isFocused(), shell, saved: global.lumio.store.settings.protocolHandlers || null };
+    }).catch((e) => e.message)));
+  }
+  assert.ok(/open all email links/i.test(await asks() || ''), `the bubble asks: ${await asks()}`);
   assert.equal(await L.shell(`!document.getElementById('perm-chip').hidden`), true, 'the chip shows');
   await shot('power-04-protocol-handler-bubble');
   await bubble(`document.querySelector('.pb [data-d=allow]').click(); true`);

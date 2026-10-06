@@ -14,7 +14,7 @@ const EVENTS = new Set([
   'overlay-picked', 'overlay-state', 'toast', 'zoom', 'fullscreen', 'agent-state', 'bookmarks', 'site-info', 'extensions-changed',
   'account', 'profile', 'passwords-prompt', 'passwords-changed', 'aura', 'update', 'update-announce', 'ai-build-doc', 'ai-open-chat',
   'ai-workflow', 'workflows-changed', 'sync-state', 'sync-pair-request', 'sidebar-changed', 'sidebar-toggle', 'dialog-data', 'notice-data',
-  'ui-prefs', 'focus-pane',
+  'ui-prefs', 'focus-pane', 'page-focus',
   'hud', 'nav-prefs', 'find-text', // main/navigation.js
   'infobars', 'tab-search', 'tab-drag-hint', // main/infobars.js, tab-search.js, tab-drag.js
   'saved-groups', 'tab-group-edit', 'side-panel', 'side-changed', // tab groups, side panel
