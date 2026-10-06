@@ -254,10 +254,15 @@ test('data on exit: deleting when windows close keeps the sites allowed to save 
   await reset();
   await go(`${a}/set-plain`, 'Cookie set');
   await go(`${b}/set-plain`, 'Cookie set');
-  await settings((s) => s.setDefault('siteData', 'session'));
-  await settings((s, o) => s.set(o, 'siteData', 'allow'), a);
-  await L.main(() => global.lumio.profiles.normal.siteControls.clearSessionData());
-  const left = await L.main(() => global.lumio.profiles.normal.session.cookies.get({ name: 'who' }).then((cs) => cs.map((c) => c.domain)));
-  assert.deepEqual(left, ['127.0.0.1']);
-  await reset();
+  // Both pages have that title: wait for localhost's cookie itself, or it can arrive after the deleting.
+  const who = () => L.main(() => global.lumio.profiles.normal.session.cookies.get({ name: 'who' }).then((cs) => cs.map((c) => c.domain).sort()));
+  assert.ok(await until(async () => (await who()).join() === '127.0.0.1,localhost'), 'both sites set their cookie');
+  try {
+    await settings((s) => s.setDefault('siteData', 'session'));
+    await settings((s, o) => s.set(o, 'siteData', 'allow'), a);
+    await L.main(() => global.lumio.profiles.normal.siteControls.clearSessionData());
+    assert.deepEqual(await who(), ['127.0.0.1']);
+  } finally {
+    await reset();
+  }
 });

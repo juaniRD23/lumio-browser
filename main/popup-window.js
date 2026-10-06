@@ -96,7 +96,7 @@ class PopupWin {
     this.tabs = new PopupTabs({
       win: this.win,
       session: profile.session,
-      store: app.store,
+      store: profile.store, // the profile's (bookmarks, history, zoom and search settings)
       incognito,
       radius: 0,
       emit: (c, p) => this.emit(c, p),

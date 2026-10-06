@@ -61,35 +61,40 @@ class Downloads {
         paused: false,
         time: Date.now(),
       };
-      if (prefs.askDownload || saveAs) {
+      entry.danger = this.danger?.(item, wc) || null;
+      if (entry.danger) {
+        // A risky file waits for Keep or Discard under a temporary name, like
+        // Chrome's "Unconfirmed … .crdownload": pausing alone can't hold it (a
+        // small file has often arrived whole before the pause counts), so it
+        // only gets its real name once kept.
+        entry.temp = uniquePath(dir, `Unconfirmed ${crypto.randomInt(100000, 999999)}.crdownload`);
+        item.setSavePath(entry.temp);
+      } else if (prefs.askDownload || saveAs) {
         // Electron shows the Save dialog; record where the file really went.
         item.setSaveDialogOptions({ defaultPath: entry.path });
         item.once('updated', () => { const p = item.getSavePath(); if (p) { entry.path = p; entry.name = path.basename(p); } });
       } else {
         item.setSavePath(entry.path);
       }
-      entry.danger = this.danger?.(item, wc) || null;
       this.items.unshift(entry);
       if (this.items.length > 30) this.items.pop();
       item.on('updated', (_ev, state) => {
         entry.state = state === 'interrupted' ? 'interrupted' : 'progressing';
-        entry.paused = item.isPaused();
+        entry.paused = item.isPaused() || !!entry.danger;
         entry.received = item.getReceivedBytes();
         entry.total = item.getTotalBytes();
         this.push();
       });
       item.once('done', (_ev, state) => {
-        entry.state = state; // completed | cancelled | interrupted
-        entry.paused = false;
         entry.received = item.getReceivedBytes();
-        if (state === 'completed') app.dock?.downloadFinished(entry.path);
-        this.persist(entry);
-        this.push(true);
+        // Arrived, but still waiting for Keep or Discard.
+        if (state === 'completed' && entry.danger) { entry.arrived = true; entry.paused = true; this.push(true); return; }
+        this.finish(entry, state);
       });
       this.persist(entry);
       this.push(true);
       // A risky file waits, unsaved, for Keep or Discard in the downloads bubble.
-      if (entry.danger) item.pause();
+      if (entry.danger) { entry.paused = true; item.pause(); }
       // Waiting for the person to allow more downloads from this page.
       if (typeof allowed?.then === 'function') {
         item.pause();
@@ -114,6 +119,34 @@ class Downloads {
   takeSaveAs(url) {
     for (const [u, t] of this.saveAsUrls) if (Date.now() - t > 60_000) this.saveAsUrls.delete(u);
     return this.saveAsUrls.delete(url);
+  }
+
+  // The download ended (completed | cancelled | interrupted). A kept risky
+  // file gets its real name now.
+  finish(entry, state) {
+    if (entry.temp) {
+      const temp = entry.temp;
+      entry.temp = null;
+      if (state === 'completed') {
+        try {
+          entry.path = uniquePath(path.dirname(entry.path), path.basename(entry.path));
+          fs.renameSync(temp, entry.path);
+        } catch { state = 'interrupted'; }
+      }
+      if (state !== 'completed') fs.rm(temp, { force: true }, () => {});
+    }
+    entry.state = state;
+    entry.paused = false;
+    entry.arrived = false;
+    if (state === 'completed') app.dock?.downloadFinished(entry.path);
+    this.persist(entry);
+    this.push(true);
+  }
+
+  // Stops a download; one that arrived and waits for Keep or Discard is thrown away.
+  stop(entry) {
+    if (entry.arrived) this.finish(entry, 'cancelled');
+    else entry.item.cancel();
   }
 
   plain(d) {
@@ -156,15 +189,16 @@ class Downloads {
     else if (what === 'keep' && entry?.danger) {
       // The person chose to keep a file Lumio warned about.
       entry.danger = null;
-      if (entry.state === 'progressing' && !entry.gated && entry.item.isPaused()) entry.item.resume();
+      if (entry.arrived) this.finish(entry, 'completed');
+      else if (entry.state === 'progressing' && !entry.gated && entry.item.isPaused()) entry.item.resume();
       this.push(true);
     } else if (what === 'remove' || what === 'discard') {
-      if (entry?.state === 'progressing') entry.item.cancel();
+      if (entry?.state === 'progressing') this.stop(entry);
       this.items = this.items.filter((d) => d.id !== id);
       this.store?.removeDownloads([id]);
       this.push(true);
     } else if (entry && entry.state === 'progressing') {
-      if (what === 'cancel') entry.item.cancel();
+      if (what === 'cancel') this.stop(entry);
       else if (what === 'pause') entry.item.pause();
       else if (what === 'resume' && !entry.danger && entry.item.canResume()) entry.item.resume();
       this.push(true);
@@ -180,7 +214,7 @@ class Downloads {
   // Incognito ended: its unfinished downloads end with it, like Chrome (the
   // in-memory session itself lives on until Lumio quits).
   cancelAll() {
-    for (const d of this.items) if (d.state === 'progressing') d.item.cancel();
+    for (const d of this.items) if (d.state === 'progressing') this.stop(d);
   }
 }
 

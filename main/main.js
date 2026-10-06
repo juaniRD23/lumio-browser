@@ -2411,6 +2411,8 @@ app.whenReady().then(async () => {
   sites = new SiteResolver(cookieProbe(session));
   const frontPasswords = {
     get entries() { return curProfile().passwords.store.entries; },
+    list: () => curProfile().passwords.store.list(),
+    get: (id) => curProfile().passwords.store.get(id),
     secret: (id) => curProfile().passwords.store.secret(id),
   };
   security = new Security({
@@ -2572,11 +2574,23 @@ async function snapshot(w = cur()) {
   const { width: W, height: H } = base.getSize();
   const scale = W / win.getContentSize()[0];
   const out = Buffer.from(base.toBitmap());
+  // A page waiting on its alert()/confirm() (a synchronous message to Lumio)
+  // can't paint: if its view changed size since its last frame, capturePage
+  // never settles. Leave such a view out rather than hang.
+  const capture = (wc) => {
+    let timer;
+    return Promise.race([
+      wc.capturePage().catch(() => null),
+      new Promise((r) => { timer = setTimeout(() => r(null), 3000); }),
+    ]).finally(() => clearTimeout(timer));
+  };
   const paste = async (view) => {
     const b = view.getBounds();
     const bw = Math.round(b.width * scale);
     const bh = Math.round(b.height * scale);
-    const src = pixels(await view.webContents.capturePage()).resize({ width: bw, height: bh }).toBitmap();
+    const img = await capture(view.webContents);
+    if (!img || img.isEmpty() || !bw || !bh) return;
+    const src = pixels(img).resize({ width: bw, height: bh }).toBitmap();
     const x0 = Math.round(b.x * scale);
     const y0 = Math.round(b.y * scale);
     for (let y = 0; y < bh && y0 + y < H; y++) {
@@ -2593,6 +2607,7 @@ async function snapshot(w = cur()) {
   const bar = w.indicator?.bar;
   if (bar && win.contentView.children.includes(bar)) await paste(bar);
   for (const v of Object.values(w.hud?.views || {})) if (win.contentView.children.includes(v) && v.getVisible()) await paste(v);
+  if (w.dialogs?.attached()) await paste(w.dialogs.view); // the tab's alert/confirm, "Leave site?"…
   if (win.contentView.children.includes(overlay)) await paste(overlay);
   return nativeImage.createFromBitmap(out, { width: W, height: H }).toPNG().toString('base64');
 }

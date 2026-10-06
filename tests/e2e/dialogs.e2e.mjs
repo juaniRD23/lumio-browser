@@ -59,9 +59,10 @@ const key = (keyCode) => L.main((_e, k) => {
 const waitDialog = (kind) => until(async () => { const d = await dialog(); return d.shown && d.kinds[0] === kind && d; });
 const noDialog = () => until(async () => { const d = await dialog(); return !d.shown && !d.kinds.length; });
 // A real click in the page: it counts as using the page (Chrome's rule for "Leave site?").
+// Scrolled into view first, as a person would (the page area can be short).
 const clickPage = (sel = 'body') => L.main(async (_e, s) => {
   const wc = global.lumio.tabs.wc();
-  const r = await wc.executeJavaScript(`(() => { const b = document.querySelector(${JSON.stringify(s)}).getBoundingClientRect(); return { x: Math.round(b.x + Math.min(b.width / 2, 40)), y: Math.round(b.y + Math.min(b.height / 2, 20)) } })()`);
+  const r = await wc.executeJavaScript(`(() => { const el = document.querySelector(${JSON.stringify(s)}); el.scrollIntoView({ block: 'center', behavior: 'instant' }); const b = el.getBoundingClientRect(); return { x: Math.round(b.x + Math.min(b.width / 2, 40)), y: Math.round(b.y + Math.min(b.height / 2, 20)) } })()`);
   wc.focus();
   wc.sendInputEvent({ type: 'mouseDown', x: r.x, y: r.y, button: 'left', clickCount: 1 });
   wc.sendInputEvent({ type: 'mouseUp', x: r.x, y: r.y, button: 'left', clickCount: 1 });
@@ -130,6 +131,12 @@ after(async () => {
 });
 
 test('alert, confirm and prompt appear in the tab, named after the site, and the page gets the answer', async () => {
+  try { await alertsConfirmPrompt(); } finally {
+    // Never leave the page waiting on a dialog for the next test.
+    await L.main(() => { const t = global.lumio.tabs; if (t.active) t.dismiss(t.active); return true; }).catch(() => {});
+  }
+});
+async function alertsConfirmPrompt() {
   await go(`${base}/alerts`, 'Page alerts');
   const host = new URL(base).host;
   await L.page(`setTimeout(() => { alert('Saved!'); window.r0 = 'after alert'; }, 0); true`);
@@ -163,7 +170,7 @@ test('alert, confirm and prompt appear in the tab, named after the site, and the
   await key('Escape');
   assert.ok(await noDialog());
   assert.equal(await L.page('window.r3'), false, 'Esc cancels');
-});
+}
 
 test('dialogs in a row: the second offers "Don’t allow … to show more dialogs", and then they stop', async () => {
   // A tab of its own: dialogs in a row, and a site's block, are counted per tab.

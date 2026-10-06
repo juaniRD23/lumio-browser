@@ -47,7 +47,9 @@ const clickPage = (sel) => L.main(async (_e, s) => {
 }, sel);
 // The pop-up window, its page and its bar.
 const popupCount = () => L.main(() => global.lumio.popups.length);
-const inPopup = (code) => L.main((_e, c) => global.lumio.popups[0].tabs.wc().executeJavaScript(c), code);
+// (Its frame runs scripts at once: webContents.executeJavaScript() waits for a
+// page to load, and a pop-up its opener writes into may never get one.)
+const inPopup = (code) => L.main((_e, c) => global.lumio.popups[0].tabs.wc().mainFrame.executeJavaScript(c), code);
 const inBar = (code) => L.main((_e, c) => global.lumio.popups[0].win.webContents.executeJavaScript(c), code);
 const openPopup = async () => {
   await go(`${base}/opener`, 'Opener');
@@ -172,6 +174,8 @@ test('a click on a button in a frame from another site opens its pop-up, the fir
   await go(`${base}/embed`, 'Embed');
   const before = await tabCount();
   // A real click on the frame's button: the frame's position plus the button's in it.
+  // Sent the way the mouse's are (DevTools' Input domain), so Chromium routes
+  // it into the frame's own process; sendInputEvent() only reaches the page's.
   const clickFrameButton = () => L.main(async () => {
     const wc = global.lumio.tabs.wc();
     const f = await wc.executeJavaScript(`(() => { const r = document.getElementById('f').getBoundingClientRect(); return { x: r.x, y: r.y } })()`);
@@ -180,9 +184,16 @@ test('a click on a button in a frame from another site opens its pop-up, the fir
     const x = Math.round(f.x + b.x);
     const y = Math.round(f.y + b.y);
     wc.focus();
-    wc.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
-    await new Promise((r) => setTimeout(r, 120)); // a person's click takes a moment
-    wc.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 });
+    const mouse = wc.debugger;
+    if (!mouse.isAttached()) mouse.attach('1.3');
+    try {
+      await mouse.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+      await mouse.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
+      await new Promise((r) => setTimeout(r, 120)); // a person's click takes a moment
+      await mouse.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
+    } finally {
+      mouse.detach();
+    }
     return true;
   });
   const backToEmbed = () => L.main(() => { const t = global.lumio.tabs; t.close(t.activeId); const e = t.tabs.find((x) => x.title === 'Embed'); if (e) t.activate(e.id); });
@@ -267,6 +278,13 @@ test('"Open in tab" moves the pop-up’s page into the browser window, still lin
   t.after(closePopups); // none left over for the next test, even if this one fails
   await openPopup();
   const before = await tabCount();
+  // Even if this fails, the tab it moved goes, so the next tests start on a live page.
+  t.after(() => L.main((_e, n) => {
+    const m = global.lumio.tabs;
+    for (const tab of m.tabs.slice(n)) { tab.touched = false; m.close(tab.id, { force: true }); }
+    if (m.tabs.length && !m.tabs.includes(m.active)) m.activate(m.tabs[0].id);
+    return true;
+  }, before));
   await inBar(`document.getElementById('open-tab').click(); true`);
   assert.ok(await until(async () => (await popupCount()) === 0), 'the pop-up window went');
   assert.equal(await tabCount(), before + 1);

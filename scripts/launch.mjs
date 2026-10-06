@@ -35,6 +35,10 @@ export async function launch({ profile, env = {}, executablePath, args = [] } = 
     // own appearance setting (main/theme.js) must decide, like in real use.
     colorScheme: null,
   });
+  // Lumio answers pages' alert()/confirm() itself (main/dialog-view.js); with
+  // no listener Playwright would also try to dismiss each one ("No dialog is
+  // showing"), an unhandled rejection that fails the whole test file.
+  app.context().on('dialog', () => {});
   const logs = [];
   app.process().stdout.on('data', (d) => logs.push(String(d)));
   app.process().stderr.on('data', (d) => logs.push(String(d)));
@@ -52,7 +56,7 @@ export async function launch({ profile, env = {}, executablePath, args = [] } = 
     wait: (ms) => new Promise((r) => setTimeout(r, ms)),
     main: (fn, arg) => timed(run(fn, arg), brief(fn)),
     async shot(file) {
-      const b64 = await run(async () => global.lumio.snapshot());
+      const b64 = await timed(run(async () => global.lumio.snapshot()), 'shot');
       if (b64 && file) fs.writeFileSync(file, Buffer.from(b64, 'base64'));
       return b64;
     },
