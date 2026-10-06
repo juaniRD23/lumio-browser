@@ -122,43 +122,70 @@ after(async () => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
+// Leaves only the first window open (a failed test mustn't leave its windows
+// to the next one, whose checks read the current window and the session).
+const onlyFirstWindow = async () => {
+  await L.main(() => { const [first, ...rest] = global.lumio.windows; for (const w of rest) w.close(); if (first) global.lumio.focus(first); return true; });
+  await until(async () => (await windows()).length === 1);
+};
+const savedUrls = () => L.main(() => global.lumio.store.sessionWindows().map((w) => w.tabs.map((t) => t.url)));
+// What the windows and the session file held, for a check that timed out.
+const sessionDiag = async () => JSON.stringify({ windows: await windows(), current: await L.main(() => global.lumio.current?.id), saved: await savedUrls() });
+
 test('new windows open, and the session remembers them', async () => {
-  await go(`${base}/one`, 'Page one');
-  await L.main(() => global.lumio.cmd.newWindow());
-  await until(async () => (await windows()).length === 2);
-  await go(`${base}/two`, 'Page two');
-  await L.wait(600);
-  const saved = await L.main(() => global.lumio.store.sessionWindows().map((w) => w.tabs.map((t) => t.url)));
-  assert.equal(saved.length, 2);
-  assert.ok(saved.flat().some((u) => u.endsWith('/one')) && saved.flat().some((u) => u.endsWith('/two')));
-  // Closing a window adds it to Recently Closed; reopening brings it back.
-  await L.main(() => global.lumio.cmd.closeWindow());
-  await until(async () => (await windows()).length === 1);
-  const closed = await L.main(() => global.lumio.recentlyClosed.map((e) => e.kind));
-  assert.equal(closed.at(-1), 'window');
-  await L.main(() => global.lumio.cmd.reopenTab());
-  await until(async () => (await windows()).length === 2);
-  assert.ok((await windows()).some((w) => w.tabs.some((u) => u.endsWith('/two'))));
-  await L.main(() => global.lumio.cmd.closeWindow());
-  await until(async () => (await windows()).length === 1);
+  try {
+    await go(`${base}/one`, 'Page one');
+    const first = await L.main(() => global.lumio.current.id);
+    // The new window is driven by its id: on a Mac the first window's own
+    // focus event can still arrive after the new one opened, and make it the
+    // current window again for a moment.
+    const id = await L.main(() => global.lumio.cmd.newWindow().id);
+    assert.ok(await until(async () => (await windows()).length === 2), 'the new window opened');
+    await L.main((_e, a) => global.lumio.windows.find((w) => w.id === a.id).tabs.navigate(a.url), { id, url: `${base}/two` });
+    assert.ok(await until(() => L.main((_e, i) => global.lumio.windows.find((w) => w.id === i)?.tabs.wc()?.getTitle() === 'Page two', id)), 'page "two" loaded in the new window');
+    assert.ok(await until(async () => {
+      const saved = await savedUrls();
+      return saved.length === 2 && saved.flat().some((u) => u.endsWith('/one')) && saved.flat().some((u) => u.endsWith('/two'));
+    }), `the session has both windows: ${await sessionDiag()}`);
+    // Closing a window adds it to Recently Closed; reopening brings it back.
+    await L.main((_e, i) => { global.lumio.windows.find((w) => w.id === i).close(); return true; }, id);
+    await until(async () => (await windows()).length === 1);
+    assert.equal(await L.main(() => global.lumio.windows[0].id), first, 'the first window stays');
+    const closed = await L.main(() => global.lumio.recentlyClosed.map((e) => e.kind));
+    assert.equal(closed.at(-1), 'window');
+    await L.main(() => global.lumio.cmd.reopenTab());
+    await until(async () => (await windows()).length === 2);
+    assert.ok((await windows()).some((w) => w.tabs.some((u) => u.endsWith('/two'))));
+  } finally {
+    await onlyFirstWindow();
+  }
 });
 
 test('pinned tabs stay first and are saved as pinned', async () => {
-  await L.main((_e, u) => { global.lumio.tabs.create(u); }, `${base}/pin-me`);
-  await until(async () => (await title()).includes('pin-me'));
-  await L.main(() => global.lumio.cmd.pinTab());
-  const state = await L.main(() => global.lumio.tabs.state().tabs.map((t) => ({ url: t.url, pinned: t.pinned })));
-  assert.equal(state[0].pinned, true);
-  assert.ok(state[0].url.endsWith('/pin-me'));
-  // A pinned tab can't be dragged after unpinned ones.
-  await L.main(() => { const t = global.lumio.tabs; t.move(t.tabs[0].id, 5); });
-  assert.equal(await L.main(() => global.lumio.tabs.tabs[0].pinned), true);
-  assert.equal(await L.shell(`document.querySelector('.tab.pinned') !== null`), true);
-  await L.wait(500);
-  const saved = await L.main(() => global.lumio.store.sessionWindows()[0].tabs);
-  assert.equal(saved[0].pinned, true);
-  await shot('10-pinned');
-  await L.main(() => global.lumio.cmd.pinTab());
+  let pinned = false;
+  try {
+    await L.main((_e, u) => { global.lumio.tabs.create(u); }, `${base}/pin-me`);
+    await until(async () => (await title()).includes('pin-me'));
+    await L.main(() => global.lumio.cmd.pinTab());
+    pinned = true;
+    const state = await L.main(() => global.lumio.tabs.state().tabs.map((t) => ({ url: t.url, pinned: t.pinned })));
+    assert.equal(state[0].pinned, true);
+    assert.ok(state[0].url.endsWith('/pin-me'));
+    // A pinned tab can't be dragged after unpinned ones.
+    await L.main(() => { const t = global.lumio.tabs; t.move(t.tabs[0].id, 5); });
+    assert.equal(await L.main(() => global.lumio.tabs.tabs[0].pinned), true);
+    assert.equal(await L.shell(`document.querySelector('.tab.pinned') !== null`), true);
+    // The session file keeps it first, marked pinned (saved a moment after the change).
+    const saved = await until(() => L.main(() => {
+      const tabs = global.lumio.store.sessionWindows().find((w) => w.tabs.some((t) => t.url.endsWith('/pin-me')))?.tabs;
+      return tabs?.[0]?.pinned ? tabs : null;
+    }));
+    assert.ok(saved, `saved as pinned: ${await sessionDiag()}`);
+    assert.ok(saved[0].url.endsWith('/pin-me'));
+    await shot('10-pinned');
+  } finally {
+    if (pinned) await L.main(() => { const t = global.lumio.tabs.tabs.find((x) => x.pinned && (x.url || '').endsWith('/pin-me')); if (t) global.lumio.tabs.setPinned(t.id, false); });
+  }
 });
 
 test('moving a tab to a new window keeps the page as it was', async () => {

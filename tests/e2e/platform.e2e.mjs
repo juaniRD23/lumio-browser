@@ -27,10 +27,13 @@ const go = async (url, title) => {
   await L.main((_e, u) => global.lumio.tabs.navigate(u), url);
   return until(async () => (await L.main(() => global.lumio.tabs.wc().getTitle())) === title);
 };
-// Runs code in the print preview's own page.
+// Runs code in the print preview's own page (null if there's none, or it
+// closes before the code answers).
 const inPrint = (code) => L.main(async (_e, c) => {
   const entry = global.lumio.printPreview.stateOf(global.lumio.current);
-  return entry ? entry.view.webContents.executeJavaScript(c) : null;
+  const wc = entry?.view.webContents;
+  if (!wc || wc.isDestroyed()) return null;
+  return Promise.race([wc.executeJavaScript(c), new Promise((r) => wc.once('destroyed', () => r(null)))]);
 }, code);
 
 before(async () => {
@@ -68,7 +71,7 @@ test('print preview: draws the page, Save as PDF writes it, and it closes with t
     pp.dialog = { showSaveDialog: async () => ({ canceled: false, filePath: f }) };
   }, file);
   try {
-    await inPrint('document.getElementById("dest").value = "pdf"; document.getElementById("dest").dispatchEvent(new Event("change", { bubbles: true })); document.getElementById("go").click(); true');
+    await inPrint('document.getElementById("dest").value = "pdf"; document.getElementById("dest").dispatchEvent(new Event("change", { bubbles: true })); setTimeout(() => document.getElementById("go").click()); true');
     assert.ok(await until(async () => fs.existsSync(file) && fs.statSync(file).size > 1000, 20_000), 'the PDF is written');
     assert.equal(fs.readFileSync(file).subarray(0, 4).toString(), '%PDF');
     assert.ok(await until(async () => !(await L.main(() => global.lumio.printPreview.isOpen(global.lumio.current)))), 'closes after saving');
@@ -86,7 +89,10 @@ test('print preview: draws the page, Save as PDF writes it, and it closes with t
   // Cancel closes it too, and the page gets the keyboard back.
   await L.main(() => global.lumio.cmd.print());
   assert.ok(await until(() => inPrint('!!document.getElementById("cancel")'), 10_000));
-  await inPrint('document.getElementById("cancel").click(); true');
+  // The click runs after this script has answered: Cancel closes the
+  // preview's page at once, and a script still running in a page that closes
+  // never answers (the call would hang until it timed out).
+  await inPrint('setTimeout(() => document.getElementById("cancel").click()); true');
   assert.ok(await until(async () => !(await L.main(() => global.lumio.printPreview.isOpen(global.lumio.current)))));
 });
 

@@ -24,11 +24,25 @@ const title = () => L.main(() => global.lumio.tabs.wc().getTitle());
 const waitTitle = async (t) => assert.ok(await until(async () => (await title()).includes(t)), `page "${t}" loaded`);
 
 // The address bar, driven from inside the window's UI.
+// On a Mac a window comes to the front a moment after focus(), and then
+// gives the keyboard back to the view that last had it (often the page),
+// which takes it from the address bar (main/tabs.js page-focus). So wait
+// for the window to be in front before the bar takes the keyboard.
 const focusBar = async () => {
-  await L.main(() => { const w = global.lumio.current; w.focus(); w.win.webContents.focus(); return true; });
+  await L.main(() => { global.lumio.current.focus(); return true; });
+  if (!(await until(() => L.main(() => global.lumio.current.win.isFocused()), 5000))) console.error('focusBar: the window is not in front:', JSON.stringify(await focusState()));
+  await L.wait(200);
+  await L.main(() => { global.lumio.current.win.webContents.focus(); return true; });
+  if (!(await until(() => L.main(() => global.lumio.current.win.webContents.isFocused()), 5000))) console.error('focusBar: the window\'s UI has no keyboard:', JSON.stringify(await focusState()));
   await L.shell(`(() => { const a = document.getElementById('address'); a.blur(); a.focus(); return true })()`);
   await L.wait(300); // the shortcuts for chips arrive
 };
+// Which window, page and field have the keyboard (printed when a check times out).
+const focusState = () => L.main(async () => {
+  const w = global.lumio.current;
+  const shell = await w.win.webContents.executeJavaScript(`({ active: document.activeElement?.id || document.activeElement?.tagName, hasFocus: document.hasFocus(), omnibox: document.getElementById('omnibox').className, value: document.getElementById('address').value })`).catch((e) => e.message);
+  return { current: w.id, windows: global.lumio.windows.map((x) => ({ id: x.id, focused: x.win.isFocused(), overlayKind: x.overlayKind })), pageFocused: w.tabs.wc()?.isFocused(), shellFocused: w.win.webContents.isFocused(), shell };
+}).catch((e) => e.message);
 const typeText = (text) => L.shell(`(() => {
   const a = document.getElementById('address');
   for (const ch of ${JSON.stringify(text)}) {
@@ -96,18 +110,24 @@ test('an address typed once completes inline next time, and Enter goes there', a
 });
 
 test('an open tab in another window is offered, and picking it switches there', async () => {
-  await L.main((_e, url) => { global.lumio.createWindow({ urls: [url] }); return true; }, `${base}/beta`);
-  assert.ok(await until(() => L.main(() => global.lumio.windows.length === 2 && global.lumio.tabs.wc()?.getTitle() === 'Page beta')));
-  const other = await L.main(() => global.lumio.current.id);
-  await L.main(() => { global.lumio.windows[0].focus(); return true; });
-  await focusBar();
-  await clearBar();
-  await typeText('beta');
-  assert.ok(await until(async () => (await rows()).some((r) => r.type === 'tab' && /Switch to this tab/.test(r.text))));
-  await L.main(() => global.lumio.current.overlay.webContents.executeJavaScript(`document.querySelector('.row.tab').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); true`));
-  assert.ok(await until(async () => (await L.main(() => global.lumio.current.id)) === other), 'the other window is in front');
-  await L.main(() => { global.lumio.current.close(); return true; });
-  assert.ok(await until(() => L.main(() => global.lumio.windows.length === 1)));
+  try {
+    await L.main((_e, url) => { global.lumio.createWindow({ urls: [url] }); return true; }, `${base}/beta`);
+    assert.ok(await until(() => L.main(() => global.lumio.windows.length === 2 && global.lumio.tabs.wc()?.getTitle() === 'Page beta')));
+    const other = await L.main(() => global.lumio.current.id);
+    await L.main(() => { global.lumio.windows[0].focus(); return true; });
+    await focusBar();
+    await clearBar();
+    await typeText('beta');
+    assert.ok(await until(async () => (await rows()).some((r) => r.type === 'tab' && /Switch to this tab/.test(r.text))), `a "Switch to this tab" row: ${JSON.stringify({ rows: await rows(), focus: await focusState() })}`);
+    await L.main(() => global.lumio.current.overlay.webContents.executeJavaScript(`document.querySelector('.row.tab').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); true`));
+    assert.ok(await until(async () => (await L.main(() => global.lumio.current.id)) === other), 'the other window is in front');
+    await L.main(() => { global.lumio.current.close(); return true; });
+    assert.ok(await until(() => L.main(() => global.lumio.windows.length === 1)));
+  } finally {
+    // Only the first window stays for the next test, even after a failure.
+    await L.main(() => { const [first, ...rest] = global.lumio.windows; for (const w of rest) w.close(); if (first) first.focus(); return true; });
+    await until(() => L.main(() => global.lumio.windows.length === 1));
+  }
 });
 
 test('the search engine’s suggestions show while typing a search, never in Incognito', async () => {
