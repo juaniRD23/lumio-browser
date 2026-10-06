@@ -34,7 +34,15 @@ function attach(ses) {
 // would never hear the event. So when the router knows no listener of that
 // extension's, the event goes straight to its service worker (woken if it's
 // asleep), on the channel the worker's preloads listen on.
+// Just after a reload the worker isn't registered again yet and can't start
+// ("Failed to start service worker") for a moment; the event waits for it
+// (sendEvent.retry) instead of being dropped.
 function sendEvent(manager, id, eventName, ...args) {
+  deliver(manager, id, eventName, args, Date.now() + sendEvent.retry.ms);
+}
+sendEvent.retry = { ms: 10_000, every: 250 };
+
+function deliver(manager, id, eventName, args, deadline) {
   const router = manager.ece?.ctx?.router;
   if (!router) return;
   const known = !(router.listeners instanceof Map) || (router.listeners.get(eventName) || []).some((l) => l.extensionId === id);
@@ -43,7 +51,10 @@ function sendEvent(manager, id, eventName, ...args) {
   if (known || !hasWorker || typeof workers?.startWorkerForScope !== 'function') { router.sendEvent(id, eventName, ...args); return; }
   workers.startWorkerForScope(`chrome-extension://${id}/`)
     .then((sw) => sw.send(`crx-${eventName}`, ...args))
-    .catch((err) => console.warn(`[lumio] couldn't send ${eventName} to extension ${id}:`, err?.message || err));
+    .catch((err) => {
+      if (Date.now() < deadline && manager.api?.getExtension?.(id)) { setTimeout(() => deliver(manager, id, eventName, args, deadline), sendEvent.retry.every); return; }
+      console.warn(`[lumio] couldn't send ${eventName} to extension ${id}:`, err?.message || err);
+    });
 }
 
 // The extension a call came from, checked against the page or worker that

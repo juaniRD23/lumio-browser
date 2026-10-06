@@ -19,7 +19,8 @@ load extensions into an in-memory session). Three layers give extensions their `
 3. **Lumio's stand-ins** (`main/extension-shims.js`, `preload/extension-shims.js`), added only
    when the extension asks for the permission and the API is missing:
    - `chrome.alarms`: timers kept by Lumio (and on disk), so they wake the service worker and
-     survive a restart. The shortest alarm is 30 seconds, like in Chrome.
+     survive a restart. The shortest alarm is 30 seconds, like in Chrome. This one replaces
+     Electron's own `chrome.alarms`, whose alarms never go off.
    - `chrome.sidePanel`: the panel page opens in a new tab, also when
      "open the side panel on toolbar click" is set.
    - `chrome.identity`: `launchWebAuthFlow` opens the sign-in page in a small window and hands

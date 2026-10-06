@@ -1,9 +1,9 @@
 // Preload for extension pages and service workers (chrome-extension:// only;
 // registered on the normal profile by main/extension-shims.js). Adds
-// chrome.alarms, chrome.sidePanel and chrome.identity where Electron has no
-// such API; each call goes to Lumio through electron-chrome-extensions'
-// router, which knows the calling extension. It runs before that library's
-// own preload, which seals the chrome object afterwards.
+// chrome.sidePanel and chrome.identity where Electron has no such API, and
+// chrome.alarms (Electron's own never goes off); each call goes to Lumio
+// through electron-chrome-extensions' router, which knows the calling
+// extension. It runs before that library's own preload, which seals the chrome object afterwards.
 const { contextBridge, ipcRenderer } = require('electron');
 
 // A service worker's preload has no `location`; install() checks it's an extension's.
@@ -54,7 +54,9 @@ function install() {
   };
   const define = (key, value) => Object.defineProperty(chrome, key, { value, enumerable: true, configurable: true });
 
-  if (!chrome.alarms && perms.has('alarms')) {
+  // Electron 43 has a chrome.alarms of its own, but its alarms never go off
+  // (onAlarm never fires), so Lumio's replaces it.
+  if (perms.has('alarms')) {
     define('alarms', {
       create: (...args) => {
         const name = typeof args[0] === 'string' ? args.shift() : '';

@@ -366,6 +366,17 @@ test('typing a shortcut turns extension shortcuts off until that page closes or 
   assert.equal(ui.recording, null);
   assert.equal(b.listenerCount('destroyed'), 0, 'no listeners left behind');
   assert.equal(rebuilt, 4);
+
+  // A shortcut changed in the manager (or an extension came or went): the
+  // menu's hidden items are made again, not taken from before.
+  const before = store.settings.extensionShortcuts?.[ID]?.toggle;
+  const has = () => ui.menuKeys().some((k) => k.id === `ext-cmd:${ID}:toggle` && /J$/.test(k.accelerator));
+  assert.equal(has(), false);
+  assert.equal(m.setShortcut(ID, 'toggle', 'Alt+Shift+J').ok, true);
+  ui.commandsChanged();
+  assert.equal(rebuilt, 5);
+  assert.equal(has(), true);
+  m.setShortcut(ID, 'toggle', before || '');
 });
 
 test('a Web Store update keeps the person’s limits and clears out the old version', async () => {

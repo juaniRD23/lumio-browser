@@ -135,19 +135,52 @@ test('split view: two pages side by side; the focused side drives the toolbar, f
   assert.ok(await until(async () => /\d+\/\d+/.test(await L.shell(`document.getElementById('find-count').textContent`))), 'matches counted on the focused side');
   await L.shell(`document.getElementById('find-close').click(); true`);
 
-  // The divider: main keeps the new width; the left page narrows.
-  await send('tab:split-ratio', { id: a, ratio: 0.35 });
-  assert.ok(await until(async () => {
-    const [l, r] = await L.main((_e, [x, y]) => [global.lumio.tabs.get(x).view.getBounds(), global.lumio.tabs.get(y).view.getBounds()], [a, b]);
-    return l.width < r.width * 0.7;
-  }), 'the left side narrowed');
-  // Swap sides.
-  await send('tab:split-swap', a);
-  assert.deepEqual(await until(() => L.main((_e, y) => { const s = global.lumio.tabs.split.state(); return s?.left === y ? s : null; }, b)), { left: b, right: a, ratio: 0.65 });
-  // The session keeps the pair.
-  await L.wait(600);
-  const saved = await L.main(() => global.lumio.store.sessionWindows()[0].tabs.filter((t) => t.split).map((t) => [t.url.split('/').pop(), t.split.side]));
-  assert.deepEqual(saved, [['right', 'left'], ['left', 'right']]);
+  // The divider: main keeps the new width; the left page narrows. Each side
+  // stays at least 260px wide (MIN_PANE, main/split-view.js), so a 35/65 split
+  // needs a page area of about 745px. On CI's Mac (a 1024x768 display, so a
+  // 964px window) the AI panel leaves the page about 570px, where the
+  // narrowest the left side can go is about 46%. Put the panel away for this
+  // part, as someone resizing two pages would; it comes back at the end.
+  const splitGeo = () => L.main((_e, [x, y]) => {
+    const t = global.lumio.tabs;
+    const w = global.lumio.current;
+    return {
+      win: w.win.getContentBounds(), slot: t.slot, split: t.split.state(), rects: t.split.rects,
+      left: t.get(x)?.view.getBounds(), right: t.get(y)?.view.getBounds(),
+    };
+  }, [a, b]);
+  const panelWasOpen = !(await L.shell(`document.body.classList.contains('panel-closed')`));
+  try {
+    if (panelWasOpen) {
+      await L.shell(`document.getElementById('panel-close').click(); true`);
+      await until(async () => (await splitGeo()).slot.width >= 745, 3000); // the diagnostics below show it if not
+    }
+    const before = await splitGeo();
+    await send('tab:split-ratio', { id: a, ratio: 0.35 });
+    let last = null;
+    const narrowed = await until(async () => {
+      last = await splitGeo();
+      return last.left.width < last.right.width * 0.7;
+    });
+    if (!narrowed) {
+      const divider = await L.shell(`(() => { const d = document.querySelector('#split .split-divider')?.getBoundingClientRect(); const box = document.getElementById('split'); return { divider: d && { x: d.x, width: d.width }, box: box && { width: box.getBoundingClientRect().width, hidden: box.hidden, ratio: box.style.getPropertyValue('--ratio') }, panelClosed: document.body.classList.contains('panel-closed') }; })()`).catch((e) => String(e));
+      console.error('split view diagnostics (the left side did not narrow):', JSON.stringify({ panelWasOpen, before, after: last, shell: divider }));
+    }
+    assert.ok(narrowed, 'the left side narrowed');
+    // Swap sides.
+    await send('tab:split-swap', a);
+    assert.deepEqual(await until(() => L.main((_e, y) => { const s = global.lumio.tabs.split.state(); return s?.left === y ? s : null; }, b)), { left: b, right: a, ratio: 0.65 });
+    // The session keeps the pair.
+    await L.wait(600);
+    const saved = await L.main(() => global.lumio.store.sessionWindows()[0].tabs.filter((t) => t.split).map((t) => [t.url.split('/').pop(), t.split.side]));
+    assert.deepEqual(saved, [['right', 'left'], ['left', 'right']]);
+  } finally {
+    // The tests after this one may use the panel: never leave it closed.
+    if (panelWasOpen && await L.shell(`document.body.classList.contains('panel-closed')`)) {
+      await L.shell(`document.getElementById('ai-toggle').click(); true`);
+      await L.wait(600);
+    }
+  }
 });
 
 test('split view: closing one side leaves the other with the whole page area; separating keeps the focused one', async () => {

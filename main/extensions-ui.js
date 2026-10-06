@@ -292,6 +292,13 @@ class ExtensionsUI {
     return this.ext.pack(pick.filePaths[0], keyFile);
   }
 
+  // An extension's shortcuts changed, or it came or went (the manager's
+  // commandsChanged hook): the menu bar's hidden items are made again.
+  commandsChanged() {
+    this.keys = null;
+    this.menuChanged();
+  }
+
   // Changes from the manager: refresh any open puzzle menu.
   changed() {
     this.ntp = undefined;
