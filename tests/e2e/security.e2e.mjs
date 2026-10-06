@@ -416,7 +416,7 @@ test('secure DNS: changing it keeps the other settings, and pages still load', a
   await go(`http://dns.${D}:${P}/dns-off`, 'Page dns-off');
   // A custom provider on this computer (it never answers): names Lumio maps
   // itself and addresses still work. Lumio can't check DNS over HTTPS here.
-  st = await security((s) => s.set({ secureDns: { on: true, provider: 'custom', custom: `https://doh.${D}/dns-query` } }));
+  st = await security((s, custom) => s.set({ secureDns: { on: true, provider: 'custom', custom } }), `https://doh.${D}/dns-query`);
   assert.deepEqual(st.secureDns, { on: true, provider: 'custom', custom: `https://doh.${D}/dns-query` });
   assert.deepEqual(await security((s) => s.store.settings.security.secureDns), st.secureDns, 'saved');
   await go(`http://127.0.0.1:${P}/dns-custom`, 'Page dns-custom');
