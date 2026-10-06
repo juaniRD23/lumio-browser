@@ -441,7 +441,8 @@ test('capture indicators: a page using the camera gets the red dot until it stop
   }
   assert.ok(await until(async () => (await activeTab()).capture?.camera === true), 'the tab uses the camera');
   assert.equal((await activeTab()).capture.microphone, false);
-  assert.ok(await until(() => L.shell(`(() => { const t = document.querySelector('.tab.active'); return !!t && !t.querySelector('.rec-dot').hidden && t.title.includes('Using your camera'); })()`)), 'the red dot and tooltip');
+  // (The tab's hover card took over from its tooltip: the words are the dot's label and the tab's description.)
+  assert.ok(await until(() => L.shell(`(() => { const t = document.querySelector('.tab.active'); const dot = t?.querySelector('.rec-dot'); return !!dot && !dot.hidden && dot.getAttribute('aria-label') === 'Using your camera' && t.getAttribute('aria-description').includes('Using your camera'); })()`)), 'the red dot and its words');
   await shot('security-07-camera');
   await L.page(`window.__cam.getTracks().forEach((t) => t.stop()); true`);
   assert.ok(await until(async () => (await activeTab()).capture === null), 'stopping the camera ends it');
