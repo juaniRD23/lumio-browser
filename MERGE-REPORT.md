@@ -96,11 +96,31 @@ Also done along the way:
 
 ## Final review findings
 
-REVIEW_PLACEHOLDER
+A fresh subagent reviewed the code end to end. It also rendered 150+ light and dark screenshots into `dist/review-shots/`, which are not committed; I looked at them too. All fixes are in commit 4331296.
+
+| Severity | Finding | Fixed? |
+|---|---|---|
+| High | Closing the last incognito pop-up after its window called `endIncognito()` with no profile and threw, so the in-memory session was never wiped and the next incognito window reused its cookies | Yes |
+| High | Tabs could be moved or dragged into another profile's or Guest's window, writing history and passwords into the other profile | Yes: moves, drags and the tab menu's window list now require the same profile |
+| High | The AI agent could drive lumio://downloads (Keep, then Open a flagged file), lumio://history and lumio://bookmarks | Yes: added to `PRIVATE_PAGE`, with a test |
+| Medium | Pop-ups' Open in browser, adopted tabs and Move tab to new window opened in the front window's profile | Yes |
+| Medium | Media controls listed and controlled other profiles' tabs, including their artwork | Yes |
+| Medium | Installed-app windows: alert and confirm returned blank answers, and passkeys failed | Yes: alert and confirm get a dialog over the app window, and passkeys go to the browser's WebAuthn. `prompt()` in app windows still returns null. |
+| Medium (e2e pass) | Protocol-handler questions couldn't show in batch 6's chip, and answers were saved as blocked; app windows answered permissions with booleans | Yes (e038778) |
+| Low–medium | Quitting before the browser opened after an app launch forgot which profiles were open | Yes |
+| Low | The session's active-tab index could point at the wrong tab | Yes |
+| Low (visual) | In the tabs column, the group line and the line under pinned tabs collided | Yes |
+| Low (visual) | Popover cards in the test screenshots are taller than their content | No. It comes from the tests' fixed heights; the app sizes them through `overlay:size`. Check on the Mac. |
+| Low (visual) | `tab-flyout-light.png` is blank | No. It's a screenshot-timing issue in the test (the dark version renders). Not reproduced in the app. |
+| Low (from the reports) | Pop-up windows have no chip, so quiet requests (notifications) aren't shown there | No. It's a small UI gap; noted for later. |
+
+The reviewer checked and found fine: the IPC host and main-frame checks, the Web Share gesture check, `innerHTML` escaping in the overlay renderers, `profileIpc` routing, the force-dark migration, sync leaving incognito out, crash-report scrubbing, and incognito blocks on the reading list and app install.
 
 ## Tests
 
-FINAL_TESTS_PLACEHOLDER
+- `npm test` at the root, which includes `server/test`: **903 tests: 897 pass, 0 fail, 6 skipped.** The skips are Mac-only or Windows-only.
+- `cd server && npm test`: **71 pass, 0 fail.** `npx tsc --noEmit -p server` is clean.
+- One headless test, "print preview (light)", timed out once under load in an earlier full run and passed when run alone; the last runs were all green.
 
 ## e2e files most likely to fail on the Mac CI
 
