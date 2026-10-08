@@ -123,7 +123,7 @@ const helpMenu = (cmd) => ({
     { type: 'separator' },
     { label: 'Terms of Service', click: cmd.terms },
     { label: 'Privacy Policy', click: cmd.privacy },
-    { label: 'Open-Source Licenses', click: cmd.credits },
+    { label: 'Third-Party Licenses', click: cmd.credits },
   ],
 });
 

@@ -32,7 +32,7 @@
       ["expo-splash-screen", { "image": "./assets/splash-icon.png", "imageWidth": 120, "backgroundColor": "#070708", "resizeMode": "contain" }]
     ],
     "extra": {
-      "site": "https://lumio.gw607953.workers.dev"
+      "site": "https://lumio-co.online"
     }
   }
 }

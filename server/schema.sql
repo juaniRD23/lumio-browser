@@ -1,9 +1,9 @@
--- Lumio (lumio-usa.online) on Cloudflare D1. Safe to run again (IF NOT EXISTS).
+-- Lumio (lumio-co.online) on Cloudflare D1. Safe to run again (IF NOT EXISTS).
 
--- Accounts: signed in with Google. The plan comes from the Stripe subscription.
+-- Accounts: signed in with Google, Apple or an email and a password. The plan comes from the Stripe subscription.
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
-  google_sub TEXT UNIQUE NOT NULL,
+  google_sub TEXT UNIQUE NOT NULL,       -- Google's account id; 'apple:<sub>' for an account made with Apple; 'email:<users.id>' for one made with email + password
   email TEXT NOT NULL,
   name TEXT,
   picture TEXT,
@@ -13,9 +13,17 @@ CREATE TABLE IF NOT EXISTS users (
   subscription_id TEXT,
   stripe_customer_id TEXT,
   created_at INTEGER NOT NULL,
-  role TEXT                              -- 'owner' can see the Spend page
+  role TEXT,                             -- 'owner' can see the Spend page
+  apple_sub TEXT,                        -- Sign in with Apple's account id (the Lumio iPhone and iPad app)
+  apple_refresh TEXT,                    -- Apple's refresh token, encrypted (revoked when the account is deleted)
+  password_hash TEXT,                    -- 'pbkdf2-sha256$<iterations>$<salt>$<hash>' (base64url); NULL: no password
+  email_unverified INTEGER               -- 1: made with Sign in with Apple from an email Apple hadn't verified (never found by its email); NULL or 0: verified
 );
 CREATE INDEX IF NOT EXISTS users_customer ON users (stripe_customer_id);
+CREATE UNIQUE INDEX IF NOT EXISTS users_apple ON users (apple_sub);
+-- Accounts by email; only one per email can have a password (and its email then never changes).
+CREATE INDEX IF NOT EXISTS users_email ON users (email);
+CREATE UNIQUE INDEX IF NOT EXISTS users_password_email ON users (email) WHERE password_hash IS NOT NULL;
 
 -- Sessions, stored by a SHA-256 of the token (never the token itself).
 CREATE TABLE IF NOT EXISTS sessions (
@@ -202,7 +210,8 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 CREATE TABLE IF NOT EXISTS app_codes (
   code_hash TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  challenge TEXT                         -- the iPhone and iPad app's PKCE challenge (its code needs the verifier)
 );
 
 -- One-time plan codes made on /admin: a month of a plan, no payment. Stored by hash.
@@ -259,3 +268,30 @@ CREATE TABLE IF NOT EXISTS crash_attempts (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS crash_attempts_ip ON crash_attempts (ip_hash, created_at);
+
+-- Email + password sign-in (src/email-auth.ts): codes waiting to be entered.
+-- A sign-up isn't an account until its code is confirmed; until then it's
+-- only this row.
+CREATE TABLE IF NOT EXISTS email_codes (
+  email TEXT NOT NULL,                   -- trimmed, lowercase
+  purpose TEXT NOT NULL,                 -- 'signup' | 'reset'
+  code_hash TEXT NOT NULL,               -- HMAC-SHA256 hex, keyed with the CODE_KEY Worker secret, of 'lumio-code|<purpose>|<email>|<code>'
+  expires_at INTEGER NOT NULL,           -- when the code stops working (sent + 15 minutes)
+  tries INTEGER NOT NULL DEFAULT 0,      -- entries of this code; at 5 it stops working
+  password_hash TEXT,                    -- signup only: the chosen password, same format as users.password_hash
+  created_at INTEGER NOT NULL,           -- a sign-up is forgotten 24 hours after this
+  PRIMARY KEY (email, purpose)
+);
+CREATE INDEX IF NOT EXISTS email_codes_created ON email_codes (created_at);
+-- Sends, sign-ins and codes entered, for the limits per email and per network address (kept an hour),
+-- and the sends that went ahead ('mail', kept a day), for the daily cap per email and the hourly cap on all.
+CREATE TABLE IF NOT EXISTS auth_attempts (
+  id TEXT PRIMARY KEY,                   -- random (randomHex(12)), so an attempt that worked can delete its own row
+  kind TEXT NOT NULL,                    -- 'send' | 'signin' | 'code' | 'mail' (a send within its limits; no ip_hash)
+  email_hash TEXT NOT NULL,              -- SHA-256 hex of 'lumio-email|<email>'
+  ip_hash TEXT NOT NULL,                 -- first 32 hex of SHA-256 of 'lumio-auth|' + ipKey(cf-connecting-ip) (an IPv6 address counts as its /64)
+  created_at INTEGER NOT NULL            -- rows are kept for one hour ('mail' rows for a day)
+);
+CREATE INDEX IF NOT EXISTS auth_attempts_email ON auth_attempts (kind, email_hash, created_at);
+CREATE INDEX IF NOT EXISTS auth_attempts_ip ON auth_attempts (kind, ip_hash, created_at);
+CREATE INDEX IF NOT EXISTS auth_attempts_kind_time ON auth_attempts (kind, created_at);

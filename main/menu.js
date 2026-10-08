@@ -314,7 +314,7 @@ function buildBrowserMenu(cmd, state = {}) {
         SEP,
         { label: 'Terms of Service', icon: 'page', run: cmd.terms },
         { label: 'Privacy Policy', icon: 'page', run: cmd.privacy },
-        { label: 'Open-source licenses', icon: 'page', run: cmd.credits },
+        { label: 'Third-party licenses', icon: 'page', run: cmd.credits },
       ],
     },
     { label: MAC ? 'Quit Lumio Browser' : 'Exit', icon: 'logout', accel: MAC ? 'Cmd+Q' : '', run: cmd.quit },

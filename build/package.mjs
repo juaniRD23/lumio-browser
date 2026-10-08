@@ -64,7 +64,7 @@ const common = {
   prune: true,
   appVersion: pkg.version, // 0.6.7, or 0.6.7-beta.2 for Lumio Beta
   buildVersion: pkg.version.split('-')[0], // CFBundleVersion: numbers only
-  appCopyright: 'Lumio · GPL-3.0',
+  appCopyright: '© Lumio',
   ignore: [
     /^\/dist($|\/)/,
     /^\/tests($|\/)/,

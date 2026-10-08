@@ -1,4 +1,4 @@
-/* First-run welcome: the same look as lumio-usa.online */
+/* First-run welcome: the same look as lumio-co.online */
 body {
   display: grid; place-items: center; min-height: 100vh;
   background: radial-gradient(ellipse 70% 55% at 50% -12%, color-mix(in srgb, var(--accent) 9%, transparent), color-mix(in srgb, var(--accent) 3%, transparent) 45%, transparent 100%), var(--bg);

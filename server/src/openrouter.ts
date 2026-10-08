@@ -22,7 +22,7 @@ export async function* complete(env: Env, model: Model, body: Record<string, unk
   try {
     res = await fetch(`${base}/chat/completions`, {
       method: 'POST',
-      headers: { authorization: `Bearer ${env.OPENROUTER_API_KEY}`, 'content-type': 'application/json', 'HTTP-Referer': 'https://lumio-usa.online', 'X-Title': 'Lumio' },
+      headers: { authorization: `Bearer ${env.OPENROUTER_API_KEY}`, 'content-type': 'application/json', 'HTTP-Referer': 'https://lumio-co.online', 'X-Title': 'Lumio' },
       body: JSON.stringify({
         ...body,
         model: model.id,

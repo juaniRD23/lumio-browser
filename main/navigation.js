@@ -64,7 +64,7 @@ function menuLabel({ title, url }) {
   return MAC ? short : short.replace(/&/g, '&&');
 }
 
-const helpUrl = () => `${(require('../package.json').homepage || 'https://lumio-browser.gw607953.workers.dev').replace(/\/$/, '')}/#faq`;
+const helpUrl = () => `${(require('../package.json').homepage || 'https://lumio-co.online').replace(/\/$/, '')}/#faq`;
 
 class Navigation {
   // deps: { store, alive(), cur(), ensureWin(), normalWin(), createWindow(opts),

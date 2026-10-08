@@ -1,5 +1,5 @@
-// Credits (lumio://credits): Lumio's own license, Chromium and Electron, and
-// the open-source packages and files Lumio ships, each with its license (from
+// Credits (lumio://credits): Chromium and Electron, and the third-party
+// packages and files Lumio ships, each with its license (from
 // main/credits.js). Everything is set as text.
 const page = window.lumioPage;
 const $ = (s) => document.querySelector(s);
@@ -31,9 +31,6 @@ const data = await page.invoke('page:credits');
 if (data) {
   if (data.terms) $('#terms').href = data.terms;
   if (data.privacy) $('#privacy').href = data.privacy;
-  if (data.source) Object.assign($('#source'), { href: data.source, hidden: false });
-
-  $('#lumio').append(entry({ name: 'Lumio Browser', version: data.version, license: data.license, url: data.source, text: data.licenseText }));
 
   // Chromium's hundreds of projects have a page of their own (or, without the file, its license online).
   const chromium = entry({ name: 'Chromium', version: data.chromium?.version, license: 'BSD-3-Clause and others' });

@@ -1,4 +1,5 @@
 /* Lumio app pages: sign in, account, Chat. Shares tokens with styles.css. */
+[hidden] { display: none !important; }
 body.app { min-height: 100svh; display: flex; flex-direction: column; }
 .app-head {
   display: flex; align-items: center; gap: 16px; height: 60px; padding: 0 var(--pad);
@@ -42,6 +43,27 @@ body.app { min-height: 100svh; display: flex; flex-direction: column; }
 .fine { color: var(--label); font-size: 12.5px; margin-top: 22px; }
 .fine a { color: var(--dim); }
 .signin-card .notice { margin-bottom: 18px; text-align: left; }
+.signin-card .or { display: flex; align-items: center; gap: 14px; margin: 20px 0; color: var(--label); font-size: 13px; }
+.signin-card .or::before, .signin-card .or::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+.signin-form { display: grid; gap: 16px; text-align: left; }
+.signin-card .field { display: grid; gap: 6px; }
+.signin-card .field label { color: var(--dim); font-size: 13px; }
+.signin-card .field input { width: 100%; height: 44px; padding: 0 14px; border-radius: 14px; border: 1px solid var(--line2); background: var(--bg2); color: var(--text); font: 400 16px var(--sans); outline: none; transition: box-shadow .15s; }
+.signin-card .field input:focus { box-shadow: 0 0 0 3px #86b7ff55; }
+.signin-card .field input::placeholder { color: var(--label); }
+.signin-card .field input[autocomplete="one-time-code"] { font-family: var(--mono); letter-spacing: .2em; }
+.signin-card .hint { margin: 0; color: var(--label); font-size: 12.5px; }
+.signin-form .btn.accent { width: 100%; height: 48px; margin-top: 4px; font-size: 15px; }
+.signin-card .alt { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 10px; margin: 18px 0 0; font-size: 14px; }
+.signin-card .alt + .alt { margin-top: 8px; }
+.signin-card .fine { margin: 26px 0 0; }
+.signin-card .link { padding: 0; border: 0; background: none; color: var(--dim); font: inherit; cursor: pointer; text-decoration: underline; text-decoration-color: var(--line2); text-underline-offset: 3px; }
+.signin-card .link:hover { color: var(--text); }
+.signin-card .link:disabled { opacity: .5; cursor: default; }
+.signin-card .link b { color: var(--text); font-weight: 600; }
+/* the reset step's username for password managers: there, but not seen */
+.pm-user { position: absolute; width: 2px; height: 2px; opacity: 0; pointer-events: none; }
+@media (max-width: 420px) { .signin-card { padding: 36px 22px 26px; } .signin-card h1 { font-size: 36px; } }
 
 /* ---------------------------------------------------------------- account */
 .page { width: min(980px, 100%); margin: 0 auto; padding: 44px var(--pad) 90px; display: grid; gap: 22px; }
@@ -57,7 +79,6 @@ body.app { min-height: 100svh; display: flex; flex-direction: column; }
 .plan-now .plan-name { font: 400 34px/1 var(--serif); }
 .pill { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 999px; font: 500 12px var(--sans); background: #86b7ff1f; color: var(--accent); }
 .pill.warn { background: #ffb4a81f; color: var(--warn); }
-.pill[hidden] { display: none; }
 .meters { display: grid; gap: 14px; margin-top: 18px; }
 .meter .row { display: flex; justify-content: space-between; font-size: 13.5px; color: var(--dim); margin-bottom: 6px; }
 .meter .bar { height: 8px; border-radius: 999px; background: #ffffff10; overflow: hidden; }

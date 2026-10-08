@@ -59,7 +59,7 @@
   show('0');
 
   // ---- fade sections in as they scroll into view ----
-  const targets = $$('.section-head, .mode, .rules li, .tile, .card, .price, .dl, .install, .oss-inner, .faq-list');
+  const targets = $$('.section-head, .mode, .rules li, .tile, .card, .price, .dl, .install, .faq-list');
   targets.forEach((el) => el.classList.add('fade'));
   const fader = new IntersectionObserver((entries) => {
     entries.forEach((e) => {

@@ -1,7 +1,6 @@
-// lumio://credits (main/credits.js, main/protocol.js): the open-source
+// lumio://credits (main/credits.js, main/protocol.js): the third-party
 // packages Lumio ships with their licenses (not the tools that build and test
-// it), Lumio's own license, and Chromium's notices as Electron ships them,
-// restyled for Lumio.
+// it), and Chromium's notices as Electron ships them, restyled for Lumio.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -36,12 +35,9 @@ test('the packages Lumio ships, theirs too, each with its license; not the build
   assert.match(ext.text, /GNU GENERAL PUBLIC LICENSE/);
 });
 
-test('the page’s data: Lumio’s own license and source, Chromium and Electron, the files Lumio carries', () => {
+test('the page’s data: Chromium and Electron, the files Lumio carries; nothing about Lumio’s own code', () => {
   const c = credits();
-  assert.equal(c.version, pkg.version);
-  assert.equal(c.license, 'GPL-3.0-or-later');
-  assert.equal(c.source, 'https://github.com/juaniRD23/lumio-browser');
-  assert.match(c.licenseText, /GNU GENERAL PUBLIC LICENSE\s+Version 3/);
+  for (const key of ['version', 'license', 'source', 'licenseText']) assert.equal(key in c, false, `no ${key} for Lumio itself`);
   assert.equal(c.electron.license, 'MIT');
   assert.match(c.electron.text, /Copyright \(c\) Electron contributors/, 'from the Electron in node_modules when running from source');
   assert.equal(c.chromium.available, true);
@@ -65,4 +61,20 @@ test('lumio://credits/chromium.html is Chromium’s notices file, with chrome://
   assert.match(out, /<link rel="stylesheet" href="credits-chromium\.css">\n<\/head>/);
   assert.match(out, /class="product"/, 'the notices themselves are kept');
   assert.ok(fs.existsSync(path.join(ROOT, 'renderer', 'pages', 'credits-chromium.css')));
+});
+
+// The app's pages, windows, menus, Spanish text and app metadata make no
+// licensing claims about Lumio itself and don't point to its code.
+// (Third-party notices, like Chromium's file and the packages' licenses, are
+// shown as they come.)
+test('the app makes no licensing claims about Lumio and doesn’t link to its code', () => {
+  const files = ['main/menu.js', 'main/menu-extras.js', 'renderer/assets/i18n/es.js', 'build/package.mjs', 'build/windows/installer.nsi'];
+  for (const dir of ['renderer/pages', 'renderer/ui']) {
+    for (const f of fs.readdirSync(path.join(ROOT, dir))) if (/\.(html|m?js)$/.test(f)) files.push(`${dir}/${f}`);
+  }
+  for (const f of files) {
+    const text = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    assert.doesNotMatch(text, /open[- ]source|free software|software libre|código abierto|General Public License|\bGPL\b/i, `${f} makes a licensing claim about Lumio`);
+    assert.doesNotMatch(text, /github\.com\/juaniRD23/i, `${f} links to Lumio’s code`);
+  }
 });

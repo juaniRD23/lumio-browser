@@ -198,19 +198,20 @@ export function validateBrowserToolCall(value:unknown,allowed:string[],extra:Too
  return {id:value.id,type:'function',function:{name:definition.function.name,arguments:JSON.stringify(args)}};
 }
 
-export type BrowserContext={platform:'mac'|'windows';computer:boolean;mode:'ask'|'auto'|'bypass';timeZone:string;tabCount:number;activeTab?:{id:number;title:string;url:string}};
+export type BrowserContext={platform:'mac'|'windows'|'ios';computer:boolean;mode:'ask'|'auto'|'bypass';timeZone:string;tabCount:number;activeTab?:{id:number;title:string;url:string}};
 export type BrowserStep=DesktopStep&{context:BrowserContext;reasoning:BrowserReasoning};
 
 function readContext(value:unknown):BrowserContext{
  if(!object(value)||Object.keys(value).some(key=>!['platform','computer','mode','timeZone','tabCount','activeTab'].includes(key)))throw new AgentError('Invalid browser context.');
  const {platform,computer,mode,timeZone,tabCount,activeTab}=value;
- if(!['mac','windows'].includes(String(platform))||typeof computer!=='boolean'||!['ask','auto','bypass'].includes(String(mode))||typeof timeZone!=='string'||!/^[A-Za-z0-9_+\-/]{1,64}$/.test(timeZone)||!Number.isSafeInteger(tabCount)||(tabCount as number)<0||(tabCount as number)>1000)throw new AgentError('Invalid browser context.');
+ // 'ios': Lumio for iPhone and iPad (web pages only, never the computer).
+ if(!['mac','windows','ios'].includes(String(platform))||typeof computer!=='boolean'||(platform==='ios'&&computer)||!['ask','auto','bypass'].includes(String(mode))||typeof timeZone!=='string'||!/^[A-Za-z0-9_+\-/]{1,64}$/.test(timeZone)||!Number.isSafeInteger(tabCount)||(tabCount as number)<0||(tabCount as number)>1000)throw new AgentError('Invalid browser context.');
  let tab:BrowserContext['activeTab'];
  if(activeTab!==undefined){
   if(!object(activeTab)||!Number.isSafeInteger(activeTab.id)||typeof activeTab.title!=='string'||typeof activeTab.url!=='string'||Object.keys(activeTab).some(key=>!['id','title','url'].includes(key)))throw new AgentError('Invalid browser context.');
   tab={id:activeTab.id as number,title:activeTab.title.slice(0,300),url:activeTab.url.slice(0,2048)};
  }
- return {platform:platform as 'mac'|'windows',computer,mode:mode as BrowserContext['mode'],timeZone,tabCount:tabCount as number,...(tab?{activeTab:tab}:{})};
+ return {platform:platform as BrowserContext['platform'],computer,mode:mode as BrowserContext['mode'],timeZone,tabCount:tabCount as number,...(tab?{activeTab:tab}:{})};
 }
 
 // Mirrors validateDesktopStep, with the browser's tools and context.
@@ -343,10 +344,11 @@ export function fitBrowserMessages(messages:AgentMessage[],fixed:number,budget=B
 // won't also send: the time-and-tab note goes only on the person's own
 // message (withContextNote). Getting this wrong made every step full price.
 export function browserSystemPrompt(step:BrowserStep,now=new Date()){
- const c=step.context,os=c.platform==='mac'?'Mac':'Windows PC';
+ const c=step.context,os=c.platform==='mac'?'Mac':c.platform==='ios'?'iPhone or iPad':'Windows PC';
+ const ios=c.platform==='ios';
  let day;
  try{day=now.toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric',timeZone:c.timeZone})}catch{day=now.toUTCString().slice(0,16)}
- return `You are Lumio, the AI assistant built into Lumio Browser, a web browser on the user's ${os}. You sit in a side panel next to the page. You can answer questions, and you can act for the user: operate web pages in the browser and, when needed, control the computer itself.
+ return `You are Lumio, the AI assistant built into Lumio Browser, a web browser on the user's ${os}. ${ios?'You sit in a panel next to the page (a sheet over it on iPhone). You can answer questions, and you can act for the user: operate web pages in the browser.':'You sit in a side panel next to the page. You can answer questions, and you can act for the user: operate web pages in the browser and, when needed, control the computer itself.'}
 
 Today is ${day} (${c.timeZone}).
 
@@ -355,8 +357,8 @@ How to work:
 - Just answer when the user asks a question you can answer. Use tools only when they help.
 ${step.tools.includes('paste_text')?'- To fill a spreadsheet or table (Google Sheets, Excel), click the first cell, then paste_text all the rows in one go (tabs between columns, new lines between rows). Never type cell by cell.\n':''}- When you already know the next few actions (for example click a field and type into it, or several fields of a form), call those tools together in one turn instead of one per turn.\n${step.tools.includes('save_site_tip')?'- If you were given tips for a site, use them. When you finish a task and learned a faster way to do it on that site, save it with save_site_tip (one short, general sentence) so next time is quicker.\n':''}- Use screenshot_tab only when read_page doesn\'t show what you need (canvases, images, layout): it is slower.\n${step.tools.includes('web_search')?'- To look things up or research, use web_search and read_url: they work in the background without opening tabs and are much faster. Open pages in tabs (navigate) only to click, type or fill something in, or when the user wants to see the page.\n':''}- For anything on the web, use the browser tools (they are faster and more reliable than controlling the screen). Call read_page to see a page and get element refs like [12], then click/type using those refs. Refs are renumbered on every read_page, so read again after the page changes.
 - If an element isn't in the list, scroll or use screenshot_tab + click_at for things like canvases.
-- ${c.computer?`Use the computer tools only for work outside the browser (other apps, files, system). Never use computer_screenshot or the other computer_* tools to look at or act on a page in Lumio's tabs: use read_page, screenshot_tab and the browser tools there. Take computer_screenshot first and use pixel coordinates from the latest screenshot. Prefer open_app, keyboard shortcuts and shell commands when they're more reliable than clicking.`:'Controlling the computer outside the browser is not available right now. Say so if the user asks for it.'}
-- Work step by step and verify the result of important actions. When the task is done, reply with a short summary of what you did.
+- ${c.computer?`Use the computer tools only for work outside the browser (other apps, files, system). Never use computer_screenshot or the other computer_* tools to look at or act on a page in Lumio's tabs: use read_page, screenshot_tab and the browser tools there. Take computer_screenshot first and use pixel coordinates from the latest screenshot. Prefer open_app, keyboard shortcuts and shell commands when they're more reliable than clicking.`:ios?'You can only work with web pages in Lumio: other apps and the device itself are out of reach. Say so if the user asks for that.':'Controlling the computer outside the browser is not available right now. Say so if the user asks for it.'}
+${ios?'- Plans can’t be bought in this app (App Store rules): never tell the user how or where to buy, upgrade or subscribe to a Lumio plan, and don’t link to prices. If they ask about their plan or usage, say they can see both in Lumio’s Settings, under their account.\n':''}- Work step by step and verify the result of important actions. When the task is done, reply with a short summary of what you did.
 - Long tasks are fine: there is no step limit. Keep going until the whole task is done instead of stopping partway to ask whether to go on. Stop early only when you need the user (a decision, a sign-in, something irreversible) or you are stuck, and then say what is blocking you.
 - For tasks with 3 or more steps, keep a plan with update_plan: list the steps before you start, then update it as each step starts and finishes (the user watches it as a "Task progress" checklist). Skip it for quick questions.
 - Approval mode is "${c.mode}". Some actions ask the user first. If the user denies an action, don't retry it — explain, or ask what they'd like instead.

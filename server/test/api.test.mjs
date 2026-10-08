@@ -89,7 +89,7 @@ beforeEach(() => {
     MICROSOFT_CLIENT_ID: 'ms-client', MICROSOFT_CLIENT_SECRET: 'ms-secret', MICROSOFT_AUTH_URL: MS_AUTH, MICROSOFT_TOKEN_URL: MS_TOKEN,
     GOOGLE_API: GAPI, GRAPH_API: GRAPH, CONNECTIONS_KEY: Buffer.from(crypto.randomBytes(32)).toString('base64'),
   };
-  calls = { or: [], orGet: [], google: [], stripe: [], api: [], revoked: [], push: [] };
+  calls = { or: [], orGet: [], google: [], stripe: [], api: [], revoked: [], push: [], apple: [] };
   generations = { 'gen-img-test': 0.0094 }; // what OpenRouter's records say each generation cost
   unrecorded = new Set(); // generations OpenRouter hasn't recorded yet
   liveCheck.delays = [0, 0, 0];
@@ -132,6 +132,11 @@ beforeEach(() => {
     }
     if (u.startsWith(GAPI) || u.startsWith(GRAPH)) { calls.api.push({ url: u, auth: opts.headers?.authorization }); return apiReply(u, opts); }
     if (u.startsWith('https://web.push.apple.com/')) { calls.push.push({ url: u, headers: opts.headers }); return new Response('', { status: 201 }); }
+    if (u.startsWith('https://apns.test/') || u.startsWith('https://apns-sandbox.test/')) {
+      calls.push.push({ url: u, headers: opts.headers, body: JSON.parse(opts.body) });
+      // A token for an app that was deleted: Apple says it's gone.
+      return u.endsWith('de'.repeat(32)) ? Response.json({ reason: 'Unregistered' }, { status: 410 }) : new Response('', { status: 200 });
+    }
     if (u === 'https://exp.host/--/api/v2/push/send') { const body = JSON.parse(opts.body); calls.push.push({ url: u, body }); return Response.json({ data: body.map((m) => (m.to.includes('Gone') ? { status: 'error', details: { error: 'DeviceNotRegistered' } } : { status: 'ok', id: 'x' })) }); }
     if (u.startsWith('https://oauth2.googleapis.com/revoke')) { calls.revoked.push(u); return new Response('', { status: 200 }); }
     if (u.startsWith(STRIPE)) {
@@ -140,7 +145,8 @@ beforeEach(() => {
       calls.stripe.push({ method: opts.method || 'GET', path, params });
       if (path === '/v1/customers') return Response.json({ id: 'cus_1' });
       const cus = /^\/v1\/customers\/(\w+)$/.exec(path);
-      if (cus && cus[1] === 'cus_1') return Response.json({ id: 'cus_1' });
+      if (cus && opts.method === 'DELETE' && stripeState.failDelete) return Response.json({ error: { message: 'Stripe is down' } }, { status: 500 });
+      if (cus && cus[1] === 'cus_1') return Response.json({ id: 'cus_1', ...(opts.method === 'DELETE' ? { deleted: true } : {}) });
       if (cus) return Response.json({ error: { code: 'resource_missing', message: `No such customer: '${cus[1]}'` } }, { status: 404 });
       // Making a plan's product and price (Go, the first time it's chosen).
       if (path === '/v1/products' && opts.method === 'POST') return Response.json({ id: `prod_${params.name.toLowerCase().replace(/\W+/g, '_')}` });
@@ -166,6 +172,13 @@ beforeEach(() => {
       }
       if (sub && stripeState.subscriptions[sub[1]]) return Response.json(stripeState.subscriptions[sub[1]]);
       return Response.json({ error: { message: 'No such thing' } }, { status: 404 });
+    }
+    if (u.startsWith('https://apple.test/')) {
+      const body = opts.body ? Object.fromEntries(new URLSearchParams(String(opts.body))) : null;
+      calls.apple.push({ url: u, body });
+      if (u === APPLE_KEYS) return Response.json({ keys: appleKeys.map((k) => k.jwk) });
+      if (u === APPLE_TOKEN) return body?.code === 'c.apple-code-123' ? Response.json({ access_token: 'apple-access', refresh_token: 'apple-refresh-1', id_token: 'x' }) : Response.json({ error: 'invalid_grant' }, { status: 400 });
+      if (u === APPLE_REVOKE) return new Response('', { status: 200 });
     }
     return new Response('nope', { status: 404 });
   };
@@ -250,6 +263,36 @@ test('logout ends the session; cookie POSTs from other sites are refused', async
   assert.equal(out.status, 200);
   assert.match(out.headers.get('set-cookie'), /Max-Age=0/);
   assert.equal((await (await call('/api/account', { cookie: token })).json()).signedIn, false);
+});
+
+test('one Worker, two hosts: lumio-co.online and the old workers.dev host each get sign-in and payment links on their own host', async () => {
+  env.STRIPE_PUBLISHABLE_KEY = 'pk_test_123';
+  const NEW = 'https://lumio-co.online', OLD = 'https://lumio.gw607953.workers.dev';
+  for (const [site, other] of [[NEW, OLD], [OLD, NEW]]) {
+    const at = (base, path, { cookie, token, method = 'GET', body, origin = base } = {}) => worker.fetch(new Request(base + path, {
+      method,
+      redirect: 'manual',
+      headers: {
+        ...(cookie ? { cookie: `__Host-lumio_session=${cookie}` } : {}),
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        ...(body ? { 'content-type': 'application/json', origin } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    }), env, ctx);
+    const start = await at(site, '/api/auth/google/start?next=/chat');
+    const auth = new URL(start.headers.get('location'));
+    assert.equal(auth.searchParams.get('redirect_uri'), `${site}/api/auth/google/callback`);
+    const back = await at(site, `/api/auth/google/callback?code=good&state=${auth.searchParams.get('state')}`);
+    assert.equal(back.headers.get('location'), '/chat');
+    assert.equal(calls.google.at(-1).redirect_uri, `${site}/api/auth/google/callback`, 'the token request names the same callback');
+    const token = /__Host-lumio_session=([a-f0-9]{64})/.exec(back.headers.get('set-cookie') || '')[1];
+    assert.equal((await at(site, '/api/billing/checkout', { cookie: token, method: 'POST', body: { plan: 'plus', embedded: true }, origin: other })).status, 403, 'a cookie POST from the other host is refused');
+    assert.deepEqual(await (await at(site, '/api/billing/checkout', { cookie: token, method: 'POST', body: { plan: 'plus', embedded: true } })).json(), { clientSecret: 'cs_e1_secret_abc', publishableKey: 'pk_test_123' });
+    assert.equal(calls.stripe.filter((c) => c.path === '/v1/checkout/sessions').at(-1).params.return_url, `${site}/checkout?session_id={CHECKOUT_SESSION_ID}`);
+    // Lumio Browser keeps its session when an update moves it to the other host.
+    assert.equal((await (await at(other, '/api/account', { token })).json()).signedIn, true);
+  }
+  assert.equal(sql.prepare('SELECT count(*) AS n FROM users').get().n, 1, 'one account on both hosts');
 });
 
 // ---------------------------------------------------------------- billing
@@ -474,6 +517,8 @@ test('web Chat streams a reply, saves the conversation, and bills the allowance'
   assert.deepEqual(calls.or[0].body.reasoning, { effort: 'low', exclude: true });
   assert.equal(calls.or[0].body.model, CHAT_DEFAULT);
   assert.equal(calls.or[0].body.messages[0].role, 'system');
+  assert.match(calls.or[0].body.messages[0].content, /AI assistant on lumio-co\.online\./);
+  assert.equal(calls.or[0].headers['HTTP-Referer'], 'https://lumio-co.online', 'OpenRouter credits Lumio’s site');
   const chatId = ev[0].chatId;
   // Follow-up in the same chat sends the history.
   reply = () => textReply('Still here.');
@@ -979,6 +1024,30 @@ test('helper AIs are offered to the model only on High thinking effort', async (
   assert.equal(def.properties.helpers.maxItems, 4);
 });
 
+test('Lumio for iPhone and iPad: its own platform, web pages only, never the computer', async () => {
+  const { token } = await signIn();
+  const ios = { platform: 'ios', computer: false, mode: 'ask', timeZone: 'Europe/Madrid', tabCount: 2, activeTab: { id: 1, title: 'Shop', url: 'https://shop.example/' } };
+  const tools = ['read_page', 'click', 'type', 'navigate', 'update_plan'];
+  const ev = await events(await call('/v1/agent', { token, method: 'POST', body: step({ stepId: 'i1', tools, context: ios }) }));
+  await settled();
+  assert.equal(ev.at(-1).type, 'result');
+  const system = calls.or.at(-1).body.messages[0].content;
+  assert.match(system, /a web browser on the user's iPhone or iPad\. You sit in a panel next to the page \(a sheet over it on iPhone\)/);
+  assert.match(system, /You can only work with web pages in Lumio/);
+  // App Store 3.1.1 / 3.1.3(f): the model never sends iPhone and iPad users to buy a plan.
+  assert.match(system, /Plans can’t be bought in this app \(App Store rules\): never tell the user how or where to buy, upgrade or subscribe/);
+  assert.doesNotMatch(system, /control the computer itself|computer_screenshot/);
+  assert.deepEqual(calls.or.at(-1).body.tools.map((t) => t.function.name), tools);
+  assert.match(calls.or.at(-1).body.messages.at(-1).content, /The user is looking at tab 1: "Shop" — https:\/\/shop\.example\/\. 2 tab\(s\) open\.$/);
+  // The computer's tools are refused, and an iPhone never claims the computer.
+  for (const bad of [step({ stepId: 'i2', tools: ['read_page', 'computer_click'], context: ios }), step({ stepId: 'i3', context: { ...ios, computer: true } }), step({ stepId: 'i4', tools: ['run_applescript'], context: ios })]) {
+    const res = await call('/v1/agent', { token, method: 'POST', body: bad });
+    assert.equal(res.status, 400);
+  }
+  // Unknown platforms are still refused.
+  assert.equal((await call('/v1/agent', { token, method: 'POST', body: step({ stepId: 'i5', context: { ...ios, platform: 'android' } }) })).status, 400);
+});
+
 test('voice: speech to text and reading aloud are charged to the weekly allowance', async () => {
   const { token } = await signIn();
   generations['gen-stt-test'] = 0.000014;
@@ -1140,6 +1209,7 @@ test('companion: the phone sends commands to a computer, sees its status, and no
   assert.equal(k, env.VAPID_PUBLIC_KEY);
   const [h, c, sig] = jwt.split('.');
   assert.equal(JSON.parse(Buffer.from(c, 'base64url')).aud, 'https://web.push.apple.com');
+  assert.equal(JSON.parse(Buffer.from(c, 'base64url')).sub, 'mailto:support@lumio-co.online', 'the push services’ contact');
   assert.ok(await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, pair.publicKey, Buffer.from(sig, 'base64url'), new TextEncoder().encode(`${h}.${c}`)), 'a valid ES256 signature');
   const notices = await (await sync(`/api/companion/messages?kind=notice&device=${PHONE}&since=0`)).json();
   assert.deepEqual(notices.messages.map((m) => m.data), [sealed('done')]);
@@ -1179,6 +1249,78 @@ test('the Lumio app gets notifications through Expo, saying only what kind of ev
   const sent = calls.push.find((p) => p.url.startsWith('https://exp.host'));
   assert.deepEqual(sent.body.map((m) => [m.to, m.title, m.body]), [['ExponentPushToken[abcdefghijklmnop]', 'Lumio', 'Lumio needs your OK.'], ['ExponentPushToken[GoneGoneGoneGone]', 'Lumio', 'Lumio needs your OK.']]);
   assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM push_subscriptions').get().n, 1, 'an uninstalled app is forgotten');
+});
+
+test('Lumio for iPhone and iPad gets notifications through APNs, saying only what kind of event it was', async () => {
+  const { token } = await signIn();
+  const sync = (path, opts = {}) => call(path, { token, ...opts });
+  const IPHONE = 'ios-dddddddd-4444';
+  const IPAD = 'ios-eeeeeeee-5555';
+  const OLD = 'ios-ffffffff-6666';
+  const tokenHex = 'ab'.repeat(32);
+  await sync('/api/sync/devices', { method: 'POST', body: { id: DEV_A, name: 'MacBook', kind: 'computer' } });
+  // Subscribing: hex device tokens only. Without an Apple key, nothing can be delivered yet (the app says so).
+  assert.equal((await sync('/api/companion/push', { method: 'POST', body: { device: IPHONE, endpoint: 'apns:not-hex' } })).status, 400);
+  assert.equal((await sync('/api/companion/push', { method: 'POST', body: { device: IPHONE, endpoint: 'apns:abc' } })).status, 400, 'too short');
+  const first = await (await sync('/api/companion/push', { method: 'POST', body: { device: IPHONE, endpoint: `apns:${tokenHex}` } })).json();
+  assert.deepEqual(first, { ok: true, delivers: false });
+  await sync('/api/companion/messages', { method: 'POST', body: { kind: 'notice', device: DEV_A, data: sealed('x'), hint: 'approval' } });
+  await settled();
+  assert.equal(calls.push.length, 0, 'no key, no APNs call');
+
+  // The Apple key (here the Sign in with Apple one, with APNs enabled on it).
+  const ec = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+  const pkcs8 = Buffer.from(await crypto.subtle.exportKey('pkcs8', ec.privateKey)).toString('base64');
+  Object.assign(env, {
+    APPLE_TEAM_ID: 'TEAM123456', APPLE_KEY_ID: 'KEYAPNS001', APNS_URL: 'https://apns.test', APNS_SANDBOX_URL: 'https://apns-sandbox.test',
+    APPLE_PRIVATE_KEY: `-----BEGIN PRIVATE KEY-----\n${pkcs8.match(/.{1,64}/g).join('\n')}\n-----END PRIVATE KEY-----`,
+  });
+  assert.deepEqual(await (await sync('/api/companion/push', { method: 'POST', body: { device: IPHONE, endpoint: `apns:${tokenHex}` } })).json(), { ok: true, delivers: true });
+  assert.equal((await sync('/api/companion/push', { method: 'POST', body: { device: IPAD, endpoint: `apns-sandbox:${'cd'.repeat(32)}` } })).status, 200, 'a development build');
+  assert.equal((await sync('/api/companion/push', { method: 'POST', body: { device: OLD, endpoint: `apns:${'de'.repeat(32)}` } })).status, 200);
+
+  await sync('/api/companion/messages', { method: 'POST', body: { kind: 'notice', device: DEV_A, data: sealed('secret details'), hint: 'approval' } });
+  await settled();
+  const sent = calls.push.filter((p) => p.url.includes('apns'));
+  assert.deepEqual(sent.map((p) => p.url).sort(), [`https://apns-sandbox.test/3/device/${'cd'.repeat(32)}`, `https://apns.test/3/device/${tokenHex}`, `https://apns.test/3/device/${'de'.repeat(32)}`]);
+  const one = sent.find((p) => p.url.endsWith(tokenHex));
+  assert.deepEqual(one.body, { aps: { alert: { title: 'Lumio', body: 'Lumio needs your OK.' }, sound: 'default', 'thread-id': 'lumio-companion' }, lumio: { notice: true, hint: 'approval' } });
+  assert.ok(!JSON.stringify(one.body).includes('secret'), 'the details stay encrypted');
+  assert.equal(one.headers['apns-topic'], 'online.lumio-usa.lumio');
+  assert.equal(one.headers['apns-push-type'], 'alert');
+  // The provider token: ES256 from the team's key, reused between pushes.
+  const [h, c, sig] = one.headers.authorization.replace(/^bearer /, '').split('.');
+  assert.deepEqual(JSON.parse(Buffer.from(h, 'base64url')), { alg: 'ES256', kid: 'KEYAPNS001' });
+  assert.equal(JSON.parse(Buffer.from(c, 'base64url')).iss, 'TEAM123456');
+  assert.ok(await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, ec.publicKey, Buffer.from(sig, 'base64url'), new TextEncoder().encode(`${h}.${c}`)));
+  assert.equal(new Set(sent.map((p) => p.headers.authorization)).size, 1);
+  assert.deepEqual(sql.prepare('SELECT device FROM push_subscriptions ORDER BY device').all().map((r) => r.device), [IPHONE, IPAD].sort(), 'a deleted app’s token is forgotten');
+
+  // A tab from the computer; an unknown hint says the least.
+  calls.push = [];
+  await sync('/api/companion/messages', { method: 'POST', body: { kind: 'notice', device: DEV_A, data: sealed('t'), hint: 'tab' } });
+  await sync('/api/companion/messages', { method: 'POST', body: { kind: 'notice', device: DEV_A, data: sealed('t'), hint: 'constructor' } });
+  await settled();
+  assert.deepEqual(calls.push.filter((p) => p.url.endsWith(tokenHex)).map((p) => [p.body.aps.alert.body, p.body.lumio.hint]), [['A tab from your computer is ready to open.', 'tab'], ['Lumio has an update.', 'info']]);
+  // Never to the device that sent it.
+  calls.push = [];
+  await sync('/api/companion/messages', { method: 'POST', body: { kind: 'notice', device: IPHONE, data: sealed('t'), hint: 'done' } });
+  await settled();
+  assert.ok(!calls.push.some((p) => p.url.endsWith(tokenHex)));
+
+  // Notifications off on the iPhone.
+  assert.equal((await sync(`/api/companion/push?device=${IPHONE}`, { method: 'DELETE' })).status, 200);
+  assert.equal((await sync('/api/companion/push?device=x', { method: 'DELETE' })).status, 400);
+  assert.deepEqual(sql.prepare('SELECT device FROM push_subscriptions').all().map((r) => r.device), [IPAD]);
+
+  // Someone else signs in on that iPad: its token now belongs to their account
+  // only, so the first account's news stops going there.
+  const { token: lee } = await signIn('other');
+  const ipadToken = `apns-sandbox:${'cd'.repeat(32)}`;
+  assert.equal((await call('/api/companion/push', { token: lee, method: 'POST', body: { device: IPAD, endpoint: ipadToken } })).status, 200);
+  const owners = sql.prepare('SELECT owner FROM push_subscriptions WHERE endpoint = ?').all(ipadToken).map((r) => r.owner);
+  const leeId = sql.prepare("SELECT id FROM users WHERE email = 'lee@example.com'").get().id;
+  assert.deepEqual(owners, [leeId]);
 });
 
 // ---------------------------------------------------------------- connections
@@ -1303,4 +1445,219 @@ test('connections: Microsoft OneDrive (Word, PowerPoint, Excel) reads a Word fil
   const state = new URL(start.headers.get('location')).searchParams.get('state');
   const stolen = await call(`/api/connect/microsoft/callback?code=conn-ms&state=${state}`, { cookie: other.token });
   assert.match(stolen.headers.get('location'), /connect_error=expired/);
+});
+
+// ---------------------------------------------------------------- Lumio for iPhone and iPad: accounts
+const APPLE_KEYS = 'https://apple.test/auth/keys';
+const APPLE_TOKEN = 'https://apple.test/auth/token';
+const APPLE_REVOKE = 'https://apple.test/auth/revoke';
+const APP_ID = 'online.lumio-usa.lumio';
+let appleKeys = []; // Apple's published signing keys (stand-ins): { kid, privateKey, jwk }
+const hex256 = (text) => crypto.createHash('sha256').update(text).digest('hex');
+const nonceN = (n) => `nonce-${String(n).padStart(4, '0')}-${'x'.repeat(24)}`;
+
+async function appleKey(kid = `k${crypto.randomBytes(5).toString('hex')}`) {
+  const pair = await crypto.subtle.generateKey({ name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['sign', 'verify']);
+  const jwk = await crypto.subtle.exportKey('jwk', pair.publicKey);
+  return { kid, privateKey: pair.privateKey, jwk: { kty: 'RSA', n: jwk.n, e: jwk.e, kid, alg: 'RS256', use: 'sig' } };
+}
+async function appleSetup() {
+  appleKeys = [await appleKey()];
+  env.APPLE_KEYS_URL = APPLE_KEYS;
+}
+// An identity token like the one the Sign in with Apple sheet gives the app.
+async function appleToken(claims = {}, { key = appleKeys[0], kid = key.kid, nonce = nonceN(1) } = {}) {
+  const now = Math.floor(Date.now() / 1000);
+  const enc = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const head = enc({ alg: 'RS256', kid });
+  const body = enc({ iss: 'https://appleid.apple.com', aud: APP_ID, exp: now + 600, iat: now, sub: '001234.abcdef0123456789.0042', email: 'ana@privaterelay.appleid.com', email_verified: 'true', is_private_email: 'true', nonce: hex256(nonce), ...claims });
+  const sig = Buffer.from(await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key.privateKey, new TextEncoder().encode(`${head}.${body}`))).toString('base64url');
+  return `${head}.${body}.${sig}`;
+}
+const appleSignIn = (body) => call('/api/auth/apple', { method: 'POST', body, origin: undefined });
+
+test('Sign in with Apple: a checked token makes an account and a session; the same Apple ID comes back to it', async () => {
+  await appleSetup();
+  const res = await appleSignIn({ identityToken: await appleToken(), nonce: nonceN(1), name: { givenName: 'Ana', familyName: 'Lee' }, authorizationCode: 'c.apple-code-123' });
+  assert.equal(res.status, 200);
+  const { token, account } = await res.json();
+  assert.match(token, /^[a-f0-9]{64}$/);
+  assert.deepEqual([account.signedIn, account.authMethod, account.email, account.profile.name, account.plan.id], [true, 'apple', 'ana@privaterelay.appleid.com', 'Ana Lee', 'free']);
+  const me = await (await call('/api/account', { token })).json();
+  assert.equal(me.ownerId, account.ownerId, 'the session works as a bearer token');
+  assert.equal(userRow().google_sub, 'apple:001234.abcdef0123456789.0042');
+  assert.equal(userRow().apple_sub, '001234.abcdef0123456789.0042');
+  assert.ok(!JSON.stringify(sql.prepare('SELECT * FROM sessions').all()).includes(token), 'only a hash is stored');
+  await settled();
+  assert.equal(calls.apple.filter((c) => c.url === APPLE_TOKEN).length, 0, 'no Apple key configured: the code is not used');
+  // Again, later: Apple sends no name this time.
+  const again = await (await appleSignIn({ identityToken: await appleToken({}, { nonce: nonceN(2) }), nonce: nonceN(2) })).json();
+  assert.equal(again.account.ownerId, account.ownerId);
+  assert.equal(again.account.profile.name, 'Ana Lee');
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM users').get().n, 1);
+  assert.equal(calls.apple.filter((c) => c.url === APPLE_KEYS).length, 1, 'Apple’s keys are cached');
+});
+
+test('Sign in with Apple refuses forged, expired, foreign and replayed tokens', async () => {
+  await appleSetup();
+  const forger = await appleKey(appleKeys[0].kid); // same key id, another key
+  const refused = async (body, status = 401) => {
+    const res = await appleSignIn(body);
+    assert.equal(res.status, status, JSON.stringify(await res.clone().json()));
+    return (await res.json()).code;
+  };
+  const now = Math.floor(Date.now() / 1000);
+  assert.equal(await refused({ identityToken: await appleToken({}, { key: forger, kid: appleKeys[0].kid }), nonce: nonceN(1) }), 'apple_invalid');
+  assert.equal(await refused({ identityToken: await appleToken({ aud: 'com.someone.else' }), nonce: nonceN(1) }), 'apple_invalid');
+  assert.equal(await refused({ identityToken: await appleToken({ iss: 'https://evil.example' }), nonce: nonceN(1) }), 'apple_invalid');
+  assert.equal(await refused({ identityToken: await appleToken({ exp: now - 10 }), nonce: nonceN(1) }), 'apple_invalid');
+  assert.equal(await refused({ identityToken: await appleToken(), nonce: nonceN(9) }), 'apple_invalid', 'the nonce must be the one the token was made for');
+  assert.equal(await refused({ identityToken: await appleToken({}, { kid: 'unknown-kid' }), nonce: nonceN(1) }), 'apple_invalid');
+  assert.equal(await refused({ identityToken: 'not.a.jwt', nonce: nonceN(1) }), 'apple_invalid');
+  assert.equal(await refused({ identityToken: await appleToken() }, 400), 'invalid_request');
+  assert.equal(await refused({ identityToken: await appleToken({ email: undefined }), nonce: nonceN(1) }, 400), 'email_required');
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM users').get().n, 0);
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 0);
+  // An unknown key id made Lumio look for new keys (Apple rotates them).
+  assert.ok(calls.apple.filter((c) => c.url === APPLE_KEYS).length >= 2);
+});
+
+test('Apple and Google sign-ins with the same verified email are one Lumio account', async () => {
+  await appleSetup();
+  // Google first (on the Mac or the website), then Apple on the iPhone.
+  const { token } = await signIn('good');
+  const google = await (await call('/api/account', { token })).json();
+  const apple = await (await appleSignIn({ identityToken: await appleToken({ email: 'sam@example.com', email_verified: true }), nonce: nonceN(1) })).json();
+  assert.equal(apple.account.ownerId, google.ownerId);
+  assert.equal(apple.account.authMethod, 'google');
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM users').get().n, 1);
+  // Apple first, then Google with the same email.
+  const lee = await (await appleSignIn({ identityToken: await appleToken({ sub: '000999.lee', email: 'lee@example.com' }, { nonce: nonceN(2) }), nonce: nonceN(2) })).json();
+  assert.equal(lee.account.authMethod, 'apple');
+  const { token: leeGoogle } = await signIn('other');
+  const leeNow = await (await call('/api/account', { token: leeGoogle })).json();
+  assert.equal(leeNow.ownerId, lee.account.ownerId);
+  assert.equal(leeNow.authMethod, 'google');
+  assert.equal(sql.prepare("SELECT google_sub FROM users WHERE id = ?").get(lee.account.ownerId).google_sub, 'g-222');
+  // An email Apple hasn't verified isn't linked to anyone.
+  const stranger = await (await appleSignIn({ identityToken: await appleToken({ sub: '000777.x', email: 'sam@example.com', email_verified: 'false' }, { nonce: nonceN(3) }), nonce: nonceN(3) })).json();
+  assert.notEqual(stranger.account.ownerId, google.ownerId);
+});
+
+test('Lumio for iPhone and iPad signs in with Google in the system sheet: the code needs the PKCE secret, once', async () => {
+  const verifier = crypto.randomBytes(32).toString('base64url');
+  const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+  const next = `/api/auth/app/finish?challenge=${challenge}&end=1`;
+  const handOff = async () => {
+    const { token, location } = await signIn('good', next);
+    assert.equal(location, next);
+    const fin = await call(location, { cookie: token });
+    const code = /^lumio:\/\/auth\?code=([a-f0-9]{48})$/.exec(fin.headers.get('location'))?.[1];
+    assert.ok(code, fin.headers.get('location'));
+    assert.match(fin.headers.get('set-cookie'), /Max-Age=0/, 'the sheet’s cookie is cleared');
+    assert.equal((await (await call('/api/account', { cookie: token })).json()).signedIn, false, 'and its browser session ended');
+    return code;
+  };
+  const trade = (code, v) => call('/api/auth/app/token', { method: 'POST', body: { code, verifier: v }, origin: undefined });
+  // A wrong secret: refused, and the code is gone.
+  const first = await handOff();
+  assert.equal((await trade(first, crypto.randomBytes(32).toString('base64url'))).status, 400);
+  assert.equal((await trade(first, verifier)).status, 400);
+  // The cookie hand-off (the Expo app's web view) won't take a PKCE code either.
+  const second = await handOff();
+  const form = await worker.fetch(new Request(`${SITE}/api/auth/app/session`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: `code=${second}` }), env, ctx);
+  assert.equal(form.headers.get('set-cookie'), null);
+  // The right secret: a session token, once.
+  const third = await handOff();
+  const ok = await trade(third, verifier);
+  assert.equal(ok.status, 200);
+  const { token, account } = await ok.json();
+  assert.equal(account.email, 'sam@example.com');
+  assert.equal((await (await call('/api/account', { token })).json()).signedIn, true);
+  assert.equal((await trade(third, verifier)).status, 400, 'a code works once');
+  // A challenge that isn't one is refused before any code is made.
+  const { token: web } = await signIn('good');
+  assert.equal((await call('/api/auth/app/finish?challenge=short', { cookie: web })).headers.get('location'), '/signin?error=expired');
+  // Signed out: sent to sign in first, keeping the challenge.
+  assert.equal((await call(next)).headers.get('location'), `/signin?next=${encodeURIComponent(next)}`);
+});
+
+test('deleting the account in the app ends the plan and removes everything on the server', async () => {
+  const { token } = await signIn();
+  const me = await (await call('/api/account', { token })).json();
+  const id = me.ownerId;
+  const t = Date.now();
+  // A paid plan, a web chat with a picture, a connected app, synced data, a redeemed code, AI usage.
+  sql.prepare("UPDATE users SET stripe_customer_id = 'cus_1', subscription_id = 'sub_1', plan = 'plus', plan_status = 'active' WHERE id = ?").run(id);
+  sql.prepare("INSERT INTO chats (id, user_id, title, created_at, updated_at) VALUES ('c_00000000000000000001', ?, 'Trip', ?, ?)").run(id, t, t);
+  sql.prepare("INSERT INTO chat_messages (chat_id, role, content, created_at) VALUES ('c_00000000000000000001', 'user', 'secret plans', ?)").run(t);
+  sql.prepare("INSERT INTO files (id, user_id, chat_id, kind, name, mime, size, created_at) VALUES ('f_000000000000000000000001', ?, 'c_00000000000000000001', 'image', 'a.png', 'image/png', 4, ?)").run(id, t);
+  await r2.put('files/f_000000000000000000000001', new Uint8Array([1, 2, 3, 4]), {});
+  await connect(token, 'gmail', 'conn-google', 'google');
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM connections').get().n, 1);
+  const sync = (path, opts = {}) => call(path, { token, ...opts });
+  await sync('/api/sync/init', { method: 'POST', body: { keyCheck: 'a'.repeat(32) } });
+  await sync('/api/sync/devices', { method: 'POST', body: { id: PHONE, name: 'iPhone', kind: 'phone', platform: 'ios' } });
+  await sync('/api/sync/push', { method: 'POST', body: { device: PHONE, items: [{ id: 'bookmark-id-001', collection: 'bookmarks', data: sealed(1) }] } });
+  await sync('/api/sync/pair', { method: 'POST', body: { device: PHONE, name: 'iPhone', kind: 'phone', pubkey: Buffer.alloc(65, 4).toString('base64') } });
+  await sync('/api/companion/messages', { method: 'POST', body: { kind: 'command', device: PHONE, data: sealed('do') } });
+  await sync('/api/companion/push', { method: 'POST', body: { device: PHONE, endpoint: 'https://web.push.apple.com/QGx' } });
+  sql.prepare("INSERT INTO plan_codes (code_hash, plan, hint, created_at, redeemed_by, redeemed_at) VALUES ('h1', 'plus', 'ABCD', ?, ?, ?)").run(t, id, t);
+  sql.prepare("INSERT INTO steps (key, owner, plan, kind, request_hash, status, held_microusd, cost_microusd, result, created_at) VALUES ('s1', ?, 'plus', 'browser', 'r', 'done', 0, 120, 'what the page said', ?)").run(id, t);
+  sql.prepare("INSERT INTO cancellations (user_id, plan, reason, comment, created_at) VALUES (?, 'plus', 'other', 'a note', ?)").run(id, t);
+
+  const del = (opts) => call('/api/account', { method: 'DELETE', ...opts });
+  assert.equal((await del({ token, body: {} })).status, 400, 'it must be confirmed');
+  assert.equal((await del({ cookie: token, body: { confirm: true }, origin: 'https://evil.example' })).status, 403, 'not from another site');
+  assert.equal((await del({ body: { confirm: true } })).status, 401);
+  // Stripe can't be reached: nothing is deleted.
+  stripeState.failDelete = true;
+  const failed = await del({ token, body: { confirm: true } });
+  assert.equal(failed.status, 502);
+  assert.match((await failed.json()).error, /nothing was deleted/);
+  assert.equal((await (await call('/api/account', { token })).json()).signedIn, true);
+  stripeState.failDelete = false;
+
+  const ok = await del({ token, body: { confirm: true } });
+  assert.equal(ok.status, 200);
+  await settled();
+  assert.deepEqual(calls.stripe.filter((c) => c.method === 'DELETE').map((c) => c.path), ['/v1/customers/cus_1', '/v1/customers/cus_1'], 'the plan ended with the Stripe customer');
+  assert.equal(calls.revoked.length, 1, 'Google’s grant was revoked');
+  assert.equal((await (await call('/api/account', { token })).json()).signedIn, false);
+  for (const [table, column] of [['users', 'id'], ['sessions', 'user_id'], ['chats', 'user_id'], ['files', 'user_id'], ['connections', 'user_id'], ['app_codes', 'user_id'], ['cancellations', 'user_id'],
+    ['sync_items', 'owner'], ['sync_meta', 'owner'], ['sync_devices', 'owner'], ['sync_pairings', 'owner'], ['companion_messages', 'owner'], ['push_subscriptions', 'owner'], ['steps', 'owner']]) {
+    assert.equal(sql.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${column} = ?`).get(id).n, 0, table);
+  }
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM chat_messages').get().n, 0);
+  assert.equal(r2.store.size, 0, 'the picture is gone from R2');
+  assert.deepEqual(sql.prepare('SELECT owner, result, cost_microusd FROM steps').all().map((r) => ({ ...r })), [{ owner: 'deleted', result: null, cost_microusd: 120 }], 'usage stays for the accounts, without the owner or content');
+  assert.equal(sql.prepare('SELECT redeemed_by FROM plan_codes').get().redeemed_by, 'deleted', 'a used code stays used');
+});
+
+test('accounts made with Apple: Apple’s refresh token is kept encrypted and revoked when the account is deleted', async () => {
+  await appleSetup();
+  const ec = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+  const pkcs8 = Buffer.from(await crypto.subtle.exportKey('pkcs8', ec.privateKey)).toString('base64');
+  Object.assign(env, {
+    APPLE_TEAM_ID: 'TEAM123456', APPLE_KEY_ID: 'KEY1234567', APPLE_TOKEN_URL: APPLE_TOKEN, APPLE_REVOKE_URL: APPLE_REVOKE,
+    APPLE_PRIVATE_KEY: `-----BEGIN PRIVATE KEY-----\n${pkcs8.match(/.{1,64}/g).join('\n')}\n-----END PRIVATE KEY-----`,
+  });
+  const { token } = await (await appleSignIn({ identityToken: await appleToken(), nonce: nonceN(1), authorizationCode: 'c.apple-code-123' })).json();
+  await settled();
+  const traded = calls.apple.find((c) => c.url === APPLE_TOKEN);
+  assert.deepEqual([traded.body.client_id, traded.body.code, traded.body.grant_type], [APP_ID, 'c.apple-code-123', 'authorization_code']);
+  // The client secret: an ES256 JWT from the team's key.
+  const [h, c, s] = traded.body.client_secret.split('.');
+  assert.deepEqual(JSON.parse(Buffer.from(h, 'base64url')), { alg: 'ES256', kid: 'KEY1234567' });
+  const claims = JSON.parse(Buffer.from(c, 'base64url'));
+  assert.deepEqual([claims.iss, claims.sub, claims.aud], ['TEAM123456', APP_ID, 'https://appleid.apple.com']);
+  assert.ok(await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, ec.publicKey, Buffer.from(s, 'base64url'), new TextEncoder().encode(`${h}.${c}`)));
+  const stored = userRow().apple_refresh;
+  assert.ok(stored && !stored.includes('apple-refresh-1'), 'stored encrypted');
+
+  assert.equal((await call('/api/account', { method: 'DELETE', token, body: { confirm: true }, origin: undefined })).status, 200);
+  await settled();
+  const revoked = calls.apple.find((x) => x.url === APPLE_REVOKE);
+  assert.deepEqual([revoked.body.client_id, revoked.body.token, revoked.body.token_type_hint], [APP_ID, 'apple-refresh-1', 'refresh_token']);
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM users').get().n, 0);
 });

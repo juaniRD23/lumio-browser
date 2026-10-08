@@ -663,11 +663,26 @@ const tabStrip = new TabStrip({
   menuExtras: (w, ids, tab) => ({
     groups: w.profile.groups?.menuItems(w, tab, ids) || [],
     reading: w.profile.sidePanel?.menuItem(w, tab) || [],
-    split: ids.length === 1 ? w.tabs.split.menuItems(tab) : [], // (a split pairs two tabs)
+    // (a split pairs two tabs) Send to Your Phone goes last before Close Tab.
+    split: ids.length === 1 ? [...w.tabs.split.menuItems(tab), ...sendToPhoneItems(w, tab)] : [],
     layout: tabLayout.menuItems(w, w.profile.store),
   }),
   stripExtras: (w) => [{ label: 'Name Window…', click: () => powerUser.nameWindow(w) }, { type: 'separator' }, ...tabLayout.menuItems(w, w.profile.store)],
 });
+// The tab menu's Send to Your Phone: Lumio for iPhone and iPad shows it as
+// "Tab from <this computer>", through the window's profile's Lumio Sync
+// (main/sync/companion.js). Web pages only, never from incognito.
+function sendToPhoneItems(w, tab) {
+  const companion = w.incognito ? null : w.profile.base.companion;
+  const url = tab ? w.tabs.displayUrl(tab) || '' : '';
+  if (!companion?.ready() || !/^https?:/.test(url)) return [];
+  return [{
+    label: 'Send to Your Phone',
+    click: () => companion.sendTabToPhone({ url, title: tab.title })
+      .then((ok) => w.emit('toast', { text: ok ? 'Sent to your phone.' : 'Couldn’t send it. Check that Sync is on.' }))
+      .catch(() => w.emit('toast', { text: 'Couldn’t send it. Try again.' })),
+  }];
+}
 const tabSearch = new TabSearch({ alive, recentlyClosed, ownsClosed, reopenClosed: (index) => reopenClosed(index) });
 const tabDrag = new TabDrag({ alive, cur, strip: tabStrip });
 const osIntegration = new OsIntegration({ cmd, alive });
@@ -732,14 +747,14 @@ function makeDefaultBrowser() {
 // ---------------------------------------------------------------- account + profile
 const ACCOUNT_PAGES = { manage: '/account', upgrade: '/account#plans', billing: '/account', home: '/' };
 
-// Signing in happens on lumio-usa.online in a normal tab of the profile. When
+// Signing in happens on lumio-co.online in a normal tab of the profile. When
 // the site's session cookie appears in the profile's session, its account
 // adopts it (watchLumioCookie) and the sign-in tab closes.
 async function signIn(from) {
   const p = from?.profile.base || curProfile();
   const { account } = p;
   const res = account.startSignIn();
-  // Already logged in to lumio-usa.online in this profile? Use that session.
+  // Already logged in to lumio-co.online in this profile? Use that session.
   const [existing] = await p.session.cookies.get({ url: account.base, name: account.cookieName }).catch(() => []);
   if (existing && await account.adopt(existing.value)) return { ok: true };
   const w = from && !from.incognito ? from : normalWin(p) || createWindow({ profile: p, urls: [] });
@@ -1357,7 +1372,7 @@ function registerIpc() {
   });
   internalHandle('page:cert-back', ['error'], ({ w, tab }) => w.tabs.backToSafety(tab.id));
 
-  // Open-source licenses (renderer/pages/credits.html).
+  // Third-party licenses (renderer/pages/credits.html).
   internalHandle('page:credits', ['credits'], ({ w }) => ({ ...credits(), terms: w.profile.account.url(LEGAL.terms), privacy: w.profile.account.url(LEGAL.privacy) }));
 
   internalHandle('page:history', ['history'], ({ w }) => w.profile.store.history().slice().reverse());
@@ -2003,6 +2018,16 @@ function openProfile(id) {
     pickWindow: () => (lastFocused && !lastFocused.incognito && lastFocused.profile === profile && windows.has(lastFocused) ? lastFocused : normalWin(profile) || createWindow({ profile, focus: false })),
     openChat: (w, chatId) => w.openChat(chatId, { full: false }),
     onTab: (tab) => shareTools?.receiveTab(tab, profile), // Send to your devices, from another computer
+    // A tab from the phone (Lumio for iPhone and iPad): opens in the background
+    // in this profile's window, and a notification says where it came from.
+    openTab: ({ url, title, from }) => {
+      const w = companion.pickWindow();
+      const tab = w.tabs.create(url, { active: false, title: title || undefined });
+      if (!Notification.isSupported()) return;
+      const n = new Notification({ title: t(`Tab from ${from}`), body: (title || url).slice(0, 240) }); // in Lumio's language
+      n.on('click', () => { if (!windows.has(w)) return; w.focus(); if (tab && w.tabs.get(tab.id)) w.tabs.activate(tab.id); });
+      n.show();
+    },
   });
   profile.companion = companion;
   companion.start();

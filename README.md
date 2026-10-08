@@ -2,7 +2,7 @@
 
 A Chromium web browser with **Lumio AI** built in. Lumio sits in a side panel next to the page. Ask it anything, or tell it what to do: it reads and operates web pages, and with your permission it controls your computer too. It asks before it acts.
 
-**Download:** [lumio-browser.gw607953.workers.dev](https://lumio-browser.gw607953.workers.dev) · macOS 14+ (Apple silicon and Intel) · Windows 10/11 (x64)
+**Download:** [lumio-co.online](https://lumio-co.online/#download) · macOS 14+ (Apple silicon and Intel) · Windows 10/11 (x64)
 
 ## What it does
 
@@ -33,13 +33,13 @@ A Chromium web browser with **Lumio AI** built in. Lumio sits in a side panel ne
 
 To let Lumio control your Mac, turn on Lumio Browser under **Accessibility** and **Screen Recording** in System Settings → Privacy & Security. Settings → Lumio AI has shortcuts.
 
-## Build from source
+## Development
 
 Requires Node 22+ and, for the Mac helper, Xcode command-line tools.
 
 ```sh
 npm install
-npm start                # run from source
+npm start                # run the app locally
 npm test                 # unit tests
 npm run test:e2e         # end-to-end tests (drive the real app)
 npm run install:app      # build and install /Applications/Lumio Browser.app
@@ -50,14 +50,10 @@ npm run release          # dist/release: Mac DMGs (Apple silicon, Intel) and a W
 
 - **Electron 43.** Each tab is a `WebContentsView`, and each window has one shell page (`renderer/ui`) and one AI controller.
 - **Agent:** `main/ai` holds the agent loop, the approval policy, browser tools, and computer tools. Computer tools go through a small native helper: Swift on macOS (`native/LumioHelper`), PowerShell on Windows (`native/windows`).
-- **Lumio account:** `main/account.js` uses the lumio-usa.online desktop sign-in hand-off. `main/ai/lumio.js` runs the AI through the account's plan (`/api/browser/agent`); the server owns the model, the tool definitions and the system prompt.
+- **Lumio account:** `main/account.js` uses the lumio-co.online desktop sign-in hand-off. `main/ai/lumio.js` runs the AI through the account's plan (`/api/browser/agent`); the server owns the model, the tool definitions and the system prompt.
 - **Passwords:** `main/passwords.js` and `main/password-manager.js`, plus the isolated preload in `preload/internal.js`. Each password is encrypted with Electron `safeStorage`.
 - **Autofill:** `main/autofill.js` and `main/autofill-store.js` (addresses, cards and form entries, encrypted with `safeStorage`), the session preload `preload/autofill.js` that finds form fields, and `renderer/ui/overlay-autofill.js` for the dropdown and the save bubble. Passkeys sync end-to-end encrypted through Lumio Sync; security keys use Chromium's own WebAuthn.
 - **While it works:** `main/ai/indicators.js` (page glow and Stop bar) and `main/ai/screen-aura.js` (screen glow and Stop pill, left out of screen captures). `main/ai/tools/plan.js` is the Task progress checklist.
 - **Updates:** `main/updater.js` checks GitHub Releases, verifies the installer's SHA-256 and swaps the app in after it quits.
 - **Extensions:** [electron-chrome-extensions](https://github.com/samuelmaddock/electron-browser-shell) and electron-chrome-web-store. `main/extensions-ui.js` runs the puzzle-piece menu, pinned buttons, shortcuts and new tab page override; `main/extension-access.js` limits site access; `main/extension-shims.js` fills API gaps (see `docs/extensions-support.md`).
 - **Help and the Mac:** `main/help.js` (Report an issue, which posts to the server's `/api/feedback`; lumio://version and lumio://flags-lite), `main/menu-extras.js` (Chrome's Mac menus), `main/devtools.js` (docking) and `main/mac-integration.js` (Handoff, Look Up).
-
-## License
-
-Lumio Browser is free software: you can redistribute it and/or modify it under the terms of the **GNU General Public License v3.0 or later**. See [LICENSE](LICENSE). The Lumio name and logo, the lumio-usa.online service, and Lumio plans are not covered by this license.

@@ -33,7 +33,7 @@ function form(params: Record<string, unknown>, prefix = '', out = new URLSearchP
   return out;
 }
 
-export async function stripe<T = any>(env: Env, method: 'GET' | 'POST', path: string, params: Record<string, unknown> = {}): Promise<T> {
+export async function stripe<T = any>(env: Env, method: 'GET' | 'POST' | 'DELETE', path: string, params: Record<string, unknown> = {}): Promise<T> {
   if (!env.STRIPE_SECRET_KEY) throw new AgentError('Billing isn’t set up yet.', 503, 'billing_unavailable');
   const base = (env.STRIPE_API || 'https://api.stripe.com').replace(/\/$/, '');
   const body = form(params);

@@ -27,16 +27,23 @@ test('every migration is already in schema.sql, the same way', () => {
   const full = new DatabaseSync(':memory:');
   full.exec(schema);
   const want = shape(full);
-  for (const [file, sql] of migrations) {
+  for (const [i, [file, sql]] of migrations.entries()) {
     const alters = [...sql.matchAll(/ALTER TABLE (\w+) ADD COLUMN (\w+)/gi)];
     if (alters.length) {
       // Columns added later: schema.sql's CREATE TABLE has them.
       for (const [, table, column] of alters) assert.ok(want[`table ${table}`]?.some((c) => c.name === column), `${file}: ${table}.${column} is in schema.sql`);
       continue;
     }
-    // On its own, it makes exactly what schema.sql has for those tables and indexes.
+    // On its own, it makes exactly what schema.sql has for those tables and indexes,
+    // once the columns later migrations add to them are in (for example
+    // app_codes.challenge from 2026-10-06-apple-account.sql).
     const alone = new DatabaseSync(':memory:');
     alone.exec(sql);
+    for (const [, later] of migrations.slice(i + 1)) {
+      for (const [stmt, table] of later.replace(/--.*$/gm, '').matchAll(/ALTER TABLE (\w+) ADD COLUMN [^;]+/gi)) {
+        if (alone.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)) alone.exec(stmt);
+      }
+    }
     const got = shape(alone);
     assert.ok(Object.keys(got).length, `${file} makes something`);
     for (const [name, def] of Object.entries(got)) assert.deepEqual(def, want[name], `${file}: ${name} matches schema.sql`);

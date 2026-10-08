@@ -1,4 +1,4 @@
-// lumio://credits: the open-source software in Lumio Browser and its
+// lumio://credits: the third-party software in Lumio Browser and its
 // licenses, like chrome://credits. The packages come from node_modules as
 // shipped (Lumio's dependencies and theirs, not the tools that build and
 // test it), read from their package.json and license files, so the list is
@@ -99,13 +99,8 @@ let cached = null;
 // What the credits page shows (main.js adds the Terms and Privacy addresses).
 function credits() {
   if (cached) return cached;
-  const pkg = readJson(path.join(ROOT, 'package.json')) || {};
   const electronLicense = electronFile('LICENSE');
   cached = {
-    version: pkg.version || '',
-    license: pkg.license || '',
-    source: homepageOf({ repository: pkg.repository }),
-    licenseText: licenseText(ROOT),
     chromium: { version: process.versions.chrome || '', available: !!electronFile('LICENSES.chromium.html') },
     electron: { version: process.versions.electron || '', license: 'MIT', url: 'https://www.electronjs.org/', text: electronLicense ? fs.readFileSync(electronLicense, 'utf8').trim() : '' },
     packages: packages(),

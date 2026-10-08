@@ -1,12 +1,16 @@
-// Lumio (lumio-usa.online): the website, accounts (Google sign-in), plans
-// (Stripe), web Chat and Lumio Browser's AI, in one Cloudflare Worker.
+// Lumio (lumio-co.online): the website, accounts (Google, Apple or email
+// sign-in), plans (Stripe), web Chat and Lumio Browser's AI, in one
+// Cloudflare Worker.
 //
 //   /                       website pages (static, from website/public)
 //   GET  /health            liveness check
 //   /api/auth/google/*      sign in with Google
-//   GET  /api/auth/app/finish, POST /api/auth/app/session         (the phone app's sign-in hand-off)
+//   POST /api/auth/apple    sign in with Apple (Lumio for iPhone and iPad)
+//   POST /api/auth/email/signup | confirm | resend | signin | forgot | reset (email + password; email-auth.ts)
+//   GET  /api/auth/app/finish, POST /api/auth/app/session | /api/auth/app/token   (the apps' sign-in hand-off)
 //   POST /api/auth          { action: 'logout' }
 //   GET  /api/account       who is signed in (the shape Lumio Browser reads)
+//   DELETE /api/account     { confirm: true }: deletes the account and everything in it
 //   GET  /api/usage         the plan and its Lumio AI allowance
 //   GET  /api/billing/plans the plans and prices
 //   POST /api/billing/checkout | /api/billing/portal
@@ -32,13 +36,17 @@
 //
 // Every 5 minutes (cron trigger) recent AI calls are checked against
 // OpenRouter's records of what they cost (spend.ts), and old sync tombstones,
-// pairings and relay messages (sync.ts), feedback (feedback.ts) and crash reports
-// (crashes.ts) are cleaned up.
+// pairings and relay messages (sync.ts), feedback (feedback.ts), crash reports
+// (crashes.ts) and email sign-in codes and attempts (email-auth.ts) are
+// cleaned up.
 //
 // Website requests use the session cookie; Lumio Browser sends the same
 // session as a bearer token. Cookie-authenticated POSTs must come from our own
 // pages (Origin check).
-import { accountJson, appFinish, appSession, currentUser, googleCallback, googleStart, logout, readToken, type User } from './auth.ts';
+import { accountJson, appFinish, appSession, appToken, currentUser, googleCallback, googleStart, logout, readToken, type User } from './auth.ts';
+import { deleteAccount } from './account.ts';
+import { appleSignIn } from './apple.ts';
+import { EMAIL_ROUTES, emailCleanup } from './email-auth.ts';
 import { cancelPlan, changePlan, checkout, checkoutStatus, portal, resumePlan, subscription, webhook } from './billing.ts';
 import { capabilities, runTool, step } from './browser.ts';
 import { connectCallback, connectStart, disconnect, listConnections } from './connections.ts';
@@ -48,7 +56,7 @@ import { imageForBrowser } from './images.ts';
 import { speak, transcribe } from './voice.ts';
 import { translate } from './translate.ts';
 import {
-  companionList, companionPost, companionStatusGet, companionStatusPut, pairAnswer, pairCheck, pairPending, pairRequest,
+  companionList, companionPost, companionStatusGet, companionStatusPut, pairAnswer, pairCheck, pairPending, pairRequest, pushUnsubscribe,
   pushSubscribe, syncChanges, syncCleanup, syncDeleteAll, syncDevice, syncInit, syncPush, syncRemoveDevice, syncStatus, vapidKey,
 } from './sync.ts';
 import { spendReport, verifySpend } from './spend.ts';
@@ -76,6 +84,12 @@ export default {
       // The phone app's sign-in hand-off (its web view posts the one-time code).
       if (path === '/api/auth/app/finish' && method === 'GET') return await appFinish(request, env);
       if (path === '/api/auth/app/session' && method === 'POST') return await appSession(request, env);
+      // Lumio for iPhone and iPad: the hand-off as JSON (PKCE), and Sign in with Apple.
+      if (path === '/api/auth/app/token' && method === 'POST') return await appToken(request, env);
+      if (path === '/api/auth/apple' && method === 'POST') return await appleSignIn(request, env, ctx);
+      // Email + password (the website and Lumio for iPhone and iPad), with no session needed.
+      const ea = /^\/api\/auth\/email\/(signup|confirm|resend|signin|forgot|reset)$/.exec(path);
+      if (ea && method === 'POST') return await EMAIL_ROUTES[ea[1]](request, env, ctx);
       // Crash reports from Lumio Browser: opt-in, and sent without the account.
       if (path === '/api/crash' && method === 'POST') return await receiveCrash(request, env);
 
@@ -122,12 +136,14 @@ export default {
     ctx.waitUntil(syncCleanup(env).catch((err) => console.error('lumio sync cleanup', err)));
     ctx.waitUntil(feedbackCleanup(env).catch((err) => console.error('lumio feedback cleanup', err)));
     ctx.waitUntil(crashCleanup(env).catch((err) => console.error('lumio crash cleanup', err)));
+    ctx.waitUntil(emailCleanup(env).catch((err) => console.error('lumio email cleanup', err)));
   },
 };
 
 type Route = (request: Request, env: Env, ctx: ExecutionContext, user: User) => Promise<Response>;
 
 function routeFor(path: string, method: string): Route | null {
+  if (path === '/api/account' && method === 'DELETE') return (r, env, c, user) => deleteAccount(r, env, user, c);
   if (path === '/v1/agent' && method === 'GET') return (_r, env, _c, user) => capabilities(env, user);
   if (path === '/v1/agent' && method === 'POST') return step;
   if (path === '/v1/usage' && method === 'GET') return async (_r, env, _c, user) => json({ usage: await allowance(env, user.id, user.plan) });
@@ -185,6 +201,7 @@ function routeFor(path: string, method: string): Route | null {
   if (path === '/api/companion/status' && method === 'PUT') return (r, env, _c, user) => companionStatusPut(r, env, user);
   if (path === '/api/companion/status' && method === 'GET') return (_r, env, _c, user) => companionStatusGet(env, user);
   if (path === '/api/companion/push' && method === 'POST') return (r, env, _c, user) => pushSubscribe(r, env, user);
+  if (path === '/api/companion/push' && method === 'DELETE') return (r, env, _c, user) => pushUnsubscribe(r, env, user);
   if (path === '/api/companion/vapid' && method === 'GET') return async (_r, env) => vapidKey(env);
   const m = /^\/api\/chats\/(c_[a-f0-9]{20})$/.exec(path);
   if (m && method === 'GET') return (_r, env, _c, user) => getChat(env, user, m[1]);

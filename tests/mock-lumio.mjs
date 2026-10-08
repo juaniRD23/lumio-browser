@@ -1,4 +1,4 @@
-// A small stand-in used by the tests for both lumio-usa.online (the sign-in
+// A small stand-in used by the tests for both lumio-co.online (the sign-in
 // page that sets the site's session cookie, /api/account, /api/usage, logout)
 // and its AI routes (/v1/agent streaming NDJSON, /v1/usage), behaving like
 // the real services.

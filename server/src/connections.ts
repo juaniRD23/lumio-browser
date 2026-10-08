@@ -172,6 +172,16 @@ export async function disconnect(env: Env, user: User, appId: string) {
   return listConnections(env, user);
 }
 
+// Deleting the account: Google's grants are revoked (Microsoft has no revoke
+// call; its tokens are deleted with the account). Best effort.
+export async function revokeConnections(env: Env, userId: string) {
+  for (const row of await rows(env, userId)) {
+    if (row.provider !== 'google') continue;
+    const t = await unseal(env, row.tokens).catch(() => null);
+    if (t) await fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(t.refresh || t.access)}`, { method: 'POST' }).catch(() => {});
+  }
+}
+
 // A working access token (refreshed when it's about to expire).
 async function accessToken(env: Env, userId: string, provider: Provider, force = false) {
   const row = await env.DB.prepare('SELECT * FROM connections WHERE user_id = ?1 AND provider = ?2').bind(userId, provider).first<Row>();

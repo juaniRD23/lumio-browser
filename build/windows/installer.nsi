@@ -34,7 +34,7 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 VIAddVersionKey "FileVersion" "${VERSION}"
 VIAddVersionKey "FileDescription" "${APP} Setup"
 VIAddVersionKey "CompanyName" "Lumio"
-VIAddVersionKey "LegalCopyright" "Lumio, GPL-3.0"
+VIAddVersionKey "LegalCopyright" "(c) Lumio"
 
 !define MUI_ICON "${ICON}"
 !define MUI_UNICON "${ICON}"
@@ -88,7 +88,7 @@ Section "Install"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "UninstallString" '"$INSTDIR\${UNINSTALLER}"'
   WriteRegStr HKCU "${UNINSTALL_KEY}" "QuietUninstallString" '"$INSTDIR\${UNINSTALLER}" /S'
-  WriteRegStr HKCU "${UNINSTALL_KEY}" "URLInfoAbout" "https://lumio.gw607953.workers.dev"
+  WriteRegStr HKCU "${UNINSTALL_KEY}" "URLInfoAbout" "https://lumio-co.online"
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoRepair" 1
   ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2

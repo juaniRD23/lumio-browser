@@ -30,7 +30,7 @@ function openrouter(env: Env, path: string, body: unknown) {
   const base = (env.OPENROUTER_BASE || 'https://openrouter.ai/api/v1').replace(/\/$/, '');
   return fetch(`${base}${path}`, {
     method: 'POST',
-    headers: { authorization: `Bearer ${env.OPENROUTER_API_KEY}`, 'content-type': 'application/json', 'HTTP-Referer': 'https://lumio-usa.online', 'X-Title': 'Lumio' },
+    headers: { authorization: `Bearer ${env.OPENROUTER_API_KEY}`, 'content-type': 'application/json', 'HTTP-Referer': 'https://lumio-co.online', 'X-Title': 'Lumio' },
     body: JSON.stringify(body),
   }).catch(() => { throw new ProviderError('Couldn’t reach the voice model. Try again.'); });
 }

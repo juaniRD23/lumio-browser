@@ -1,6 +1,6 @@
 /* Lumio's colors and type: one set of tokens for the browser UI (shell,
    overlay, aura) and its pages, served to every lumio:// host as
-   /assets/theme.css. Dark is the palette of lumio-usa.online.
+   /assets/theme.css. Dark is the palette of lumio-co.online.
 
    Each color is light-dark(light, dark), so it follows the page's color
    scheme: the system appearance, which Lumio sets from Settings › Appearance

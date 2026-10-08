@@ -40,7 +40,7 @@ export async function makeImage(env: Env, user: { id: string; plan: Plan }, prom
     try {
       res = await fetch(`${base}/chat/completions`, {
         method: 'POST',
-        headers: { authorization: `Bearer ${env.OPENROUTER_API_KEY}`, 'content-type': 'application/json', 'HTTP-Referer': 'https://lumio-usa.online', 'X-Title': 'Lumio' },
+        headers: { authorization: `Bearer ${env.OPENROUTER_API_KEY}`, 'content-type': 'application/json', 'HTTP-Referer': 'https://lumio-co.online', 'X-Title': 'Lumio' },
         body: JSON.stringify({
           model: IMAGE_MODEL.id,
           messages: [{ role: 'user', content: prompt }],

@@ -167,7 +167,6 @@ test('an incognito window’s bubble is dark on a light computer', { skip }, asy
 
 // ---------------------------------------------------------------- credits
 const CREDITS = {
-  version: '0.6.7', license: 'GPL-3.0-or-later', source: 'https://github.com/juaniRD23/lumio-browser', licenseText: 'GNU GENERAL PUBLIC LICENSE\nVersion 3',
   chromium: { version: '150.0.1', available: true },
   electron: { version: '43.7.7', license: 'MIT', url: 'https://www.electronjs.org/', text: 'Copyright (c) Electron contributors' },
   packages: [
@@ -183,16 +182,15 @@ const openCredits = (opts = {}) => open(`/pages/credits.html${opts.query || ''}`
   init: { fn: (answer) => { window.__calls = []; window.lumioPage = { invoke: async (c) => { window.__calls.push(c); return c === 'page:credits' ? answer : null; }, on() {} }; }, arg: CREDITS },
 }).then(async (r) => { await r.page.waitForSelector('#packages > *'); return r; });
 
-test('credits: the legal links, Lumio’s license, Chromium and Electron, every package and file, licenses that open from the keyboard', { skip }, async () => {
+test('credits: the legal links, Chromium and Electron, every package and file, licenses that open from the keyboard', { skip }, async () => {
   const { page, errors } = await openCredits();
   assert.equal(await page.title(), 'Credits');
   assert.deepEqual(await page.$$eval('.links a', (els) => els.map((a) => [a.textContent, a.href, a.target, a.hidden])), [
     ['Terms of Service', 'https://lumio.example/terms', '_blank', false],
     ['Privacy Policy', 'https://lumio.example/privacy', '_blank', false],
-    ['Source code', 'https://github.com/juaniRD23/lumio-browser', '_blank', false],
   ]);
-  assert.equal(await page.textContent('#lumio .name'), 'Lumio Browser');
-  assert.equal(await page.textContent('#lumio .lic'), 'GPL-3.0-or-later');
+  assert.deepEqual(await page.$$eval('h2', (els) => els.map((h) => h.textContent)), ['Chromium and Electron', 'Packages', 'Also included'], 'third-party software only');
+  assert.doesNotMatch(await page.textContent('main'), /open[- ]source|free software|source code|GPL/i);
   assert.deepEqual(await page.$$eval('#engine > *', (els) => els.map((e) => e.querySelector('.name').textContent)), ['Chromium', 'Electron']);
   assert.equal(await page.getAttribute('#engine .plain a', 'href'), 'chromium.html', 'Chromium’s own list, in the same tab');
   assert.equal(await page.textContent('#engine .plain .lic'), 'BSD-3-Clause and others');
@@ -251,7 +249,7 @@ test('Chromium’s notices: no stylesheets the page can’t load, every license 
 });
 
 // ---------------------------------------------------------------- Settings › About
-test('Settings › About links to the Terms, the Privacy Policy (on Lumio’s website) and the open-source licenses', { skip }, async () => {
+test('Settings › About links to the Terms, the Privacy Policy (on Lumio’s website) and the third-party licenses', { skip }, async () => {
   const { page, errors } = await open('/pages/settings.html#about', {
     init: {
       fn: () => {
@@ -268,7 +266,7 @@ test('Settings › About links to the Terms, the Privacy Policy (on Lumio’s we
   assert.deepEqual(await page.$$eval('.legal a', (els) => els.map((a) => [a.textContent, a.getAttribute('href'), a.target])), [
     ['Terms of Service', 'https://lumio.example/terms', '_blank'],
     ['Privacy Policy', 'https://lumio.example/privacy', '_blank'],
-    ['Open-source licenses', 'lumio://credits/', '_blank'],
+    ['Third-party licenses', 'lumio://credits/', '_blank'],
   ]);
   assert.deepEqual(errors, []);
   await page.close();

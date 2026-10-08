@@ -1,11 +1,12 @@
-// The computer's side of the phone companion (lumio…/companion). Through the
-// Lumio server's relay, end-to-end encrypted with the sync key:
+// The computer's side of the phone companion (lumio…/companion and Lumio for
+// iPhone and iPad). Through the Lumio server's relay, end-to-end encrypted
+// with the sync key:
 // - commands from the phone: ask Lumio something here, run a workflow,
-//   approve or deny a step, stop;
+//   approve or deny a step, stop, open a tab ("Tab from iPhone");
 // - this computer's live status for the phone: what Lumio is doing, the
 //   latest reply, steps waiting for an OK;
 // - notices that wake the phone: a task it started finished or needs an OK,
-//   a scheduled task finished.
+//   a scheduled task finished, a tab sent to the phone ("Tab from MacBook").
 const C = require('./crypto');
 const { t } = require('../i18n');
 
@@ -16,12 +17,13 @@ const MAX_AGE = 3 * 60_000; // commands older than this are ignored
 const TAB_MAX_AGE = 24 * 3600_000; // a tab sent from another device waits a day (as long as the relay keeps it)
 
 class CompanionBridge {
-  constructor({ sync, windows, pickWindow, openChat, onTab = () => {} }) {
+  constructor({ sync, windows, pickWindow, openChat, onTab = () => {}, openTab }) {
     this.sync = sync;
     this.windows = windows; // () => this computer's normal windows
     this.pickWindow = pickWindow; // () => the window to work in (opening one if needed)
     this.openChat = openChat; // (w, chatId) => show that chat in the panel
     this.onTab = onTab; // ({ url, title, from }) => a tab sent here from another computer (main/share.js)
+    this.openTab = openTab; // ({ url, title, from }) => open a tab the phone sent, and say so
     this.watching = false;
     this.fromPhone = new Set(); // chats the phone started: their end and approvals notify it
     this.live = { running: false, chatId: null, title: '', label: '', reply: '', approvals: [] };
@@ -74,6 +76,13 @@ class CompanionBridge {
     }
     if (cmd.type === 'stop') {
       for (const w of this.windows()) if (w.ai.isRunning()) w.ai.stop();
+      return;
+    }
+    if (cmd.type === 'open') {
+      // A tab from the phone: web pages only.
+      const url = String(cmd.url || '');
+      if (!/^https?:\/\/[^\s]+$/i.test(url) || url.length > 8000) return;
+      this.openTab?.({ url, title: String(cmd.title || '').slice(0, 200), from: String(cmd.fromName || '').slice(0, 60) || 'your phone' });
       return;
     }
     if (cmd.type !== 'send' && cmd.type !== 'workflow') return;
@@ -149,17 +158,32 @@ class CompanionBridge {
     await this.sync.api('/api/companion/status', { method: 'PUT', body: { device: this.sync.deviceId, data: await this.seal(status, 'status') } });
   }
 
-  // Sends a tab to another of the person's computers (Share › Send to your
-  // devices): an encrypted command for that computer only, which shows it
-  // as a "Tab from …" notification.
-  async sendTab(target, { url, title }) {
+  // Sends a tab to another of the person's devices:
+  // - sendTab(target, { url, title }): to one of their computers (Share ›
+  //   Send to your devices) — an encrypted command for that computer only,
+  //   which shows it as a "Tab from …" notification;
+  // - sendTab({ url, title }): to the phone(s) — see sendTabToPhone.
+  async sendTab(target, tab) {
+    if (target && typeof target === 'object') return this.sendTabToPhone(target);
+    const { url, title } = tab || {};
     if (!this.ready()) throw new Error('Turn on Lumio Sync to send tabs to your devices.');
     const data = await this.seal({ type: 'tab', url, title, from: this.sync.deviceName, at: Date.now() });
     await this.sync.api('/api/companion/messages', { method: 'POST', body: { kind: 'command', device: this.sync.deviceId, target, data } });
   }
 
+  // Sends a tab to the phone(s): "Tab from MacBook" there, with the page to open.
+  // Resolves false when it can't be sent (Sync off, not a web page).
+  async sendTabToPhone({ url, title }) {
+    if (!this.ready() || !/^https?:\/\/[^\s]+$/i.test(String(url || '')) || url.length > 8000) return false;
+    const name = this.sync.deviceName;
+    // In Lumio's language, like the other notices.
+    const data = await this.seal({ at: Date.now(), type: 'tab', title: t(`Tab from ${name}`), body: String(title || url).slice(0, 300), url, chatId: null, computer: name });
+    await this.sync.api('/api/companion/messages', { method: 'POST', body: { kind: 'notice', device: this.sync.deviceId, data, hint: 'tab' } });
+    return true;
+  }
+
   // A notification for the phone(s).
-  // hint (done | approval | scheduled | info) is the only part the server can
+  // hint (done | approval | scheduled | tab | info) is the only part the server can
   // see: the Lumio app's notification says just that.
   async notice({ title, body, chatId = null, hint = 'info' }) {
     if (!this.ready()) return;

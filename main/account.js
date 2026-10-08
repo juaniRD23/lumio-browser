@@ -1,13 +1,14 @@
-// Lumio account: the same account as lumio-usa.online. Signing in happens on
+// Lumio account: the same account as lumio-co.online. Signing in happens on
 // the website itself, in a normal Lumio Browser tab: the person logs in the way
 // they usually do (Google, email). When the site's session cookie shows up in
 // the browser's normal profile (main.js watches for it), we check that session
 // with /api/account and keep it as the account's token, stored encrypted with
 // safeStorage. Profile, plan and the Lumio AI allowance come from the same
 // server (server/ in this repo), which also runs the AI.
-// The Lumio server (server/ in this repo). It moves to lumio-usa.online once
-// that domain points at Cloudflare; sessions carry over (same database).
-const BASE = (process.env.LUMIO_ACCOUNT_BASE || 'https://lumio.gw607953.workers.dev').replace(/\/$/, '');
+// The Lumio server (server/ in this repo). It lives at lumio-co.online. Older
+// builds use lumio.gw607953.workers.dev, which keeps working (same Worker and
+// database), so a saved session carries over.
+const BASE = (process.env.LUMIO_ACCOUNT_BASE || 'https://lumio-co.online').replace(/\/$/, '');
 const AI_BASE = (process.env.LUMIO_AI_BASE || BASE).replace(/\/$/, '');
 const SECRET = 'lumio-session';
 const SIGN_IN_MS = 15 * 60 * 1000;

@@ -51,7 +51,7 @@ test('Safari bookmarks (plist) and history (SQLite)', { skip: !mac }, () => {
     { Title: 'BookmarksMenu', WebBookmarkType: 'WebBookmarkTypeList', Children: [
       { Title: 'News', WebBookmarkType: 'WebBookmarkTypeList', Children: [{ WebBookmarkType: 'WebBookmarkTypeLeaf', URLString: 'https://news.example/', URIDictionary: { title: 'News site' } }] },
     ] },
-    { WebBookmarkType: 'WebBookmarkTypeLeaf', URLString: 'https://lumio-usa.online/', URIDictionary: { title: 'Lumio' } },
+    { WebBookmarkType: 'WebBookmarkTypeLeaf', URLString: 'https://lumio-co.online/', URIDictionary: { title: 'Lumio' } },
     { Title: 'History', WebBookmarkType: 'WebBookmarkTypeProxy' },
   ] };
   fs.writeFileSync(path.join(dir, 'b.json'), JSON.stringify(plist));

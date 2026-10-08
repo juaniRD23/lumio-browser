@@ -1,5 +1,5 @@
-// Lumio for iPhone and Android: the phone companion (lumio…/companion) in an
-// app, with the parts a web page can't do on its own.
+// Lumio for iPhone and Android: the phone companion (lumio-co.online/companion)
+// in an app, with the parts a web page can't do on its own.
 // - Signing in: Google doesn't allow its sign-in inside an app's web view, so
 //   the app signs in in the phone's browser and gets a one-time code back
 //   (lumio://auth?code=…); the web view trades it for its own session.
@@ -17,9 +17,13 @@ import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 
-const SITE = String(Constants.expoConfig?.extra?.site || 'https://lumio.gw607953.workers.dev').replace(/\/$/, '');
+const SITE = String(Constants.expoConfig?.extra?.site || 'https://lumio-co.online').replace(/\/$/, '');
 const APP = `${SITE}/companion`;
 const HOST = new URL(SITE).host;
+// Pages on Lumio's own hosts stay in the app: this build's site,
+// lumio-co.online (www redirects there) and lumio.gw607953.workers.dev (the
+// same Worker; builds from before the domain switch use it).
+const OWN_HOSTS = new Set([HOST, 'lumio-co.online', 'www.lumio-co.online', 'lumio.gw607953.workers.dev']);
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({ shouldPlaySound: false, shouldSetBadge: false, shouldShowBanner: true, shouldShowList: true }),
@@ -87,7 +91,7 @@ export default function App() {
   const onShouldStart = useCallback((req: WebViewNavigation) => {
     try {
       const u = new URL(req.url);
-      if (u.host === HOST || u.protocol === 'about:' || u.protocol === 'blob:' || u.protocol === 'data:') return true;
+      if (OWN_HOSTS.has(u.host) || u.protocol === 'about:' || u.protocol === 'blob:' || u.protocol === 'data:') return true;
     } catch { return false; }
     Linking.openURL(req.url).catch(() => {});
     return false;

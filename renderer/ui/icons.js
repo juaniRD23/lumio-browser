@@ -108,7 +108,7 @@ export function avatarHtml({ profile = {}, account = {}, incognito = false, gues
 // Signal-style bars for the reasoning level (1 = low, 2 = medium, 3 = high).
 export const levelBars = (n, size = 14) => `<svg viewBox="0 0 16 16" width="${size}" height="${size}" aria-hidden="true">${[0, 1, 2].map((i) => `<rect x="${1.5 + i * 5}" y="${10 - i * 4}" width="3.2" height="${4.5 + i * 4}" rx="1" fill="currentColor" opacity="${i < n ? 1 : 0.28}"/>`).join('')}</svg>`;
 
-// The Lumio mark (lumio-usa.online's favicon), drawn in the text color so it
+// The Lumio mark (lumio-co.online's favicon), drawn in the text color so it
 // shows on light and dark backgrounds; `blue` gives its dot the accent color.
 export const markSvg = (size = 18, blue = false) => `<svg viewBox="0 0 64 64" width="${size}" height="${size}" aria-hidden="true"><path d="M35 12a21 21 0 1 0 17 19" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><circle cx="48" cy="17" r="5" fill="currentColor"${blue ? ' style="fill:var(--accent)"' : ''}/></svg>`;
 

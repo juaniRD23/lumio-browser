@@ -342,7 +342,7 @@ test('closing the last tab closes the window instead when that needs asking, so 
 });
 
 // ---------------------------------------------------------------- Help
-test('Help, in the menu bar and the ⋮ menu: Terms of Service, Privacy Policy, open-source licenses', () => {
+test('Help, in the menu bar and the ⋮ menu: Terms of Service, Privacy Policy, third-party licenses', () => {
   const cmd = new Proxy({}, { get: (_t, name) => (name === 'isDev' ? false : name) }); // each command is its own name
   const help = buildMenu(cmd).find((m) => m.role === 'help');
   // (With batch 7c's help center, Report an issue, What's new, Version Info and Experiments.)
@@ -350,10 +350,10 @@ test('Help, in the menu bar and the ⋮ menu: Terms of Service, Privacy Policy, 
   assert.deepEqual(help.submenu.filter((i) => i.label).map((i) => [i.label, i.click]), [
     [MAC ? 'Lumio Browser Help' : 'Help center', 'helpCenter'], [MAC ? 'Report an Issue…' : 'Report an issue…', 'reportIssue'], [MAC ? 'What’s New' : 'What’s new', 'whatsNew'],
     ['Version Info', 'versionPage'], ['Experiments', 'flagsPage'],
-    ['Terms of Service', 'terms'], ['Privacy Policy', 'privacy'], ['Open-Source Licenses', 'credits'],
+    ['Terms of Service', 'terms'], ['Privacy Policy', 'privacy'], ['Third-Party Licenses', 'credits'],
   ]);
   const dots = buildBrowserMenu(cmd);
   const sub = dots.find((i) => i.label === 'Help').submenu.filter((i) => i.label && typeof i.run === 'string');
-  assert.deepEqual(sub.map((i) => [i.label, i.run]), [['About Lumio Browser', 'about'], ['Help center', 'helpCenter'], ['Report an issue…', 'reportIssue'], ['What’s new', 'whatsNew'], ['Terms of Service', 'terms'], ['Privacy Policy', 'privacy'], ['Open-source licenses', 'credits']]);
+  assert.deepEqual(sub.map((i) => [i.label, i.run]), [['About Lumio Browser', 'about'], ['Help center', 'helpCenter'], ['Report an issue…', 'reportIssue'], ['What’s new', 'whatsNew'], ['Terms of Service', 'terms'], ['Privacy Policy', 'privacy'], ['Third-party licenses', 'credits']]);
   assert.equal(dots.at(-1).run, 'quit', 'Exit still quits (and main.js asks first)');
 });

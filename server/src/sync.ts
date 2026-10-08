@@ -14,8 +14,10 @@
 // "approve that", "stop"), computers post their encrypted status (what Lumio
 // is doing, what needs an OK) and notices ("task finished"), and a notice
 // wakes the phone with a Web Push (no payload; the phone fetches and
-// decrypts it).
+// decrypts it), an Expo push (the Expo app) or an APNs push (Lumio for
+// iPhone and iPad, apns.ts), each saying only what kind of thing happened.
 import type { Plan } from './agent.ts';
+import { APNS_ENDPOINT, apnsConfigured, sendApns } from './apns.ts';
 import { AgentError, type Env, fail, json, randomHex } from './util.ts';
 
 type User = { id: string; plan: Plan };
@@ -220,7 +222,8 @@ export async function companionPost(request: Request, env: Env, user: User, ctx:
   if ((recent?.n || 0) >= 120) return fail('Slow down a little.', 429, 'rate_limited');
   const row = await env.DB.prepare('INSERT INTO companion_messages (owner, kind, sender, target, data, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6) RETURNING seq')
     .bind(user.id, kind, device, target, data, now()).first<{ seq: number }>();
-  if (kind === 'notice') ctx.waitUntil(pushAll(env, user.id, device, HINTS[String(b.hint)] || HINTS.info));
+  const hint = Object.hasOwn(HINTS, String(b.hint)) ? String(b.hint) : 'info';
+  if (kind === 'notice') ctx.waitUntil(pushAll(env, user.id, device, HINTS[hint], hint));
   return json({ ok: true, seq: row?.seq || 0 });
 }
 
@@ -267,12 +270,25 @@ export async function pushSubscribe(request: Request, env: Env, user: User) {
   const endpoint = typeof b.endpoint === 'string' ? b.endpoint.slice(0, 1000) : '';
   let host = '';
   try { host = new URL(endpoint).hostname; } catch { /* invalid */ }
-  // Only the browsers' own push services.
-  // The browsers' own push services, or the Lumio app's Expo push token.
+  // The browsers' own push services, the Expo app's push token, or Lumio for
+  // iPhone and iPad's APNs device token (hex).
   const expo = /^expo:ExponentPushToken\[[A-Za-z0-9_-]{10,100}\]$/.test(endpoint);
-  if (!DEVICE.test(device) || (!expo && (!/^https:/.test(endpoint) || !/(^|\.)(push\.apple\.com|fcm\.googleapis\.com|googleapis\.com|push\.services\.mozilla\.com|notify\.windows\.com)$/.test(host)))) return fail('Invalid subscription.', 400, 'invalid_request');
+  const apns = APNS_ENDPOINT.test(endpoint);
+  if (!DEVICE.test(device) || (!expo && !apns && (!/^https:/.test(endpoint) || !/(^|\.)(push\.apple\.com|fcm\.googleapis\.com|googleapis\.com|push\.services\.mozilla\.com|notify\.windows\.com)$/.test(host)))) return fail('Invalid subscription.', 400, 'invalid_request');
+  // An iPhone or iPad's token belongs to whoever signed in there last: another
+  // account it was subscribed under (signed out offline, or switched) stops
+  // sending to it.
+  if (apns) await env.DB.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?1 AND NOT (owner = ?2 AND device = ?3)').bind(endpoint, user.id, device).run();
   await env.DB.prepare(`INSERT INTO push_subscriptions (owner, device, endpoint, created_at) VALUES (?1, ?2, ?3, ?4)
     ON CONFLICT(owner, device) DO UPDATE SET endpoint = ?3, created_at = ?4`).bind(user.id, device, endpoint, now()).run();
+  return json({ ok: true, delivers: !apns || apnsConfigured(env) });
+}
+
+// Notifications off on a device (DELETE /api/companion/push?device=…).
+export async function pushUnsubscribe(request: Request, env: Env, user: User) {
+  const device = str(new URL(request.url).searchParams.get('device'), 64);
+  if (!DEVICE.test(device)) return fail('Invalid device.', 400, 'invalid_request');
+  await env.DB.prepare('DELETE FROM push_subscriptions WHERE owner = ?1 AND device = ?2').bind(user.id, device).run();
   return json({ ok: true });
 }
 
@@ -288,14 +304,23 @@ const HINTS: Record<string, string> = {
   done: 'Lumio finished a task.',
   approval: 'Lumio needs your OK.',
   scheduled: 'A scheduled task finished.',
+  tab: 'A tab from your computer is ready to open.',
   info: 'Lumio has an update.',
 };
 
 // Web Push: VAPID-signed with no payload; it only wakes the phone, which then
 // fetches the (encrypted) notice itself. The Lumio app: Expo's push service.
-async function pushAll(env: Env, owner: string, sender: string, text = HINTS.info) {
+async function pushAll(env: Env, owner: string, sender: string, text = HINTS.info, hint = 'info') {
   const subs = await env.DB.prepare('SELECT device, endpoint FROM push_subscriptions WHERE owner = ?1 AND device != ?2').bind(owner, sender).all<{ device: string; endpoint: string }>();
   const all = subs.results || [];
+  const gone = (device: string) => env.DB.prepare('DELETE FROM push_subscriptions WHERE owner = ?1 AND device = ?2').bind(owner, device).run();
+  // Lumio for iPhone and iPad: APNs (when the Apple key is set up).
+  const apns = all.filter((s) => APNS_ENDPOINT.test(s.endpoint));
+  if (apns.length && apnsConfigured(env)) {
+    for (const s of apns) {
+      if ((await sendApns(env, s.endpoint, { body: text, hint })) === 'gone') await gone(s.device);
+    }
+  }
   const expo = all.filter((s) => s.endpoint.startsWith('expo:'));
   if (expo.length) {
     try {
@@ -311,7 +336,7 @@ async function pushAll(env: Env, owner: string, sender: string, text = HINTS.inf
     } catch { /* try again next time */ }
   }
   if (!env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_KEY) return;
-  for (const s of all.filter((x) => !x.endpoint.startsWith('expo:'))) {
+  for (const s of all.filter((x) => /^https:/.test(x.endpoint))) {
     try {
       const res = await fetch(s.endpoint, { method: 'POST', headers: { TTL: '86400', Urgency: 'high', 'Content-Length': '0', Authorization: await vapidAuth(env, s.endpoint) } });
       if (res.status === 404 || res.status === 410) await env.DB.prepare('DELETE FROM push_subscriptions WHERE owner = ?1 AND device = ?2').bind(owner, s.device).run();
@@ -322,7 +347,7 @@ async function pushAll(env: Env, owner: string, sender: string, text = HINTS.inf
 async function vapidAuth(env: Env, endpoint: string) {
   const te = new TextEncoder();
   const header = b64url(te.encode(JSON.stringify({ typ: 'JWT', alg: 'ES256' })));
-  const claims = b64url(te.encode(JSON.stringify({ aud: new URL(endpoint).origin, exp: Math.floor(now() / 1000) + 12 * 3600, sub: 'mailto:support@lumio-usa.online' })));
+  const claims = b64url(te.encode(JSON.stringify({ aud: new URL(endpoint).origin, exp: Math.floor(now() / 1000) + 12 * 3600, sub: 'mailto:support@lumio-co.online' })));
   const key = await crypto.subtle.importKey('jwk', JSON.parse(env.VAPID_PRIVATE_KEY as string), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
   const sig = new Uint8Array(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, key, te.encode(`${header}.${claims}`)));
   return `vapid t=${header}.${claims}.${b64url(sig)}, k=${env.VAPID_PUBLIC_KEY}`;

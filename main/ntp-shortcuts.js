@@ -16,7 +16,7 @@ const STARTERS = [
   { url: 'https://www.google.com/', title: 'Google' },
   { url: 'https://www.youtube.com/', title: 'YouTube' },
   { url: 'https://github.com/', title: 'GitHub' },
-  { url: 'https://lumio-usa.online/', title: 'Lumio' },
+  { url: 'https://lumio-co.online/', title: 'Lumio' },
 ];
 
 const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };

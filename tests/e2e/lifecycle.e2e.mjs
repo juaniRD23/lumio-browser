@@ -251,10 +251,10 @@ test('Windows: closing the last window (which quits) with a download asks first'
   }
 });
 
-test('lumio://credits lists the open-source software with its licenses; Chromium’s notices open from it', async () => {
+test('lumio://credits lists the third-party software with its licenses; Chromium’s notices open from it', async () => {
   await go('lumio://credits/', 'Credits');
   assert.ok(await until(async () => (await L.page("document.querySelectorAll('#packages details').length")) >= 5), 'the packages Lumio ships');
-  assert.deepEqual(await L.page("[...document.querySelectorAll('.links a')].map((a) => a.href)"), await L.main(() => [global.lumio.account.url('/terms'), global.lumio.account.url('/privacy'), 'https://github.com/juaniRD23/lumio-browser']));
+  assert.deepEqual(await L.page("[...document.querySelectorAll('.links a')].map((a) => a.href)"), await L.main(() => [global.lumio.account.url('/terms'), global.lumio.account.url('/privacy')]));
   assert.match(await L.page("document.querySelector('#engine .ver').textContent"), /^\d+\./, 'Chromium’s version');
   await shot('92-credits');
   await L.page("document.querySelector('#engine a').click(); true");
@@ -263,11 +263,11 @@ test('lumio://credits lists the open-source software with its licenses; Chromium
   assert.equal(await L.page("getComputedStyle(document.querySelector('.product .license')).display"), 'block', 'every license shown');
 });
 
-test('Help › Open-Source Licenses and Settings › About lead to the credits, Terms and Privacy Policy', async () => {
+test('Help › Third-Party Licenses and Settings › About lead to the credits, Terms and Privacy Policy', async () => {
   await go(`${base}/page`, 'Plain page');
   await L.main((electron) => {
     const help = electron.Menu.getApplicationMenu().items.find((i) => i.role === 'help');
-    help.submenu.items.find((i) => i.label === 'Open-Source Licenses').click();
+    help.submenu.items.find((i) => i.label === 'Third-Party Licenses').click();
     return true;
   });
   assert.ok(await until(async () => (await L.main(() => global.lumio.tabs.wc().getURL())).startsWith('lumio://credits/')));

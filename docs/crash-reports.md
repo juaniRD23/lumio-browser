@@ -4,12 +4,12 @@ Lumio can send crash reports, like Chrome's "Help improve Chrome". It's **off by
 
 ## What gets sent
 
-- **Minidumps** from Crashpad (Electron's `crashReporter`) when any Lumio process crashes. Each one carries these annotations: `version`, `platform`, `arch`, `channel` (`stable`, `beta`, or `dev` when running from source), `_productName: Lumio Browser` and `_companyName: Lumio`, plus Electron's own fields (`process_type`, `ver`, `guid`, ...). A minidump is a snapshot of the crashed process, so it can contain bits of what was in memory. The Settings text and the privacy page say so.
+- **Minidumps** from Crashpad (Electron's `crashReporter`) when any Lumio process crashes. Each one carries these annotations: `version`, `platform`, `arch`, `channel` (`stable`, `beta`, or `dev` when running with `npm start`), `_productName: Lumio Browser` and `_companyName: Lumio`, plus Electron's own fields (`process_type`, `ver`, `guid`, ...). A minidump is a snapshot of the crashed process, so it can contain bits of what was in memory. The Settings text and the privacy page say so.
 - **JSON reports** from `main/crash-reports.js`:
   - JavaScript errors in the main process (`uncaughtException`, `unhandledRejection`). The stack keeps Lumio's own file paths (`main/tabs.js:183:7`). Other paths, web addresses, host names, IP addresses, long tokens, emails and quoted text are removed (host-shaped code like `tab.view` goes too; the stack still points at the bug).
   - Pages and helper processes that died (`render-process-gone`, `child-process-gone`), by kind (`page`, `ui`, `extension`, `gpu-process`, `utility`), reason and exit code. A page's address and title are never sent.
 
-The setting is read from `settings.json` before the app is ready, because Crashpad can only start then. So turning it **on** takes effect at the next launch. Turning it **off** stops uploads right away (`crashReporter.setUploadToServer(false)`). When running from source (`npm start`), reports go only to a server set with `LUMIO_ACCOUNT_BASE`, never to the live one.
+The setting is read from `settings.json` before the app is ready, because Crashpad can only start then. So turning it **on** takes effect at the next launch. Turning it **off** stops uploads right away (`crashReporter.setUploadToServer(false)`). When running with `npm start`, reports go only to a server set with `LUMIO_ACCOUNT_BASE`, never to the live one.
 
 ## Server
 

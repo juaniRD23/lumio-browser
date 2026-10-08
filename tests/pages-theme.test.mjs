@@ -49,7 +49,6 @@ const ANSWERS = {
   ] },
   'page:bookmarks-bar': false,
   'page:credits': {
-    version: '0.6.3', license: 'GPL-3.0-or-later', source: 'https://github.com/juaniRD23/lumio-browser', licenseText: 'GNU GENERAL PUBLIC LICENSE',
     chromium: { version: '150.0.0.0', available: true }, electron: { version: '43.7.7', license: 'MIT', url: 'https://www.electronjs.org/', text: 'MIT' },
     packages: [{ name: 'marked', version: '16.4.2', license: 'MIT', url: 'https://marked.js.org', text: 'MIT License' }],
     bundled: [{ name: 'PDF.js', license: 'Apache-2.0', url: 'https://mozilla.github.io/pdf.js/' }],

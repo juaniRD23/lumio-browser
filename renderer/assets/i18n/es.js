@@ -1534,10 +1534,9 @@
 
   // ------------------------------------------------------------ credits (renderer/pages/credits.*)
   'Credits': 'Créditos',
-  'Lumio Browser is free software, made with the open-source projects below. Open one to read its license.': 'Lumio Browser es software libre, hecho con los proyectos de código abierto que aparecen abajo. Abre uno para leer su licencia.',
+  'Lumio Browser includes software from the projects below. Open one to read its license.': 'Lumio Browser incluye software de los proyectos que aparecen abajo. Abre uno para leer su licencia.',
   'Terms of Service': 'Condiciones del servicio',
   'Privacy Policy': 'Política de privacidad',
-  'Source code': 'Código fuente',
   'Chromium and Electron': 'Chromium y Electron',
   'Packages': 'Paquetes',
   'Also included': 'También se incluyen',
@@ -1580,7 +1579,7 @@
   'The pages listed below, each in its own tab.': 'Las páginas de la lista de abajo, cada una en su propia pestaña.',
   'Ask at startup': 'Preguntar al iniciar',
   'When Lumio isn’t your default browser, a bar offers to make it the default.': 'Cuando Lumio no es tu navegador predeterminado, una barra te ofrece convertirlo en el predeterminado.',
-  'Open-source licenses': 'Licencias de código abierto',
+  'Third-party licenses': 'Licencias de terceros',
 
   // ------------------------------------------------------------ welcome: the search engine (renderer/pages/welcome.*)
   'Choose your': 'Elige tu',
@@ -1737,7 +1736,7 @@
   'Select Next Tab': 'Seleccionar la pestaña siguiente',
   'Select Previous Tab': 'Seleccionar la pestaña anterior',
   'Duplicate Tab': 'Duplicar pestaña',
-  'Open-Source Licenses': 'Licencias de código abierto',
+  'Third-Party Licenses': 'Licencias de terceros',
   'Use Selection for Find': 'Usar la selección para buscar',
   '{title} and {#n} more tab': '{title} y {n} pestaña más',
   '{title} and {#n} more tabs': '{title} y {n} pestañas más',

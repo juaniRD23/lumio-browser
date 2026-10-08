@@ -17,8 +17,10 @@ npx expo start
 Scan the QR code with Expo Go (iPhone) or a development build (Android:
 push notifications need a development build since SDK 53).
 
-The site it opens is `expo.extra.site` in `app.json`. Change it when the
-domain moves to lumio-usa.online.
+The site it opens is `expo.extra.site` in `app.json`
+(https://lumio-co.online). The value is built into each app, so store builds
+need a new build after it changes. Builds made before the switch open
+lumio.gw607953.workers.dev, which keeps working (same Worker and database).
 
 ## Store builds
 

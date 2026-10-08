@@ -1,4 +1,4 @@
-/* Credits (credits.html): the open-source software in Lumio Browser. */
+/* Credits (credits.html): the third-party software in Lumio Browser. */
 .links { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: -6px 0 6px; }
 .card { overflow: hidden; }
 .card > * + * { border-top: 1px solid var(--line); }

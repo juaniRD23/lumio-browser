@@ -26,6 +26,32 @@ export interface Env {
   MICROSOFT_TOKEN_URL?: string; // tests
   GOOGLE_API?: string; // tests
   GRAPH_API?: string; // tests
+  // Sign in with Apple (Lumio for iPhone and iPad). APPLE_AUDIENCES: the app's
+  // bundle id (comma-separated if more). The key lets Lumio revoke Apple's
+  // token when an account is deleted: the team id, the key's id and the key
+  // (.p8, PEM) of a "Sign in with Apple" key from the Apple developer account.
+  APPLE_AUDIENCES?: string;
+  APPLE_TEAM_ID?: string;
+  APPLE_KEY_ID?: string;
+  APPLE_PRIVATE_KEY?: string;
+  APPLE_KEYS_URL?: string; // tests
+  APPLE_TOKEN_URL?: string; // tests
+  APPLE_REVOKE_URL?: string; // tests
+  // Notifications for Lumio for iPhone and iPad (APNs, apns.ts): a key with
+  // Apple Push Notifications enabled. Each falls back to its APPLE_* twin
+  // above (one Apple key can do both). APNS_TOPIC: the app's bundle id.
+  APNS_KEY_ID?: string;
+  APNS_PRIVATE_KEY?: string;
+  APNS_TEAM_ID?: string;
+  APNS_TOPIC?: string;
+  APNS_URL?: string; // tests
+  APNS_SANDBOX_URL?: string; // tests
+  // Email + password sign-in (email-auth.ts): its codes go out through Resend.
+  // Without the key, email sign-up and password resets aren't available yet.
+  RESEND_API_KEY?: string;
+  CODE_KEY?: string; // base64 of 32 random bytes: keys the email code hashes (HMAC); without it, email sign-in isn't available either
+  EMAIL_FROM?: string; // default 'Lumio <no-reply@lumio-co.online>'
+  RESEND_API_URL?: string; // tests
 }
 
 export { AgentError };
@@ -33,7 +59,7 @@ export { AgentError };
 export function json(body: unknown, status = 200, headers: Record<string, string> = {}) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...headers } });
 }
-export const fail = (message: string, status: number, code: string) => json({ error: message, code }, status);
+export const fail = (message: string, status: number, code: string, headers: Record<string, string> = {}) => json({ error: message, code }, status, headers);
 
 export function redirect(location: string, headers: Record<string, string> = {}) {
   return new Response(null, { status: 302, headers: { location, 'cache-control': 'no-store', ...headers } });
@@ -47,6 +73,16 @@ export async function sha256(text: string) {
 export function randomHex(bytes = 32) {
   const a = crypto.getRandomValues(new Uint8Array(bytes));
   return [...a].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Compares secrets without leaking where they differ: Workers have
+// crypto.subtle.timingSafeEqual; Node (where the tests run) doesn't.
+export function timingSafeEqual(a: Uint8Array, b: Uint8Array) {
+  if (a.byteLength !== b.byteLength) return false;
+  if (typeof crypto.subtle.timingSafeEqual === 'function') return crypto.subtle.timingSafeEqual(a, b);
+  let diff = 0;
+  for (let i = 0; i < a.byteLength; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
 }
 
 export function base64url(bytes: Uint8Array) {

@@ -1,6 +1,9 @@
 // One-time setup for the Lumio server, run in your own terminal:
-//   node scripts/setup.mjs --host lumio.gw607953.workers.dev
-//   node scripts/setup.mjs --host lumio.gw607953.workers.dev --stripe   (only the Stripe keys, e.g. test → live)
+//   node scripts/setup.mjs --host lumio-co.online
+//   node scripts/setup.mjs --host lumio-co.online --stripe   (only the Stripe keys, e.g. test → live)
+// Use the canonical host: Stripe's webhook and billing-portal links point at it
+// (run it once https://lumio-co.online/health answers). The Worker still answers
+// on lumio.gw607953.workers.dev for older apps; that needs nothing here.
 // Asks for each key with hidden input (Enter skips one) and stores it as a
 // Cloudflare Worker secret. With a Stripe key it also creates Lumio's plans
 // (Go $10, Plus $20, Pro $100, Max $200 a month), its own billing-portal settings and
@@ -13,7 +16,7 @@ import readline from 'node:readline';
 
 const host = (process.argv[process.argv.indexOf('--host') + 1] || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
 if (!process.argv.includes('--host') || !/^[a-z0-9.-]+$/.test(host)) {
-  console.error('Usage: node scripts/setup.mjs --host lumio.gw607953.workers.dev');
+  console.error('Usage: node scripts/setup.mjs --host lumio-co.online');
   process.exit(1);
 }
 const PLANS = [
@@ -130,6 +133,10 @@ if (!onlyStripe) {
   if (openrouter) { await putSecret('OPENROUTER_API_KEY', openrouter); console.log('  ✓ OpenRouter key stored'); }
   const google = await ask('Google OAuth client secret: ');
   if (google) { await putSecret('GOOGLE_CLIENT_SECRET', google); console.log('  ✓ Google client secret stored'); }
+  // Email sign-in's codes go out through Resend (a sending-only key for lumio-co.online).
+  const resend = await ask('Resend API key (re_…, blank to skip): ');
+  if (resend && !/^re_[A-Za-z0-9_-]+$/.test(resend)) console.error('  ✗ That doesn’t look like a Resend API key (re_…). It wasn’t stored.');
+  else if (resend) { await putSecret('RESEND_API_KEY', resend); console.log('  ✓ Resend key stored (email sign-in)'); }
 }
 const stripeKey = await ask('Stripe secret key (sk_test_… to try it first, sk_live_… for real payments): ');
 // The publishable key shows Stripe's payment form inside Lumio's own /checkout page.
@@ -154,6 +161,12 @@ try { existing = execFileSync('npx', ['--yes', 'wrangler', 'secret', 'list'], { 
 if (!existing.includes('"CONNECTIONS_KEY"')) {
   await putSecret('CONNECTIONS_KEY', crypto.randomBytes(32).toString('base64'));
   console.log('  ✓ Connections encryption key created');
+}
+// Email sign-in keeps its 6-digit codes only as an HMAC with this key (so a
+// copy of the database can't give them away). Made once, here; never shown.
+if (!existing.includes('"CODE_KEY"')) {
+  await putSecret('CODE_KEY', crypto.randomBytes(32).toString('base64'));
+  console.log('  ✓ Email code key created');
 }
 // Phone notifications (Web Push) need a VAPID key pair. Made once, here;
 // never shown. (Replacing it means phones turn notifications on again.)

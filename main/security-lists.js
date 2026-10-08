@@ -50,7 +50,9 @@ const BRANDS = [
   // phone and internet providers, governments
   'att.com', 'verizon.com', 't-mobile.com', 'xfinity.com', 'comcast.net', 'spectrum.net', 'irs.gov', 'ssa.gov', 'gov.uk',
   // Lumio
-  'lumio-usa.online', 'lumio.gw607953.workers.dev', 'lumio-browser.gw607953.workers.dev',
+  // lumio-usa.online and the workers.dev hosts are older addresses still used
+  // by older apps; drop lumio-usa.online here if that domain is ever let go.
+  'lumio-co.online', 'lumio-usa.online', 'lumio.gw607953.workers.dev', 'lumio-browser.gw607953.workers.dev',
 ];
 
 const INFRA = [

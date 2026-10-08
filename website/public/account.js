@@ -128,8 +128,9 @@ async function renderAll() {
   plansList ??= (await fetch('/api/billing/plans').then((r) => r.json())).plans;
   $('#page').hidden = false;
   avatar($('#avatar'), account);
+  // No name (an account made with email): the email once, as the name.
   $('#name').textContent = account.profile?.name || account.email;
-  $('#email').textContent = account.email;
+  $('#email').textContent = account.profile?.name ? account.email : '';
   const u = usage.usage;
   renderUsage(u);
   const p = account.plan || {};

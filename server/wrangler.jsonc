@@ -1,16 +1,31 @@
-// Lumio (lumio-usa.online): website, accounts, Stripe plans, web Chat and
-// Lumio Browser's AI, in one Worker.
+// Lumio (lumio-co.online): website, accounts, Stripe plans, web Chat and
+// Lumio Browser's AI, in one Worker (also served at lumio.gw607953.workers.dev
+// for older apps).
 //   Deploy:  npx wrangler deploy
 //   Schema:  npx wrangler d1 execute lumio --remote --file schema.sql
 //            (or, on an existing database, the new files in migrations/)
-//   Secrets: node scripts/setup.mjs --host <host>   (OpenRouter, Google, Stripe)
-//            OPENROUTER_API_KEY, GOOGLE_CLIENT_SECRET, STRIPE_SECRET_KEY,
+//   Secrets: node scripts/setup.mjs --host lumio-co.online   (OpenRouter, Google, Resend, Stripe)
+//            OPENROUTER_API_KEY, GOOGLE_CLIENT_SECRET, RESEND_API_KEY, STRIPE_SECRET_KEY,
 //            STRIPE_PUBLISHABLE_KEY, STRIPE_WEBHOOK_SECRET, MICROSOFT_CLIENT_SECRET,
-//            CONNECTIONS_KEY, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY (see Env in src/util.ts)
+//            CONNECTIONS_KEY, CODE_KEY, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY (see Env in src/util.ts)
 {
   "name": "lumio",
   "main": "src/index.ts",
   "compatibility_date": "2026-09-01",
+  // lumio-co.online is the canonical host. The zone must be active on this
+  // Cloudflare account (nameservers moved) before deploying, and neither name
+  // may already have an A, AAAA or CNAME record: each custom domain makes its own.
+  // www.lumio-co.online isn't attached here: it has its own proxied DNS record
+  // (CNAME to the apex) and a Cloudflare Redirect Rule sends it to the apex
+  // (301, path and query kept) before the Worker. The Worker can't do it itself,
+  // because static pages are served without running it (see run_worker_first).
+  "routes": [
+    { "pattern": "lumio-co.online", "custom_domain": true }
+  ],
+  // Keep lumio.gw607953.workers.dev: older Lumio Browser, iPhone and companion
+  // builds use it (same Worker and database). Wrangler turns it off when routes
+  // are set unless this says otherwise.
+  "workers_dev": true,
   "observability": { "enabled": true },
   "assets": {
     "directory": "../website/public",
@@ -26,11 +41,13 @@
     { "binding": "FILES", "bucket_name": "lumio-files" }
   ],
   // Checks recent AI calls against OpenRouter's records of what they cost (src/spend.ts),
-  // and clears out old sync pairings, feedback and crash reports (see scheduled() in src/index.ts).
+  // and clears out old sync pairings, feedback, crash reports and email sign-in codes (see scheduled() in src/index.ts).
   "triggers": { "crons": ["*/5 * * * *"] },
   "vars": {
     "GOOGLE_CLIENT_ID": "1034095196731-3gfal3tuf9goo6ejtnhgi07h3pgtkhdr.apps.googleusercontent.com",
     "FREE_DAILY_CAP_USD": "10",
+    // Who Lumio's emails (sign-in codes) come from; sent with Resend (secret RESEND_API_KEY).
+    "EMAIL_FROM": "Lumio <no-reply@lumio-co.online>",
     // Microsoft Entra app (Outlook, OneDrive connections); its secret is set by scripts/setup.mjs.
     "MICROSOFT_CLIENT_ID": ""
   }

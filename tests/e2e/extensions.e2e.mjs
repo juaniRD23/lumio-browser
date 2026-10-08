@@ -308,8 +308,8 @@ test('the menu bar: Help, View › Developer, History, and the Mac’s own menus
   const top = await menus();
   const help = top.find((m) => m.role === 'help');
   assert.deepEqual(help.items.filter(Boolean), MAC
-    ? ['Lumio Browser Help', 'Report an Issue…', 'What’s New', 'Version Info', 'Experiments', 'Terms of Service', 'Privacy Policy', 'Open-Source Licenses']
-    : ['Help center', 'Report an issue…', 'What’s new', 'Version Info', 'Experiments', 'Terms of Service', 'Privacy Policy', 'Open-Source Licenses']);
+    ? ['Lumio Browser Help', 'Report an Issue…', 'What’s New', 'Version Info', 'Experiments', 'Terms of Service', 'Privacy Policy', 'Third-Party Licenses']
+    : ['Help center', 'Report an issue…', 'What’s new', 'Version Info', 'Experiments', 'Terms of Service', 'Privacy Policy', 'Third-Party Licenses']);
   const win = top.find((m) => m.label === 'Window');
   for (const l of ['Name Window…', 'Task Manager', 'Search Tabs…']) assert.ok(win.items.includes(l), `Window › ${l}`);
   if (MAC) assert.match(String(win.role), /^window$/i, 'the Mac lists its windows there');
