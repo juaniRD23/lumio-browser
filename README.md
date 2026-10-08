@@ -28,13 +28,13 @@ A Chromium web browser with **Lumio AI** built in. Lumio sits in a side panel ne
 
 To let Lumio control your Mac, turn on Lumio Browser under **Accessibility** and **Screen Recording** in System Settings → Privacy & Security. Settings → Lumio AI has shortcuts.
 
-## Build from source
+## Development
 
 Requires Node 22+ and, for the Mac helper, Xcode command-line tools.
 
 ```sh
 npm install
-npm start                # run from source
+npm start                # run the app locally
 npm test                 # unit tests
 npm run test:e2e         # end-to-end tests (drive the real app)
 npm run install:app      # build and install /Applications/Lumio Browser.app
@@ -50,7 +50,3 @@ npm run release          # dist/release: Mac DMGs (Apple silicon, Intel) and a W
 - **While it works:** `main/ai/indicators.js` (page glow and Stop bar) and `main/ai/screen-aura.js` (screen glow and Stop pill, left out of screen captures). `main/ai/tools/plan.js` is the Task progress checklist.
 - **Updates:** `main/updater.js` checks GitHub Releases, verifies the installer's SHA-256 and swaps the app in after it quits.
 - **Extensions:** [electron-chrome-extensions](https://github.com/samuelmaddock/electron-browser-shell) and electron-chrome-web-store.
-
-## License
-
-Lumio Browser is free software: you can redistribute it and/or modify it under the terms of the **GNU General Public License v3.0 or later**. See [LICENSE](LICENSE). The Lumio name and logo, the lumio-usa.online service, and Lumio plans are not covered by this license.
