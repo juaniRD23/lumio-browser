@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import { fakeAccount } from './fake-agent.mjs';
 
 const require = createRequire(import.meta.url);
-const { trimForServer, lumioChat } = require('../main/ai/lumio.js');
+const { trimForServer, lumioChat, STOPPED_NOTE } = require('../main/ai/lumio.js');
 
 const turn = (k) => [
   { role: 'assistant', content: null, tool_calls: [{ id: `c${k}`, type: 'function', function: { name: 'read_page', arguments: '{}' } }] },
@@ -20,7 +20,8 @@ test('a very long run keeps the request it is working on', () => {
   const out = trimForServer(messages);
   assert.ok(out.length <= 150);
   assert.equal(out[0], request, 'starts with the task');
-  assert.equal(out[1].role, 'assistant', 'then a model turn with its results');
+  assert.match(out[1].content, /^\[Lumio Browser, not the user\] To keep the request small, the earliest steps of this chat are no longer sent/, 'then what the steps left out did');
+  assert.equal(out[2].role, 'assistant', 'then a model turn with its results');
   assert.equal(out.at(-1), messages.at(-1), 'ends with the newest step');
   // Every tool result still follows the call that asked for it.
   const asked = new Set();
@@ -95,12 +96,53 @@ test('a long run drops its oldest steps in batches, so most requests start with 
     assert.equal(out[0], messages[0]);
     if (previous && messages.length > 150) {
       pairs++;
-      if (previous.every((m, i) => out[i] === m)) same++;
+      if (previous.every((m, i) => JSON.stringify(out[i]) === JSON.stringify(m))) same++;
     }
     previous = out;
   }
   // 3 messages a step, 50 dropped at a time: a new start about every 17 steps.
   assert.ok(same / pairs > 0.9, `${same} of ${pairs}`);
+});
+
+test('a task the person stopped is not carried into their next request', () => {
+  const stopped = { role: 'user', content: 'Delete every email from Bob' };
+  const next = { role: 'user', content: 'Compare laptop prices on 40 stores' };
+  const messages = [stopped, ...steps(0, 5), { role: 'user', content: STOPPED_NOTE }, next, ...steps(5, 60)];
+  const out = trimForServer(messages);
+  assert.equal(out[0], next, 'starts with the new request');
+  assert.ok(!out.includes(stopped));
+  assert.ok(out.length <= 150);
+  wellFormed(out);
+  // Before it's long enough to trim, the model sees it was stopped.
+  const short = [stopped, ...steps(0, 5), { role: 'user', content: STOPPED_NOTE }, next];
+  assert.deepEqual(trimForServer(short), short);
+  assert.match(STOPPED_NOTE, /^\[Lumio Browser, not the user\] The user pressed Stop here, so the task above ended unfinished\. Don’t go back to it unless they ask you to\.$/);
+});
+
+test('the steps left out are summed up, one line each, with the plan as of then', () => {
+  const task = { role: 'user', content: 'Note the price on all 80 pages' };
+  const plan = { role: 'assistant', content: 'Starting with page 1.', tool_calls: [{ id: 'plan1', type: 'function', function: { name: 'update_plan', arguments: JSON.stringify({ steps: [{ title: 'Open each page', status: 'in_progress' }, { title: 'Report the prices', status: 'pending' }] }) } }] };
+  const page = (k) => [
+    { role: 'assistant', content: null, tool_calls: [{ id: `c${k}`, type: 'function', function: { name: 'read_page', arguments: `{"tab_id":${k}}` } }] },
+    { role: 'tool', tool_call_id: `c${k}`, content: `Tab ${k}: "Item ${k}" price $${k}.99` },
+  ];
+  const messages = [task, plan, { role: 'tool', tool_call_id: 'plan1', content: 'Plan updated (0/2 done).' }];
+  for (let k = 1; k <= 80; k++) messages.push(...page(k));
+  const out = trimForServer(messages);
+  assert.ok(out.length <= 150);
+  assert.equal(out[0], task);
+  const note = out[1].content;
+  assert.match(note, /- You wrote: Starting with page 1\./);
+  assert.match(note, /- read_page \{"tab_id":1\} → Tab 1: "Item 1" price \$1\.99/);
+  assert.match(note, /Your plan as of those steps:\n1\. \[in_progress\] Open each page\n2\. \[pending\] Report the prices/);
+  assert.match(note, /keep anything you will need later \(findings, numbers, where you are\) in update_plan/);
+  assert.doesNotMatch(note, /tab_id":80/, 'only the steps left out');
+  wellFormed(out);
+  // Many steps left out: the newest 40 lines, and how many came before.
+  for (let k = 81; k <= 300; k++) messages.push(...page(k));
+  const later = trimForServer(messages)[1].content.split('\n');
+  assert.equal(later.filter((l) => l.startsWith('- read_page')).length, 40);
+  assert.match(later[1], /^- \(\d+ earlier\)$/);
 });
 
 const ids = { taskId: 't1', runId: 'r1', stepId: 's1' };

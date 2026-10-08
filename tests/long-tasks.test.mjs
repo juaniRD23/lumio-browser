@@ -10,7 +10,7 @@ const require = createRequire(import.meta.url);
 const electronPath = require.resolve('electron');
 require.cache[electronPath] ??= { id: electronPath, filename: electronPath, loaded: true, exports: {} };
 const { runAgent } = require('../main/ai/agent.js');
-const { lumioChat } = require('../main/ai/lumio.js');
+const { lumioChat, STOPPED_NOTE } = require('../main/ai/lumio.js');
 const { AIController } = require('../main/ai/controller.js');
 const { ChatStore } = require('../main/ai/chats.js');
 const { cleanHelpers, HELPER_STEPS } = require('../main/ai/tools/helpers.js');
@@ -126,4 +126,49 @@ test(`helpers get up to ${HELPER_STEPS} steps, and Lumio hears when one was cut 
   assert.match(out.text, /Helper 1 \(Blue\), “Prices” — did not finish:/);
   assert.match(out.text, /It stopped before finishing: it reached its limit of 60 steps\./);
   assert.equal(out.status, 'error');
+});
+
+test('a helper is told its step budget, and near the end to report what it has (Lumio gets the report)', async () => {
+  const tab = { id: 7, view: { setBounds() {}, webContents: { setBackgroundThrottling() {} } } };
+  const report = 'Prices so far: $10 at A, $12 at B. Not checked yet: C.';
+  const { ai, account } = controller((body, i) => (/only 3 more steps/.test(body.messages.at(-1).content) ? { text: report } : busy(body, i)), {
+    tabs: { create: () => tab, get: (id) => (id === 7 ? tab : null), setAgent() {}, scoped: () => ({ active: tab, tabs: [tab], get: () => tab }), close() {} },
+  });
+  const run = { abort: new AbortController(), pending: new Map(), grants: new Set() };
+  const out = await ai.runHelpers(cleanHelpers([{ title: 'Prices', task: 'Find the price on every page' }]), { parentId: 'p1', run, chat: { id: 'chat1' }, record: () => {}, runId: 'run1' });
+  const bodies = account.bodies.filter((b) => b.runId === 'run1-h1');
+  assert.match(bodies[0].messages[0].content, /Do only this task, in at most 60 steps, then reply with a short report/);
+  assert.equal(bodies.length, 58);
+  assert.match(out.text, /Helper 1 \(Blue\), “Prices” — done:\nPrices so far: \$10 at A, \$12 at B\. Not checked yet: C\./);
+  assert.equal(out.status, 'ok');
+});
+
+test('Stop: the chat marks the task as stopped, so the next request doesn\'t carry it on', async () => {
+  let ai = null;
+  const made = controller((body, i) => {
+    if (i === 5) ai.stop();
+    return i <= 5 ? busy(body, i) : { text: 'Here are the prices.' };
+  });
+  ai = made.ai;
+  let ending = made.end();
+  const sent = await ai.send({ text: 'Delete every email from Bob' });
+  await ending;
+  const chat = ai.chatStore.get(sent.chatId);
+  assert.equal(chat.messages.at(-1).content, STOPPED_NOTE);
+  assert.deepEqual(chat.display.at(-1), { kind: 'note', text: 'Stopped.' });
+  ending = made.end();
+  await ai.send({ chatId: sent.chatId, text: 'Compare laptop prices' });
+  await ending;
+  const last = made.account.bodies.at(-1).messages;
+  const at = last.findIndex((m) => m.content === STOPPED_NOTE);
+  assert.ok(at > 0, 'the model sees it was stopped');
+  assert.match(last[at + 1].content, /^Compare laptop prices/);
+  assert.equal(chat.display.filter((d) => d.kind === 'ai').at(-1).text, 'Here are the prices.');
+});
+
+test('a scheduled task is told how many steps it may take', async () => {
+  const { ai, account } = controller(() => ({ text: 'All dashboards are green.' }));
+  const out = await ai.runScheduled({ id: 'job', title: 'Morning check', prompt: 'Check all the dashboards', when: 'Every day at 8:00' });
+  assert.equal(out.status, 'done');
+  assert.match(account.bodies[0].messages[0].content, /A scheduled task can take at most 300 steps\./);
 });

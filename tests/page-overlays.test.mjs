@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const scripts = require('../main/ai/tools/page-scripts.js');
+const { VOLATILE } = require('../main/ai/agent.js');
 
 const CHROME = ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/usr/bin/google-chrome', 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'].find((p) => fs.existsSync(p));
 const skip = !CHROME && 'Google Chrome not installed';
@@ -40,5 +41,24 @@ test('the glow and the pointer appear on a page that enforces Trusted Types (lik
   assert.equal(await run(scripts.aura, { remove: true }), true);
   assert.equal(await run(scripts.cursor, { remove: true }), true);
   assert.equal(await page.evaluate(() => document.body.children.length), 1, 'removed cleanly');
+  await page.close();
+});
+
+test('what the AI compares its steps by: a field, a list scrolled inside the page and the text count; a clock ticking doesn\'t', { skip }, async () => {
+  const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
+  await page.setContent(`<p id="clock">Updated 10:41 PM · 5 seconds ago</p><input id="qty" value="1"><p id="msg">Cart</p>
+    <div id="list" style="position:fixed;top:100px;left:0;right:0;bottom:0;overflow:auto">${'<p>mail</p>'.repeat(200)}</div>`);
+  const state = () => page.evaluate(`(${scripts.pageState.toString()})(${JSON.stringify({ volatile: VOLATILE.source })})`);
+  const first = await state();
+  await page.evaluate(() => { document.getElementById('clock').textContent = 'Updated 10:42 PM · 6 seconds ago'; });
+  assert.equal(await state(), first, 'a clock ticking is not a change');
+  await page.evaluate(() => { document.getElementById('qty').value = '2'; });
+  const second = await state();
+  assert.notEqual(second, first, 'a field changed');
+  await page.evaluate(() => { document.getElementById('list').scrollTop = 700; });
+  const third = await state();
+  assert.notEqual(third, second, 'the list in the middle scrolled (the window didn\'t)');
+  await page.evaluate(() => { document.getElementById('msg').textContent = 'Cart (2)'; });
+  assert.notEqual(await state(), third, 'the text changed');
   await page.close();
 });

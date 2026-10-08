@@ -256,6 +256,28 @@ function selectOption(opts) {
   return { selected: opt.text.trim() };
 }
 
+// A short hash of what the page shows: its text (with what changes on its
+// own, like clock times, taken out: opts.volatile), its fields' values and
+// how far it and the boxes in the middle of it are scrolled. It tells the AI
+// whether a step changed anything; it never leaves the computer.
+function pageState(opts) {
+  const fields = [];
+  for (const el of document.querySelectorAll('input:not([type=password]):not([type=hidden]), textarea, select')) {
+    fields.push(el.type === 'checkbox' || el.type === 'radio' ? el.checked : el.value);
+    if (fields.length >= 500) break;
+  }
+  const scrolled = [Math.round(window.scrollY)];
+  for (let el = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2); el; el = el.parentElement) {
+    if (el.scrollTop) scrolled.push(Math.round(el.scrollTop));
+  }
+  let text = document.body ? document.body.innerText : '';
+  if (opts.volatile) text = text.replace(new RegExp(opts.volatile, 'gi'), '#');
+  const all = `${text}\u0001${fields.join('\u0001')}\u0001${scrolled.join(',')}`;
+  let h = 0x811c9dc5;
+  for (let i = 0; i < all.length; i++) h = Math.imul(h ^ all.charCodeAt(i), 16777619);
+  return `${all.length}:${(h >>> 0).toString(36)}`;
+}
+
 function scrollInfo() {
   return { y: Math.round(window.scrollY), height: Math.round(document.documentElement.scrollHeight), vh: window.innerHeight };
 }
@@ -505,4 +527,4 @@ function serp(opts) {
   };
 }
 
-module.exports = { domClick, domType, domScroll, youtube, snapshot, locate, focusCheck, selectContents, selectOption, scrollInfo, cursor, aura, serp, maskCards };
+module.exports = { domClick, domType, domScroll, youtube, snapshot, locate, focusCheck, selectContents, selectOption, pageState, scrollInfo, cursor, aura, serp, maskCards };

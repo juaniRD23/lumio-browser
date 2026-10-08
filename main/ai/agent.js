@@ -20,16 +20,31 @@ const MAX_TOOL_TEXT = 24_000;
 // more would make every later step fail, so the extra ones don't run.
 const MAX_CALLS = 12;
 
-// Stuck: the same step again (the same tool calls, on the same page, with the
-// same results) with nothing new coming back in between. 3 times within the
-// last 8 steps adds a note telling the model to change course; 6 times within
-// the last 12 ends the task. Waiting on purpose (a wait, or looking again
-// while the page loads or right after a wait) repeats by design, so it gets 4
-// times the room: 12 checks with no change before the note, 24 before it ends.
-const NUDGE = { times: 3, within: 8 };
-const GIVE_UP = { times: 6, within: 12 };
-const PATIENCE = 4;
+// Stuck: the task has stopped getting anywhere. Each step is fingerprinted
+// from its tool calls, the active tab's address, what the tab shows after it
+// (a short hash of its text, field values and scroll positions: a click on
+// "+" or a scroll changes it even when the tool's answer is the same) and the
+// results, with text that changes on its own (clock times, "5 seconds ago")
+// taken out; a screenshot counts by what the tab shows (or, for the screen,
+// a coarse 16x10 picture), not its bytes, which change whenever anything
+// moves. A step never seen before is progress; a repeat brings nothing new.
+// - Acting (clicking, typing…) with nothing new: the same step 3 times within
+//   the last 8, or 8 steps in a row that repeat earlier ones (a loop of
+//   several different steps), adds a note telling the model to change course;
+//   the same step 6 times within 12, or 12 in a row, ends the task.
+// - Waiting on purpose (only waits and looks, or a wait at least every 4th
+//   step) is counted in time, not checks: a note every 2 minutes with no
+//   change (and at the 3rd look with no wait in between), and it ends after 15.
+const NUDGE = { times: 3, within: 8, stale: 8 };
+const GIVE_UP = { times: 6, within: 12, stale: 12 };
+const WAIT_NOTE_MS = 2 * 60_000;
+const WAIT_LIMIT_MS = 15 * 60_000;
 const LOOKS = new Set(['read_page', 'screenshot_tab', 'computer_screenshot', 'list_tabs', 'list_apps', 'read_url']);
+// Text that changes on its own: clock times, "5 seconds ago", countdowns, long ids.
+const VOLATILE = /(?<!\d)\d{1,2}:\d{2}(?::\d{2})?(?:\s?[ap]\.?m\b\.?)?|\b\d+(?:\.\d+)?\s*(?:ms|s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?)\b|\d{10,}/gi;
+const steady = (text) => String(text || '').replace(VOLATILE, '#');
+// Close to the safety ceiling, the model is told to wrap up and report.
+const WRAP_UP = 3;
 
 function abortError() {
   const e = new Error('Stopped');
@@ -85,38 +100,44 @@ function sameArgs(raw) {
   try { return JSON.stringify(sorted(JSON.parse(raw || '{}'))); } catch { return String(raw).replace(/\s+/g, ' ').trim(); }
 }
 
-// Remembers each step's fingerprint and says whether the newest one repeats
-// itself (verdict 'nudge' or 'stop'). heard() marks something new from the
-// person (a message sent while it works), which starts the count again.
-function stuckWatch() {
-  const steps = []; // { key, fresh, waiting }, the newest last
-  const seen = new Set(); // every result that came back
-  const check = (calls, results, ctx) => {
-    const parts = results.map((r) => digest(`${r.text}\n${r.image || ''}`));
-    const fresh = parts.some((p) => !seen.has(p));
-    for (const p of parts) seen.add(p);
+// Remembers each step's fingerprint and says whether the task is stuck
+// (verdict 'nudge' or 'stop'). heard() marks something new from the person
+// (a message sent while it works), which starts the count again.
+function stuckWatch(now = Date.now) {
+  const seen = new Set(); // every step so far
+  let run = []; // the newest step that brought something new, and the ones since; { key, at, waits, looks }
+  const check = async (calls, results, ctx) => {
     const tab = safe(() => ctx?.tabs?.active);
-    const loading = !!safe(() => tab.view.webContents.isLoading());
+    let page = '';
+    try { page = (await ctx?.pageState?.(VOLATILE.source)) || ''; } catch { /* no page to look at */ }
     const names = calls.map((c) => c.name);
-    const waiting = names.every((n) => n === 'wait' || LOOKS.has(n)) && (names.includes('wait') || loading || !!steps.at(-1)?.waiting);
-    const key = digest([...calls.map((c) => `${c.name} ${sameArgs(c.arguments)}`), tab?.url || '', ...parts].join('\n'));
-    steps.push({ key, fresh, waiting });
-    if (steps.length > GIVE_UP.within * PATIENCE) steps.shift();
-    const room = waiting ? PATIENCE : 1;
-    // This step's repeats among the last `within` steps, back to the last one that brought something new.
-    const repeats = (within) => {
-      let n = 0;
-      for (let i = steps.length - 1; i >= Math.max(0, steps.length - within * room); i--) {
-        if (steps[i].key === key) n++;
-        else if (steps[i].fresh) break;
-      }
-      return n;
-    };
-    if (repeats(GIVE_UP.within) >= GIVE_UP.times * room) return { verdict: 'stop', waiting };
+    const key = digest([
+      ...calls.map((c) => (c.name === 'wait' ? 'wait' : `${c.name} ${sameArgs(c.arguments)}`)),
+      tab?.url || '',
+      page,
+      ...results.map((r) => `${steady(r.text)}\n${r.sig || ''}`),
+    ].join('\n'));
+    const step = { key, at: now(), waits: names.includes('wait'), looks: names.every((n) => n === 'wait' || LOOKS.has(n)) };
+    if (!seen.has(key)) { seen.add(key); run = [step]; return { verdict: null }; }
+    run.push(step);
+    const stale = run.slice(1);
+    // Waiting on purpose: how long nothing has changed.
+    if (stale.every((s) => s.looks) || stale.filter((s) => s.waits).length * 4 >= stale.length) {
+      const quiet = step.at - run[0].at;
+      const minutes = Math.round(quiet / 60_000);
+      if (quiet >= WAIT_LIMIT_MS) return { verdict: 'stop', waiting: true, minutes };
+      const before = run.at(-2).at - run[0].at;
+      const again = stale.length === 2 && !run.some((s) => s.waits); // looking again and again without waiting
+      if (again || Math.floor(quiet / WAIT_NOTE_MS) > Math.floor(before / WAIT_NOTE_MS)) return { verdict: 'nudge', waiting: true, times: run.length, minutes };
+      return { verdict: null };
+    }
+    const repeats = (within) => run.slice(-within).filter((s) => s.key === key).length;
+    if (repeats(GIVE_UP.within) >= GIVE_UP.times || stale.length >= GIVE_UP.stale) return { verdict: 'stop' };
     const n = repeats(NUDGE.within);
-    return n >= NUDGE.times * room ? { verdict: 'nudge', times: n, waiting } : { verdict: null };
+    if (n >= NUDGE.times) return { verdict: 'nudge', times: n };
+    return stale.length >= NUDGE.stale ? { verdict: 'nudge', loop: stale.length } : { verdict: null };
   };
-  check.heard = () => steps.push({ key: null, fresh: true, waiting: false });
+  check.heard = () => { run = [{ key: null, at: now(), waits: false, looks: false }]; };
   return check;
 }
 
@@ -244,7 +265,7 @@ async function runAgent({
       if (/^(Error|Refused)\b/.test(text) || out.status === 'blocked') trouble = true;
       messages.push({ role: 'tool', tool_call_id: call.id, content: text });
       if (out.image) images.push(out.image);
-      results.push({ text, image: out.image, label: out.label || call.name });
+      results.push({ text, sig: out.sig, label: out.label || call.name });
     }
     const last = messages[messages.length - 1];
     if (dropped > 0) last.content += `\n\n[Lumio Browser, not the user] Only your first ${MAX_CALLS} tool calls ran; the other ${dropped} did not. Call them again if you still need them.`;
@@ -254,14 +275,21 @@ async function runAgent({
     // Doing the same thing again with the same result: first a note to try
     // something else, then the task ends (unless the person just said something).
     const said = takeQueued?.() || [];
-    const { verdict, times, waiting } = stuck(calls, results, ctx);
+    const { verdict, times, loop, waiting, minutes } = await stuck(calls, results, ctx);
     if (said.length) stuck.heard();
     else if (verdict === 'nudge') {
       last.content += waiting
-        ? `\n\n[Lumio Browser, not the user] You have checked ${times} times and nothing has changed. Keep waiting only if it is still likely to finish; otherwise try something else, or stop and tell the user what is blocking you.`
-        : `\n\n[Lumio Browser, not the user] You have now done this same step ${times} times with the same result, so it is not working. Try a different approach, or stop and tell the user what is blocking you.`;
+        ? `\n\n[Lumio Browser, not the user] You have checked ${times} times${minutes ? ` over ${minutes} minute${minutes === 1 ? '' : 's'}` : ''} and nothing has changed. If you are waiting for something, use wait between checks, and keep waiting only if it is still likely to finish; otherwise try something else, or stop and tell the user what is blocking you.`
+        : loop
+          ? `\n\n[Lumio Browser, not the user] Your last ${loop} steps repeated earlier ones with the same results, so this is not working. Try a different approach, or stop and tell the user what is blocking you.`
+          : `\n\n[Lumio Browser, not the user] You have now done this same step ${times} times with the same result, so it is not working. Try a different approach, or stop and tell the user what is blocking you.`;
     } else if (verdict === 'stop') {
-      last.content += '\n\n[Lumio Browser, not the user] Lumio stopped the task here because you kept repeating the same step. If the user says to continue, try a different approach.';
+      last.content += waiting
+        ? `\n\n[Lumio Browser, not the user] Lumio stopped the task here because nothing changed for ${minutes} minutes. If the user says to continue, keep waiting or try a different approach.`
+        : '\n\n[Lumio Browser, not the user] Lumio stopped the task here because you kept repeating the same step. If the user says to continue, try a different approach.';
+    }
+    if ((said.length || verdict !== 'stop') && maxSteps - (step + 1) === WRAP_UP) {
+      last.content += `\n\n[Lumio Browser, not the user] This task can take only ${WRAP_UP} more steps. Finish up now: reply with what you did and found, and what is still left to do.`;
     }
     if (images.length) {
       messages.push({
@@ -275,8 +303,9 @@ async function runAgent({
     const heard = absorb(said);
     if (!heard && verdict === 'stop') {
       const what = results.map((r) => r.label).join(', ').slice(0, 80);
-      emit({ type: 'done', reason: 'stuck', what, timing: timing(step + 1) });
-      return { steps: step + 1, reason: 'stuck', what };
+      const waited = waiting ? { waited: minutes } : {}; // it gave up waiting: for how many minutes nothing changed
+      emit({ type: 'done', reason: 'stuck', what, ...waited, timing: timing(step + 1) });
+      return { steps: step + 1, reason: 'stuck', what, ...waited };
     }
     quick = !trouble && !heard && !verdict && !calls.some((c) => THINK_AFTER.has(c.name)) && (step + 1) % 10 !== 0;
   }
@@ -303,4 +332,4 @@ function repairHistory(messages, note = 'Stopped by the user before this ran.') 
   return messages;
 }
 
-module.exports = { runAgent, prepareMessages, toolSchemas, abortError, repairHistory, MAX_STEPS, UNATTENDED_STEPS };
+module.exports = { runAgent, prepareMessages, toolSchemas, abortError, repairHistory, MAX_STEPS, UNATTENDED_STEPS, VOLATILE };

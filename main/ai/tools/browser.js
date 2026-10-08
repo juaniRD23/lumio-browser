@@ -585,6 +585,14 @@ const tools = [
   },
 ];
 
+// A short hash of what a tab shows (scripts.pageState), so the AI can tell
+// whether its last step changed anything: '' when there's nothing to read.
+async function pageState(tab, volatile) {
+  const wc = tab?.view?.webContents;
+  if (!wc || wc.isDestroyed() || PRIVATE_PAGE.test(wc.getURL())) return '';
+  return Promise.race([inPage(wc, scripts.pageState, { volatile }), wait(1000).then(() => '')]).catch(() => '');
+}
+
 // Removes the fake cursor from every tab (called when a run ends).
 async function clearCursors(tabs) {
   for (const t of tabs.tabs) {
@@ -678,4 +686,4 @@ async function tabPdf(tabs, tabId) {
   }
 }
 
-module.exports = { tools, clearCursors, pageContext, allTabsContext, tabPdf, YOUTUBE_VIDEO, videoText, pressKey, inPage, settle, PRIVATE_PAGE };
+module.exports = { tools, clearCursors, pageState, pageContext, allTabsContext, tabPdf, YOUTUBE_VIDEO, videoText, pressKey, inPage, settle, PRIVATE_PAGE };

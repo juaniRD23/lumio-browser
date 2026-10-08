@@ -159,16 +159,129 @@ test('stuck: the same step after something new came back (another "Load more") i
   assert.equal(notes(messages, /same step|nothing has changed/), 0);
 });
 
-test('stuck: waiting on purpose gets 4 times the room (12 checks with no change before the note, 24 before it ends)', async () => {
-  const tools = [tool('wait', 'read', () => 'Done waiting.'), tool('read_page', 'read', () => 'Exporting your video…')];
-  const { opts, messages, chat } = setup({ tools, turns: (i) => ({ calls: [{ id: `w${i}`, name: i % 2 ? 'read_page' : 'wait', arguments: i % 2 ? '{}' : '{"seconds":5}' }] }) });
+const toolResults = (messages) => messages.filter((m) => m.role === 'tool').map((m) => m.content);
+
+test('stuck: waiting on purpose is counted in time, not checks: a note every 2 minutes with no change, the end after 15', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 0 });
+  let left = 3600;
+  const tools = [
+    tool('wait', 'read', () => { t.mock.timers.tick(5000); return 'Done waiting.'; }),
+    // A countdown that ticks on its own is not a change.
+    tool('read_page', 'read', () => { left -= 5; return `Exporting your video… about ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} left`; }),
+  ];
+  const { opts, messages, events } = setup({ tools, turns: (i) => ({ calls: [{ id: `w${i}`, name: i % 2 ? 'read_page' : 'wait', arguments: i % 2 ? '{}' : `{"seconds":${5 + (i % 3)}}` }] }) });
   const res = await runAgent(opts);
-  const results = messages.filter((m) => m.role === 'tool').map((m) => m.content);
-  const first = results.findIndex((r) => /Lumio Browser/.test(r));
-  assert.equal(first, 23, 'no note before the 12th look');
-  assert.match(results[first], /You have checked 12 times and nothing has changed\. Keep waiting only if it is still likely to finish/);
-  assert.deepEqual(res, { steps: 48, reason: 'stuck', what: 'read_page' });
-  assert.equal(chat.seen.length, 48);
+  // 5 s a check: 15 minutes with no change is 180 more waits after the first look.
+  assert.deepEqual(res, { steps: 361, reason: 'stuck', what: 'wait', waited: 15 });
+  const results = toolResults(messages);
+  const notes = results.filter((r) => /You have checked/.test(r));
+  assert.equal(notes.length, 7, 'at 2, 4, … 14 minutes');
+  assert.match(notes[0], /You have checked \d+ times over 2 minutes and nothing has changed\. If you are waiting for something, use wait between checks, and keep waiting only if it is still likely to finish/);
+  assert.match(results.at(-1), /Lumio stopped the task here because nothing changed for 15 minutes\./);
+  assert.equal(events.at(-1).waited, 15);
+});
+
+test('stuck: a long wait that ends (a 10-minute export) is waited out', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 0 });
+  let ready = false;
+  const tools = [
+    tool('wait', 'read', () => { t.mock.timers.tick(10_000); return 'Done waiting.'; }),
+    tool('read_page', 'read', () => { ready = Date.now() >= 10 * 60_000; return ready ? 'Your video is ready. Download' : 'Exporting your video…'; }),
+  ];
+  const { opts, messages } = setup({ tools, turns: (i) => (ready ? { text: 'Your video is ready.' } : { calls: [{ id: `w${i}`, name: i % 2 ? 'read_page' : 'wait', arguments: i % 2 ? '{}' : '{"seconds":10}' }] }) });
+  const res = await runAgent(opts);
+  assert.deepEqual(res, { steps: 121, reason: 'complete' });
+  assert.equal(toolResults(messages).filter((r) => /You have checked/.test(r)).length, 4, 'a note at 2, 4, 6 and 8 minutes');
+});
+
+test('stuck: looking again and again without wait is waiting too: it is told to use wait, and not ended after a few looks', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 0 });
+  let n = 0;
+  const tools = [tool('read_page', 'read', () => { t.mock.timers.tick(3000); return ++n < 60 ? 'Processing your payment…' : 'Payment received.'; })];
+  const { opts, messages } = setup({ tools, turns: (i) => (n >= 60 ? { text: 'It went through.' } : { calls: [{ id: `r${i}`, name: 'read_page', arguments: '{}' }] }) });
+  const res = await runAgent(opts);
+  assert.deepEqual(res, { steps: 61, reason: 'complete' });
+  const results = toolResults(messages);
+  assert.match(results[2], /You have checked 3 times and nothing has changed\. If you are waiting for something, use wait between checks/);
+  assert.equal(results.filter((r) => /You have checked/.test(r)).length, 2, 'then only every 2 minutes');
+});
+
+test('stuck: a loop of 3 different steps (retrying a wrong code) gets a note and is ended', async () => {
+  const page = '"Verify" — https://bank.test/verify';
+  const tools = [
+    tool('read_page', 'read', () => `Tab 1: ${page}\nInvalid code. Try again.`),
+    tool('type', 'read', () => `Typed into [3]. Page is now: ${page}`),
+    tool('click', 'read', () => `Clicked [5]. Page is now: ${page}`),
+  ];
+  const cycle = [['read_page', '{}'], ['type', '{"ref":3,"text":"1234"}'], ['click', '{"ref":5}']];
+  const { opts, messages, events } = setup({ tools, turns: (i) => ({ calls: [{ id: `v${i}`, name: cycle[i % 3][0], arguments: cycle[i % 3][1] }] }) });
+  const res = await runAgent(opts);
+  assert.deepEqual(res, { steps: 15, reason: 'stuck', what: 'click' }, '12 steps in a row with nothing new after the first round');
+  const results = toolResults(messages);
+  assert.equal(results.findIndex((r) => /Lumio Browser/.test(r)), 8, 'the 3rd round');
+  assert.match(results[8], /You have now done this same step 3 times with the same result/);
+  assert.match(results[14], /Lumio stopped the task here because you kept repeating the same step/);
+  assert.equal(events.at(-1).reason, 'stuck');
+});
+
+test('stuck: a loop of 4 different steps gets a note after 8 steps that repeat earlier ones, and ends after 12', async () => {
+  const page = '"Verify" — https://bank.test/verify';
+  const tools = [
+    tool('navigate', 'read', () => `Page is now: ${page}`),
+    tool('read_page', 'read', () => `Tab 1: ${page}\nInvalid code. Try again.`),
+    tool('type', 'read', () => `Typed into [3]. Page is now: ${page}`),
+    tool('click', 'read', () => `Clicked [5]. Page is now: ${page}`),
+  ];
+  const cycle = [['navigate', '{"url":"https://bank.test/verify"}'], ['read_page', '{}'], ['type', '{"ref":3,"text":"1234"}'], ['click', '{"ref":5}']];
+  const { opts, messages } = setup({ tools, turns: (i) => ({ calls: [{ id: `v${i}`, name: cycle[i % 4][0], arguments: cycle[i % 4][1] }] }) });
+  const res = await runAgent(opts);
+  assert.deepEqual(res, { steps: 16, reason: 'stuck', what: 'click' });
+  const results = toolResults(messages);
+  assert.equal(results.findIndex((r) => /Lumio Browser/.test(r)), 11);
+  assert.match(results[11], /Your last 8 steps repeated earlier ones with the same results, so this is not working\./);
+});
+
+test('stuck: text that changes on its own (times, "seconds ago") and new screenshot bytes are not progress', async () => {
+  let k = 0;
+  const map = '"Map" — https://maps.test/';
+  const clock = tool('read_page', 'read', () => { k++; return `Tab 1: ${map}\nLive traffic · updated ${k} seconds ago · ${10 + (k % 12)}:${String(k % 60).padStart(2, '0')} PM · ref ${1700000000000 + k}`; });
+  const click = tool('click_at', 'read', () => `Clicked. Page is now: ${map}`);
+  const one = setup({ tools: [click, clock], turns: (i) => ({ calls: [{ id: `c${i}`, name: i % 2 ? 'read_page' : 'click_at', arguments: i % 2 ? '{}' : '{"x":640,"y":360}' }] }) });
+  assert.equal((await runAgent(one.opts)).reason, 'stuck');
+  // A canvas where the click does nothing: every screenshot is new bytes (it animates), the same page.
+  const shot = tool('screenshot_tab', 'read', () => ({ text: `Screenshot of tab 1 (1280x800px). Page is now: ${map}`, image: `data:image/jpeg;base64,AAA${++k}` }));
+  const two = setup({ tools: [click, shot], turns: (i) => ({ calls: [{ id: `s${i}`, name: i % 2 ? 'screenshot_tab' : 'click_at', arguments: i % 2 ? '{}' : '{"x":640,"y":360}' }] }) });
+  const res = await runAgent(two.opts);
+  assert.equal(res.reason, 'stuck');
+  assert.ok(res.steps <= 14, `${res.steps} steps`);
+});
+
+test('stuck: the same click or scroll is progress when the page changes, even if the tool says the same thing', async () => {
+  let qty = 1;
+  const plus = tool('click', 'read', () => { qty++; return 'Clicked [12]. Page is now: "Cart" — https://shop.test/cart'; });
+  const a = setup({ tools: [plus], turns: (i) => (qty < 8 ? { calls: [{ id: `q${i}`, name: 'click', arguments: '{"ref":12}' }] } : { text: 'The quantity is 8.' }) });
+  a.opts.ctx = { pageState: () => `quantity ${qty}` };
+  assert.deepEqual(await runAgent(a.opts), { steps: 8, reason: 'complete' });
+  assert.equal(toolResults(a.messages).filter((r) => /Lumio Browser/.test(r)).length, 0);
+  // A mail list that scrolls inside the page: the window stays at 0.
+  let top = 0;
+  const scroll = tool('scroll', 'read', () => { top += 700; return 'Scrolled down. Now at 0 of 900px (viewport 900px).'; });
+  const b = setup({ tools: [scroll], turns: (i) => (i < 12 ? { calls: [{ id: `s${i}`, name: 'scroll', arguments: '{"direction":"down"}' }] } : { text: 'Found the March email.' }) });
+  b.opts.ctx = { pageState: (volatile) => { assert.equal(typeof volatile, 'string'); return `list at ${top}`; } };
+  assert.deepEqual(await runAgent(b.opts), { steps: 13, reason: 'complete' });
+  assert.equal(toolResults(b.messages).filter((r) => /Lumio Browser/.test(r)).length, 0);
+});
+
+test('near a safety ceiling the model is told to wrap up, and its answer ends the task normally', async () => {
+  let seen = null;
+  const { opts, chat } = setup({
+    turns: (i) => (/only 3 more steps/.test(seen?.at(-1)?.content || '') ? { text: 'Read 7 pages; 3 are left.' } : { calls: [{ id: `p${i}`, name: 'read_page', arguments: `{"tab_id":${i + 1}}` }] }),
+  });
+  const inner = opts.chat;
+  opts.chat = (o) => { seen = o.messages; return inner(o); };
+  opts.maxSteps = 10;
+  assert.deepEqual(await runAgent(opts), { steps: 8, reason: 'complete' });
+  assert.match(chat.seen[7].at(-1).content, /This task can take only 3 more steps\. Finish up now: reply with what you did and found, and what is still left to do\./);
 });
 
 test('stuck: a message from the person while it repeats itself starts the count again', async () => {

@@ -43,6 +43,15 @@ function toGlobal(ctx, x, y) {
 
 const XY = { x: { type: 'number' }, y: { type: 'number' } };
 
+// A coarse picture of the screen (16x10 gray levels): whether a step changed
+// what's on it, without the clock or a blinking caret counting as a change.
+function coarse(img) {
+  const px = img.resize({ width: 16, height: 10 }).toBitmap();
+  let sig = '';
+  for (let i = 0; i < px.length; i += 4) sig += Math.round((px[i] + px[i + 1] + px[i + 2]) / 192);
+  return sig;
+}
+
 const tools = [
   {
     name: 'computer_screenshot',
@@ -66,6 +75,7 @@ const tools = [
         text: `Screenshot of display ${res.display} (${res.width}x${res.height}px). Frontmost app: ${res.frontmost || 'unknown'}. Displays: ${displays}.`,
         image: 'data:image/jpeg;base64,' + res.image,
         thumb,
+        sig: coarse(img),
       };
     },
   },

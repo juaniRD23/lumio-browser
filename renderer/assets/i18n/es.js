@@ -241,6 +241,7 @@
   'Screenshot': 'Captura de pantalla',
   'Lumio stopped at its safety limit of {#n} steps. Say "continue" to keep going.': 'Lumio se detuvo en su límite de seguridad de {n} pasos. Di "continúa" para seguir.',
   'Lumio stopped because it was repeating the same step ({what}). Say "continue" to try again.': 'Lumio se detuvo porque estaba repitiendo el mismo paso ({what}). Di "continúa" para intentarlo de nuevo.',
+  'Lumio stopped after waiting {#n} minutes with no change. Say "continue" to keep waiting.': 'Lumio se detuvo después de esperar {n} minutos sin cambios. Di "continúa" para seguir esperando.',
   'The reply was cut off because it got too long.': 'La respuesta se cortó porque era demasiado larga.',
   'Your Lumio plan': 'Tu plan de Lumio',
   'No chats yet': 'Todavía no hay chats',

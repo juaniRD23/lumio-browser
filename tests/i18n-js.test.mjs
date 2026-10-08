@@ -36,6 +36,7 @@ const EXPECTED = {
   // the AI panel's notes when a task ends early (main/ai/controller.js endNote)
   'Lumio stopped at its safety limit of 1000 steps. Say "continue" to keep going.': 'Lumio se detuvo en su límite de seguridad de 1000 pasos. Di "continúa" para seguir.',
   'Lumio stopped because it was repeating the same step (Hacer clic en “Siguiente”). Say "continue" to try again.': 'Lumio se detuvo porque estaba repitiendo el mismo paso (Hacer clic en “Siguiente”). Di "continúa" para intentarlo de nuevo.',
+  'Lumio stopped after waiting 15 minutes with no change. Say "continue" to keep waiting.': 'Lumio se detuvo después de esperar 15 minutos sin cambios. Di "continúa" para seguir esperando.',
   // the autofill dropdown's announcements (renderer/ui/overlay-autofill.js)
   'Saved cards, 2. Use the arrow keys to choose and Enter to fill.': 'Tarjetas guardadas, 2. Usa las flechas para elegir y Enter para completar.',
   'Earlier entries, 12. Use the arrow keys to choose and Enter to fill.': 'Entradas anteriores, 12. Usa las flechas para elegir y Enter para completar.',

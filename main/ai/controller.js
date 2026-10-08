@@ -5,7 +5,7 @@
 // renderer can't forge tool calls or approvals for itself.
 const { shell } = require('electron');
 const crypto = require('crypto');
-const { lumioChat, lumioCapabilities, lumioVoice } = require('./lumio');
+const { lumioChat, lumioCapabilities, lumioVoice, STOPPED_NOTE } = require('./lumio');
 const { runAgent, repairHistory, MAX_STEPS, UNATTENDED_STEPS } = require('./agent');
 const { buildSystemPrompt } = require('./prompts');
 const { MODES } = require('./policy');
@@ -70,6 +70,7 @@ const STOP_WORDS = /^(?:ok(?:ay)?[,.]?\s+)?(?:stop|cancel|never ?mind|forget it|
 
 // The chat's note when a task ends before Lumio says it's done (none when it finished).
 function endNote(ev) {
+  if (ev.reason === 'stuck' && ev.waited) return `Lumio stopped after waiting ${ev.waited} minutes with no change. Say "continue" to keep waiting.`;
   if (ev.reason === 'stuck') return `Lumio stopped because it was repeating the same step (${ev.what}). Say "continue" to try again.`;
   if (ev.reason === 'max_steps') return `Lumio stopped at its safety limit of ${ev.steps} steps. Say "continue" to keep going.`;
   if (ev.reason === 'length') return 'The reply was cut off because it got too long.';
@@ -451,7 +452,7 @@ class AIController {
     };
     this.chatStore.add(chat);
     if (task.manual) { this.store.setSetting('panelOpen', true); this.emit('ai-open-chat', { id: chat.id }); } // "Run now" in Settings shows it
-    const note = `${contextNote(this.tabs)} This is a scheduled task the user set up earlier (“${task.title.replace(/"/g, "'")}”, ${task.when || task.repeat}), running on its own: the user may not be watching. Do it, then reply with a short summary of the result. Ask in chat if you truly need them.`;
+    const note = `${contextNote(this.tabs)} This is a scheduled task the user set up earlier (“${task.title.replace(/"/g, "'")}”, ${task.when || task.repeat}), running on its own: the user may not be watching. Do it, then reply with a short summary of the result. Ask in chat if you truly need them. A scheduled task can take at most ${UNATTENDED_STEPS} steps.`;
     chat.messages.push({ role: 'user', content: `${task.prompt}\n\n${note}` });
     chat.display.push({ kind: 'user', text: task.prompt, ctx: { title: `Scheduled · ${task.when || task.title}`, scheduled: true } });
     this.saveChats();
@@ -508,7 +509,7 @@ class AIController {
       tab.view.webContents.setBackgroundThrottling(false);
       this.tabs.setAgent(tab.id, { color: h.color.hex, name, title: h.title });
       show(h);
-      const note = `[Lumio Browser, not the user] You are ${name}, a helper AI that Lumio (the assistant working with the user) sent to do one part of a bigger task. You work alone, in the background, in tab ${tab.id}${h.url ? `, which is opening ${h.url}` : ' (blank: navigate to start)'}. To look things up, use web_search and read_url (fast, no tab needed); use read_page and clicking in your tab when the task needs the page itself. Do only this task, then reply with a short report of what you found: the facts, numbers, names and page addresses Lumio needs. You can't ask the user anything: if something needs them (signing in, a captcha, payment, personal details), stop and say so in your report. Never buy, sign in, send, post or delete anything.`;
+      const note = `[Lumio Browser, not the user] You are ${name}, a helper AI that Lumio (the assistant working with the user) sent to do one part of a bigger task. You work alone, in the background, in tab ${tab.id}${h.url ? `, which is opening ${h.url}` : ' (blank: navigate to start)'}. To look things up, use web_search and read_url (fast, no tab needed); use read_page and clicking in your tab when the task needs the page itself. Do only this task, in at most ${helpersTool.HELPER_STEPS} steps, then reply with a short report of what you found: the facts, numbers, names and page addresses Lumio needs. You can't ask the user anything: if something needs them (signing in, a captcha, payment, personal details), stop and say so in your report. Never buy, sign in, send, post or delete anything.`;
       const messages = [{ role: 'user', content: `${h.task}\n\n${note}` }];
       const ctx = {
         tabs: this.tabs.scoped(tab),
@@ -521,6 +522,7 @@ class AIController {
         lastMacShot: null,
         account: this.account,
         siteTips: this.tipsHook(() => tab),
+        pageState: (volatile) => browser.pageState(tab, volatile),
         onPage: () => {},
         onCapture: () => {},
       };
@@ -547,7 +549,7 @@ class AIController {
       const last = [...messages].reverse().find((m) => m.role === 'assistant' && typeof m.content === 'string' && m.content.trim());
       const report = last?.content.trim().slice(0, 6000) || '(No report.)';
       // Cut short: Lumio hears it didn't finish, with what it had so far.
-      const cut = res.reason === 'stuck' ? 'it kept repeating the same step' : res.reason === 'max_steps' ? `it reached its limit of ${helpersTool.HELPER_STEPS} steps` : null;
+      const cut = res.reason === 'stuck' ? (res.waited ? `nothing changed for ${res.waited} minutes` : 'it kept repeating the same step') : res.reason === 'max_steps' ? `it reached its limit of ${helpersTool.HELPER_STEPS} steps` : null;
       if (cut) {
         h.status = 'failed';
         h.label = `Couldn’t finish: ${cut}`;
@@ -594,6 +596,7 @@ class AIController {
       workflows: this.workflows,
       siteTipsStore: this.learnTips ? this.siteTips : null,
       siteTips: this.tipsHook(() => this.tabs.active),
+      pageState: (volatile) => browser.pageState(this.tabs.active, volatile),
       made: (file) => record({ type: 'made', file }),
       buildDocument: (spec) => this.buildDocument(spec),
       onPage: (wc) => this.indicator?.touch(wc),
@@ -605,6 +608,7 @@ class AIController {
     const runId = crypto.randomUUID();
     const reasoning = this.reasoning().id;
     let stepNo = 0;
+    let stopped = false;
 
     try {
       const tools = await this.lumioTools();
@@ -633,11 +637,14 @@ class AIController {
         maxSteps: scheduled ? UNATTENDED_STEPS : MAX_STEPS, // nobody may be watching a scheduled task
       });
     } catch (err) {
-      if (err.name === 'AbortError' || abort.signal.aborted) record({ type: 'stopped' });
+      stopped = err.name === 'AbortError' || abort.signal.aborted;
+      if (stopped) record({ type: 'stopped' });
       else record({ type: 'error', message: err.message || String(err), code: err.code || null });
     } finally {
       for (const resolve of run.pending.values()) resolve('stop');
       repairHistory(chat.messages);
+      // Stopped: the next request doesn't carry this task on (unless it asks to).
+      if (stopped) chat.messages.push({ role: 'user', content: STOPPED_NOTE });
       chat.updatedAt = Date.now();
       this.run = null;
       this.chatStore.running.delete(chat.id);
