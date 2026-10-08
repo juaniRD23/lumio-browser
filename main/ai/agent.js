@@ -1,16 +1,35 @@
 // The agent loop: model call -> tool calls (with approval) -> results -> repeat.
 // Messages use the OpenAI/OpenRouter chat format. `chat` is injected so tests
 // can drive the loop with a fake model.
+const crypto = require('crypto');
 const { needsApproval } = require('./policy');
 const { t } = require('../i18n');
 
-const MAX_STEPS = 100;
+// There's no step budget: a task runs until Lumio answers without tools, the
+// person presses Stop, the plan's allowance runs out, or it's stuck (below).
+// These ceilings only contain a bug; ordinary tasks never get near them.
+const MAX_STEPS = 1000; // a task the person is watching
+const UNATTENDED_STEPS = 300; // a scheduled task, running on its own
 // After these, the next turn weighs what came back (research, other tabs,
 // helpers' reports): it thinks at the chosen effort, not the quick one.
 const THINK_AFTER = new Set(['web_search', 'read_url', 'list_tabs', 'send_helpers', 'save_site_tip']);
 const KEEP_IMAGES = 2;
 const SHOT_BATCH = 4;
 const MAX_TOOL_TEXT = 24_000;
+// The Lumio server takes at most 12 tool calls in one model turn: a turn with
+// more would make every later step fail, so the extra ones don't run.
+const MAX_CALLS = 12;
+
+// Stuck: the same step again (the same tool calls, on the same page, with the
+// same results) with nothing new coming back in between. 3 times within the
+// last 8 steps adds a note telling the model to change course; 6 times within
+// the last 12 ends the task. Waiting on purpose (a wait, or looking again
+// while the page loads or right after a wait) repeats by design, so it gets 4
+// times the room: 12 checks with no change before the note, 24 before it ends.
+const NUDGE = { times: 3, within: 8 };
+const GIVE_UP = { times: 6, within: 12 };
+const PATIENCE = 4;
+const LOOKS = new Set(['read_page', 'screenshot_tab', 'computer_screenshot', 'list_tabs', 'list_apps', 'read_url']);
 
 function abortError() {
   const e = new Error('Stopped');
@@ -58,6 +77,49 @@ function safe(fn, fallback = null) {
   try { return fn(); } catch { return fallback; }
 }
 
+const digest = (text) => crypto.createHash('sha1').update(text).digest('base64').slice(0, 12);
+
+// The same arguments however they're written ({"a":1,"b":2} = {"b":2,"a":1}).
+function sameArgs(raw) {
+  const sorted = (v) => (Array.isArray(v) ? v.map(sorted) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sorted(v[k])])) : v);
+  try { return JSON.stringify(sorted(JSON.parse(raw || '{}'))); } catch { return String(raw).replace(/\s+/g, ' ').trim(); }
+}
+
+// Remembers each step's fingerprint and says whether the newest one repeats
+// itself (verdict 'nudge' or 'stop'). heard() marks something new from the
+// person (a message sent while it works), which starts the count again.
+function stuckWatch() {
+  const steps = []; // { key, fresh, waiting }, the newest last
+  const seen = new Set(); // every result that came back
+  const check = (calls, results, ctx) => {
+    const parts = results.map((r) => digest(`${r.text}\n${r.image || ''}`));
+    const fresh = parts.some((p) => !seen.has(p));
+    for (const p of parts) seen.add(p);
+    const tab = safe(() => ctx?.tabs?.active);
+    const loading = !!safe(() => tab.view.webContents.isLoading());
+    const names = calls.map((c) => c.name);
+    const waiting = names.every((n) => n === 'wait' || LOOKS.has(n)) && (names.includes('wait') || loading || !!steps.at(-1)?.waiting);
+    const key = digest([...calls.map((c) => `${c.name} ${sameArgs(c.arguments)}`), tab?.url || '', ...parts].join('\n'));
+    steps.push({ key, fresh, waiting });
+    if (steps.length > GIVE_UP.within * PATIENCE) steps.shift();
+    const room = waiting ? PATIENCE : 1;
+    // This step's repeats among the last `within` steps, back to the last one that brought something new.
+    const repeats = (within) => {
+      let n = 0;
+      for (let i = steps.length - 1; i >= Math.max(0, steps.length - within * room); i--) {
+        if (steps[i].key === key) n++;
+        else if (steps[i].fresh) break;
+      }
+      return n;
+    };
+    if (repeats(GIVE_UP.within) >= GIVE_UP.times * room) return { verdict: 'stop', waiting };
+    const n = repeats(NUDGE.within);
+    return n >= NUDGE.times * room ? { verdict: 'nudge', times: n, waiting } : { verdict: null };
+  };
+  check.heard = () => steps.push({ key: null, fresh: true, waiting: false });
+  return check;
+}
+
 async function runToolCall(call, env) {
   const { byName, ctx, approve, getMode, emit, signal, grants } = env;
   const tool = byName.get(call.name);
@@ -90,7 +152,7 @@ async function runToolCall(call, env) {
     if (decision === 'stop' || signal?.aborted) throw abortError();
     if (decision === 'deny') {
       emit({ type: 'step_done', id: call.id, status: 'denied' });
-      return { text: 'The user denied this action. Do not retry it. Explain what you were trying to do, or ask the user how they want to proceed.' };
+      return { text: 'The user denied this action. Do not retry it. Explain what you were trying to do, or ask the user how they want to proceed.', label };
     }
     if (decision === 'task') grants.add(tool.name);
   }
@@ -102,11 +164,11 @@ async function runToolCall(call, env) {
     const res = typeof out === 'string' ? { text: out } : out || { text: 'Done.' };
     if (res.text && res.text.length > MAX_TOOL_TEXT) res.text = res.text.slice(0, MAX_TOOL_TEXT) + '\n…[truncated]';
     chip({ type: 'step_done', id: call.id, status: res.status || 'ok', summary: res.summary, thumb: res.thumb });
-    return res;
+    return { ...res, label };
   } catch (err) {
     if (signal?.aborted) throw abortError();
     chip({ type: 'step_done', id: call.id, status: 'error', summary: err.message });
-    return { text: `Error: ${err.message}` };
+    return { text: `Error: ${err.message}`, label };
   }
 }
 
@@ -117,8 +179,7 @@ async function runAgent({
   const byName = new Map(tools.map((t) => [t.name, t]));
   // Messages the person sent (typed or said) while Lumio was working join the
   // conversation before the next step, so it can change course.
-  const absorb = () => {
-    const queued = takeQueued?.() || [];
+  const absorb = (queued = takeQueued?.() || []) => {
     for (const content of queued) messages.push({ role: 'user', content });
     return queued.length;
   };
@@ -137,12 +198,17 @@ async function runAgent({
   // needs judgment (an error, a new message, research results, every 10th
   // step) gets the full effort again.
   let quick = quickStart; // a voice message: the first answer is quick too, so it starts talking sooner
+  const stuck = stuckWatch();
 
   for (let step = 0; step < maxSteps; step++) {
     if (signal?.aborted) throw abortError();
     emit({ type: 'thinking' });
     const modelStart = Date.now();
-    const gen = chat({ model, messages: prepareMessages(systemPrompt(), messages), tools: schemas, signal, quick });
+    const prepared = prepareMessages(systemPrompt(), messages);
+    // Screenshots it won't send again are let go, so a long task doesn't
+    // hold hundreds of them in memory (what's sent is the same either way).
+    prepared.forEach((m, i) => { if (i && isScreenshots(m)) messages[i - 1] = m; });
+    const gen = chat({ model, messages: prepared, tools: schemas, signal, quick });
     let result;
     for (;;) {
       const { value, done } = await gen.next();
@@ -151,7 +217,8 @@ async function runAgent({
     }
     modelMs += Date.now() - modelStart;
 
-    const calls = result.toolCalls || [];
+    const calls = (result.toolCalls || []).slice(0, MAX_CALLS);
+    const dropped = (result.toolCalls?.length || 0) - calls.length;
     const assistant = { role: 'assistant', content: result.content || (calls.length ? null : '(no reply)') };
     if (calls.length) {
       assistant.tool_calls = calls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.arguments || '{}' } }));
@@ -161,11 +228,13 @@ async function runAgent({
 
     if (!calls.length) {
       if (absorb()) { quick = false; continue; } // they said something while it answered: answer that too
-      emit({ type: 'done', reason: result.finishReason === 'length' ? 'length' : 'complete', timing: timing(step + 1) });
-      return { steps: step + 1 };
+      const reason = result.finishReason === 'length' ? 'length' : 'complete';
+      emit({ type: 'done', reason, timing: timing(step + 1) });
+      return { steps: step + 1, reason };
     }
 
     const images = [];
+    const results = [];
     let trouble = false;
     for (const call of calls) {
       const toolStart = Date.now();
@@ -175,10 +244,25 @@ async function runAgent({
       if (/^(Error|Refused)\b/.test(text) || out.status === 'blocked') trouble = true;
       messages.push({ role: 'tool', tool_call_id: call.id, content: text });
       if (out.image) images.push(out.image);
+      results.push({ text, image: out.image, label: out.label || call.name });
     }
+    const last = messages[messages.length - 1];
+    if (dropped > 0) last.content += `\n\n[Lumio Browser, not the user] Only your first ${MAX_CALLS} tool calls ran; the other ${dropped} did not. Call them again if you still need them.`;
     // Tips saved for a site it just arrived on: added to the last result.
     const tips = ctx?.siteTips?.();
-    if (tips) messages[messages.length - 1].content += `\n\n${tips}`;
+    if (tips) last.content += `\n\n${tips}`;
+    // Doing the same thing again with the same result: first a note to try
+    // something else, then the task ends (unless the person just said something).
+    const said = takeQueued?.() || [];
+    const { verdict, times, waiting } = stuck(calls, results, ctx);
+    if (said.length) stuck.heard();
+    else if (verdict === 'nudge') {
+      last.content += waiting
+        ? `\n\n[Lumio Browser, not the user] You have checked ${times} times and nothing has changed. Keep waiting only if it is still likely to finish; otherwise try something else, or stop and tell the user what is blocking you.`
+        : `\n\n[Lumio Browser, not the user] You have now done this same step ${times} times with the same result, so it is not working. Try a different approach, or stop and tell the user what is blocking you.`;
+    } else if (verdict === 'stop') {
+      last.content += '\n\n[Lumio Browser, not the user] Lumio stopped the task here because you kept repeating the same step. If the user says to continue, try a different approach.';
+    }
     if (images.length) {
       messages.push({
         role: 'user',
@@ -188,11 +272,17 @@ async function runAgent({
         ],
       });
     }
-    const heard = absorb();
-    quick = !trouble && !heard && !calls.some((c) => THINK_AFTER.has(c.name)) && (step + 1) % 10 !== 0;
+    const heard = absorb(said);
+    if (!heard && verdict === 'stop') {
+      const what = results.map((r) => r.label).join(', ').slice(0, 80);
+      emit({ type: 'done', reason: 'stuck', what, timing: timing(step + 1) });
+      return { steps: step + 1, reason: 'stuck', what };
+    }
+    quick = !trouble && !heard && !verdict && !calls.some((c) => THINK_AFTER.has(c.name)) && (step + 1) % 10 !== 0;
   }
+  // The safety ceiling (see MAX_STEPS).
   emit({ type: 'done', reason: 'max_steps', steps: maxSteps, timing: timing(maxSteps) });
-  return { steps: maxSteps };
+  return { steps: maxSteps, reason: 'max_steps' };
 }
 
 // After a stop or crash mid-turn, every tool call must still have a result or
@@ -213,4 +303,4 @@ function repairHistory(messages, note = 'Stopped by the user before this ran.') 
   return messages;
 }
 
-module.exports = { runAgent, prepareMessages, toolSchemas, abortError, repairHistory, MAX_STEPS };
+module.exports = { runAgent, prepareMessages, toolSchemas, abortError, repairHistory, MAX_STEPS, UNATTENDED_STEPS };

@@ -10,7 +10,9 @@ const COLORS = [
   { name: 'Orange', hex: '#ffb86b' },
 ];
 const MAX_HELPERS = COLORS.length;
-const HELPER_STEPS = 15;
+// A helper's safety ceiling (one that's stuck is stopped sooner): high enough
+// that it doesn't quit halfway through its part.
+const HELPER_STEPS = 60;
 // What a helper may do, in its own tab only. No other tabs, no computer
 // control, no files, no more helpers.
 const HELPER_TOOLS = new Set(['web_search', 'read_url', 'read_page', 'click', 'type', 'select_option', 'scroll', 'navigate', 'go_back', 'wait']);

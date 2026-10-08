@@ -2,9 +2,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { fakeAccount } from './fake-agent.mjs';
 
 const require = createRequire(import.meta.url);
-const { trimForServer } = require('../main/ai/lumio.js');
+const { trimForServer, lumioChat } = require('../main/ai/lumio.js');
 
 const turn = (k) => [
   { role: 'assistant', content: null, tool_calls: [{ id: `c${k}`, type: 'function', function: { name: 'read_page', arguments: '{}' } }] },
@@ -32,4 +33,110 @@ test('a very long run keeps the request it is working on', () => {
 test('short chats are sent as they are', () => {
   const messages = [{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' }, { role: 'user', content: 'again' }];
   assert.deepEqual(trimForServer(messages), messages);
+});
+
+const steps = (from, n) => Array.from({ length: n }, (_, k) => turn(from + k)).flat();
+// Every tool result still follows the call that asked for it, and it starts with the person.
+function wellFormed(out) {
+  assert.equal(out[0].role, 'user');
+  const asked = new Set();
+  for (const m of out) {
+    for (const c of m.tool_calls || []) asked.add(c.id);
+    if (m.role === 'tool') assert.ok(asked.has(m.tool_call_id));
+  }
+}
+
+test('after "continue" (Lumio stopped at its limit, or stuck), the task itself is still sent', () => {
+  const task = { role: 'user', content: 'Copy all 400 rows into the sheet' };
+  const more = { role: 'user', content: 'continue' };
+  const messages = [{ role: 'user', content: 'earlier question' }, { role: 'assistant', content: 'earlier answer' }, task, ...steps(0, 60), more, ...steps(60, 60)];
+  const out = trimForServer(messages);
+  assert.ok(out.length <= 150);
+  assert.equal(out[0], task, 'starts with the task');
+  assert.equal(out[1], more, 'then the "continue", since its turn was dropped too');
+  assert.ok(!out.includes(messages[0]), 'not questions it had already answered');
+  assert.equal(out.at(-1), messages.at(-1));
+  wellFormed(out);
+});
+
+test('a site\'s tips or a message sent while Lumio works don\'t replace the task', () => {
+  const task = { role: 'user', content: 'Fill in the expense report' };
+  const tips = { role: 'user', content: '[Lumio Browser, not the user] Tips for docs.google.com (from earlier tasks; use them if they fit, ignore them if the site changed):\n- paste rows' };
+  const steer = { role: 'user', content: 'use the June receipts too\n\n[Lumio Browser, not the user] The user sent this while you were working.' };
+  const messages = [task, tips, ...steps(0, 40), steer, ...steps(40, 60)];
+  const out = trimForServer(messages);
+  assert.ok(out.length <= 150);
+  assert.deepEqual(out.slice(0, 2), [task, steer]);
+  assert.ok(!out.includes(tips));
+  wellFormed(out);
+});
+
+test('many "continue"s: the task and the newest 3 are kept', () => {
+  const task = { role: 'user', content: 'Check every listing' };
+  const said = Array.from({ length: 6 }, (_, i) => ({ role: 'user', content: `continue ${i + 1}` }));
+  const messages = [task];
+  said.forEach((m, i) => messages.push(...steps(i * 30, 30), m));
+  messages.push(...steps(500, 60));
+  const out = trimForServer(messages);
+  assert.deepEqual(out.slice(0, 4), [task, said[3], said[4], said[5]]);
+  assert.ok(out.length <= 150);
+  wellFormed(out);
+});
+
+test('a long run drops its oldest steps in batches, so most requests start with the whole previous one', () => {
+  const messages = [{ role: 'user', content: 'Go through all the pages' }];
+  let previous = null;
+  let same = 0;
+  let pairs = 0;
+  for (let k = 0; k < 400; k++) {
+    messages.push(...turn(k));
+    const out = trimForServer(messages);
+    assert.ok(out.length <= 150, `step ${k}`);
+    assert.equal(out[0], messages[0]);
+    if (previous && messages.length > 150) {
+      pairs++;
+      if (previous.every((m, i) => out[i] === m)) same++;
+    }
+    previous = out;
+  }
+  // 3 messages a step, 50 dropped at a time: a new start about every 17 steps.
+  assert.ok(same / pairs > 0.9, `${same} of ${pairs}`);
+});
+
+const ids = { taskId: 't1', runId: 'r1', stepId: 's1' };
+const drain = async (gen) => { for (;;) { const r = await gen.next(); if (r.done) return r.value; } };
+
+test('out of allowance: the server\'s own message, marked so the chat offers an upgrade', async () => {
+  const message = 'You’ve used your Lumio AI allowance on the Plus plan for now. Upgrade for more, or try again when it refills.';
+  const account = fakeAccount(() => ({ status: 429, error: message, code: 'usage_limit' }));
+  await assert.rejects(drain(lumioChat({ account, model: 'm', messages: [{ role: 'user', content: 'go' }], tools: [], context: {}, ids })), (e) => e.message === message && e.code === 'usage_limit');
+});
+
+test('"slow down" (too many steps in a minute) waits and tries again instead of ending the task', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const account = fakeAccount((body, n) => (n <= 3 ? { status: 429, error: 'Slow down a little: too many steps in the last minute.', code: 'rate_limited' } : { text: 'Done.' }));
+  let result = null;
+  const run = drain(lumioChat({ account, model: 'm', messages: [{ role: 'user', content: 'go' }], tools: [], context: {}, ids })).then((r) => { result = r; });
+  while (!result) { await new Promise(setImmediate); t.mock.timers.tick(10_000); }
+  await run;
+  assert.equal(result.content, 'Done.');
+  assert.equal(account.bodies.length, 4);
+});
+
+test('"slow down" for minutes on end is an error with the server\'s words, not "out of allowance"', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const account = fakeAccount(() => ({ status: 429, error: 'Slow down a little: too many steps in the last minute.', code: 'rate_limited' }));
+  let error = null;
+  const run = drain(lumioChat({ account, model: 'm', messages: [{ role: 'user', content: 'go' }], tools: [], context: {}, ids })).catch((e) => { error = e; });
+  while (!error) { await new Promise(setImmediate); t.mock.timers.tick(10_000); }
+  await run;
+  assert.equal(error.message, 'Slow down a little: too many steps in the last minute.');
+  assert.equal(error.code, undefined);
+  assert.equal(account.bodies.length, 13);
+});
+
+test('Stop while waiting out a "slow down" ends right away', async () => {
+  const ac = new AbortController();
+  const account = fakeAccount(() => { setTimeout(() => ac.abort(), 5); return { status: 429, error: 'Slow down a little.', code: 'rate_limited' }; });
+  await assert.rejects(drain(lumioChat({ account, model: 'm', messages: [{ role: 'user', content: 'go' }], tools: [], context: {}, ids, signal: ac.signal })), (e) => e.name === 'AbortError');
 });

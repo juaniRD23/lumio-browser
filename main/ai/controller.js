@@ -6,7 +6,7 @@
 const { shell } = require('electron');
 const crypto = require('crypto');
 const { lumioChat, lumioCapabilities, lumioVoice } = require('./lumio');
-const { runAgent, repairHistory, MAX_STEPS } = require('./agent');
+const { runAgent, repairHistory, MAX_STEPS, UNATTENDED_STEPS } = require('./agent');
 const { buildSystemPrompt } = require('./prompts');
 const { MODES } = require('./policy');
 const { MODEL, REASONING, DEFAULT_REASONING, findReasoning } = require('./models');
@@ -67,6 +67,14 @@ function contextNote(tabs) {
 const VOICE_NOTE = 'The user is talking to you by voice: their words were transcribed (expect small mistakes), and everything you write is read aloud as you write it. Write like you talk: short, plain sentences, with no Markdown, lists, tables, links or emoji. Before each group of actions, say one short sentence about what you are about to do. Keep the final answer to two or three sentences unless they ask for more.';
 // Said or typed while Lumio works: these stop the task instead of joining it.
 const STOP_WORDS = /^(?:ok(?:ay)?[,.]?\s+)?(?:stop|cancel|never ?mind|forget it|wait,? stop|stop (?:it|that|now))[.!]*$/i;
+
+// The chat's note when a task ends before Lumio says it's done (none when it finished).
+function endNote(ev) {
+  if (ev.reason === 'stuck') return `Lumio stopped because it was repeating the same step (${ev.what}). Say "continue" to try again.`;
+  if (ev.reason === 'max_steps') return `Lumio stopped at its safety limit of ${ev.steps} steps. Say "continue" to keep going.`;
+  if (ev.reason === 'length') return 'The reply was cut off because it got too long.';
+  return null;
+}
 
 class AIController {
   constructor({ store, chats, tabs, emit, helper, account = null, indicator = null, schedules = null, workflows = null, projects = null, siteTips = null, learnTips = true, notify = null, onSettingsChanged = () => {} }) {
@@ -450,11 +458,16 @@ class AIController {
     this.emit('ai-event', { chatId: chat.id, type: 'user', text: task.prompt, ctx: { title: `Scheduled · ${task.when || task.title}`, scheduled: true }, title: chat.title, background: true });
     this.schedules?.started(task.id, chat.id, { manual: !!task.manual });
     let status = 'done';
-    const watch = (ev) => { if (ev.type === 'error') status = 'error'; else if (ev.type === 'stopped') status = 'stopped'; };
+    let why = null; // it stopped on its own: stuck, or at its safety limit
+    const watch = (ev) => {
+      if (ev.type === 'error') status = 'error';
+      else if (ev.type === 'stopped') status = 'stopped';
+      else if (ev.type === 'done' && (ev.reason === 'stuck' || ev.reason === 'max_steps')) { status = 'stopped'; why = endNote(ev); }
+    };
     await this.start(chat, { scheduled: task, watch });
     this.schedules?.finished(task.id, status);
     const reply = [...chat.display].reverse().find((x) => x.kind === 'ai' && x.text?.trim())?.text || '';
-    const body = status === 'done' ? (reply.replace(/[#*_`>[\]()]/g, '').replace(/\s+/g, ' ').trim().slice(0, 180) || 'Done.') : status === 'error' ? 'It ran into a problem. Open the chat to see what happened.' : 'It was stopped.';
+    const body = status === 'done' ? (reply.replace(/[#*_`>[\]()]/g, '').replace(/\s+/g, ' ').trim().slice(0, 180) || 'Done.') : status === 'error' ? 'It ran into a problem. Open the chat to see what happened.' : why || 'It was stopped.';
     this.notify?.(task.title, body, chat.id);
     return { status, chatId: chat.id };
   }
@@ -517,7 +530,7 @@ class AIController {
         if (ev.type === 'approval') record({ ...ev, label: `${name} (${h.color.name}): ${ev.label}`, helper: { n: h.n, color: h.color.hex } });
         if (ev.type === 'approval_done') record(ev);
       };
-      await runAgent({
+      const res = await runAgent({
         model: this.model().id,
         messages,
         tools,
@@ -532,9 +545,17 @@ class AIController {
         maxSteps: helpersTool.HELPER_STEPS,
       });
       const last = [...messages].reverse().find((m) => m.role === 'assistant' && typeof m.content === 'string' && m.content.trim());
+      const report = last?.content.trim().slice(0, 6000) || '(No report.)';
+      // Cut short: Lumio hears it didn't finish, with what it had so far.
+      const cut = res.reason === 'stuck' ? 'it kept repeating the same step' : res.reason === 'max_steps' ? `it reached its limit of ${helpersTool.HELPER_STEPS} steps` : null;
+      if (cut) {
+        h.status = 'failed';
+        h.label = `Couldn’t finish: ${cut}`;
+        return { ok: false, tab, report: `${report}\n(It stopped before finishing: ${cut}.)` };
+      }
       h.status = 'done';
       h.label = 'Reported back';
-      return { ok: true, tab, report: last?.content.trim().slice(0, 6000) || '(No report.)' };
+      return { ok: true, tab, report };
     } catch (err) {
       const stopped = err.name === 'AbortError' || run.abort.signal.aborted;
       h.status = stopped ? 'stopped' : 'failed';
@@ -609,6 +630,7 @@ class AIController {
         grants: run.grants,
         takeQueued: () => run.queue.splice(0),
         quickStart,
+        maxSteps: scheduled ? UNATTENDED_STEPS : MAX_STEPS, // nobody may be watching a scheduled task
       });
     } catch (err) {
       if (err.name === 'AbortError' || abort.signal.aborted) record({ type: 'stopped' });
@@ -678,12 +700,13 @@ class AIController {
         run.text = null;
         d.push({ kind: 'made', file: ev.file });
         break;
-      case 'done':
+      case 'done': {
         run.text = null;
-        if (ev.reason === 'max_steps') d.push({ kind: 'note', text: `Stopped after ${MAX_STEPS} steps. Say "continue" to keep going.` });
-        if (ev.reason === 'length') d.push({ kind: 'note', text: 'The reply was cut off because it got too long.' });
+        const note = endNote(ev);
+        if (note) { d.push({ kind: 'note', text: note }); ev = { ...ev, note }; } // the panel shows the same note
         if (ev.timing?.steps > 1) { d.push({ kind: 'timing', ...ev.timing }); this.logTiming(ev.timing); }
         break;
+      }
       case 'stopped':
         run.text = null;
         d.push({ kind: 'note', text: 'Stopped.' });

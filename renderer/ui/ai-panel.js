@@ -803,7 +803,8 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     voice.onEvent(ev);
     if (ev.chatId === chatId || !chatId) {
       if (ev.type === 'user' && !ev.mid) lastAsk = ev.ctx || null;
-      if ((ev.type === 'error' || ev.type === 'stopped') && live) live.failed = true;
+      // Ended early (an error, Stop, stuck or the safety limit): nothing to save as a workflow.
+      if ((ev.type === 'error' || ev.type === 'stopped' || (ev.type === 'done' && (ev.reason === 'stuck' || ev.reason === 'max_steps'))) && live) live.failed = true;
     }
     if (ev.type === 'user') {
       // A scheduled task shows up in an empty panel, unless you're typing there.
@@ -902,8 +903,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
       case 'done':
         endText();
         thinking(false);
-        if (ev.reason === 'max_steps') notice(`Stopped after ${ev.steps || 100} steps. Say "continue" to keep going.`, 'info');
-        if (ev.reason === 'length') notice('The reply was cut off because it got too long.', 'info');
+        if (ev.note) notice(ev.note, 'info'); // why it ended before Lumio was done (stuck, the safety limit, a cut-off reply)
         if (ev.timing?.steps > 1) { messages.append(timingEl(ev.timing)); scrollDown(); }
         break;
       case 'stopped':

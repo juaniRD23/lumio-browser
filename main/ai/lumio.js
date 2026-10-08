@@ -5,31 +5,59 @@
 // conversation, the tool names we can run, the reasoning level and a little
 // context. Replies stream back as NDJSON events. Retrying the same step ID
 // replays its saved result instead of charging again.
-const MAX_MESSAGES = 150;
 
-// What the person asked (not screenshots the tools sent back as user messages).
-const isRequest = (m) => m.role === 'user' && !(Array.isArray(m.content) && /^Screenshot\(s\) from the tool call/.test(m.content[0]?.text || ''));
+// A long run sends at most this many messages, however many steps it takes.
+const MAX_MESSAGES = 150;
+// Its oldest steps go 50 messages at a time, so what's sent starts the same
+// way for many steps in a row (the model provider's cached-input discount
+// needs that).
+const TRIM_BATCH = 50;
+const KEEP_ASKED = 4; // the person's messages kept from before that (asked())
+// "Slow down" (too many steps in a minute): wait 10 s and try again, up to 12 times.
+const SLOW_DOWN_MS = 10_000;
+const MAX_SLOW_DOWNS = 12;
+
+// What the person asked (not screenshots the tools sent back as user
+// messages, or notes from Lumio Browser like a site's tips).
+const isRequest = (m) => m.role === 'user' && !(Array.isArray(m.content) && /^Screenshot\(s\) from the tool call/.test(m.content[0]?.text || ''))
+  && !(typeof m.content === 'string' && m.content.startsWith('[Lumio Browser, not the user]'));
+
+// The person's newest message and the ones it carries on from: a "continue"
+// after Lumio stopped, or a message sent while it worked, goes back to the
+// one before, until a message Lumio had finished answering. The first (the
+// task) and the newest 3, oldest first, as indexes.
+function asked(messages) {
+  const chain = [];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (!isRequest(messages[i])) continue;
+    chain.unshift(i);
+    if (i === 0 || messages[i - 1].role === 'assistant') break;
+  }
+  return chain.length > KEEP_ASKED ? [chain[0], ...chain.slice(1 - KEEP_ASKED)] : chain;
+}
 
 // Server-side limit: at most 160 messages, starting with a real user message.
-// A run longer than that drops its oldest steps but keeps the request it's
-// working on, so Lumio doesn't forget the task.
+// A run longer than that drops its oldest steps but keeps what the person
+// asked (asked()), so Lumio doesn't forget the task.
 function trimForServer(messages) {
   let out = messages;
   if (out.length > MAX_MESSAGES) {
-    const from = out.length - MAX_MESSAGES + 1; // room for the request
-    let request = -1;
-    for (let i = out.length - 1; i >= 0 && request < 0; i--) if (isRequest(out[i])) request = i;
-    if (request >= 0 && request < from) {
-      let k = from;
-      while (k < out.length && out[k].role !== 'assistant') k++; // start at a model turn, with its results
-      out = [out[request], ...out.slice(k)];
-    } else {
-      out = out.slice(out.length - MAX_MESSAGES);
-    }
+    let k = Math.ceil((out.length - MAX_MESSAGES + KEEP_ASKED) / TRIM_BATCH) * TRIM_BATCH;
+    while (k < out.length && out[k].role !== 'assistant') k++; // start at a model turn, with its results
+    out = [...asked(out).filter((i) => i < k).map((i) => out[i]), ...out.slice(k)];
   }
   let start = 0;
   while (start < out.length && !(out[start].role === 'user')) start++;
   return out.slice(start);
+}
+
+// Waits, unless Stop is pressed meanwhile.
+function pause(ms, signal) {
+  return new Promise((resolve, reject) => {
+    const stop = () => { clearTimeout(timer); const e = new Error('Stopped'); e.name = 'AbortError'; reject(e); };
+    const timer = setTimeout(() => { signal?.removeEventListener('abort', stop); resolve(); }, ms);
+    if (signal?.aborted) stop(); else signal?.addEventListener('abort', stop, { once: true });
+  });
 }
 
 // Out of allowance: the panel offers an Upgrade button for these.
@@ -59,6 +87,7 @@ async function* lumioChat({ account, model, reasoning = 'medium', messages, tool
     messages: trimForServer(messages.filter((m) => m.role !== 'system')),
   };
   let attempt = 0;
+  let slowed = 0;
   for (;;) {
     let res;
     try {
@@ -79,6 +108,12 @@ async function* lumioChat({ account, model, reasoning = 'medium', messages, tool
       let data = null;
       try { data = await res.json(); } catch { /* not JSON */ }
       if (res.status === 401) account.refresh().catch(() => {});
+      // Too many steps in the last minute (Lumio and its helpers at once):
+      // wait it out, a long task doesn't end over it. Not the allowance.
+      if (data?.code === 'rate_limited') {
+        if (slowed++ < MAX_SLOW_DOWNS) { await pause(SLOW_DOWN_MS, signal); continue; }
+        throw new Error(friendly(res.status, data));
+      }
       if (res.status === 429 || data?.code === 'usage_limit') throw limitError(friendly(429, data));
       throw new Error(friendly(res.status, data));
     }
