@@ -1,14 +1,19 @@
 // Lumio Sync and the phone companion's relay.
 //
-// Sync: devices store end-to-end encrypted records here (bookmarks, passwords,
-// passkeys, addresses, cards, history, chats, workflows, settings, open
-// tabs). The server only ever sees ciphertext, opaque ids and the collection
-// names; the key stays on the devices (see main/sync/crypto.js). Each change gets a new sequence number,
-// and devices pull what changed since the last one they saw.
+// Sync: devices store encrypted records here (bookmarks, passwords, passkeys,
+// addresses, cards, history, chats, workflows, settings, open tabs). Records
+// are encrypted on the devices with the account's sync key (see
+// main/sync/crypto.js); the server sees ciphertext, opaque ids and collection
+// names. Each change gets a new sequence number, and devices pull what changed
+// since the last one they saw.
 //
-// Pairing: a new device posts its public key; a device that has the key
-// approves (after the person checks that the codes match) and posts the key
-// wrapped for it.
+// How devices get the key depends on the account's mode (sync-keys.ts,
+// docs/sync-managed.md). In managed mode (the default), the server keeps the
+// key wrapped with SYNC_MASTER_KEY and hands it to the account's signed-in
+// devices. In passphrase mode, it never sees the key: a new device posts its
+// public key, and a device that has the key approves it (after the person
+// checks that the codes match) and posts the key wrapped for it. Older Lumio
+// builds ask that way in managed mode too, and the server approves them itself.
 //
 // Companion: the phone sends encrypted commands to a computer ("do this",
 // "approve that", "stop"), computers post their encrypted status (what Lumio
@@ -18,6 +23,7 @@
 // iPhone and iPad, apns.ts), each saying only what kind of thing happened.
 import type { Plan } from './agent.ts';
 import { APNS_ENDPOINT, apnsConfigured, sendApns } from './apns.ts';
+import { autoApproval, keyState, managedAvailable } from './sync-keys.ts';
 import { AgentError, type Env, fail, json, randomHex } from './util.ts';
 
 type User = { id: string; plan: Plan };
@@ -34,6 +40,7 @@ const PAIR_TTL = 10 * 60 * 1000;
 const ID = /^[A-Za-z0-9_-]{8,64}$/;
 const DEVICE = /^[A-Za-z0-9-]{8,64}$/;
 const B64 = /^[A-Za-z0-9+/]+={0,2}$/;
+const CHECK = /^[a-f0-9]{32}$/;
 
 const now = () => Date.now();
 const str = (v: unknown, max: number) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, max) : '');
@@ -49,12 +56,17 @@ export async function syncStatus(env: Env, user: User) {
   const meta = await env.DB.prepare('SELECT key_check, created_at FROM sync_meta WHERE owner = ?1').bind(user.id).first<{ key_check: string; created_at: number }>();
   const devices = await env.DB.prepare('SELECT id, name, kind, platform, last_seen FROM sync_devices WHERE owner = ?1 ORDER BY last_seen DESC').bind(user.id).all<{ id: string; name: string; kind: string; platform: string | null; last_seen: number }>();
   const usage = await env.DB.prepare('SELECT COUNT(*) AS items, COALESCE(SUM(size), 0) AS bytes FROM sync_items WHERE owner = ?1 AND deleted = 0').bind(user.id).first<{ items: number; bytes: number }>();
+  const keys = await keyState(env, user.id);
   return json({
     keyCheck: meta?.key_check || null,
     since: meta?.created_at || null,
     devices: (devices.results || []).map((d) => ({ id: d.id, name: d.name, kind: d.kind, platform: d.platform, lastSeen: d.last_seen })),
     usage: { items: usage?.items || 0, bytes: usage?.bytes || 0, limit: MAX_TOTAL },
     collections: [...COLLECTIONS], // what this server keeps, so newer collections wait for it
+    // How devices get the key (sync-keys.ts): managed (the server keeps it) or passphrase.
+    mode: keys.mode,
+    managedKey: keys.managedKey, // the server has this keyCheck's key (devices that don't fetch it)
+    managedAvailable: managedAvailable(env), // without SYNC_MASTER_KEY, devices pair as before
   });
 }
 
@@ -70,7 +82,9 @@ export async function syncInit(request: Request, env: Env, user: User) {
   return json({ ok: true });
 }
 
-// Turning sync off for the account: deletes everything synced.
+// Turning sync off for the account: deletes everything synced, and the
+// server's copy of the key (the mode stays: a managed account's next device
+// gets a new key).
 export async function syncDeleteAll(env: Env, user: User) {
   await env.DB.batch([
     env.DB.prepare('DELETE FROM sync_items WHERE owner = ?1').bind(user.id),
@@ -79,6 +93,7 @@ export async function syncDeleteAll(env: Env, user: User) {
     env.DB.prepare('DELETE FROM sync_devices WHERE owner = ?1').bind(user.id),
     env.DB.prepare('DELETE FROM companion_messages WHERE owner = ?1').bind(user.id),
     env.DB.prepare('DELETE FROM push_subscriptions WHERE owner = ?1').bind(user.id),
+    env.DB.prepare('UPDATE sync_keys SET wrapped = NULL, key_check = NULL, updated_at = ?2 WHERE owner = ?1').bind(user.id, now()),
   ]);
   return json({ ok: true });
 }
@@ -131,11 +146,18 @@ export async function syncChanges(request: Request, env: Env, user: User) {
   });
 }
 
+// keyCheck (newer devices): the key the records were sealed with. When the
+// account's key changed meanwhile (a reset, or a switch to its own
+// passphrase, between the device's status check and this push), nothing is
+// stored: records only an old key opens would stay here for good. The check
+// and the writes are one transaction. Older devices don't send it.
 export async function syncPush(request: Request, env: Env, user: User) {
-  const b = await body<{ device?: unknown; items?: unknown }>(request);
+  const b = await body<{ device?: unknown; items?: unknown; keyCheck?: unknown }>(request);
   const device = str(b.device, 64);
   if (!DEVICE.test(device)) return fail('Invalid device.', 400, 'invalid_request');
   if (!Array.isArray(b.items) || !b.items.length || b.items.length > MAX_PUSH) return fail(`Send 1 to ${MAX_PUSH} records.`, 400, 'invalid_request');
+  const keyCheck = b.keyCheck === undefined || b.keyCheck === null ? null : typeof b.keyCheck === 'string' && CHECK.test(b.keyCheck) ? b.keyCheck : false;
+  if (keyCheck === false) return fail('Invalid key check.', 400, 'invalid_request');
   if (!(await env.DB.prepare('SELECT 1 FROM sync_meta WHERE owner = ?1').bind(user.id).first())) return fail('Set up sync first.', 409, 'sync_not_set_up');
   const items = b.items.map((raw) => {
     const it = raw as { id?: unknown; collection?: unknown; data?: unknown; deleted?: unknown; updatedAt?: unknown };
@@ -151,8 +173,12 @@ export async function syncPush(request: Request, env: Env, user: User) {
   const adding = items.reduce((a, it) => a + it.size, 0);
   if ((used?.bytes || 0) + adding > MAX_TOTAL) return fail('Your synced data is full. Turn off syncing history or chats in Settings › Sync.', 413, 'sync_full');
   // Replacing a row gives it a new sequence number, so other devices pull it.
-  await env.DB.batch(items.map((it) => env.DB.prepare(`INSERT OR REPLACE INTO sync_items (owner, id, collection, data, deleted, size, device, updated_at)
-    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`).bind(user.id, it.id, it.collection, it.data, it.deleted ? 1 : 0, it.size, device, it.updatedAt)));
+  const done = await env.DB.batch(items.map((it) => (keyCheck
+    ? env.DB.prepare(`INSERT OR REPLACE INTO sync_items (owner, id, collection, data, deleted, size, device, updated_at)
+      SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8 WHERE (SELECT key_check FROM sync_meta WHERE owner = ?1) = ?9`).bind(user.id, it.id, it.collection, it.data, it.deleted ? 1 : 0, it.size, device, it.updatedAt, keyCheck)
+    : env.DB.prepare(`INSERT OR REPLACE INTO sync_items (owner, id, collection, data, deleted, size, device, updated_at)
+      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`).bind(user.id, it.id, it.collection, it.data, it.deleted ? 1 : 0, it.size, device, it.updatedAt))));
+  if (keyCheck && !done.some((r) => r.meta?.changes)) return fail('This account’s sync key changed.', 409, 'key_mismatch');
   const top = await env.DB.prepare('SELECT MAX(seq) AS seq FROM sync_items WHERE owner = ?1').bind(user.id).first<{ seq: number }>();
   return json({ ok: true, cursor: top?.seq || 0 });
 }
@@ -171,8 +197,13 @@ export async function pairRequest(request: Request, env: Env, user: User) {
   return json({ id });
 }
 
-// What a device with the key sees: requests waiting for an OK.
+// What a device with the key sees: requests waiting for an OK. None when the
+// server answers them itself (managed mode, with the key here).
 export async function pairPending(request: Request, env: Env, user: User) {
+  if (managedAvailable(env)) {
+    const keys = await keyState(env, user.id);
+    if (keys.mode === 'managed' && keys.managedKey) return json({ requests: [] });
+  }
   const device = str(new URL(request.url).searchParams.get('device'), 64);
   const rows = await env.DB.prepare(`SELECT id, device, name, kind, pubkey, created_at FROM sync_pairings
     WHERE owner = ?1 AND status = 'pending' AND created_at > ?2 AND device != ?3 ORDER BY created_at DESC LIMIT 5`)
@@ -181,10 +212,22 @@ export async function pairPending(request: Request, env: Env, user: User) {
 }
 
 // The requester checks whether it was approved (and collects the wrapped key).
-export async function pairCheck(env: Env, user: User, id: string) {
-  const r = await env.DB.prepare('SELECT status, approver_pub, wrapped, created_at FROM sync_pairings WHERE owner = ?1 AND id = ?2').bind(user.id, id)
-    .first<{ status: string; approver_pub: string | null; wrapped: string | null; created_at: number }>();
+// In managed mode the server approves it here, once (sync-keys.ts).
+export async function pairCheck(request: Request, env: Env, user: User, id: string) {
+  const read = () => env.DB.prepare('SELECT status, pubkey, approver_pub, wrapped, created_at FROM sync_pairings WHERE owner = ?1 AND id = ?2').bind(user.id, id)
+    .first<{ status: string; pubkey: string; approver_pub: string | null; wrapped: string | null; created_at: number }>();
+  let r = await read();
   if (!r) return fail('No such request.', 404, 'not_found');
+  if (r.status === 'pending' && r.created_at >= now() - PAIR_TTL) {
+    const auto = await autoApproval(request, env, user.id, r.pubkey);
+    if (auto) {
+      const res = await env.DB.prepare("UPDATE sync_pairings SET status = 'done', wrapped = NULL WHERE owner = ?1 AND id = ?2 AND status = 'pending'").bind(user.id, id).run();
+      if (res.meta.changes) return json({ status: 'approved', approverPub: auto.approverPub, wrapped: auto.wrapped });
+      // Answered meanwhile (another check, or a device): as it is now.
+      r = await read();
+      if (!r) return fail('No such request.', 404, 'not_found');
+    }
+  }
   if (r.status === 'pending' && r.created_at < now() - PAIR_TTL) return json({ status: 'expired' });
   if (r.status === 'approved') {
     // Collected once.
@@ -247,13 +290,23 @@ export async function companionList(request: Request, env: Env, user: User) {
 }
 
 // A computer's live status (encrypted): what Lumio is doing, what needs an OK.
+// keyCheck (newer computers): the key it's sealed with; a computer still on
+// an old key (the account was reset, or switched to its own passphrase) can't
+// write it, so status only the old key opens doesn't come back.
 export async function companionStatusPut(request: Request, env: Env, user: User) {
-  const b = await body<{ device?: unknown; data?: unknown }>(request);
+  const b = await body<{ device?: unknown; data?: unknown; keyCheck?: unknown }>(request);
   const device = str(b.device, 64);
   const data = typeof b.data === 'string' ? b.data : '';
-  if (!DEVICE.test(device) || !data || data.length > 100_000 || !B64.test(data)) return fail('Invalid status.', 400, 'invalid_request');
-  const res = await env.DB.prepare('UPDATE sync_devices SET status = ?3, status_at = ?4, last_seen = ?4 WHERE owner = ?1 AND id = ?2').bind(user.id, device, data, now()).run();
-  if (!res.meta.changes) return fail('Register this device first.', 409, 'unknown_device');
+  const keyCheck = b.keyCheck === undefined || b.keyCheck === null ? null : typeof b.keyCheck === 'string' && CHECK.test(b.keyCheck) ? b.keyCheck : false;
+  if (!DEVICE.test(device) || !data || data.length > 100_000 || !B64.test(data) || keyCheck === false) return fail('Invalid status.', 400, 'invalid_request');
+  const res = keyCheck
+    ? await env.DB.prepare(`UPDATE sync_devices SET status = ?3, status_at = ?4, last_seen = ?4 WHERE owner = ?1 AND id = ?2
+      AND (SELECT key_check FROM sync_meta WHERE owner = ?1) = ?5`).bind(user.id, device, data, now(), keyCheck).run()
+    : await env.DB.prepare('UPDATE sync_devices SET status = ?3, status_at = ?4, last_seen = ?4 WHERE owner = ?1 AND id = ?2').bind(user.id, device, data, now()).run();
+  if (!res.meta.changes) {
+    if (keyCheck && (await env.DB.prepare('SELECT 1 FROM sync_devices WHERE owner = ?1 AND id = ?2').bind(user.id, device).first())) return fail('This account’s sync key changed.', 409, 'key_mismatch');
+    return fail('Register this device first.', 409, 'unknown_device');
+  }
   return json({ ok: true });
 }
 
@@ -353,12 +406,13 @@ async function vapidAuth(env: Env, endpoint: string) {
   return `vapid t=${header}.${claims}.${b64url(sig)}, k=${env.VAPID_PUBLIC_KEY}`;
 }
 
-// Old tombstones, pairings and relay messages (the 5-minute cron).
+// Old tombstones, pairings, key reads and changes, and relay messages (the 5-minute cron).
 export async function syncCleanup(env: Env) {
   const t = now();
   await env.DB.batch([
     env.DB.prepare('DELETE FROM sync_items WHERE deleted = 1 AND updated_at < ?1').bind(t - 90 * 24 * 3600_000),
     env.DB.prepare('DELETE FROM sync_pairings WHERE created_at < ?1').bind(t - 24 * 3600_000),
     env.DB.prepare('DELETE FROM companion_messages WHERE created_at < ?1').bind(t - 2 * 24 * 3600_000),
+    env.DB.prepare('DELETE FROM sync_key_events WHERE created_at < ?1').bind(t - 3600_000),
   ]);
 }

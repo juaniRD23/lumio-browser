@@ -2,9 +2,10 @@
 // Copy link; a QR code made on this computer (renderer/assets/qr.js, nothing
 // is sent anywhere); Send to your devices (another computer signed in to
 // Lumio Sync gets a "Tab from …" notification, through the companion relay,
-// end-to-end encrypted); Screenshot (main/screenshot.js); Save page as;
-// Install page as app / Create shortcut (main/apps.js); and on the Mac the
-// system's share sheet. The popover itself is renderer/ui/overlay-share.js.
+// encrypted with the account's sync key, see docs/sync-managed.md);
+// Screenshot (main/screenshot.js); Save page as; Install page as app / Create
+// shortcut (main/apps.js); and on the Mac the system's share sheet. The
+// popover itself is renderer/ui/overlay-share.js.
 //
 // Websites' Share buttons (navigator.share) open the same popover: a small
 // shim in the page's own world (preload/internal.js) asks main through the

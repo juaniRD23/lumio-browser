@@ -22,6 +22,7 @@ export interface Env {
   MICROSOFT_CLIENT_ID?: string;
   MICROSOFT_CLIENT_SECRET?: string;
   CONNECTIONS_KEY?: string; // base64 of 32 random bytes: encrypts connection tokens
+  SYNC_MASTER_KEY?: string; // base64 of 32 random bytes: wraps each managed account's sync key (sync-keys.ts). Never replace it.
   MICROSOFT_AUTH_URL?: string; // tests
   MICROSOFT_TOKEN_URL?: string; // tests
   GOOGLE_API?: string; // tests

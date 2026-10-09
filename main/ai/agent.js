@@ -25,9 +25,9 @@ const MAX_CALLS = 12;
 // (a short hash of its text, field values and scroll positions: a click on
 // "+" or a scroll changes it even when the tool's answer is the same) and the
 // results, with text that changes on its own (clock times, "5 seconds ago")
-// taken out; a screenshot counts by what the tab shows (or, for the screen,
-// a coarse 16x10 picture), not its bytes, which change whenever anything
-// moves. A step never seen before is progress; a repeat brings nothing new.
+// taken out; a screenshot counts by what the tab shows, not its bytes, which
+// change whenever anything moves. A step never seen before is progress; a
+// repeat brings nothing new.
 // - Acting (clicking, typing…) with nothing new: the same step 3 times within
 //   the last 8, or 8 steps in a row that repeat earlier ones (a loop of
 //   several different steps), adds a note telling the model to change course;
@@ -39,7 +39,7 @@ const NUDGE = { times: 3, within: 8, stale: 8 };
 const GIVE_UP = { times: 6, within: 12, stale: 12 };
 const WAIT_NOTE_MS = 2 * 60_000;
 const WAIT_LIMIT_MS = 15 * 60_000;
-const LOOKS = new Set(['read_page', 'screenshot_tab', 'computer_screenshot', 'list_tabs', 'list_apps', 'read_url']);
+const LOOKS = new Set(['read_page', 'screenshot_tab', 'list_tabs', 'read_url']);
 // Text that changes on its own: clock times, "5 seconds ago", countdowns, long ids.
 const VOLATILE = /(?<!\d)\d{1,2}:\d{2}(?::\d{2})?(?:\s?[ap]\.?m\b\.?)?|\b\d+(?:\.\d+)?\s*(?:ms|s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?)\b|\d{10,}/gi;
 const steady = (text) => String(text || '').replace(VOLATILE, '#');
@@ -178,7 +178,6 @@ async function runToolCall(call, env) {
     if (decision === 'task') grants.add(tool.name);
   }
 
-  safe(() => ctx?.onToolRun?.(tool, args, label)); // e.g. the screen glow when it controls the computer
   try {
     if (ctx) ctx.callId = call.id; // which step is running (send_helpers groups its helpers under it)
     const out = await tool.run(args, ctx);

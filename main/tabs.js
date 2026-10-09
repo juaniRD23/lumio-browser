@@ -525,10 +525,15 @@ class TabManager {
       // inside (a tab opened by Lumio would skip the renderer's own checks).
       const sameExtension = extension && url.startsWith(new URL(page).origin + '/');
       if (!own && !sameExtension && kind === 'web' && !/^(https?|blob):|^about:blank$/i.test(url)) return { action: 'deny' };
+      // Lumio AI is at work on this page: what it opens can't open other
+      // apps either while that lasts (main.js openExternalLink). A "Join
+      // Zoom Meeting" link opens zoom.us in a tab, which then opens Zoom.
+      const byAi = m.hooks.aiAtWork?.(tab) || null;
+      const mark = (made) => { if (byAi && made && typeof made === 'object') made.aiOpener = byAi; return made; };
       // A helper AI's tab never opens windows or jumps the person's view: a
       // link it opens goes to a background tab.
       if (tab.agent) {
-        if (kind === 'web' && /^https?:/i.test(url)) m.create(url, { active: false, index: m.tabs.indexOf(tab) + 1 });
+        if (kind === 'web' && /^https?:/i.test(url)) mark(m.create(url, { active: false, index: m.tabs.indexOf(tab) + 1 }));
         return { action: 'deny' };
       }
       // Which frame asked, when the page sends a referrer: a frame from
@@ -559,14 +564,14 @@ class TabManager {
             action: 'allow',
             outlivesOpener: true, // like Chrome: closing the tab leaves its pop-up open
             overrideBrowserWindowOptions: { webPreferences: PAGE_PREFS },
-            createWindow: (options) => m.hooks.openPopup(tab, { webContents: options.webContents || null, url, features }),
+            createWindow: (options) => m.hooks.openPopup(tab, { webContents: options.webContents || null, url, features, ...(byAi ? { aiOpener: byAi } : {}) }),
           };
         }
-        m.hooks.openInNewWindow?.(url, m.incognito);
+        mark(m.hooks.openInNewWindow?.(url, m.incognito)?.tabs?.active);
         return { action: 'deny' };
       }
       const index = m.tabs.indexOf(tab) + 1;
-      m.create(url, { active: disposition !== 'background-tab', index, ...(tab.groupId ? { groupId: tab.groupId } : {}) });
+      mark(m.create(url, { active: disposition !== 'background-tab', index, ...(tab.groupId ? { groupId: tab.groupId } : {}) }));
       return { action: 'deny' };
     });
 

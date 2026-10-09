@@ -10,8 +10,7 @@ import { scriptedTurn, turnEvents } from './mock-scripts.mjs';
 const MODEL = { id: 'mock/agent-1', name: 'Mock Agent', maker: 'Lumio', minimumPlan: 'free', available: true };
 // The tools the real server owns (server/src/agent.ts).
 const TOOLS = ['read_page', 'click', 'type', 'select_option', 'press_key', 'scroll', 'navigate', 'web_search', 'read_url', 'paste_text', 'save_site_tip', 'go_back', 'screenshot_tab', 'click_at',
-  'list_tabs', 'open_tab', 'switch_tab', 'close_tab', 'wait', 'computer_screenshot', 'computer_click', 'computer_move', 'computer_drag',
-  'computer_scroll', 'computer_type', 'computer_key', 'open_app', 'list_apps', 'run_shell', 'update_plan', 'run_applescript',
+  'list_tabs', 'open_tab', 'switch_tab', 'close_tab', 'wait', 'update_plan',
   'generate_image', 'create_document', 'schedule_task', 'list_scheduled_tasks', 'cancel_scheduled_task', 'send_helpers', 'save_workflow', 'list_workflows'];
 // A 2x2 PNG for /v1/images.
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFklEQVR42mNkYPj/n4GBgYHhPwMDAwAt8gP9tA3e2wAAAABJRU5ErkJggg==';

@@ -1,6 +1,7 @@
 // Lumio on your phone: wakes up for a push (it carries nothing), fetches the
 // new notices from Lumio, decrypts them with the sync key kept on this phone,
-// and shows them.
+// and shows them. Without the key (signed out, or not set up yet), it shows a
+// plain notice instead.
 importScripts('/sync-crypto.js');
 
 self.addEventListener('install', () => self.skipWaiting());

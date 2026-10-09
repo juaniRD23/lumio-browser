@@ -1,7 +1,10 @@
 // The phone companion end to end: the real web app (website/public/
 // companion.*) in headless Chrome as the phone, a computer running the real
 // sync engine and companion bridge with stand-in windows, and the real server
-// code (in-memory D1) between them. Skipped without Google Chrome.
+// code (in-memory D1) between them: an account that encrypts sync with its
+// own passphrase (the computer approves the phone), and one where Lumio keeps
+// the key (signed in is synced; docs/sync-managed.md). Skipped without
+// Google Chrome.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
@@ -25,7 +28,8 @@ const SHOTS = process.env.LUMIO_SHOTS;
 const shot = async (page, name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.waitForTimeout(450); await page.screenshot({ path: path.join(SHOTS, `phone-${name}.png`) }); } };
 const CHROME = ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/usr/bin/google-chrome'].find((p) => fs.existsSync(p));
 const PUBLIC = fileURLToPath(new URL('../website/public/', import.meta.url));
-const TOKEN = crypto.randomBytes(32).toString('hex');
+const TOKEN = crypto.randomBytes(32).toString('hex'); // sam@example.com (u1): passphrase
+const TOKEN2 = crypto.randomBytes(32).toString('hex'); // kim@example.com (u2): managed
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
 
 function d1(db) {
@@ -45,17 +49,22 @@ function d1(db) {
 }
 
 let env, server, base, browser;
+const seen = []; // API requests: { method, path, phone (cookie), sync (X-Lumio-Sync) }
 before(async () => {
   if (!CHROME) return;
   const sql = new DatabaseSync(':memory:');
   sql.exec(fs.readFileSync(new URL('../server/schema.sql', import.meta.url), 'utf8'));
   sql.prepare("INSERT INTO users (id, google_sub, email, name, plan, created_at) VALUES ('u1', 'g1', 'sam@example.com', 'Sam', 'free', 0)").run();
-  sql.prepare('INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, 0, ?)').run(crypto.createHash('sha256').update(TOKEN).digest('hex'), 'u1', Date.now() + 864e5);
-  env = { DB: d1(sql) };
+  sql.prepare("INSERT INTO users (id, google_sub, email, name, plan, created_at) VALUES ('u2', 'g2', 'kim@example.com', 'Kim', 'free', 0)").run();
+  for (const [token, user] of [[TOKEN, 'u1'], [TOKEN2, 'u2']]) {
+    sql.prepare('INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, 0, ?)').run(crypto.createHash('sha256').update(token).digest('hex'), user, Date.now() + 864e5);
+  }
+  env = { DB: d1(sql), SYNC_MASTER_KEY: crypto.randomBytes(32).toString('base64') };
   // One origin for the web app and its API, like the real site.
   server = http.createServer(async (req, res) => {
     const url = new URL(req.url, base);
     if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/v1/')) {
+      seen.push({ method: req.method, path: url.pathname, phone: !!req.headers.cookie, sync: req.headers['x-lumio-sync'] });
       let body = '';
       for await (const c of req) body += c;
       const r = await worker.fetch(new Request(url, { method: req.method, headers: req.headers, body: ['GET', 'HEAD'].includes(req.method) ? undefined : body }), env, { waitUntil() {} });
@@ -77,15 +86,15 @@ after(async () => { await browser?.close(); server?.close(); });
 
 // A computer: real sync engine and bridge; its windows are stand-ins that
 // record what the phone asked for.
-function computer() {
+function computer({ token = TOKEN, email = 'sam@example.com' } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lumio-companion-'));
   const store = new Store(dir, { isEncryptionAvailable: () => false });
   const chats = new ChatStore(store.chatsFile);
   const workflows = new Workflows(dir);
   const account = {
     base,
-    token: () => TOKEN,
-    state: () => ({ signedIn: true, email: 'sam@example.com' }),
+    token: () => token,
+    state: () => ({ signedIn: true, email }),
     fetch: (url, opts = {}) => fetch(url, { method: opts.method, headers: opts.headers, body: opts.body }),
   };
   const sync = new SyncEngine({ dir, store, account });
@@ -109,7 +118,9 @@ function computer() {
   return { store, chats, workflows, sync, bridge, win, did };
 }
 
-test('the phone pairs with the computer, sees its chats and work, approves a step and sends a task', { skip: !CHROME && 'Google Chrome not installed', timeout: 60_000 }, async () => {
+test('with its own passphrase, the phone pairs with the computer, sees its chats and work, approves a step and sends a task', { skip: !CHROME && 'Google Chrome not installed', timeout: 60_000 }, async () => {
+  // Passphrase mode (Settings › Sync › Advanced on a Mac), set here directly.
+  await env.DB.prepare("INSERT INTO sync_keys (owner, mode, wrapped, key_check, created_at, updated_at) VALUES ('u1','passphrase',NULL,NULL,0,0)").run();
   const mac = computer();
   mac.chats.add({ id: 'chat-1', title: 'Trip to Lisbon', createdAt: 1, updatedAt: Date.now(), messages: [{ role: 'user', content: 'Plan it' }], display: [{ kind: 'user', text: 'Plan a trip to Lisbon' }, { kind: 'ai', text: 'Day 1: **Alfama**' }] });
   mac.chats.save();
@@ -189,6 +200,52 @@ test('the phone pairs with the computer, sees its chats and work, approves a ste
   const rows = await env.DB.prepare('SELECT data FROM companion_messages').all();
   assert.ok(rows.results.length >= 3);
   assert.ok(rows.results.every((r) => !Buffer.from(r.data, 'base64').toString('latin1').includes('calendar')));
+  const items = await env.DB.prepare("SELECT data FROM sync_items WHERE owner = 'u1' AND data IS NOT NULL").all();
+  assert.ok(items.results.length >= 2);
+  assert.ok(items.results.every((r) => !/Lisbon|Price check/.test(Buffer.from(r.data, 'base64').toString('latin1'))));
+  // The key never went to Lumio.
+  assert.ok(!seen.some((r) => r.path === '/api/sync/key'));
+  assert.equal((await env.DB.prepare("SELECT wrapped FROM sync_keys WHERE owner = 'u1'").first()).wrapped, null);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('signed in is synced: the phone gets the key from Lumio and opens Now, with no code and no approval', { skip: !CHROME && 'Google Chrome not installed', timeout: 60_000 }, async () => {
+  const mac = computer({ token: TOKEN2, email: 'kim@example.com' });
+  mac.chats.add({ id: 'chat-g', title: 'Garden plan', createdAt: 1, updatedAt: Date.now(), messages: [{ role: 'user', content: 'Plan it' }], display: [{ kind: 'user', text: 'Plan my garden' }, { kind: 'ai', text: 'Tomatoes **first**' }] });
+  mac.chats.save();
+  await mac.sync.tick();
+  assert.equal(mac.sync.status, 'ready', mac.sync.error);
+  assert.ok((await env.DB.prepare("SELECT wrapped FROM sync_keys WHERE owner = 'u2'").first())?.wrapped, 'Lumio keeps the key');
+
+  seen.length = 0;
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 19_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/19.0 Mobile/15E148 Safari/604.1' });
+  await ctx.addCookies([{ name: 'lumio_session', value: TOKEN2, url: base }]);
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(`${base}/companion`);
+  await page.waitForSelector('#nav:not([hidden])', { timeout: 10_000 });
+  await shot(page, '6-managed-now');
+  assert.equal(await page.$('.code'), null, 'no code to compare');
+  await page.click('#nav [data-view="chats"]');
+  await page.waitForSelector('[data-chat]');
+  assert.match(await page.textContent('.list'), /Garden plan/);
+  await mac.sync.tick();
+  assert.deepEqual(mac.sync.state().requests, [], 'nothing for the computer to approve');
+
+  // The phone asked Lumio for the key (a same-site request with X-Lumio-Sync), and nobody paired.
+  assert.deepEqual(seen.filter((r) => r.phone && r.path === '/api/sync/key').map((r) => [r.method, r.sync]), [['POST', '1']]);
+  assert.ok(!seen.some((r) => r.phone && r.path.startsWith('/api/sync/pair')), 'the phone asked no computer');
+  assert.ok(!seen.some((r) => r.method === 'POST' && /^\/api\/sync\/pair\/./.test(r.path)), 'no approval');
+
+  // What's synced is still unreadable on the server; its copy of the key is wrapped.
+  const items = await env.DB.prepare("SELECT data FROM sync_items WHERE owner = 'u2' AND data IS NOT NULL").all();
+  assert.ok(items.results.length >= 1);
+  assert.ok(items.results.every((r) => !/Garden|Tomatoes/.test(Buffer.from(r.data, 'base64').toString('latin1'))));
+  const kept = await page.evaluate(() => new Promise((resolve) => { const r = indexedDB.open('lumio-companion', 1); r.onsuccess = () => { const q = r.result.transaction('kv').objectStore('kv').get('syncKey:kim@example.com'); q.onsuccess = () => resolve(q.result); }; }));
+  assert.match(kept, /^[A-Za-z0-9+/]{43}=$/);
+  assert.ok(!(await env.DB.prepare("SELECT wrapped FROM sync_keys WHERE owner = 'u2'").first()).wrapped.includes(kept));
   assert.deepEqual(errors, []);
   await ctx.close();
 });

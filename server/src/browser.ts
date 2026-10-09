@@ -25,6 +25,8 @@ export async function capabilities(env: Env, user: User) {
     planName: planName(user.plan),
     model: publicModel(findModel(BROWSER_DEFAULT)!, user.plan),
     models: browserModels().map((m) => publicModel(m, user.plan)),
+    // Lumio Browser offers only these, so leaving the computer's tools out keeps
+    // every version in the browser's tabs, including ones made before.
     tools: [...browserAgentTools, ...connected].map((t) => t.function.name),
     // Tools the browser runs by asking the server (POST /v1/tools/run): the person's connected apps.
     remoteTools: connected.map((t) => ({ name: t.function.name, app: appForTool(t.function.name)?.name || '' })),

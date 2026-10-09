@@ -36,6 +36,11 @@ class PageIndicator {
     return inPage(wc, scripts.aura, opts).catch(() => {});
   }
 
+  // Lumio is working on this page right now (it read or acted on it in this task).
+  working(wc) {
+    return this.active && !!wc && this.pages.has(wc);
+  }
+
   // Hide the glow for Lumio's own screenshot of the tab, then bring it back.
   capture(wc, hidden) {
     return this.pages.has(wc) ? this.paint(wc, { hidden }) : Promise.resolve();
@@ -111,4 +116,15 @@ class PageIndicator {
   }
 }
 
-module.exports = { PageIndicator };
+// Lumio AI is at work on this tab's page: it read or acted on it in the task
+// running in its window (w), a helper AI has the tab, or such a page opened
+// it (a tab, pop-up or window: main/tabs.js passes this on). Returns what
+// says whether that AI is still at work, or null. While it is, the page
+// can't open other apps (main.js openExternalLink).
+function aiAtWork(w, tab) {
+  if (tab.aiOpener?.()) return tab.aiOpener;
+  if (!w?.ai?.isRunning() || !(tab.agent || w.indicator?.working?.(tab.view?.webContents))) return null;
+  return () => !w.closed && !!w.ai?.isRunning();
+}
+
+module.exports = { PageIndicator, aiAtWork };

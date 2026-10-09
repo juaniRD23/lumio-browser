@@ -74,3 +74,15 @@ test('the website makes no licensing claims about Lumio; GitHub is only the DMG 
     }
   }
 });
+
+// Lumio AI works only in the browser's tabs: the website must not promise it
+// controls the computer, and it says desktop apps open as their web versions.
+test('the website says Lumio AI stays in the browser and uses web apps, never that it controls the computer', () => {
+  for (const f of files) {
+    assert.doesNotMatch(read(f), /control(?:s|ling)? (?:your|my|the) (?:whole )?(?:computer|Mac|PC)|Screen Recording|whole screen|see your screen|AppleScript|shell command|your Mac or PC|Open Notes/i, `${f} says Lumio AI can act outside the browser`);
+  }
+  const html = read('index.html');
+  assert.match(html, /<b>It stays in the browser\.<\/b> Lumio works only in its own tabs\./);
+  assert.match(html, /opens Microsoft 365 on the web \(office\.com\), and Google Docs, Sheets and Gmail/);
+  assert.match(read('terms.html'), /Lumio Browser can act on web pages in its tabs\. It doesn’t control other apps or the rest of your computer\./);
+});

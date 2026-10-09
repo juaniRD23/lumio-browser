@@ -111,6 +111,7 @@ select.field { appearance: none; padding-right: 30px; background: var(--field) v
 .bill-top .title { font-weight: 600; font-size: 15px; }
 .bill-top .desc { color: var(--dim); font-size: 13px; margin-top: 2px; }
 .pill.warn { background: color-mix(in srgb, var(--warn) 10%, transparent); color: var(--warn-text); }
+.desc.warn { color: var(--warn-text); }
 .bill-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 20px 16px; }
 .bill-actions .spacer { flex: 1; }
 .bill-actions .btn.on { background: var(--overlay-4); border-color: var(--line2); }

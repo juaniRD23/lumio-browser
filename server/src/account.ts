@@ -7,11 +7,11 @@
 // if Stripe can't be reached, nothing is deleted and the app says to try
 // again. Then everything the account has on Lumio's server goes: sessions,
 // web chats and their files (R2 too), connected apps (Google's grant is
-// revoked), Lumio Sync's encrypted records, devices and pairings, the
-// companion's messages and push subscriptions, the apps' pending sign-in
-// hand-off codes (app_codes, which a password reset also ends), email sign-in
-// codes and attempts (by its email), cancellation notes, and the account
-// itself. Apple's token is revoked for accounts that used Sign in with
+// revoked), Lumio Sync's encrypted records, its wrapped sync key, devices and
+// pairings (and the key's rate-limit records), the companion's messages and
+// push subscriptions, the apps' pending sign-in hand-off codes (app_codes,
+// which a password reset also ends), email sign-in codes and attempts (by its
+// email), cancellation notes, and the account itself. Apple's token is revoked for accounts that used Sign in with
 // Apple. AI usage records stay for the spend accounting, without the owner or
 // any content (owner 'deleted'); a redeemed plan code stays used.
 import { revokeApple } from './apple.ts';
@@ -66,6 +66,8 @@ export async function deleteAccount(request: Request, env: Env, user: User, ctx:
     env.DB.prepare('DELETE FROM sync_meta WHERE owner = ?1').bind(id),
     env.DB.prepare('DELETE FROM sync_pairings WHERE owner = ?1').bind(id),
     env.DB.prepare('DELETE FROM sync_devices WHERE owner = ?1').bind(id),
+    env.DB.prepare('DELETE FROM sync_keys WHERE owner = ?1').bind(id),
+    env.DB.prepare('DELETE FROM sync_key_events WHERE owner = ?1').bind(id),
     env.DB.prepare('DELETE FROM companion_messages WHERE owner = ?1').bind(id),
     env.DB.prepare('DELETE FROM push_subscriptions WHERE owner = ?1').bind(id),
     env.DB.prepare('DELETE FROM app_codes WHERE user_id = ?1').bind(id),

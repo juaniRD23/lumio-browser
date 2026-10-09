@@ -3,7 +3,6 @@
 // reasoning setting and chat list. Everything the AI panel does goes through
 // here (via IPC in main.js). Pending approvals live only in this process, so a
 // renderer can't forge tool calls or approvals for itself.
-const { shell } = require('electron');
 const crypto = require('crypto');
 const { lumioChat, lumioCapabilities, lumioVoice, STOPPED_NOTE } = require('./lumio');
 const { runAgent, repairHistory, MAX_STEPS, UNATTENDED_STEPS } = require('./agent');
@@ -11,7 +10,6 @@ const { buildSystemPrompt } = require('./prompts');
 const { MODES } = require('./policy');
 const { MODEL, REASONING, DEFAULT_REASONING, findReasoning } = require('./models');
 const browser = require('./tools/browser');
-const mac = require('./tools/mac');
 const plan = require('./tools/plan');
 const make = require('./tools/make');
 const schedule = require('./tools/schedule');
@@ -21,13 +19,7 @@ const webTool = require('./tools/web');
 const tipsTool = require('./tools/tips');
 const { tipsNote, siteOf } = require('../site-tips');
 const { fill: fillWorkflow } = require('../workflows');
-const screenAura = require('./screen-aura');
 
-// Without the helper there's no computer control at all (the server only
-// accepts these when the step's context says the computer is available).
-const HELPER_TOOLS = new Set(['computer_screenshot', 'computer_click', 'computer_move', 'computer_drag', 'computer_scroll', 'computer_type', 'computer_key', 'open_app', 'list_apps', 'run_shell', 'run_applescript']);
-// Tools that look at or drive the computer itself: while one runs, the screen glows.
-const CONTROLS_COMPUTER = new Set(['computer_screenshot', 'computer_click', 'computer_move', 'computer_drag', 'computer_scroll', 'computer_type', 'computer_key', 'open_app', 'run_applescript']);
 const CAPS_TTL = 60 * 1000; // short, so newly connected apps show up soon
 const MAX_ATTACHMENTS = 10;
 
@@ -78,7 +70,7 @@ function endNote(ev) {
 }
 
 class AIController {
-  constructor({ store, chats, tabs, emit, helper, account = null, indicator = null, schedules = null, workflows = null, projects = null, siteTips = null, learnTips = true, notify = null, onSettingsChanged = () => {} }) {
+  constructor({ store, chats, tabs, emit, account = null, indicator = null, schedules = null, workflows = null, projects = null, siteTips = null, learnTips = true, notify = null, onSettingsChanged = () => {} }) {
     this.store = store;
     this.projects = projects; // Projects: chat folders with instructions (main/projects.js)
     this.workflows = workflows; // Workflows: saved tasks (main/workflows.js)
@@ -91,7 +83,6 @@ class AIController {
     this.chatStore = chats;
     this.tabs = tabs;
     this.emit = emit;
-    this.helper = helper;
     this.onSettingsChanged = onSettingsChanged; // lets every window refresh its panel
     this.run = null;
     this.capsCache = null; // { at, tools, model, remote } from the Lumio server
@@ -105,7 +96,8 @@ class AIController {
     const tab = this.tabs.active;
     return {
       platform: process.platform === 'win32' ? 'windows' : 'mac',
-      computer: this.helper.available(),
+      // Lumio AI works only in the browser's tabs: never the computer itself.
+      computer: false,
       mode: this.store.settings.approvalMode,
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
       tabCount: this.tabs.tabs.length,
@@ -136,7 +128,6 @@ class AIController {
       mode: this.store.settings.approvalMode,
       running: !!this.run,
       runChatId: this.run?.chatId || null,
-      macAvailable: this.helper.available(),
       ephemeral: this.chatStore.ephemeral,
       workflows: !!this.workflows,
     };
@@ -204,12 +195,12 @@ class AIController {
     };
   }
 
+  // Everything Lumio AI can do happens in the browser's tabs (or on Lumio's
+  // server): there are no tools for the computer itself.
   tools() {
-    const helperOk = this.helper.available();
     const off = new Set(this.store.settings.appsOff || []);
     const remote = make.remoteTools(this.capsCache?.remote || []).filter((t) => !off.has(t.app));
-    return [...browser.tools, ...webTool.tools, ...mac.tools, ...plan.tools, ...make.tools, ...(this.schedules ? schedule.tools : []), ...(this.workflows ? workflowTool.tools : []), ...(this.learnTips ? tipsTool.tools : []), ...(this.reasoning().id === 'high' ? helpersTool.tools : []), ...remote].filter((t) => (helperOk || !HELPER_TOOLS.has(t.name))
-      && (process.platform === 'darwin' || t.name !== 'run_applescript'));
+    return [...browser.tools, ...webTool.tools, ...plan.tools, ...make.tools, ...(this.schedules ? schedule.tools : []), ...(this.workflows ? workflowTool.tools : []), ...(this.learnTips ? tipsTool.tools : []), ...(this.reasoning().id === 'high' ? helpersTool.tools : []), ...remote];
   }
 
   // ------------------------------------------------------------ connections (+ menu)
@@ -513,13 +504,11 @@ class AIController {
       const messages = [{ role: 'user', content: `${h.task}\n\n${note}` }];
       const ctx = {
         tabs: this.tabs.scoped(tab),
-        helper: this.helper,
         refs: this.refs,
         signal: run.abort.signal,
         background: true,
         showCursor: false,
         lastTabShot: null,
-        lastMacShot: null,
         account: this.account,
         siteTips: this.tipsHook(() => tab),
         pageState: (volatile) => browser.pageState(tab, volatile),
@@ -584,12 +573,10 @@ class AIController {
     const record = (ev) => { watch?.(ev); this.record(chat, run, ev); };
     const ctx = {
       tabs: this.tabs,
-      helper: this.helper,
       refs: this.refs,
       signal: abort.signal,
       showCursor: true,
       lastTabShot: null,
-      lastMacShot: null,
       setPlan: (items) => record({ type: 'plan', items }),
       account: this.account,
       schedules: this.schedules,
@@ -601,8 +588,6 @@ class AIController {
       buildDocument: (spec) => this.buildDocument(spec),
       onPage: (wc) => this.indicator?.touch(wc),
       onCapture: (wc, hidden) => this.indicator?.capture(wc, hidden),
-      // The glow goes only on the screens the tool looks at or acts on.
-      onToolRun: (tool, args) => { if (CONTROLS_COMPUTER.has(tool.name)) screenAura.acquire(this, screenAura.displaysFor(tool.name, args, ctx.lastMacShot)); },
       runHelpers: (list, opts) => this.runHelpers(list, { ...opts, run, chat, record, runId }),
     };
     const runId = crypto.randomUUID();
@@ -621,7 +606,6 @@ class AIController {
           return buildSystemPrompt({
             activeTab: tab ? { id: tab.id, title: tab.title, url: this.tabs.displayUrl(tab) } : null,
             tabCount: this.tabs.tabs.length,
-            macAvailable: this.helper.available(),
             mode: this.store.settings.approvalMode,
           });
         },
@@ -648,7 +632,6 @@ class AIController {
       chat.updatedAt = Date.now();
       this.run = null;
       this.chatStore.running.delete(chat.id);
-      screenAura.release(this);
       this.indicator?.end();
       browser.clearCursors(this.tabs).catch(() => {});
       this.saveChats();
@@ -741,26 +724,6 @@ class AIController {
     this.run.abort.abort();
     for (const resolve of this.run.pending.values()) resolve('stop');
     this.run.pending.clear();
-  }
-
-  // ------------------------------------------------------------ Mac permissions
-  async macPermissions() {
-    if (!this.helper.available()) return { error: 'The Mac helper is not built yet (run `npm run native`).' };
-    try {
-      const res = await this.helper.request('permissions', {}, 5000);
-      return { accessibility: res.accessibility, screen: res.screen };
-    } catch (err) {
-      return { error: err.message };
-    }
-  }
-
-  async openMacPermissionSettings(which) {
-    const pane = which === 'screen' ? 'Privacy_ScreenCapture' : 'Privacy_Accessibility';
-    if (this.helper.available()) {
-      // Asking once makes macOS list Lumio Browser in that Settings pane.
-      await this.helper.request('request_permissions', { which }, 5000).catch(() => {});
-    }
-    shell.openExternal(`x-apple.systempreferences:com.apple.preference.security?${pane}`);
   }
 
   shutdown() {

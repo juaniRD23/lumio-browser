@@ -8,7 +8,8 @@
 // Cloudflare Worker secret. With a Stripe key it also creates Lumio's plans
 // (Go $10, Plus $20, Pro $100, Max $200 a month), its own billing-portal settings and
 // the webhook, all tagged app=lumio, and stores the webhook's signing secret.
-// It also creates the key that encrypts connected apps' tokens (once).
+// It also creates, once each, the keys that encrypt connected apps' tokens, key
+// the email codes, wrap Lumio Sync's keys, and sign phone notifications.
 // Keys only go to Cloudflare (wrangler) and Stripe; nothing is printed or saved.
 import { execFileSync, spawn } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -157,7 +158,11 @@ if (!onlyStripe) {
 // Connections need a key to encrypt people's Google/Microsoft tokens. Made
 // once, here; never shown. (Replacing it would disconnect everyone.)
 let existing = '';
-try { existing = execFileSync('npx', ['--yes', 'wrangler', 'secret', 'list'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { /* not deployed yet */ }
+let listed = false;
+try {
+  existing = execFileSync('npx', ['--yes', 'wrangler', 'secret', 'list'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  listed = true;
+} catch { /* not deployed yet */ }
 if (!existing.includes('"CONNECTIONS_KEY"')) {
   await putSecret('CONNECTIONS_KEY', crypto.randomBytes(32).toString('base64'));
   console.log('  ✓ Connections encryption key created');
@@ -168,6 +173,15 @@ if (!existing.includes('"CODE_KEY"')) {
   await putSecret('CODE_KEY', crypto.randomBytes(32).toString('base64'));
   console.log('  ✓ Email code key created');
 }
+// Lumio Sync keeps each account's sync key wrapped (AES-GCM) with this key,
+// so signing in is enough to sync (docs/sync-managed.md). Made once, here;
+// never shown. Never replace it: every managed account's key would become
+// unreadable (devices that still have it upload it again; the others wait).
+// Only made when the secret list was read, so a failed list can't replace it.
+if (listed && !existing.includes('"SYNC_MASTER_KEY"')) {
+  await putSecret('SYNC_MASTER_KEY', crypto.randomBytes(32).toString('base64'));
+  console.log('  ✓ Sync master key created');
+} else if (!listed) console.log('  ! Couldn’t list secrets: run setup again to create SYNC_MASTER_KEY');
 // Phone notifications (Web Push) need a VAPID key pair. Made once, here;
 // never shown. (Replacing it means phones turn notifications on again.)
 if (!existing.includes('"VAPID_PRIVATE_KEY"')) {

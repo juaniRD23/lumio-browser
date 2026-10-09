@@ -7,7 +7,7 @@
 //   Secrets: node scripts/setup.mjs --host lumio-co.online   (OpenRouter, Google, Resend, Stripe)
 //            OPENROUTER_API_KEY, GOOGLE_CLIENT_SECRET, RESEND_API_KEY, STRIPE_SECRET_KEY,
 //            STRIPE_PUBLISHABLE_KEY, STRIPE_WEBHOOK_SECRET, MICROSOFT_CLIENT_SECRET,
-//            CONNECTIONS_KEY, CODE_KEY, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY (see Env in src/util.ts)
+//            CONNECTIONS_KEY, CODE_KEY, SYNC_MASTER_KEY, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY (see Env in src/util.ts)
 {
   "name": "lumio",
   "main": "src/index.ts",

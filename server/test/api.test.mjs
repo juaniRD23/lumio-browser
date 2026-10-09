@@ -88,6 +88,7 @@ beforeEach(() => {
     STRIPE_SECRET_KEY: 'rk_test_123', STRIPE_WEBHOOK_SECRET: WHSEC, STRIPE_API: STRIPE,
     MICROSOFT_CLIENT_ID: 'ms-client', MICROSOFT_CLIENT_SECRET: 'ms-secret', MICROSOFT_AUTH_URL: MS_AUTH, MICROSOFT_TOKEN_URL: MS_TOKEN,
     GOOGLE_API: GAPI, GRAPH_API: GRAPH, CONNECTIONS_KEY: Buffer.from(crypto.randomBytes(32)).toString('base64'),
+    SYNC_MASTER_KEY: Buffer.from(crypto.randomBytes(32)).toString('base64'),
   };
   calls = { or: [], orGet: [], google: [], stripe: [], api: [], revoked: [], push: [], apple: [] };
   generations = { 'gen-img-test': 0.0094 }; // what OpenRouter's records say each generation cost
@@ -558,6 +559,8 @@ test('browser: capabilities, a streamed step, tool calls, replays and the Free d
   assert.ok(caps.models.every((m) => m.available));
   assert.ok(caps.tools.includes('update_plan'));
   assert.ok(caps.tools.includes('web_search') && caps.tools.includes('read_url'), 'research without tabs');
+  // Lumio Browser offers only the tools listed here, so none of them may act outside the browser.
+  assert.deepEqual(caps.tools.filter((n) => /^(computer_|open_app$|list_apps$|run_shell$|run_applescript$)/.test(n)), [], 'browser tabs only');
   // A step that offers them: the model gets both, and the prompt says to use them for looking things up.
   const research = await call('/v1/agent', { token, method: 'POST', body: step({ stepId: 's-web', tools: ['web_search', 'read_url', 'navigate', 'paste_text', 'save_site_tip'] }) });
   assert.equal(research.status, 200);
@@ -1039,13 +1042,121 @@ test('Lumio for iPhone and iPad: its own platform, web pages only, never the com
   assert.doesNotMatch(system, /control the computer itself|computer_screenshot/);
   assert.deepEqual(calls.or.at(-1).body.tools.map((t) => t.function.name), tools);
   assert.match(calls.or.at(-1).body.messages.at(-1).content, /The user is looking at tab 1: "Shop" — https:\/\/shop\.example\/\. 2 tab\(s\) open\.$/);
-  // The computer's tools are refused, and an iPhone never claims the computer.
-  for (const bad of [step({ stepId: 'i2', tools: ['read_page', 'computer_click'], context: ios }), step({ stepId: 'i3', context: { ...ios, computer: true } }), step({ stepId: 'i4', tools: ['run_applescript'], context: ios })]) {
-    const res = await call('/v1/agent', { token, method: 'POST', body: bad });
-    assert.equal(res.status, 400);
-  }
+  // An iPhone never claims the computer.
+  assert.equal((await call('/v1/agent', { token, method: 'POST', body: step({ stepId: 'i3', context: { ...ios, computer: true } }) })).status, 400);
   // Unknown platforms are still refused.
   assert.equal((await call('/v1/agent', { token, method: 'POST', body: step({ stepId: 'i5', context: { ...ios, platform: 'android' } }) })).status, 400);
+});
+
+// The AI works only in Lumio's tabs, on every platform and for every version
+// of Lumio Browser: 0.6.7 and its betas can still send `computer: true` and
+// list the computer's tools (from a cached tool list, or all of them when the
+// list couldn't be fetched).
+const OUTSIDE = ['computer_screenshot', 'computer_click', 'computer_move', 'computer_drag', 'computer_scroll', 'computer_type', 'computer_key', 'open_app', 'list_apps', 'run_shell', 'run_applescript'];
+test('browser only: older browsers asking for the computer’s tools get the browser’s, and a prompt that says so', async () => {
+  const { token } = await signIn();
+  const contexts = [
+    context, // a Mac with the helper: computer: true
+    { ...context, platform: 'windows' },
+    { ...context, computer: false },
+    { platform: 'mac', mode: 'auto', timeZone: 'UTC', tabCount: 0 }, // newer browsers may leave it out
+    { platform: 'ios', computer: false, mode: 'ask', timeZone: 'UTC', tabCount: 0 },
+  ];
+  for (const [i, c] of contexts.entries()) {
+    const res = await call('/v1/agent', { token, method: 'POST', body: step({ stepId: `b${i}`, context: c, tools: ['read_page', 'click', 'navigate', ...OUTSIDE] }) });
+    assert.equal(res.status, 200, `${c.platform} ${c.computer}`);
+    await events(res);
+    await settled();
+    const sent = calls.or.at(-1).body;
+    assert.deepEqual(sent.tools.map((t) => t.function.name), ['read_page', 'click', 'navigate'], 'dropped, never offered');
+    const system = sent.messages[0].content;
+    assert.match(system, /operate web pages in Lumio's tabs\./);
+    assert.match(system, /You can only work with web pages in Lumio's tabs\. The (Mac|Windows PC|iPhone or iPad) itself is out of reach/);
+    // Apps: their web versions, in a tab.
+    assert.match(system, /use its web version in a tab, never the desktop app, even when the user names the app \("open Excel"\)/);
+    assert.match(system, /Excel, Word, PowerPoint and Outlook: Microsoft 365 on the web \(office\.com, or excel\.cloud\.microsoft/);
+    assert.match(system, /Google Docs, Sheets and Slides: docs\.google\.com/);
+    assert.match(system, /Never open links that hand off to another app \(mailto:, tel:, ms-excel:, zoommtg:/);
+    assert.match(system, /"Open in desktop app"/);
+    // Anything else: say so, and what to do instead.
+    assert.match(system, /say you can't do that from the browser, then suggest the web alternative or how the user can do it themselves/);
+    assert.doesNotMatch(system, /control the computer|computer_|open_app|shell|AppleScript|screen glows/i);
+  }
+  // The model calls one of them anyway: there is no such tool.
+  reply = () => sse([{ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_c', type: 'function', function: { name: 'computer_click', arguments: '{"x":1,"y":2}' } }] }, finish_reason: 'tool_calls' }] }]);
+  const refused = await events(await call('/v1/agent', { token, method: 'POST', body: step({ stepId: 'b-call', tools: ['read_page', ...OUTSIDE] }) }));
+  await settled();
+  assert.equal(refused.at(-1).code, 'invalid_tool_arguments');
+  assert.match(calls.or.at(-1).body.messages.at(-1).content, /no tool named "computer_click"/);
+  assert.ok(!refused.some((e) => e.type === 'tool_call'), 'nothing to run');
+  // Unknown tools are still refused.
+  assert.equal((await call('/v1/agent', { token, method: 'POST', body: step({ stepId: 'b-bad', tools: ['read_page', 'computer_click', 'write_file'] }) })).status, 400);
+});
+
+test('browser only: chats from before, with the computer’s tools in them, can go on', async () => {
+  const { token } = await signIn();
+  const messages = [
+    { role: 'user', content: 'What apps are running on my Mac? Then email my boss.' },
+    { role: 'assistant', content: null, tool_calls: [
+      { id: 'old_1', type: 'function', function: { name: 'list_apps', arguments: '{}' } },
+      { id: 'old_2', type: 'function', function: { name: 'computer_click', arguments: '{"x":10,"y":20}' } },
+      { id: 'old_3', type: 'function', function: { name: 'run_shell', arguments: '{"command":"ls","explanation":"Lists your files"}' } },
+      { id: 'old_4', type: 'function', function: { name: 'run_applescript', arguments: '{"script":"beep","explanation":"Beeps"}' } },
+      { id: 'old_5', type: 'function', function: { name: 'navigate', arguments: '{"url":"mailto:boss@co.com"}' } },
+    ] },
+    ...['Finder, Excel', 'Clicked.', 'a.txt', 'Done.', 'Opened Mail.'].map((content, i) => ({ role: 'tool', tool_call_id: `old_${i + 1}`, content })),
+    { role: 'user', content: 'Now open Excel.' },
+  ];
+  const res = await call('/v1/agent', { token, method: 'POST', body: step({ messages, context: { ...context, platform: 'windows' } }) });
+  assert.equal(res.status, 200);
+  await events(res);
+  await settled();
+  const sent = calls.or.at(-1).body;
+  assert.deepEqual(sent.messages[2].tool_calls.map((c) => c.function.name), ['list_apps', 'computer_click', 'run_shell', 'run_applescript', 'navigate']);
+  assert.deepEqual(sent.tools.map((t) => t.function.name), ['read_page', 'click', 'update_plan'], 'but they aren’t offered again');
+  assert.match(sent.messages[0].content, /If earlier messages in this chat show you doing that, it is no longer possible\./);
+  // Only the computer's old tools: a call to a tool that never existed is still refused.
+  const made = structuredClone(messages);
+  made[1].tool_calls[0].function.name = 'write_file';
+  assert.equal((await call('/v1/agent', { token, method: 'POST', body: step({ stepId: 's2', messages: made }) })).status, 400);
+});
+
+test('browser only: links that open another app (mailto:, ms-excel:, zoommtg:, file:…) are refused, web addresses are not', async () => {
+  const { token } = await signIn();
+  const toolCall = (name, args, id = 'call_1') => sse([{ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id, type: 'function', function: { name, arguments: JSON.stringify(args) } }] }, finish_reason: 'tool_calls' }] }]);
+  const tools = ['read_page', 'navigate', 'open_tab', 'save_workflow', 'send_helpers'];
+  // mailto: first: the model is told why and writes the email in Gmail instead.
+  let n = 0;
+  reply = () => (n++ === 0 ? toolCall('navigate', { url: 'mailto:boss@co.com?subject=Hi' }, 'call_m') : toolCall('navigate', { url: 'https://mail.google.com/mail/?view=cm&to=boss@co.com' }, 'call_g'));
+  const mail = await events(await call('/v1/agent', { token, method: 'POST', body: step({ stepId: 'm1', tools }) }));
+  await settled();
+  assert.match(calls.or.at(-1).body.messages.at(-1).content, /^Error: url: "mailto:" links open something outside the browser, and you work only in Lumio's tabs\. Use a web page \(http or https\) instead/);
+  assert.deepEqual(mail.filter((e) => e.type === 'tool_call').map((e) => JSON.parse(e.tool_call.function.arguments).url), ['https://mail.google.com/mail/?view=cm&to=boss@co.com']);
+  // Twice in a row: the step fails with nothing to run.
+  const refuse = [
+    ['navigate', { url: 'ms-excel:ofe|u|https://contoso.sharepoint.com/Budget.xlsx' }],
+    ['open_tab', { url: 'zoommtg://zoom.us/join?confno=123' }],
+    ['navigate', { url: 'file:///Users/sam/Budget.xlsx' }],
+    ['navigate', { url: 'tel:911' }],
+    ['navigate', { url: 'mailto: boss@co.com' }],
+    ['open_tab', { url: 'x-apple.systempreferences:com.apple.preference.security' }],
+    ['save_workflow', { title: 'Mail the boss', instructions: 'Write to the boss', start_url: 'mailto:boss@co.com' }],
+    ['send_helpers', { helpers: [{ title: 'Slack', task: 'Post the update', url: 'slack://open' }] }],
+  ];
+  for (const [k, [name, args]] of refuse.entries()) {
+    reply = () => toolCall(name, args);
+    const ev = await events(await call('/v1/agent', { token, method: 'POST', body: step({ stepId: `r${k}`, tools, reasoning: 'high' }) }));
+    await settled();
+    assert.equal(ev.at(-1).code, 'invalid_tool_arguments', name);
+    assert.ok(!ev.some((e) => e.type === 'tool_call'), name);
+  }
+  // Web addresses, local servers and searches (with operators too) go through.
+  for (const [k, url] of ['https://excel.cloud.microsoft/', 'office.com', 'localhost:3000', 'example.com:8080/x', 'weather: Madrid', 'about:blank', 'site:reddit.com best noise cancelling headphones', 'define:serendipity', 'filetype:pdf w-9 form', 'intitle:"index of" mp3'].entries()) {
+    reply = () => toolCall('navigate', { url });
+    const ev = await events(await call('/v1/agent', { token, method: 'POST', body: step({ stepId: `w${k}`, tools }) }));
+    await settled();
+    assert.equal(ev.find((e) => e.type === 'tool_call')?.tool_call.function.name, 'navigate', url);
+  }
 });
 
 test('voice: speech to text and reading aloud are charged to the weekly allowance', async () => {
@@ -1153,7 +1264,7 @@ test('sync: the first device sets the key; records go up and come down; a device
   // Turning sync off for the account deletes everything.
   await sync('/api/sync', { method: 'DELETE' });
   const { collections, ...cleared } = await (await sync('/api/sync')).json();
-  assert.deepEqual(cleared, { keyCheck: null, since: null, devices: [], usage: { items: 0, bytes: 0, limit: 60 * 1024 * 1024 } });
+  assert.deepEqual(cleared, { keyCheck: null, since: null, devices: [], usage: { items: 0, bytes: 0, limit: 60 * 1024 * 1024 }, mode: 'managed', managedKey: false, managedAvailable: true });
   assert.ok(collections.includes('bookmarks'));
 });
 
@@ -1596,7 +1707,8 @@ test('deleting the account in the app ends the plan and removes everything on th
   await connect(token, 'gmail', 'conn-google', 'google');
   assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM connections').get().n, 1);
   const sync = (path, opts = {}) => call(path, { token, ...opts });
-  await sync('/api/sync/init', { method: 'POST', body: { keyCheck: 'a'.repeat(32) } });
+  // Lumio keeps the account's sync key (managed sync, sync-keys.ts).
+  assert.equal((await (await sync('/api/sync/key', { method: 'POST', body: {} })).json()).status, 'ready');
   await sync('/api/sync/devices', { method: 'POST', body: { id: PHONE, name: 'iPhone', kind: 'phone', platform: 'ios' } });
   await sync('/api/sync/push', { method: 'POST', body: { device: PHONE, items: [{ id: 'bookmark-id-001', collection: 'bookmarks', data: sealed(1) }] } });
   await sync('/api/sync/pair', { method: 'POST', body: { device: PHONE, name: 'iPhone', kind: 'phone', pubkey: Buffer.alloc(65, 4).toString('base64') } });
@@ -1605,6 +1717,7 @@ test('deleting the account in the app ends the plan and removes everything on th
   sql.prepare("INSERT INTO plan_codes (code_hash, plan, hint, created_at, redeemed_by, redeemed_at) VALUES ('h1', 'plus', 'ABCD', ?, ?, ?)").run(t, id, t);
   sql.prepare("INSERT INTO steps (key, owner, plan, kind, request_hash, status, held_microusd, cost_microusd, result, created_at) VALUES ('s1', ?, 'plus', 'browser', 'r', 'done', 0, 120, 'what the page said', ?)").run(id, t);
   sql.prepare("INSERT INTO cancellations (user_id, plan, reason, comment, created_at) VALUES (?, 'plus', 'other', 'a note', ?)").run(id, t);
+  for (const table of ['sync_keys', 'sync_key_events', 'sync_meta', 'sync_items']) assert.ok(sql.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE owner = ?`).get(id).n > 0, table);
 
   const del = (opts) => call('/api/account', { method: 'DELETE', ...opts });
   assert.equal((await del({ token, body: {} })).status, 400, 'it must be confirmed');
@@ -1625,7 +1738,7 @@ test('deleting the account in the app ends the plan and removes everything on th
   assert.equal(calls.revoked.length, 1, 'Google’s grant was revoked');
   assert.equal((await (await call('/api/account', { token })).json()).signedIn, false);
   for (const [table, column] of [['users', 'id'], ['sessions', 'user_id'], ['chats', 'user_id'], ['files', 'user_id'], ['connections', 'user_id'], ['app_codes', 'user_id'], ['cancellations', 'user_id'],
-    ['sync_items', 'owner'], ['sync_meta', 'owner'], ['sync_devices', 'owner'], ['sync_pairings', 'owner'], ['companion_messages', 'owner'], ['push_subscriptions', 'owner'], ['steps', 'owner']]) {
+    ['sync_items', 'owner'], ['sync_meta', 'owner'], ['sync_devices', 'owner'], ['sync_pairings', 'owner'], ['sync_keys', 'owner'], ['sync_key_events', 'owner'], ['companion_messages', 'owner'], ['push_subscriptions', 'owner'], ['steps', 'owner']]) {
     assert.equal(sql.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${column} = ?`).get(id).n, 0, table);
   }
   assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM chat_messages').get().n, 0);

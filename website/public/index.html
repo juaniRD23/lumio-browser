@@ -63,8 +63,8 @@
     <!-- Marquee of things to ask -->
     <section class="asks" aria-label="Things you can ask Lumio">
       <div class="track">
-        <span>“Book a table for 2 at 8pm”</span><span>“Summarize this page”</span><span>“Compare the three cheapest flights”</span><span>“Fill in this form with my details”</span><span>“Find a used bike under $300 near me”</span><span>“What changed in this contract?”</span><span>“Open Notes and jot down this address”</span><span>“Unsubscribe me from these emails”</span>
-        <span aria-hidden="true">“Book a table for 2 at 8pm”</span><span aria-hidden="true">“Summarize this page”</span><span aria-hidden="true">“Compare the three cheapest flights”</span><span aria-hidden="true">“Fill in this form with my details”</span><span aria-hidden="true">“Find a used bike under $300 near me”</span><span aria-hidden="true">“What changed in this contract?”</span><span aria-hidden="true">“Open Notes and jot down this address”</span><span aria-hidden="true">“Unsubscribe me from these emails”</span>
+        <span>“Book a table for 2 at 8pm”</span><span>“Summarize this page”</span><span>“Compare the three cheapest flights”</span><span>“Fill in this form with my details”</span><span>“Find a used bike under $300 near me”</span><span>“What changed in this contract?”</span><span>“Put these prices in a Google Sheet”</span><span>“Unsubscribe me from these emails”</span>
+        <span aria-hidden="true">“Book a table for 2 at 8pm”</span><span aria-hidden="true">“Summarize this page”</span><span aria-hidden="true">“Compare the three cheapest flights”</span><span aria-hidden="true">“Fill in this form with my details”</span><span aria-hidden="true">“Find a used bike under $300 near me”</span><span aria-hidden="true">“What changed in this contract?”</span><span aria-hidden="true">“Put these prices in a Google Sheet”</span><span aria-hidden="true">“Unsubscribe me from these emails”</span>
       </div>
     </section>
 
@@ -103,7 +103,7 @@
           <li class="step" data-step="3">
             <span class="num">04</span>
             <h3>Done, with a short summary</h3>
-            <p>When the job’s finished, Lumio checks the result and tells you what happened. It can go beyond the browser too: see your screen, open apps and type on your Mac or PC, with your permission. While it does, your whole screen glows blue, with a Stop button at the top.</p>
+            <p>When the job’s finished, Lumio checks the result and tells you what happened. It all happens in your tabs: when a job needs Excel, Word or PowerPoint, Lumio opens the web version in a tab instead of an app on your computer.</p>
           </li>
         </ol>
       </div>
@@ -119,12 +119,12 @@
         <article class="mode">
           <span class="pill">Ask</span>
           <h3>Confirm every action</h3>
-          <p>The default. Reading pages never asks; clicking, typing and anything on your computer does.</p>
+          <p>The default. Reading pages never asks; clicking and typing do.</p>
         </article>
         <article class="mode">
           <span class="pill">Auto</span>
           <h3>Browse on its own</h3>
-          <p>Lumio works through websites by itself, and still asks before it touches your computer or runs a command.</p>
+          <p>Lumio works through websites by itself, and still stops for your OK before it buys, sends, posts or deletes anything.</p>
         </article>
         <article class="mode">
           <span class="pill warn">Bypass</span>
@@ -144,7 +144,8 @@
         <ul class="rules">
           <li><b>Pages can’t give orders.</b> Text on websites, emails and screenshots is treated as information, never as instructions. If a page tries to steer Lumio, it tells you.</li>
           <li><b>No passwords, cards or IDs.</b> Lumio refuses to type into password, payment and ID fields, even when a click lands focus there by surprise.</li>
-          <li><b>You always see it, and can stop it.</b> Whatever Lumio is working on glows blue, whether it’s the page or your whole screen, with a Stop button right there.</li>
+          <li><b>It stays in the browser.</b> Lumio works only in its own tabs. It can’t open the apps on your computer, run commands or change system settings.</li>
+          <li><b>You always see it, and can stop it.</b> The page Lumio is working on glows blue, with a Stop button right there.</li>
           <li><b>It stops before anything big.</b> Buying, sending, posting or deleting always needs your OK in the chat.</li>
           <li><b>Your passwords stay yours.</b> The password manager encrypts every entry with your system keychain. The AI can’t read them, and websites only get one after you pick it.</li>
         </ul>
@@ -252,7 +253,6 @@
           <ol>
             <li>Open the <b>.dmg</b> and drag <b>Lumio Browser</b> into <b>Applications</b>.</li>
             <li>Open it from Applications. macOS checks it (Lumio Browser is signed and notarized by Apple) and asks once to confirm you want to open an app from the internet. Click <b>Open</b>.</li>
-            <li>Optional: to let Lumio use your whole Mac, turn on Lumio Browser under <b>System Settings → Privacy &amp; Security → Accessibility</b> and <b>Screen Recording</b>.</li>
           </ol>
         </details>
       </div>
@@ -268,11 +268,11 @@
         <details><summary>Is Lumio Browser free?</summary><p>Yes. The browser is free to download. Lumio AI runs on your Lumio account: the Free plan includes some use each week, and Go ($10), Plus ($20), Pro ($100) and Max ($200) a month include much more.</p></details>
         <details><summary>Is it based on Chrome?</summary><p>It’s built on Chromium, the engine inside Chrome, through Electron. Websites work like they do in Chrome, and most Chrome extensions install from the Chrome Web Store.</p></details>
         <details><summary>What can the AI see?</summary><p>Only what you share: the page you include in a message, or pages and screenshots it opens while doing a task you asked for. Chats are saved on your computer (never in incognito). Saved passwords are never available to it.</p></details>
-        <details><summary>Can it control my whole computer?</summary><p>If you let it. On a Mac, turn on Accessibility and Screen Recording for Lumio Browser. In the default Ask mode, it asks before every action on your computer.</p></details>
-        <details><summary>Can I use Lumio on my phone?</summary><p>Yes. Turn on <b>Settings › Sync</b> in Lumio Browser, then open <b>lumio-co.online/companion</b> on your phone and sign in. You’ll see what Lumio is doing on your computer, approve its steps, run your workflows and read your chats. Your synced data is encrypted on your devices.</p></details>
+        <details><summary>Can it use Excel, Word or my other apps?</summary><p>Their web versions, yes. Lumio works only inside its browser tabs, so for Excel, Word, PowerPoint or Outlook it opens Microsoft 365 on the web (office.com), and Google Docs, Sheets and Gmail work the same way. Apps and settings on your computer are out of its reach; when a task needs them, it tells you what you can do instead.</p></details>
+        <details><summary>Can I use Lumio on my phone?</summary><p>Yes. Open <b>lumio-co.online/companion</b> on your phone and sign in to the same Lumio account as Lumio Browser. You’ll see what Lumio is doing on your computer, approve its steps, run your workflows and read your chats. Your synced data is encrypted.</p></details>
         <details><summary>What’s Lumio Chat?</summary><p>Lumio’s AI in your web browser, at <a href="/chat">lumio-co.online/chat</a>. Sign in with Google or your email and ask anything; your chats are saved to your account. Pick the model: fast ones on every plan, and bigger ones from Claude, GPT, Gemini and Grok on Plus and up. It shares your plan with Lumio Browser.</p></details>
         <details><summary>How do updates work?</summary><p>Lumio Browser checks for new versions on its own. When one is out, a blue <b>Update</b> button appears next to your profile picture. Click it, and Lumio downloads the update, checks it, installs it and restarts with your tabs.</p></details>
-        <details><summary>Does it sync between devices?</summary><p>Not yet. Bookmarks, history and passwords stay on your computer. Your Lumio account and plan work everywhere you sign in.</p></details>
+        <details><summary>Does it sync between devices?</summary><p>Yes. Sign in to your Lumio account and Lumio Sync keeps your bookmarks, history, chats, open tabs and settings the same everywhere you sign in, and your passwords between your computers. Want only your devices to hold the key? Turn on <b>Settings › Sync › Advanced › Encrypt with my own passphrase</b>.</p></details>
       </div>
     </section>
   </main>

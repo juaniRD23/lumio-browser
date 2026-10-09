@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
+const electronPath = require.resolve('electron');
+require.cache[electronPath] ??= { id: electronPath, filename: electronPath, loaded: true, exports: {} };
 const { runAgent, prepareMessages, repairHistory, MAX_STEPS, UNATTENDED_STEPS } = require('../main/ai/agent.js');
 const { needsApproval } = require('../main/ai/policy.js');
 
@@ -30,7 +32,7 @@ function setup({ turns, mode = 'ask', decide = () => 'once', tools }) {
   const t = tools || [
     tool('read_page', 'read', () => { ran.push('read_page'); return 'page text'; }),
     tool('click', 'browser', () => { ran.push('click'); return 'clicked'; }),
-    tool('run_shell', 'shell', () => { ran.push('run_shell'); return 'ok'; }),
+    tool('navigate', 'browser', () => { ran.push('navigate'); return 'opened'; }),
   ];
   const messages = [{ role: 'user', content: 'go' }];
   const chat = fakeChat(turns);
@@ -45,9 +47,18 @@ test('policy', () => {
   assert.equal(needsApproval('read', 'ask'), false);
   assert.equal(needsApproval('browser', 'ask'), true);
   assert.equal(needsApproval('browser', 'auto'), false);
-  assert.equal(needsApproval('mac', 'auto'), true);
-  assert.equal(needsApproval('shell', 'auto'), true);
-  assert.equal(needsApproval('shell', 'bypass'), false);
+  assert.equal(needsApproval('browser', 'bypass'), false);
+  assert.equal(needsApproval('read', 'bypass'), false);
+  assert.equal(needsApproval('browser', 'unknown'), true, 'an unknown mode asks');
+});
+
+test('Lumio AI works only in the browser: no tools for the computer itself', () => {
+  const COMPUTER = /^computer_|^(open_app|list_apps|run_shell|run_applescript)$/;
+  const tools = ['browser', 'web', 'plan', 'make', 'schedule', 'helpers', 'workflow', 'tips'].flatMap((f) => require(`../main/ai/tools/${f}.js`).tools);
+  assert.ok(tools.length > 20);
+  assert.deepEqual(tools.filter((t) => COMPUTER.test(t.name)).map((t) => t.name), []);
+  assert.deepEqual([...new Set(tools.map((t) => (typeof t.risk === 'function' ? 'browser' : t.risk)))].sort(), ['browser', 'read'], 'only looking and acting in tabs');
+  assert.throws(() => require('../main/ai/tools/mac.js'), /Cannot find module/);
 });
 
 test('runs tools, asks for approval, and finishes with text', async () => {
@@ -68,7 +79,7 @@ test('runs tools, asks for approval, and finishes with text', async () => {
 
 test('deny is reported to the model and the tool does not run', async () => {
   const { opts, ran, messages } = setup({
-    turns: [{ calls: [{ id: 'x', name: 'run_shell', arguments: '{}' }] }, { text: 'OK, I will not.' }],
+    turns: [{ calls: [{ id: 'x', name: 'navigate', arguments: '{}' }] }, { text: 'OK, I will not.' }],
     decide: () => 'deny',
   });
   await runAgent(opts);

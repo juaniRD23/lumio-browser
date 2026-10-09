@@ -61,7 +61,7 @@ class PopupWin {
   // app: services from main.js. profile: the opener's ({ session, downloads,
   // permissions }). opener: the window it came from (a browser window, or
   // another pop-up). webContents: the page Chromium made for window.open().
-  constructor(app, profile, { incognito = false, opener = null, webContents = null, url, features = '' }) {
+  constructor(app, profile, { incognito = false, opener = null, webContents = null, url, features = '', aiOpener = null }) {
     this.app = app;
     this.profile = profile;
     this.incognito = incognito;
@@ -126,6 +126,7 @@ class PopupWin {
         openInNewWindow: (u, inc) => app.createWindow({ profile: profile.base, incognito: inc, urls: [u] }),
         openPopup: (tab, opts) => app.openPopup(this, tab, opts),
         openExternal: (tab, req) => app.openExternal(this, tab, req),
+        aiAtWork: (tab) => app.aiAtWork?.(this, tab),
         dialogInProcess: (wc) => app.dialogInProcess(wc),
         popupsAllowed: (pageUrl) => profile.permissions.allowsPopups(pageUrl),
         saveAs: (wc, u) => profile.downloads.saveAs(wc, u),
@@ -139,6 +140,7 @@ class PopupWin {
     this.tabs.setSlot({ x: 0, y: BAR, width: w, height: h - BAR }); // until the bar measures itself
     const tab = this.tabs.create(url, { webContents });
     tab.navigatingTo = url; // its first page may ask to sign in (main/page-dialogs.js)
+    if (aiOpener) tab.aiOpener = aiOpener; // Lumio AI's click opened it: it stays in the browser too
 
     this.win.on('resize', () => this.tabs.layout());
     this.win.on('close', (e) => {

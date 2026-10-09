@@ -273,23 +273,23 @@ test('deny stops that action; Auto mode skips browser approvals', async () => {
   assert.equal(await L.shell(`document.querySelectorAll('.approval').length`), 0);
   assert.match(await L.page(`document.getElementById('result').textContent`), /Order placed/);
   await L.main(() => global.lumio.ai.setMode('ask'));
-  await ask('run a shell test');
+  await ask('press end on the page');
   const card = await until(() => L.shell(`!!document.querySelector('.approval [data-d="deny"]')`));
   assert.ok(card);
-  assert.match(await L.shell(`document.querySelector('.approval pre').textContent`), /echo lumio/);
+  assert.match(await L.shell(`document.querySelector('.approval .a-detail').textContent`), /^Browser action · Press End on /);
   await L.shell(`document.querySelector('.approval [data-d="deny"]').click(); true`);
   await idle();
   // (Its status class only: 'changed' just plays the spinner-to-result animation, batch 3.)
   assert.equal(await L.shell(`[...[...document.querySelectorAll('.step')].at(-1).classList].filter((c) => c !== 'changed').join(' ')`), 'step denied');
 });
 
-test('shell commands run after approval', async () => {
-  await ask('run a shell test');
+test('browser actions run after approval', async () => {
+  await ask('press end on the page');
   // The deny test's card fades out with disabled buttons; only click a live one.
   await until(() => L.shell(`!!document.querySelector('.approval [data-d="once"]:not(:disabled)')`));
   await L.shell(`document.querySelector('.approval [data-d="once"]:not(:disabled)').click(); true`);
   await idle();
-  assert.match(await lastReply(), /lumio-42/);
+  assert.match(await lastReply(), /Done: Pressed End\./);
 });
 
 test('screenshots of a tab reach the model as images', async () => {
@@ -386,7 +386,7 @@ test('on High effort, Lumio sends helper AIs to work in background tabs, each wi
     const main = reqs.filter((r) => !/You are Helper/.test(textOf(r.messages[0])));
     const helpers = reqs.filter((r) => /You are Helper/.test(textOf(r.messages[0])));
     assert.ok(main[0].tools.includes('send_helpers') && main[0].reasoning === 'high');
-    assert.ok(helpers.length >= 6 && helpers.every((r) => !r.tools.includes('send_helpers') && !r.tools.includes('run_shell')));
+    assert.ok(helpers.length >= 6 && helpers.every((r) => !r.tools.includes('send_helpers') && !r.tools.some((t) => /^computer_|^(open_app|list_apps|run_shell|run_applescript)$/.test(t))));
     // Each helper plans at Medium, then its routine turns are quick (Low).
     const firstTurns = helpers.filter((r) => !r.messages.some((m) => m.role === 'assistant'));
     assert.ok(firstTurns.length === 2 && firstTurns.every((r) => r.reasoning === 'medium'), 'helpers plan at Medium');
@@ -473,23 +473,16 @@ test('while Lumio works on a page it glows, and the Stop bar stops it', async ()
   assert.equal(await L.main(() => { const w = global.lumio.current; return w.win.contentView.children.includes(w.indicator.bar); }), false, 'bar removed');
 });
 
-test('while Lumio controls the computer the screen glows, and the Stop pill stops it', async () => {
+test('Lumio AI stays in the browser: no computer tools, and no links that open another app', async () => {
   await L.main(() => global.lumio.ai.setMode('bypass'));
-  await ask('please use my computer');
-  const auras = () => L.main(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter((w) => w.webContents.getURL().startsWith('lumio://aura/')).map((w) => ({ url: w.webContents.getURL(), focusable: w.isFocusable(), top: w.isAlwaysOnTop(), visible: w.isVisible(), protected: w.isContentProtected?.() ?? null })));
-  assert.ok(await until(async () => (await auras()).filter((a) => a.visible).length >= 2), 'glow and pill shown');
-  const list = await auras();
-  // Only the screen the tool used glows (main/ai/screen-aura.js), not every screen.
-  assert.equal(list.filter((a) => a.url.includes('mode=glow')).length, 1, 'one glow, on the screen it used');
-  assert.equal(list.filter((a) => a.url.includes('mode=pill')).length, 1);
-  assert.ok(list.every((a) => a.focusable === false && a.top), 'never takes focus, always on top');
-  assert.ok(list.every((a) => a.protected !== false), 'left out of screen captures');
-  assert.ok((await L.main(() => global.lumio.screenAura.windowIds())).length >= 2, 'ids passed to the helper');
-  await L.main(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().includes('mode=pill')).webContents.executeJavaScript(`document.getElementById('stop').click(); true`));
+  const before = lumio.state.agentRequests.length;
+  await ask('email the team about lunch');
   await idle();
-  assert.match(await L.shell(`[...document.querySelectorAll('.notice')].at(-1).textContent`), /Stopped/);
-  assert.ok(await until(async () => (await auras()).length === 0, 3000), 'glow windows closed');
-  assert.equal(await L.main(() => global.lumio.screenAura.active()), false);
+  assert.match(await lastReply(), /can’t open other apps/);
+  const reqs = lumio.state.agentRequests.slice(before);
+  assert.ok(reqs.length >= 2);
+  assert.ok(reqs.every((r) => r.context.computer === false && !r.tools.some((t) => /^computer_|^(open_app|list_apps|run_shell|run_applescript)$/.test(t))));
+  assert.equal(await L.main(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter((w) => w.webContents.getURL().startsWith('lumio://aura/')).length), 0, 'no screen glow windows');
   await L.main(() => global.lumio.ai.setMode('ask'));
 });
 

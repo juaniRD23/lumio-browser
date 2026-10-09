@@ -10,20 +10,17 @@ import { initExtras, filesEl, madeEl } from './panel-extras.js';
 
 const LEVEL = { low: 1, medium: 2, high: 3 }; // reasoning level -> bars
 
-// What to call this computer in what Lumio says.
-const PC = /Mac/.test(navigator.platform) ? 'Mac' : 'PC';
-
 const SUGGESTIONS = [
   { title: 'Summarize this page', text: 'Summarize this page in a few bullet points.', page: true },
   { title: 'Find something for me', text: 'Search the web for the best-reviewed noise-cancelling headphones under $200 and compare the top 3.' },
   { title: 'Do it for me', text: 'Open Google Maps and find coffee shops open now near me.' },
-  { title: `Help on my ${PC}`, text: `What apps are running on my ${PC} right now?` },
+  { title: 'Make a spreadsheet', text: 'Open Excel on the web and start a simple monthly budget for me.' },
 ];
 
 // Approval modes, for the button under the chat box.
 const MODES = { ask: { name: 'Ask', icon: icons.shield }, auto: { name: 'Auto', icon: icons.bolt }, bypass: { name: 'Bypass', icon: icons.warn } };
 
-const RISK_LABEL = { browser: 'Browser action', mac: `Controls your ${PC}`, shell: `Runs on your ${PC}` };
+const RISK_LABEL = { browser: 'Browser action' };
 
 const $ = (s) => document.querySelector(s);
 // Prompts Lumio writes for you, in Lumio's language (renderer/assets/i18n).
@@ -555,7 +552,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     el.innerHTML = `
       <div class="hero-mark">${markSvg(34, true)}</div>
       <h2>What can I help with?</h2>
-      <p>Ask anything, or tell me what to do. I can read and use web pages${ai.macAvailable ? ` and control your ${PC}` : ''}, and I'll ask before I act.</p>
+      <p>Ask anything, or tell me what to do. I can read and use web pages, and I'll ask before I act.</p>
       ${ai.ephemeral ? '<p class="incog-note">You’re incognito: chats here aren’t saved.</p>' : ''}
       <div class="suggestions">${SUGGESTIONS.map((s, i) => `<button class="suggestion" data-i="${i}"><b>${esc(s.title)}</b>${esc(s.text)}</button>`).join('')}</div>`;
     messages.append(el);
@@ -671,7 +668,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     el.className = 'approval';
     el.dataset.id = a.id;
     const detail = a.detail && a.detail !== a.label ? a.detail : '';
-    const code = a.risk === 'shell' || /\n/.test(detail);
+    const code = /\n/.test(detail);
     el.innerHTML = `
       <div class="a-title"><span></span></div>
       <div class="a-detail"></div>
@@ -703,19 +700,6 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     b.addEventListener('click', () => api.send('account:open', 'upgrade'));
     el.append(b);
     return el;
-  }
-
-  function permissionHint(summary) {
-    if (!summary) return;
-    const which = /screen recording/i.test(summary) ? 'screen' : /accessibility/i.test(summary) ? 'accessibility' : null;
-    if (!which) return;
-    const el = notice(`Lumio needs the ${which === 'screen' ? 'Screen Recording' : 'Accessibility'} permission to do this.`, 'info');
-    const b = document.createElement('button');
-    b.className = 'btn';
-    b.style.marginLeft = '8px';
-    b.textContent = 'Open System Settings';
-    b.addEventListener('click', () => api.send('ai:mac-permissions-open', which));
-    el.append(b);
   }
 
   function renderChat(display) {
@@ -895,7 +879,6 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
             img.alt = 'Screenshot';
             el.after(img);
           }
-          if (ev.status === 'error') permissionHint(ev.summary);
         }
         scrollDown();
         break;

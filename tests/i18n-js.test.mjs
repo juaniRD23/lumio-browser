@@ -45,6 +45,7 @@ const EXPECTED = {
   'Lists updated 5 min ago · 1,200 sites': 'Listas actualizadas hace 5 min · 1,200 sitios',
   'But you have 2 reused passwords and 1 weak password.': 'Pero tienes 2 contraseñas reutilizadas y 1 contraseña débil.',
   'On · encrypted on your devices · synced 5 min ago': 'Activada · cifrada en tus dispositivos · sincronizada hace 5 min',
+  'Sync is on · synced 5 min ago': 'La sincronización está activada · sincronizada hace 5 min',
   'New tab is back to Lumio’s shortcut.': 'Nueva pestaña volvió a la combinación de teclas de Lumio.',
   'Open all in Incognito window': 'Abrir todos en una ventana de incógnito',
 };

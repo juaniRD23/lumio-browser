@@ -3,6 +3,7 @@
 const scripts = require('./page-scripts');
 const { parseInput, displayUrl } = require('../../omnibox');
 const { markSynthetic } = require('../../synthetic-input');
+const { classify } = require('../../external-protocols');
 
 const WORLD = 1001;
 const TAB_ID = { type: 'integer', description: 'Tab id (defaults to the active tab)' };
@@ -95,8 +96,20 @@ function tabFor(ctx, id, { activate = false, leaving = false } = {}) {
   return { tab, wc, url };
 }
 
+// A link the page tried to open in another app while Lumio worked on it
+// (main.js openExternalLink stopped it): said once, the next time Lumio looks
+// at the tab, so it doesn't think the app opened.
+function blockedNote(tab) {
+  const scheme = tab?.blockedApp;
+  if (!scheme) return '';
+  tab.blockedApp = null;
+  const web = scheme === 'mailto' ? 'for email, the user’s webmail, like Gmail or Outlook on the web' : 'like the page’s "Open in browser" or "Join from your browser" option';
+  return `Tab ${tab.id} tried to open a ${scheme}: link in another app. Lumio stays in the browser, so nothing opened: use the web version in a tab instead (${web}).`;
+}
+
 function pageLine(wc) {
-  const note = dialogNote(pageTabs.get(wc));
+  const tab = pageTabs.get(wc);
+  const note = [dialogNote(tab), blockedNote(tab)].filter(Boolean).join('\n');
   return `Page is now: "${wc.getTitle()}" — ${wc.getURL()}${note ? `\n${note}` : ''}`;
 }
 
@@ -118,6 +131,8 @@ function safeUrl(ctx, input) {
   if (/^(file|view-source|data|javascript):/i.test(parsed.url)) throw new Error('Lumio can only open web pages (http/https).');
   if (PRIVATE_PAGE.test(parsed.url)) throw new Error("Lumio can't open its own Settings, Extensions, Passwords, Version, Experiments, welcome, Downloads, History or Bookmarks pages.");
   if (/^lumio:\/\/(interstitial|error)/i.test(parsed.url)) throw new Error('Lumio can only open web pages (http/https).');
+  // Lumio AI stays in the browser: no links that open another app (mailto:…).
+  if (classify(parsed.url) !== 'web') throw new Error('Lumio works only in web pages and can’t open other apps. Use the web version in a tab instead (for email, the user’s webmail, like Gmail or Outlook on the web).');
   return parsed.url;
 }
 
@@ -211,6 +226,8 @@ const tools = [
         if (v?.transcript) parts.push('', 'Video transcript (from YouTube):', v.transcript);
       }
       if (snap.frames) parts.push('', `(${snap.frames} embedded frame(s) not included; use screenshot_tab to see them.)`);
+      const blocked = blockedNote(tab);
+      if (blocked) parts.push('', blocked);
       return { text: parts.join('\n'), summary: `${snap.lines.length} elements` };
     },
   },

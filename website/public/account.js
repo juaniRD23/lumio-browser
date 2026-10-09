@@ -175,7 +175,57 @@ $('#code-form').addEventListener('submit', async (e) => {
     $('#code-go').disabled = false;
   }
 });
+
+// Signing out also removes Lumio Sync's key from this browser (the phone
+// companion keeps it in IndexedDB) when Lumio keeps a copy of it (managed).
+// With the account's own passphrase, or a server that doesn't keep keys, it
+// stays, as in Lumio Browser: no other copy may exist (docs/sync-managed.md).
+function companionDB() {
+  return new Promise((resolve, reject) => {
+    const r = indexedDB.open('lumio-companion');
+    r.onupgradeneeded = () => r.transaction.abort(); // no companion here: nothing to read or remove (and nothing made)
+    r.onerror = () => reject(r.error);
+    r.onsuccess = () => resolve(r.result);
+  });
+}
+// A value the companion keeps (what Lumio last said about the account's mode).
+async function companionValue(key) {
+  const db = await companionDB();
+  try {
+    return await new Promise((resolve, reject) => {
+      const req = db.transaction('kv', 'readonly').objectStore('kv').get(key);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  } finally { db.close(); }
+}
+function forgetSyncKeys() {
+  return new Promise((resolve, reject) => {
+    const r = indexedDB.open('lumio-companion');
+    r.onupgradeneeded = () => r.transaction.abort(); // no companion here: nothing to remove (and nothing made)
+    r.onerror = () => reject(r.error);
+    r.onsuccess = () => {
+      const db = r.result;
+      try {
+        const t = db.transaction('kv', 'readwrite');
+        const store = t.objectStore('kv');
+        const keys = store.getAllKeys();
+        keys.onsuccess = () => keys.result.forEach((k) => { if (typeof k === 'string' && (k.startsWith('syncKey:') || k === 'syncKeyOwner')) store.delete(k); });
+        t.oncomplete = () => { db.close(); resolve(); };
+        t.onerror = () => { db.close(); reject(t.error); };
+      } catch (err) { db.close(); reject(err); }
+    };
+  });
+}
+
 $('#sign-out').addEventListener('click', async () => {
+  const s = await fetch('/api/sync', { credentials: 'include' }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  // Managed per Lumio, unless the companion here keeps its own passphrase
+  // key; when the status can't be read, what the companion last heard.
+  const managed = s
+    ? s.managedAvailable === true && s.mode !== 'passphrase' && (await companionValue('syncMode').catch(() => null)) !== 'passphrase'
+    : (await companionValue('syncManaged').catch(() => null)) === true;
+  if (managed) await forgetSyncKeys().catch(() => {});
   await post('/api/auth', { action: 'logout' }).catch(() => {});
   location.href = '/';
 });

@@ -141,9 +141,10 @@ CREATE TABLE IF NOT EXISTS cancellations (
 );
 CREATE INDEX IF NOT EXISTS cancellations_time ON cancellations (created_at);
 
--- Lumio Sync: end-to-end encrypted records (the server sees ciphertext, opaque
--- ids and collection names only). Replacing a row gives it a new seq, which
--- is how devices find what changed.
+-- Lumio Sync: records encrypted on the devices with the account's sync key
+-- (the server stores ciphertext, opaque ids and collection names). In managed
+-- mode, sync_keys also holds that key, wrapped. Replacing a row gives it a new
+-- seq, which is how devices find what changed.
 CREATE TABLE IF NOT EXISTS sync_meta (
   owner TEXT PRIMARY KEY,
   key_check TEXT NOT NULL,               -- lets a device tell whether its key is the account's
@@ -187,6 +188,25 @@ CREATE TABLE IF NOT EXISTS sync_pairings (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS sync_pairings_owner ON sync_pairings (owner, created_at);
+-- Each account's sync mode and, in managed mode, its sync key wrapped with
+-- SYNC_MASTER_KEY (src/sync-keys.ts, docs/sync-managed.md). No row: managed.
+CREATE TABLE IF NOT EXISTS sync_keys (
+  owner TEXT PRIMARY KEY,
+  mode TEXT NOT NULL DEFAULT 'managed',  -- managed | passphrase (kept by DELETE /api/sync and reset)
+  wrapped TEXT,                          -- 'v1.<b64 iv>.<b64 ct>', AES-256-GCM, AAD 'lumio-sync-key|v1|<owner>'; NULL in passphrase mode, after a reset or delete, or while waiting for migration
+  key_check TEXT,                        -- the wrapped key's check (equals sync_meta.key_check when usable)
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+-- Key reads and changes, for their rate limits (kept an hour).
+CREATE TABLE IF NOT EXISTS sync_key_events (
+  owner TEXT NOT NULL,
+  kind TEXT NOT NULL,                    -- 'read' (key handed out, including auto-approved pairings) | 'write' (upload, mode change, reset)
+  ip_hash TEXT NOT NULL,                 -- first 32 hex of SHA-256 of 'lumio-sync|' + ipKey(cf-connecting-ip)
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS sync_key_events_owner ON sync_key_events (owner, kind, created_at);
+CREATE INDEX IF NOT EXISTS sync_key_events_ip ON sync_key_events (ip_hash, kind, created_at);
 -- The phone companion's relay: commands to a computer, notices to phones (encrypted).
 CREATE TABLE IF NOT EXISTS companion_messages (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,

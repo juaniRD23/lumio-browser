@@ -1,8 +1,11 @@
-// Client for the computer-control helper. On macOS it's the native Swift
-// helper (native/LumioHelper); on Windows, a PowerShell script with the same
-// protocol (native/windows/lumio-helper.ps1). Both run as a child process and
-// speak JSON lines: {id, cmd, ...args} -> {id, ok, ...result}.
-// Running inside the app bundle, macOS credits its permissions to Lumio Browser.
+// Client for Lumio's native helper. On macOS it's the native Swift helper
+// (native/LumioHelper), which asks for Touch ID or the Mac password before
+// passwords and cards are shown or filled; on Windows, a PowerShell script with
+// the same protocol (native/windows/lumio-helper.ps1). Both run as a child
+// process and speak JSON lines: {id, cmd, ...args} -> {id, ok, ...result}.
+// Their screen, mouse and keyboard commands go unused: Lumio AI works only in
+// the browser's tabs. Running inside the app bundle, macOS credits its
+// permissions to Lumio Browser.
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -40,7 +43,7 @@ class MacHelper {
 
   start() {
     if (this.proc) return;
-    if (!this.available()) throw new Error(WIN ? 'The computer-control helper is missing.' : 'The Mac helper is not built yet. Run `npm run native` in the lumio-browser folder.');
+    if (!this.available()) throw new Error(WIN ? 'The Lumio helper is missing.' : 'The Mac helper is not built yet. Run `npm run native` in the lumio-browser folder.');
     const [cmd, args] = helperCommand();
     const proc = spawn(cmd, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     this.proc = proc;

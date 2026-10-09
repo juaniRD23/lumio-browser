@@ -140,6 +140,7 @@ class BrowserWin {
         openInNewWindow: (url, inc) => app.createWindow({ profile: profile.base, incognito: inc, urls: [url] }),
         openPopup: (tab, opts) => app.openPopup(this, tab, opts),
         openExternal: (tab, req) => app.openExternal(this, tab, req),
+        aiAtWork: (tab) => app.aiAtWork?.(this, tab),
         dialogInProcess: (wc) => app.dialogInProcess(wc),
         popupsAllowed: (pageUrl) => profile.permissions.allowsPopups(pageUrl),
         saveAs: (wc, url) => profile.downloads.saveAs(wc, url),
@@ -161,7 +162,6 @@ class BrowserWin {
       chats: profile.chats,
       tabs: this.tabs,
       emit,
-      helper: app.helper,
       account: profile.account,
       indicator: this.indicator,
       // Guest keeps nothing, so Lumio doesn't schedule or learn there.

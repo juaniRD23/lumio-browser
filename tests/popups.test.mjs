@@ -341,3 +341,34 @@ test('a pop-up window: the size the page asked for, plus the bar, on the browser
   // No size: Lumio's default, centered.
   assert.deepEqual(popupBounds('noopener', null, area), { x: 460, y: 77, width: 520, height: 680 + BAR });
 });
+
+test('while Lumio AI is at work on a page, the tabs, pop-ups and windows it opens carry that (they can’t open other apps either)', () => {
+  const atWork = () => true; // main/ai/indicators.js aiAtWork: the window's AI is still on it
+  const windows = [];
+  const { m, wc, tab, calls, open } = setup('https://calendar.example/', {
+    aiAtWork: () => atWork,
+    openInNewWindow: (u) => { const t = { url: u }; windows.push(t); return { tabs: { active: t } }; },
+  });
+  const made = [];
+  m.create = (u) => { const t = { url: u }; made.push(t); return t; };
+  wc.click(); // Lumio clicks "Join Zoom Meeting" (target=_blank)
+  open('https://zoom.example/j/1');
+  assert.equal(made[0].aiOpener, atWork, 'the new tab');
+  wc.click();
+  const r = open('https://accounts.example/oauth', { disposition: 'new-window', features: 'width=500,height=600' });
+  r.createWindow({ webContents: { id: 9 } });
+  assert.equal(calls.popups[0].aiOpener, atWork, 'the pop-up window');
+  wc.click();
+  open('https://news.example/a', { disposition: 'new-window' });
+  assert.equal(windows[0].aiOpener, atWork, 'a new window’s tab');
+  tab.agent = { name: 'Helper 1' };
+  open('https://docs.example/');
+  assert.equal(made[1].aiOpener, atWork, 'a helper’s background tab');
+  // The person's own tab (Lumio isn't on it): nothing carried.
+  const own = setup('https://calendar.example/', { aiAtWork: () => null });
+  const mine = [];
+  own.m.create = (u) => { const t = { url: u }; mine.push(t); return t; };
+  own.wc.click();
+  own.open('https://zoom.example/j/2');
+  assert.equal(mine[0].aiOpener, undefined);
+});

@@ -1,6 +1,6 @@
 // The computer's side of the phone companion (lumio…/companion and Lumio for
-// iPhone and iPad). Through the Lumio server's relay, end-to-end encrypted
-// with the sync key:
+// iPhone and iPad). Through the Lumio server's relay, encrypted with the
+// account's sync key (docs/sync-managed.md):
 // - commands from the phone: ask Lumio something here, run a workflow,
 //   approve or deny a step, stop, open a tab ("Tab from iPhone");
 // - this computer's live status for the phone: what Lumio is doing, the
@@ -155,7 +155,9 @@ class CompanionBridge {
     this.lastStatus = Date.now();
     const l = this.live;
     const status = { at: Date.now(), running: l.running, chatId: l.chatId, title: l.title, label: l.label, reply: l.reply.slice(-1500), approvals: l.approvals };
-    await this.sync.api('/api/companion/status', { method: 'PUT', body: { device: this.sync.deviceId, data: await this.seal(status, 'status') } });
+    // keyCheck: the server refuses status sealed with a key the account no
+    // longer has (reset, or its own passphrase), so none is left behind.
+    await this.sync.api('/api/companion/status', { method: 'PUT', body: { device: this.sync.deviceId, keyCheck: this.sync.keys.check, data: await this.seal(status, 'status') } });
   }
 
   // Sends a tab to another of the person's devices:

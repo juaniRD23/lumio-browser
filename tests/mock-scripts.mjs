@@ -58,25 +58,19 @@ export function scriptedTurn(msgs) {
     if (step === 0) return { calls: [{ name: 'read_page' }] };
     return { calls: [{ name: 'wait', args: { seconds: 20 } }] };
   }
-  if (ask.includes('use my computer')) {
-    if (step === 0) return { calls: [{ name: 'computer_screenshot' }] };
-    return { calls: [{ name: 'wait', args: { seconds: 20 } }] };
-  }
   if (ask.includes('screenshot')) {
     if (step === 0) return { calls: [{ name: 'screenshot_tab' }] };
     return { text: `I can see the page. Images received: ${msgs.flatMap((m) => (Array.isArray(m.content) ? m.content : [])).filter((p) => p.type === 'image_url').length}.` };
   }
-  if (ask.includes('apps')) {
-    if (step === 0) return { calls: [{ name: 'list_apps' }] };
-    return { text: `Running apps:\n${(lastTool?.content || '').split('\n').slice(0, 3).join('\n')}` };
+  // A browser action that leaves the page as it is: Ask mode asks first.
+  if (ask.includes('press end')) {
+    if (step === 0) return { calls: [{ name: 'press_key', args: { keys: 'End' } }] };
+    return { text: `Done: ${(lastTool?.content || '').split('.')[0]}.` };
   }
-  if (ask.includes('my screen')) {
-    if (step === 0) return { calls: [{ name: 'computer_screenshot' }] };
-    return { text: lastTool?.content.startsWith('Error') ? 'I need Screen Recording permission first.' : 'I can see your screen.' };
-  }
-  if (ask.includes('shell')) {
-    if (step === 0) return { calls: [{ name: 'run_shell', args: { command: 'echo lumio-$((6*7))', explanation: 'Print a test value' } }] };
-    return { text: `Shell said: ${(lastTool?.content || '').split('\n')[1]}` };
+  // A link to the mail app: refused, Lumio stays in the browser.
+  if (ask.includes('email the team')) {
+    if (step === 0) return { calls: [{ name: 'navigate', args: { url: 'mailto:team@example.com' } }] };
+    return { text: `Couldn't: ${lastTool?.content || ''}` };
   }
   if (ask.includes('summarize')) {
     const hasPage = msgs.some((m) => /<current_page/.test(textOf(m)));

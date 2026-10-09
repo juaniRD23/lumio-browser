@@ -62,3 +62,15 @@ test('what the AI compares its steps by: a field, a list scrolled inside the pag
   assert.notEqual(await state(), third, 'the text changed');
   await page.close();
 });
+
+test('read_page shows where a link that isn’t a web page goes (mailto:, Office’s desktop links), so the AI knows it would open another app', { skip }, async () => {
+  const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
+  await page.setContent(`<a href="mailto:team@example.com">Email us</a> <a href="ms-excel:ofe|u|https://contoso.example/Budget.xlsx">Open in Desktop App</a>
+    <a href="https://excel.cloud.microsoft/open?id=1">Open in Browser</a>`);
+  const snap = await page.evaluate(`(${scripts.snapshot.toString()})({})`);
+  const line = (name) => snap.lines.find((l) => l.includes(`"${name}"`));
+  assert.match(line('Email us'), /→ mailto:team@example\.com$/);
+  assert.match(line('Open in Desktop App'), /→ ms-excel:ofe\|u\|https:\/\/contoso/);
+  assert.match(line('Open in Browser'), /→ excel\.cloud\.microsoft\/open$/, 'web links as before');
+  await page.close();
+});

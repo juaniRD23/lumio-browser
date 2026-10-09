@@ -3,15 +3,18 @@
 // copy, loaded as a plain script: window.LumioSyncCrypto). Uses WebCrypto in
 // both places.
 //
-// Everything synced is encrypted on the device with a 32-byte sync key that
-// never reaches Lumio's server:
+// Everything synced is encrypted on the device with the account's 32-byte
+// sync key:
 // - each record: AES-256-GCM, with its collection and id bound in;
 // - each record's id: an HMAC of its collection and key (the server can't
 //   see which sites are bookmarked or saved);
 // - a check value lets a device tell whether its key matches the account's.
-// A new device gets the key from one that has it (ECDH P-256, after the person
-// approves and the 6-digit codes on both screens match), or from the
-// recovery key the person wrote down.
+// How a device gets the key (docs/sync-managed.md): by default Lumio's server
+// keeps a copy, wrapped with a key only the server has, and gives it to the
+// account's signed-in devices. With "Encrypt with my own passphrase" the key
+// never reaches the server: a new device gets it from one that has it (ECDH
+// P-256, after the person approves and the 6-digit codes on both screens
+// match), or from the recovery key the person wrote down.
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.LumioSyncCrypto = factory();

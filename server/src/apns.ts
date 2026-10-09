@@ -1,7 +1,7 @@
 // Notifications for Lumio for iPhone and iPad, through Apple's push service
 // (APNs). Like the companion's other pushes, they say only what kind of thing
-// happened ("Lumio needs your OK."): the details are end-to-end encrypted, and
-// the app fetches and opens them itself.
+// happened ("Lumio needs your OK."): the details are encrypted with the
+// account's sync key, and the app fetches and opens them itself.
 //
 // The app subscribes with POST /api/companion/push { device, endpoint:
 // "apns:<device token>" } ("apns-sandbox:<token>" for builds signed for

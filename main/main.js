@@ -32,6 +32,7 @@ const { NEWTAB } = require('./tabs');
 const { BrowserWin } = require('./window');
 const { PopupWin } = require('./popup-window');
 const external = require('./external-protocols');
+const { aiAtWork } = require('./ai/indicators');
 const { registerUiProtocol, registerPagesProtocol, setPageAttributes } = require('./protocol');
 const accessibility = require('./accessibility');
 const theme = require('./theme');
@@ -63,7 +64,6 @@ const { Handoff, contextMenuItems: macContextItems } = require('./mac-integratio
 const { LumioAccount } = require('./account');
 const { PasswordManager } = require('./password-manager');
 const { AutofillManager, attachAutofill } = require('./autofill');
-const screenAura = require('./ai/screen-aura');
 const { Updater, LATEST, BETAS, compareVersions } = require('./updater');
 const { generatePassword } = require('./passwords');
 const importer = require('./importer');
@@ -242,7 +242,6 @@ function siteControlsFor(profile) {
 }
 
 const services = {
-  get helper() { return helper; },
   notify: (w, title, body, chatId) => { notifyChat(w, title, body, chatId); w.profile.companion?.notice({ title, body, chatId, hint: /needs your OK/.test(title) ? 'approval' : 'scheduled' }); },
   onEmit: (w, channel, payload) => w.profile.companion?.onEmit(w, channel, payload),
   createWindow: (opts) => createWindow(opts),
@@ -334,6 +333,7 @@ const services = {
   isNewTabUrl: (url) => openProfiles().some((p) => p.extUi?.isNewTabUrl(url)),
   broadcastAIState: () => alive().forEach((w) => w.ai.emitState()),
   openExternal: (w, tab, req) => openExternalLink(w, tab, req),
+  aiAtWork: (w, tab) => aiAtWork(w, tab),
   // Is a page in this page's process waiting on its alert()/confirm()/prompt()?
   dialogInProcess: (wc) => {
     const pid = wc.getProcessId();
@@ -343,8 +343,8 @@ const services = {
     }));
   },
   // window.open() with a size: a pop-up window. Returns its page.
-  openPopup: (w, _tab, { webContents, url, features }) => {
-    const p = new PopupWin(services, w.profile, { incognito: w.incognito, opener: w, webContents, url, features });
+  openPopup: (w, _tab, { webContents, url, features, aiOpener = null }) => {
+    const p = new PopupWin(services, w.profile, { incognito: w.incognito, opener: w, webContents, url, features, aiOpener });
     popups.add(p);
     return webContents || p.tabs.wc();
   },
@@ -1318,8 +1318,6 @@ function registerIpc() {
   on('ai:show-file', (w, p) => { if (w.ai.ownsFile(p)) shell.showItemInFolder(p); });
   on('ai:stop', (w) => w.ai.stop());
   on('ai:approve', (w, { callId, decision }) => w.ai.approve(callId, decision));
-  on('ai:mac-permissions-open', (w, which) => w.ai.openMacPermissionSettings(which));
-  handle('ai:mac-permissions', (w) => w.ai.macPermissions());
   on('open-url', (w, url) => w.tabs.create(url));
 
   // ---- media controls, Share, screenshots and installed apps
@@ -1461,7 +1459,7 @@ function registerIpc() {
   });
   // Lumio Sync (Settings › Sync). Guest has none: it shows as off.
   const syncReply = async (fn) => { try { return { ok: true, ...(await fn()) }; } catch (err) { return { ok: false, error: err.message }; } };
-  const syncOf = (w) => w.profile.sync || { state: () => ({ on: false, status: 'off', types: {}, requests: [] }), setPrefs() {}, keys: null, tick: async () => {}, answer() { throw new Error('Sync isn’t available in Guest mode.'); }, recoveryKey: () => null, useRecoveryKey() { throw new Error('Sync isn’t available in Guest mode.'); }, api: async () => ({ devices: [] }), deleteEverything: async () => ({}) };
+  const syncOf = (w) => w.profile.sync || { state: () => ({ on: false, status: 'off', flow: 'e2ee', types: {}, requests: [] }), setPrefs() {}, keys: null, tick: async () => {}, answer() { throw new Error('Sync isn’t available in Guest mode.'); }, recoveryKey: () => null, useRecoveryKey() { throw new Error('Sync isn’t available in Guest mode.'); }, api: async () => ({ devices: [] }), deleteEverything: async () => ({}), resetSync() { throw new Error('Sync isn’t available in Guest mode.'); }, setMode() { throw new Error('Sync isn’t available in Guest mode.'); } };
   internalHandle('page:sync', ['settings'], ({ w }) => syncOf(w).state());
   internalHandle('page:sync-devices', ['settings'], ({ w }) => syncReply(async () => (syncOf(w).keys ? syncOf(w).api('/api/sync') : { devices: [] })));
   internalHandle('page:sync-set', ['settings'], ({ w }, prefs) => { syncOf(w).setPrefs(prefs || {}); return syncOf(w).state(); });
@@ -1471,6 +1469,8 @@ function registerIpc() {
   internalHandle('page:sync-use-recovery', ['settings'], ({ w }, text) => syncReply(() => syncOf(w).useRecoveryKey(String(text || ''))));
   internalHandle('page:sync-remove-device', ['settings'], ({ w }, id) => syncReply(() => syncOf(w).api(`/api/sync/devices/${encodeURIComponent(String(id))}`, { method: 'DELETE' })));
   internalHandle('page:sync-delete-all', ['settings'], ({ w }) => syncReply(() => syncOf(w).deleteEverything()));
+  internalHandle('page:sync-reset', ['settings'], ({ w }) => syncReply(() => syncOf(w).resetSync()));
+  internalHandle('page:sync-set-mode', ['settings'], ({ w }, mode) => syncReply(() => syncOf(w).setMode(mode === 'passphrase' ? 'passphrase' : 'managed')));
 
   // Saved workflows (Settings › Workflows, and the new tab page)
   internalHandle('page:workflows', ['settings', 'newtab'], ({ w }) => ({ workflows: w.profile.workflows.list() }));
@@ -1546,8 +1546,6 @@ function registerIpc() {
   // Crash reports are Lumio's own setting (the computer owner's: Guest can't change it).
   internalHandle('page:set-crash-reports', ['settings', 'welcome'], ({ w }, on) => (w.profile.guest ? crashReports.state() : crashReports.setEnabled(rootStore, on === true)));
   internalHandle('page:protected-content', ['settings'], () => drm.status());
-  internalHandle('page:mac-permissions', ['settings'], ({ w }) => w.ai.macPermissions());
-  internalHandle('page:mac-permissions-open', ['settings'], ({ w }, which) => w.ai.openMacPermissionSettings(which));
   internalHandle('page:passwords', ['passwords'], ({ w }) => w.profile.passwords.pageState());
   internalHandle('page:password-reveal', ['passwords'], ({ w }, id) => w.profile.passwords.reveal(w, String(id)));
   internalHandle('page:password-copy', ['passwords'], ({ w }, id) => w.profile.passwords.copy(w, String(id)));
@@ -1709,7 +1707,12 @@ app.on('open-file', (e, file) => {
 // asked, when a page did.
 async function openExternalLink(w, tab, { url, typed = false, requestingUrl = '', isMainFrame = true }) {
   const wc = tab.view?.webContents;
-  if (!url || !wc || wc.isDestroyed() || tab.agent) return; // a helper AI's tab has nobody to ask
+  if (!url || !wc || wc.isDestroyed()) return;
+  // Lumio AI stays in the browser: a page it's working on can't open another
+  // app ("Open in Desktop App", mailto:…), even after a click Lumio made. Its
+  // next look at the tab says so (main/ai/tools/browser.js).
+  if (aiAtWork(w, tab)) { tab.blockedApp = external.schemeOf(url); return; }
+  if (tab.agent) return; // a helper AI's tab has nobody to ask
   if (tab.dialogs?.some((d) => d.spec.kind === 'external')) return; // one prompt at a time
   const origin = typed ? null : external.originOf(requestingUrl || wc.getURL());
   const topOrigin = external.originOf(wc.getURL());
@@ -1915,6 +1918,7 @@ function openProfile(id) {
 
   const account = new LumioAccount({
     store,
+    onSignedOut: () => profile.sync?.signedOut(),
     onChange: (state) => {
       wins().forEach((w) => { w.emit('account', state); w.ai.refreshCapabilities(); });
       services.broadcastAIState();
@@ -1963,7 +1967,8 @@ function openProfile(id) {
   addProfileServices(profile);
 
   // Lumio Sync: bookmarks, passwords, history, chats, workflows, settings and
-  // open tabs on every device signed in to this Lumio account (encrypted here).
+  // open tabs on every device signed in to this Lumio account, encrypted with
+  // the account's sync key (docs/sync-managed.md).
   const sync = new SyncEngine({
     dir,
     store,
@@ -2376,7 +2381,6 @@ app.whenReady().then(async () => {
   PasswordManager.register((wc) => pageOfWc(wc)?.w.profile.passwords || null);
   // Addresses, cards and form entries go to the page's profile's autofill too (main/autofill.js).
   AutofillManager.registerPages((wc) => pageOfWc(wc)?.w.profile.autofill || null);
-  screenAura.register();
 
   // Updates from GitHub Releases (packaged builds; tests point it at a mock).
   const testUpdates = process.env.LUMIO_TEST && process.env.LUMIO_UPDATE_API;
@@ -2714,7 +2718,6 @@ global.lumio = {
   get browsingData() { return curProfile().browsingData; },
   get security() { return security; },
   get pageTools() { return { media, share: shareTools, screenshots, apps, pageMenu }; },
-  screenAura,
   set answerDownloads(fn) { answerDownloads = fn; },
   get updater() { return updater; },
   drmTimeline: () => drm.timeline(),

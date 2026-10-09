@@ -1,11 +1,12 @@
 // Lumio on your phone. Signed in to the same Lumio account as Lumio Browser,
-// and paired with a computer that syncs (the computer approves it, after you
-// check that the codes match), it shows:
+// it shows:
 // - Now: what Lumio is doing on your computer, steps waiting for your OK,
 //   and a box to ask Lumio something there;
 // - Chats, Workflows and Tabs synced from your computers.
-// Everything to and from the computer is end-to-end encrypted with the sync
-// key (sync-crypto.js); the server only relays ciphertext.
+// Everything to and from the computer is encrypted with the account's sync
+// key (sync-crypto.js); the server relays ciphertext. By default the phone
+// gets the key from Lumio when you sign in; if the account uses its own
+// passphrase, a computer approves the phone instead (docs/sync-managed.md).
 import { marked } from '/vendor/marked.js';
 import DOMPurify from '/vendor/purify.js';
 
@@ -44,10 +45,19 @@ const idb = (() => {
 })();
 
 // ---------------------------------------------------------------- server
+// X-Lumio-Sync: the sync key routes take cookie requests only with it (a
+// custom header no other site can send without asking first).
 async function api(path, { method = 'GET', body } = {}) {
-  const res = await fetch(path, { method, credentials: 'include', headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+  const res = await fetch(path, { method, credentials: 'include', headers: { 'X-Lumio-Sync': '1', ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401) { signIn(); throw new Error('Sign in again.'); }
+  if (res.status === 401) {
+    // Signed out (the session ended): a key Lumio keeps leaves this phone
+    // too. Otherwise (the account's own passphrase, or a server that doesn't
+    // keep keys) it stays, as before: no other copy may exist.
+    if (S.managed) await forgetKey().catch(() => {});
+    signIn();
+    throw Object.assign(new Error('Sign in again.'), { status: 401 });
+  }
   if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { status: res.status, code: data.code });
   return data;
 }
@@ -61,6 +71,12 @@ const S = {
   account: null,
   device: null,
   keys: null,
+  mode: 'managed', // the account's: 'managed' (Lumio keeps the key) or 'passphrase'
+  managed: false, // Lumio hands out the key (managed mode, and the server can)
+  modeChanged: false, // the server says managed, but this phone keeps its own passphrase key (syncStatus)
+  keyRetryAt: 0, // no key reads before this (Lumio said "too many requests")
+  lastUpload: 0,
+  started: false,
   view: 'now',
   chat: null, // the open chat's id
   computers: [], // { id, name, online, status }
@@ -73,12 +89,19 @@ const S = {
 
 // ---------------------------------------------------------------- start
 async function boot() {
+  // As Lumio last said, until it says again.
+  S.mode = (await idb.get('syncMode').catch(() => null)) || 'managed';
+  S.managed = (await idb.get('syncManaged').catch(() => null)) === true;
   try {
     S.account = await (await fetch('/api/account', { credentials: 'include' })).json();
   } catch {
     return render(`<div class="hero"><div class="mark"></div><h1>Can’t reach Lumio</h1><p>Check your connection, then try again.</p><button class="btn primary" onclick="location.reload()">Try again</button></div>`);
   }
-  if (!S.account?.signedIn) return signIn();
+  if (!S.account?.signedIn) {
+    // Signed out since the last visit (the session ended): a key Lumio keeps goes too.
+    if (S.managed) await forgetKey().catch(() => {});
+    return signIn();
+  }
   S.device = localStorage.getItem('lumioPhoneId') || `phone-${crypto.randomUUID()}`;
   localStorage.setItem('lumioPhoneId', S.device);
   await idb.set('device', S.device);
@@ -87,16 +110,135 @@ async function boot() {
   } catch (err) {
     return render(`<div class="hero"><div class="mark"></div><h1>Almost there</h1><p>${esc(err.message)}</p></div>`);
   }
-  const status = await api('/api/sync');
-  if (!status.keyCheck) return needsSync();
-  const saved = await idb.get(`syncKey:${S.account.email}`);
+  const status = await syncStatus();
+  if (!S.managed) return e2ee(status);
+  // Managed: signing in is enough. Lumio keeps the account's key.
+  const saved = await savedKey(status.keyCheck);
   if (saved) {
-    const keys = await C.deriveKeys(C.fromB64(saved));
-    if (keys.check === status.keyCheck) S.keys = keys;
-    else await idb.del(`syncKey:${S.account.email}`);
+    // Already here (an account from before managed sync): Lumio gets a copy,
+    // so the account's other devices can have it too.
+    if (!status.managedKey) upload(saved);
+    return start();
   }
-  if (!S.keys) return pair(status.keyCheck);
+  if (status.keyCheck && !status.managedKey) return finishing(status.keyCheck);
+  try {
+    const r = await fetchKey();
+    return r.raw ? adopt(r.raw) : finishing(r.keyCheck);
+  } catch (err) {
+    if (err.code === 'passphrase_mode') return e2ee(await syncStatus());
+    return render(`<div class="hero"><div class="mark"></div><h1>Couldn’t connect</h1><p>${esc(err.message)}</p><button class="btn primary" onclick="location.reload()">Try again</button></div>`);
+  }
+}
+
+// The account's sync status, and its mode: managed unless it says otherwise
+// (an older server says nothing: then the phone pairs, as before).
+// The account's own passphrase is only turned off by a device that has its
+// key (as in Lumio Browser, main/sync/engine.js remember): while this phone
+// has the key it last saw the account use with its passphrase
+// (syncPassphraseCheck), the account counts as managed again only once Lumio
+// hands back that same key. Until then (S.modeChanged: the server's word
+// alone, from a stolen session or a changed database) the phone keeps its
+// key to itself: it doesn't give it to Lumio, take Lumio's, or ask to be approved.
+async function syncStatus() {
+  const status = await api('/api/sync');
+  if (status.mode === 'passphrase') idb.set('syncPassphraseCheck', status.keyCheck || null).catch(() => {});
+  let mode = status.mode === 'passphrase' ? 'passphrase' : 'managed';
+  S.modeChanged = false;
+  if (mode === 'managed' && S.mode === 'passphrase') {
+    const last = await idb.get('syncPassphraseCheck').catch(() => null);
+    const saved = await idb.get(`syncKey:${S.account.email}`).catch(() => null);
+    if (saved && last && (await C.deriveKeys(C.fromB64(saved))).check === last && !(await lumioHas(saved, status))) {
+      mode = 'passphrase';
+      S.modeChanged = status.mode === 'managed';
+    }
+  }
+  S.mode = mode;
+  S.managed = status.managedAvailable === true && mode !== 'passphrase';
+  idb.set('syncMode', S.mode).catch(() => {});
+  idb.set('syncManaged', S.managed).catch(() => {});
+  return status;
+}
+
+// Lumio hands back exactly the key saved here: a device that had it gave it
+// to Lumio, so there's nothing left to keep from it.
+async function lumioHas(saved, status) {
+  if (status.mode !== 'managed' || status.managedAvailable !== true || status.managedKey !== true || Date.now() < S.keyRetryAt) return false;
+  if ((await C.deriveKeys(C.fromB64(saved))).check !== status.keyCheck) return false;
+  try {
+    const r = await api('/api/sync/key', { method: 'POST', body: {} });
+    return r.status === 'ready' && r.key === saved;
+  } catch (err) {
+    backOff(err);
+    return false;
+  }
+}
+
+// Lumio's key routes allow a few reads an hour: after "too many requests",
+// none for ten minutes (its retry-after).
+function backOff(err) { if (err.code === 'rate_limited') S.keyRetryAt = Date.now() + 10 * 60_000; }
+
+// The key saved on this phone, if it's the account's (else it's removed,
+// except while S.modeChanged: then it's this phone's own passphrase key).
+async function savedKey(keyCheck) {
+  const saved = await idb.get(`syncKey:${S.account.email}`);
+  if (!saved) return null;
+  const keys = await C.deriveKeys(C.fromB64(saved));
+  if (keyCheck && keys.check === keyCheck) { S.keys = keys; return saved; }
+  if (!S.modeChanged) await idb.del(`syncKey:${S.account.email}`);
+  return null;
+}
+
+// Signed out (managed): the key leaves this phone.
+async function forgetKey() {
+  S.keys = null;
+  const owner = S.account?.email || await idb.get('syncKeyOwner');
+  if (owner) await idb.del(`syncKey:${owner}`);
+  await idb.del('syncKeyOwner');
+}
+
+// The key only the account's devices have (passphrase mode, or an older
+// server): a computer approves this phone, or the recovery key.
+async function e2ee(status) {
+  if (!status.keyCheck) return needsSync();
+  await savedKey(status.keyCheck);
+  if (!S.keys) return S.modeChanged ? modeChanged() : pair(status.keyCheck);
   start();
+}
+
+// The server says the account no longer uses its own passphrase, with a key
+// that isn't the one on this phone: nobody is asked for a key (Lumio would
+// answer with its own). The person can choose Lumio's key instead.
+function modeChanged() {
+  $('#nav').hidden = true;
+  render(`<div class="hero"><div class="mark"></div><h1>Sync is paused</h1>
+    <p>Lumio’s server says your account no longer uses your own passphrase, but this phone didn’t hear that from a device that has your key, so the key stays here.</p>
+    <p>If you turned it off in Lumio Browser, or reset sync there, use the key Lumio keeps. Then Lumio could technically read what you sync.</p>
+    <button class="btn primary block" onclick="location.reload()">Try again</button>
+    <button class="btn block" id="use-lumio">Use the key Lumio keeps</button></div>`);
+  $('#use-lumio').addEventListener('click', async () => {
+    await idb.set('syncMode', 'managed').catch(() => {});
+    location.reload();
+  });
+}
+
+// Managed: the account's key from Lumio. { raw } once it's there, else
+// { status: 'waiting', keyCheck } (an account whose key isn't on Lumio yet).
+// After "too many requests", not again for a while.
+async function fetchKey() {
+  if (Date.now() < S.keyRetryAt) throw Object.assign(new Error('Too many requests. Try again in a few minutes.'), { code: 'rate_limited' });
+  const r = await api('/api/sync/key', { method: 'POST', body: {} }).catch((err) => { backOff(err); throw err; });
+  if (r.status !== 'ready') return r;
+  const raw = C.fromB64(r.key);
+  if (raw.length !== 32 || (await C.deriveKeys(raw)).check !== r.keyCheck) throw new Error('That key didn’t match. Try again.');
+  return { ...r, raw };
+}
+
+// Managed, with the key here but not on Lumio: upload it (at most every 10
+// minutes; it's checked against the account's, and failures wait for later).
+function upload(key) {
+  if (Date.now() - S.lastUpload < 10 * 60_000) return;
+  S.lastUpload = Date.now();
+  api('/api/sync/key', { method: 'PUT', body: { key } }).catch(() => {});
 }
 
 function render(html) { app.innerHTML = html; }
@@ -123,18 +265,24 @@ function needsSync() {
 
 // ---------------------------------------------------------------- pairing
 // The phone asks; the computer shows the same code and approves.
-async function pair(keyCheck) {
+// managed: the account's key isn't on Lumio yet (an account from before
+// managed sync). A computer with the latest version puts it there, and Lumio
+// then approves this request itself; an older one approves it as before.
+async function pair(keyCheck, { managed = false } = {}) {
   $('#nav').hidden = true;
   const kp = await C.pairKeyPair();
   const code = await C.pairCode(kp.publicKey);
+  const ask = () => api('/api/sync/pair', { method: 'POST', body: { device: S.device, name: phoneName(), kind: 'phone', pubkey: kp.publicKey } });
   let req;
   try {
-    req = await api('/api/sync/pair', { method: 'POST', body: { device: S.device, name: phoneName(), kind: 'phone', pubkey: kp.publicKey } });
+    req = await ask();
   } catch (err) {
     return render(`<div class="hero"><div class="mark"></div><h1>Couldn’t connect</h1><p>${esc(err.message)}</p><button class="btn primary" onclick="location.reload()">Try again</button></div>`);
   }
-  render(`<div class="hero"><div class="mark"></div><h1>Connect your phone</h1>
-    <p>Lumio on your computer will ask to approve <b>${esc(phoneName())}</b>. Approve it only if it shows this code:</p>
+  render(`<div class="hero"><div class="mark"></div>${managed ? `<h1>Finishing setup</h1>
+    <p>Open Lumio Browser on a computer that already syncs. Once it has the latest version, your phone connects by itself.</p>
+    <p>Using an older version? Approve <b>${esc(phoneName())}</b> there. It should show this code:</p>` : `<h1>Connect your phone</h1>
+    <p>Lumio on your computer will ask to approve <b>${esc(phoneName())}</b>. Approve it only if it shows this code:</p>`}
     <div class="code">${code.slice(0, 3)} ${code.slice(3)}</div>
     <ol class="steps"><li>Open Lumio Browser on your computer.</li><li>Click the notification, or go to <b>Settings › Sync</b>.</li><li>Check the code, then click <b>Approve</b>.</li></ol>
     <p class="err" id="pair-err"></p>
@@ -146,42 +294,82 @@ async function pair(keyCheck) {
     if ((await C.deriveKeys(raw)).check !== keyCheck) { $('#pair-err').textContent = 'That recovery key is for a different account, or has a typo.'; return; }
     await adopt(raw);
   });
-  const started = Date.now();
+  let started = Date.now();
   const check = async () => {
     if (S.keys) return;
     try {
       const r = await api(`/api/sync/pair/${req.id}`);
+      if (S.keys) return;
       if (r.status === 'approved') {
         const raw = await C.unwrapFromApprover(kp.privateKey, r.approverPub, r.wrapped);
         if ((await C.deriveKeys(raw)).check !== keyCheck) throw new Error('The key didn’t match. Try again.');
         return adopt(raw);
       }
       if (r.status === 'denied') { $('#pair-err').textContent = 'Your computer said no. Reload to ask again.'; return; }
-      if (r.status === 'expired' || Date.now() - started > 9 * 60_000) { $('#pair-err').textContent = 'That request expired. Reload to ask again.'; return; }
-    } catch (err) { $('#pair-err').textContent = err.message; }
+      if (r.status === 'expired' || Date.now() - started > 9 * 60_000) {
+        if (!managed) { $('#pair-err').textContent = 'That request expired. Reload to ask again.'; return; }
+        // Managed: ask again quietly (the same code).
+        req = await ask();
+        started = Date.now();
+      }
+    } catch (err) {
+      if (err.status === 401) return; // signed out: the sign-in screen is up
+      $('#pair-err').textContent = err.message;
+    }
     setTimeout(check, 2000);
   };
   setTimeout(check, 2000);
+  // Managed: once the key is on Lumio, get it from there.
+  if (managed) {
+    const poll = async () => {
+      if (S.keys) return;
+      let wait = 10_000;
+      try {
+        const st = await syncStatus();
+        if (S.managed && (!st.keyCheck || st.managedKey)) {
+          const r = await fetchKey();
+          if (r.raw && !S.keys) return adopt(r.raw);
+        }
+      } catch (err) {
+        if (err.status === 401) return;
+        if (err.code === 'rate_limited') wait = Math.max(wait, S.keyRetryAt - Date.now()); // "too many requests": not before Lumio says
+      }
+      setTimeout(poll, wait);
+    };
+    setTimeout(poll, 10_000);
+  }
 }
+
+const finishing = (keyCheck) => pair(keyCheck, { managed: true });
 
 async function adopt(raw) {
   await idb.set(`syncKey:${S.account.email}`, C.toB64(raw));
   await idb.set('syncKeyOwner', S.account.email);
   S.keys = await C.deriveKeys(raw);
+  // A new key (another device reset sync): everything is pulled again with it.
+  S.records = { chats: new Map(), workflows: new Map(), tabs: new Map() };
+  S.cursor = 0;
   start();
 }
 
 // ---------------------------------------------------------------- running
+// Again with a new key: the views and the pull start over.
 function start() {
   $('#nav').hidden = false;
-  document.querySelectorAll('#nav button').forEach((b) => b.addEventListener('click', () => { S.chat = null; show(b.dataset.view); }));
-  const hash = new URLSearchParams(location.hash.slice(1));
-  if (hash.get('chat')) { S.chat = hash.get('chat'); S.view = 'chats'; }
+  const first = !S.started;
+  S.started = true;
+  if (first) {
+    document.querySelectorAll('#nav button').forEach((b) => b.addEventListener('click', () => { S.chat = null; show(b.dataset.view); }));
+    const hash = new URLSearchParams(location.hash.slice(1));
+    if (hash.get('chat')) { S.chat = hash.get('chat'); S.view = 'chats'; }
+  }
   show(S.view);
   pullAll();
   pollStatus();
   pollNotices();
+  if (!first) return;
   setInterval(() => { if (!document.hidden) pullAll(); }, 15_000);
+  setInterval(() => { if (!document.hidden) checkKey(); }, 60_000);
   setInterval(() => { if (!document.hidden) pollStatus(); }, 2500);
   setInterval(() => { if (!document.hidden) pollNotices(); }, 10_000);
   // Seen recently: computers check for commands more often.
@@ -196,17 +384,55 @@ function show(view) {
   ({ now: renderNow, chats: renderChats, workflows: renderWorkflows, tabs: renderTabs })[view]();
 }
 
+// The account's key can change while this page is open (Reset sync, or the
+// passphrase setting, on a computer).
+async function checkKey() {
+  const { keys } = S;
+  if (!keys) return;
+  try {
+    let status = await syncStatus();
+    if (S.keys !== keys) return;
+    if (status.keyCheck === keys.check) {
+      const saved = S.managed && !status.managedKey && await idb.get(`syncKey:${S.account.email}`);
+      if (saved) upload(saved);
+      return;
+    }
+    if (S.managed) {
+      try {
+        const r = await fetchKey();
+        if (S.keys !== keys) return;
+        if (r.raw) return adopt(r.raw);
+        await forgetKey();
+        return finishing(r.keyCheck);
+      } catch (err) {
+        if (err.code !== 'passphrase_mode') throw err;
+        status = await syncStatus();
+      }
+    }
+    if (S.keys !== keys) return;
+    // The server says managed without this phone's passphrase key: keep it, ask nobody.
+    if (S.modeChanged) { S.keys = null; return modeChanged(); }
+    // The account's own passphrase: a computer approves this phone again.
+    await forgetKey();
+    e2ee(status);
+  } catch { /* try again later */ }
+}
+
 // Chats, workflows and tabs synced from the computers (read-only here).
 async function pullAll() {
+  const { keys, records } = S;
+  if (!keys) return;
   try {
     for (let i = 0; i < 20; i++) {
       const res = await api(`/api/sync/changes?since=${S.cursor}&device=${encodeURIComponent(S.device)}&collections=chats,workflows,tabs&limit=500`);
+      if (S.keys !== keys) return; // a new key: its own pull starts over
       for (const it of res.items) {
-        const map = S.records[it.collection];
+        const map = records[it.collection];
         if (!map) continue;
         if (it.deleted) { map.delete(it.id); continue; }
-        try { map.set(it.id, (await C.open(S.keys, it.collection, it.id, it.data)).r); } catch { /* another key */ }
+        try { map.set(it.id, (await C.open(keys, it.collection, it.id, it.data)).r); } catch { /* another key */ }
       }
+      if (S.keys !== keys) return;
       S.cursor = res.cursor;
       if (!res.more) break;
     }
@@ -215,13 +441,17 @@ async function pullAll() {
 }
 
 async function pollStatus() {
+  const { keys } = S;
+  if (!keys) return;
   try {
     const { computers } = await api('/api/companion/status');
-    S.computers = await Promise.all(computers.map(async (c) => {
+    const list = await Promise.all(computers.map(async (c) => {
       let status = null;
-      try { status = c.status ? await C.open(S.keys, 'companion', 'status', c.status) : null; } catch { /* old key */ }
+      try { status = c.status ? await C.open(keys, 'companion', 'status', c.status) : null; } catch { /* old key */ }
       return { ...c, status };
     }));
+    if (S.keys !== keys) return;
+    S.computers = list;
     if (!S.target || !S.computers.some((c) => c.id === S.target)) S.target = (S.computers.find((c) => c.online) || S.computers[0])?.id || null;
     const sig = JSON.stringify([S.target, S.computers.map((c) => [c.id, c.online, c.status])]);
     if (S.view === 'now' && sig !== S.lastSig) renderNow();
@@ -230,6 +460,7 @@ async function pollStatus() {
 }
 
 async function pollNotices() {
+  if (!S.keys) return;
   try {
     S.noticeCursor ||= (await idb.get('noticeCursor')) || 0;
     const res = await api(`/api/companion/messages?kind=notice&device=${encodeURIComponent(S.device)}&since=${S.noticeCursor}`);

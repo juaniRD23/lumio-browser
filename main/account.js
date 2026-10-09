@@ -14,9 +14,10 @@ const SECRET = 'lumio-session';
 const SIGN_IN_MS = 15 * 60 * 1000;
 
 class LumioAccount {
-  constructor({ store, onChange, fetchImpl = globalThis.fetch }) {
+  constructor({ store, onChange, onSignedOut, fetchImpl = globalThis.fetch }) {
     this.store = store;
     this.onChange = onChange;
+    this.onSignedOut = onSignedOut; // signed out, or the session ended: Lumio Sync forgets a key Lumio keeps
     this.fetch = fetchImpl;
     this.pending = null; // { expiresAt } while waiting for the person to log in on the website
     this.info = null; // { email, name, username, publicUsername }
@@ -84,6 +85,8 @@ class LumioAccount {
   }
 
   changed() { this.onChange?.(this.state()); }
+  // Only when the session is over, never while offline (main/sync/engine.js signedOut).
+  ended() { try { this.onSignedOut?.(); } catch { /* signing out still finishes */ } }
 
   // ---------------------------------------------------------------- sign in
   // Starts waiting for a login on the website. main.js opens the sign-in page
@@ -135,6 +138,7 @@ class LumioAccount {
         this.info = null;
         this.usage = null;
         this.error = 'You were signed out of Lumio.';
+        this.ended();
       } else if (account.ok) {
         const a = account.data;
         this.info = { email: a.email, name: a.profile?.name || null, username: a.username, publicUsername: a.publicUsername };
@@ -155,6 +159,7 @@ class LumioAccount {
     this.info = null;
     this.usage = null;
     this.error = null;
+    this.ended();
     this.changed();
   }
 }

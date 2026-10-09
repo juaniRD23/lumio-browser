@@ -112,7 +112,9 @@
           <div id="sync-requests"></div>
           <div class="row sync-needs" id="sync-needs" hidden>
             <div class="grow">
-              <div class="title">Approve this computer</div>
+              <div class="title" id="sync-needs-approve">Approve this computer</div>
+              <div class="title" id="sync-needs-finish" hidden>Finishing setup</div>
+              <div class="desc" id="sync-needs-auto" hidden>Open Lumio on a device that already syncs. If it has the latest version, this computer turns on by itself.</div>
               <div class="desc">On a device that already syncs Lumio, open Settings › Sync and approve <b id="sync-name"></b>. It should show the code <b class="code-inline" id="sync-code"></b>.</div>
               <div class="sync-recovery-use"><input class="field" id="sync-recovery-input" placeholder="Or type your recovery key" autocomplete="off" spellcheck="false" aria-label="Recovery key"><button class="btn" id="sync-recovery-go">Use</button></div>
               <div class="desc err" id="sync-recovery-err"></div>
@@ -128,8 +130,8 @@
         </div>
         <h3>Your devices</h3>
         <div class="card" id="sync-devices"><div class="row"><div class="desc">…</div></div></div>
-        <h3>Recovery key</h3>
-        <div class="card">
+        <h3 id="sync-recovery-h">Recovery key</h3>
+        <div class="card" id="sync-recovery-card">
           <div class="row">
             <div class="grow"><div class="title">Your recovery key</div><div class="desc">Your synced data is encrypted on your devices: Lumio can’t read it. Write this key down somewhere safe. With it, you can set up a new device even if your others are lost.</div>
               <div class="recovery" id="sync-recovery" hidden></div></div>
@@ -138,6 +140,20 @@
           <div class="row">
             <div class="grow"><div class="title">Delete synced data</div><div class="desc">Removes everything synced from Lumio’s servers and turns sync off. What’s on each device stays there.</div></div>
             <button class="btn danger" id="sync-delete">Delete</button>
+          </div>
+        </div>
+        <h3 id="sync-advanced-h" hidden>Advanced</h3>
+        <div class="card" id="sync-advanced" hidden>
+          <label class="row" style="cursor:pointer">
+            <div class="grow"><div class="title">Encrypt with my own passphrase</div>
+              <div class="desc" id="sync-mode-managed">Lumio keeps a copy of your sync key, so signing in is all a new device needs. Turn this on to keep the key only on your devices: Lumio can’t read what you sync, and new devices need your approval or your recovery key.</div>
+              <div class="desc" id="sync-mode-own" hidden>Only your devices have your sync key: Lumio can’t read what you sync. New devices need your approval or your recovery key.</div>
+              <div class="desc warn" id="sync-mode-changed" hidden>Lumio’s server says this account no longer uses your own passphrase, but this computer didn’t change that, so your key stays here. If you turned it off on another device, turn it off here too.</div></div>
+            <span class="switch"><input type="checkbox" id="sync-passphrase" aria-label="Encrypt with my own passphrase"><i></i></span>
+          </label>
+          <div class="row" id="sync-reset-row" hidden>
+            <div class="grow"><div class="title">Reset sync</div><div class="desc">Deletes everything synced from Lumio’s servers and starts over with a new key. Your devices that have sync on upload what they have again.</div></div>
+            <button class="btn danger" id="sync-reset">Reset</button>
           </div>
         </div>
       </section>
@@ -163,24 +179,9 @@
 
         <h3>Approvals</h3>
         <div class="card modes" id="modes">
-          <label class="row"><input type="radio" name="mode" value="ask" /><div class="grow"><div class="title">Ask</div><div class="desc">Ask before every action: clicking, typing, opening pages, and anything on your computer. Reading pages never asks.</div></div></label>
-          <label class="row"><input type="radio" name="mode" value="auto" /><div class="grow"><div class="title">Auto</div><div class="desc">Browse on its own. Still asks before controlling your computer, running commands, or scripts.</div></div></label>
-          <label class="row"><input type="radio" name="mode" value="bypass" /><div class="grow"><div class="title">Bypass <span class="pill bad" style="margin-left:6px">Careful</span></div><div class="desc">Never asks. Lumio can click, type, and run commands on your computer without checking with you.</div></div></label>
-        </div>
-
-        <h3>Computer control</h3>
-        <div class="card" id="perm-card">
-          <div class="row mac-only">
-            <div class="grow"><div class="title">Accessibility</div><div class="desc">Lets Lumio move the mouse, click, and type in other apps.</div></div>
-            <span class="pill" id="perm-accessibility">…</span>
-            <button class="btn" data-perm="accessibility">Open Settings</button>
-          </div>
-          <div class="row mac-only">
-            <div class="grow"><div class="title">Screen Recording</div><div class="desc">Lets Lumio take screenshots of your screen so it can see what it’s doing.</div></div>
-            <span class="pill" id="perm-screen">…</span>
-            <button class="btn" data-perm="screen">Open Settings</button>
-          </div>
-          <div class="row"><div class="desc" id="perm-note">After you turn a permission on, quit and reopen Lumio Browser.</div></div>
+          <label class="row"><input type="radio" name="mode" value="ask" /><div class="grow"><div class="title">Ask</div><div class="desc">Ask before every action: clicking, typing, and opening pages. Reading pages never asks.</div></div></label>
+          <label class="row"><input type="radio" name="mode" value="auto" /><div class="grow"><div class="title">Auto</div><div class="desc">Browse on its own. Still checks with you in chat before buying or sending anything.</div></div></label>
+          <label class="row"><input type="radio" name="mode" value="bypass" /><div class="grow"><div class="title">Bypass <span class="pill bad" style="margin-left:6px">Careful</span></div><div class="desc">Never asks. Lumio can click, type, and open pages without checking with you.</div></div></label>
         </div>
       </section>
 

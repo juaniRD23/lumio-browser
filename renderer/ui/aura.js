@@ -1,22 +1,21 @@
-// The glow, Stop pill and Stop bar shown while Lumio works (see
-// main/ai/indicators.js and main/ai/screen-aura.js).
+// The Stop bar shown over the page while Lumio works in the browser (see
+// main/ai/indicators.js).
 import { markSvg } from './icons.js';
 
 const $ = (s) => document.querySelector(s);
 const api = window.lumio;
-const mode = new URLSearchParams(location.search).get('mode') || 'glow';
+const mode = new URLSearchParams(location.search).get('mode') || 'bar';
 document.body.classList.add(mode);
 
-if (mode === 'pill' || mode === 'bar') {
+if (mode === 'bar') {
   const pill = $('#pill');
   pill.hidden = false;
   $('#mark').innerHTML = markSvg(16);
-  $('#title').textContent = mode === 'pill' ? 'Lumio is controlling your computer' : 'Lumio is working';
   $('#stop').addEventListener('click', () => {
     $('#stop').disabled = true;
-    api?.send(mode === 'pill' ? 'aura:stop' : 'ai:stop');
+    api?.send('ai:stop');
   });
-  // Tell main how big the pill is, so the window/view around it fits it.
+  // Tell main how big the bar is, so the view around it fits it.
   const report = () => {
     const r = pill.getBoundingClientRect();
     api?.send('aura:size', { width: Math.ceil(r.width), height: Math.ceil(r.height) });
@@ -27,6 +26,5 @@ if (mode === 'pill' || mode === 'bar') {
 
 api?.on('aura', (d = {}) => {
   if (typeof d.label === 'string') $('#step').textContent = d.label;
-  if (d.reset) { $('#stop').disabled = false; document.body.classList.remove('out'); }
-  if (d.out) document.body.classList.add('out');
+  if (d.reset) $('#stop').disabled = false;
 });

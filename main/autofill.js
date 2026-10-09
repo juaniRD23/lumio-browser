@@ -10,7 +10,8 @@
 //    the Mac password, Windows Hello, or a dialog where neither exists). The
 //    security code (CVC) is never saved. Card numbers never go to Lumio AI or
 //    any server: the AI can't open card suggestions, and Lumio Sync carries
-//    cards only end-to-end encrypted, and only when the person turns it on.
+//    cards only encrypted with the account's sync key (docs/sync-managed.md),
+//    and only when the person turns it on.
 //  - Incognito windows can fill saved addresses and cards, but never save new
 //    ones or remember form entries.
 const { ipcMain, dialog, systemPreferences } = require('electron');

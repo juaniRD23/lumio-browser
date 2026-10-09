@@ -30,13 +30,14 @@
 //   POST /api/crash         crash reports from Lumio Browser (opt-in, no account; crashes.ts)
 //   GET  /api/admin/crashes, GET /api/admin/crashes/:id/dump   crash reports (the owner only)
 //   GET|DELETE /api/sync, POST /api/sync/init, POST /api/sync/devices, DELETE /api/sync/devices/:id,
-//   GET  /api/sync/changes, POST /api/sync/push, GET|POST /api/sync/pair, GET|POST /api/sync/pair/:id   (Lumio Sync)
+//   GET  /api/sync/changes, POST /api/sync/push, GET|POST /api/sync/pair, GET|POST /api/sync/pair/:id,
+//   POST|PUT /api/sync/key, PUT /api/sync/mode, POST /api/sync/reset   (Lumio Sync; docs/sync-managed.md)
 //   GET|POST /api/companion/messages, GET|PUT /api/companion/status, POST /api/companion/push,
 //   GET  /api/companion/vapid                                       (the phone companion)
 //
 // Every 5 minutes (cron trigger) recent AI calls are checked against
 // OpenRouter's records of what they cost (spend.ts), and old sync tombstones,
-// pairings and relay messages (sync.ts), feedback (feedback.ts), crash reports
+// pairings, key reads and relay messages (sync.ts), feedback (feedback.ts), crash reports
 // (crashes.ts) and email sign-in codes and attempts (email-auth.ts) are
 // cleaned up.
 //
@@ -59,6 +60,7 @@ import {
   companionList, companionPost, companionStatusGet, companionStatusPut, pairAnswer, pairCheck, pairPending, pairRequest, pushUnsubscribe,
   pushSubscribe, syncChanges, syncCleanup, syncDeleteAll, syncDevice, syncInit, syncPush, syncRemoveDevice, syncStatus, vapidKey,
 } from './sync.ts';
+import { syncKeyRead, syncKeyUpload, syncMode, syncReset } from './sync-keys.ts';
 import { spendReport, verifySpend } from './spend.ts';
 import { createCodes, listCodes, redeemCode } from './codes.ts';
 import { deleteFeedback, feedbackCleanup, feedbackScreenshot, listFeedback, postFeedback } from './feedback.ts';
@@ -194,8 +196,13 @@ function routeFor(path: string, method: string): Route | null {
   if (path === '/api/sync/pair' && method === 'POST') return (r, env, _c, user) => pairRequest(r, env, user);
   if (path === '/api/sync/pair' && method === 'GET') return (r, env, _c, user) => pairPending(r, env, user);
   const sp = /^\/api\/sync\/pair\/(p_[a-f0-9]{24})$/.exec(path);
-  if (sp && method === 'GET') return (_r, env, _c, user) => pairCheck(env, user, sp[1]);
+  if (sp && method === 'GET') return (r, env, _c, user) => pairCheck(r, env, user, sp[1]);
   if (sp && method === 'POST') return (r, env, _c, user) => pairAnswer(r, env, user, sp[1]);
+  // The account's sync key (sync-keys.ts): no GET, so a link or an image can't ask for it.
+  if (path === '/api/sync/key' && method === 'POST') return (r, env, _c, user) => syncKeyRead(r, env, user);
+  if (path === '/api/sync/key' && method === 'PUT') return (r, env, _c, user) => syncKeyUpload(r, env, user);
+  if (path === '/api/sync/mode' && method === 'PUT') return (r, env, _c, user) => syncMode(r, env, user);
+  if (path === '/api/sync/reset' && method === 'POST') return (r, env, _c, user) => syncReset(r, env, user);
   if (path === '/api/companion/messages' && method === 'POST') return (r, env, c, user) => companionPost(r, env, user, c);
   if (path === '/api/companion/messages' && method === 'GET') return (r, env, _c, user) => companionList(r, env, user);
   if (path === '/api/companion/status' && method === 'PUT') return (r, env, _c, user) => companionStatusPut(r, env, user);

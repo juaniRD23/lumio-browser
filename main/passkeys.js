@@ -1,8 +1,9 @@
 // Passkeys (WebAuthn): Lumio is the authenticator. When a website asks to
 // create or use a passkey, Lumio makes or uses an ES256 (P-256) key pair. The
 // private key is encrypted with safeStorage, like saved passwords, and Lumio
-// Sync carries it end-to-end encrypted to the person's other computers, so
-// new passkeys tell sites they can be backed up (and are, while Sync is on).
+// Sync carries it to the person's other computers, encrypted with the
+// account's sync key (docs/sync-managed.md), so new passkeys tell sites they
+// can be backed up (and are, while Sync is on).
 // Passkeys made before Lumio synced them said they were device-bound, which a
 // passkey can't change later: those stay on their computer.
 // This file is the authenticator itself (no UI); password-manager.js asks the
@@ -186,7 +187,7 @@ class PasskeyStore {
 
   // ---------------------------------------------------------------- Lumio Sync
   // A passkey for sync, private key included (the sync engine encrypts it
-  // end to end), and other computers' passkeys stored here.
+  // with the account's sync key), and other computers' passkeys stored here.
   syncRecord(id) {
     const k = this.find(id);
     if (!k?.be) return null;

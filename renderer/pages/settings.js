@@ -338,27 +338,6 @@ document.querySelectorAll('input[name=mode]').forEach((r) => {
   r.addEventListener('change', () => page.invoke('page:set-setting', 'approvalMode', r.value));
 });
 
-async function perms() {
-  if (s.platform !== 'darwin') {
-    $('#perm-note').textContent = s.ai.macAvailable
-      ? 'Lumio can use the mouse, keyboard and take screenshots on this PC. It asks before doing so unless you choose Bypass.'
-      : 'Computer control isn’t available on this system.';
-    return;
-  }
-  try {
-    const p = await page.invoke('page:mac-permissions');
-    for (const k of ['accessibility', 'screen']) {
-      const el = $('#perm-' + k);
-      if (p[k] === undefined) { el.textContent = 'Unknown'; continue; }
-      el.textContent = p[k] ? 'On' : 'Off';
-      el.className = 'pill ' + (p[k] ? 'ok' : 'bad');
-    }
-    if (p.error) $('#perm-note').textContent = p.error;
-  } catch (e) { $('#perm-note').textContent = String(e.message || e); }
-}
-document.querySelectorAll('[data-perm]').forEach((b) => b.addEventListener('click', () => page.invoke('page:mac-permissions-open', b.dataset.perm)));
-window.addEventListener('focus', perms);
-
 // ------------------------------------------------------------ passwords
 $('#offer-pw').checked = s.offerPasswords;
 $('#autofill-pw').checked = s.autofillPasswords;
@@ -515,7 +494,6 @@ sections.forEach((sec) => { const h = sec.querySelector('h2'); if (h) h.tabIndex
 requestAnimationFrame(spy);
 
 renderProfile();
-perms();
 if (location.hash) document.querySelector(location.hash)?.scrollIntoView();
 
 // ---- Scheduled tasks
@@ -702,24 +680,44 @@ const sinceText = (t) => {
 };
 const PHONE_IC = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg>';
 const LAPTOP_IC = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg>';
+// How this computer gets the sync key (docs/sync-managed.md): 'managed' when
+// Lumio keeps it (signing in is enough, and Lumio lets new devices in itself);
+// otherwise new devices are approved here, or use the recovery key.
 let syncState = null;
 function renderSync(st) {
   syncState = st;
+  const managed = st.flow === 'managed';
   $('#sync-on').checked = st.on;
   $('#sync-status').textContent = !st.on ? 'Off. Your bookmarks, passwords and chats stay on this computer.'
     : st.status === 'signed-out' ? 'Sign in to Lumio to sync.'
-    : st.status === 'needs-key' ? 'Waiting for you to approve this computer.'
-    : st.status === 'ready' ? `On · encrypted on your devices${st.lastSync ? ` · synced ${sinceText(st.lastSync)}` : ''}`
+    : st.status === 'needs-key' ? (managed ? 'Finishing setup. Open Lumio on a device that already syncs.' : 'Waiting for you to approve this computer.')
+    : st.status === 'ready' ? `${managed ? 'Sync is on' : 'On · encrypted on your devices'}${st.lastSync ? ` · synced ${sinceText(st.lastSync)}` : ''}`
     : st.status === 'error' ? `Couldn’t sync: ${st.error || 'try again later.'}`
     : 'Turning on…';
   $('#sync-needs').hidden = !(st.on && st.status === 'needs-key');
+  $('#sync-needs-approve').hidden = managed;
+  $('#sync-needs-finish').hidden = !managed;
+  $('#sync-needs-auto').hidden = !managed;
+  $('#sync-recovery-h').hidden = managed;
+  $('#sync-recovery-card').hidden = managed;
+  const advanced = st.managedAvailable === true && st.on && st.status !== 'signed-out';
+  $('#sync-advanced-h').hidden = !advanced;
+  $('#sync-advanced').hidden = !advanced;
+  $('#sync-passphrase').checked = st.mode === 'passphrase';
+  // modeChanged: the server says Lumio keeps the key, but this computer didn't
+  // agree (main/sync/engine.js remember); the person can still choose here.
+  $('#sync-passphrase').disabled = st.status !== 'ready' && !st.modeChanged;
+  $('#sync-mode-managed').hidden = st.mode === 'passphrase';
+  $('#sync-mode-own').hidden = st.mode !== 'passphrase';
+  $('#sync-mode-changed').hidden = !st.modeChanged;
+  $('#sync-reset-row').hidden = !managed;
   $('#sync-phone').hidden = !(st.on && st.status === 'ready' && st.siteUrl);
   if (st.siteUrl) $('#phone-url').textContent = `${st.siteUrl.replace(/^https?:\/\//, '')}/companion`;
   $('#sync-name').textContent = `“${st.deviceName}”`;
   $('#sync-code').textContent = st.pairCode ? st.pairCode.replace(/(\d{3})/, '$1 ') : '…';
   $('#sync-types').hidden = !st.on;
   $('#sync-types').innerHTML = SYNC_TYPES.map(([k, label]) => `<label><input type="checkbox" data-type="${k}" ${st.types[k] ? 'checked' : ''}> ${label}</label>`).join('');
-  $('#sync-requests').innerHTML = (st.requests || []).map((r) => `
+  $('#sync-requests').innerHTML = (managed ? [] : st.requests || []).map((r) => `
     <div class="row sync-request" data-id="${esc(r.id)}">
       <div class="grow"><div class="title">“${esc(r.name)}” wants to sync</div>
         <div class="desc">Only approve it if it shows the code <b class="code-inline">${esc(r.code.replace(/(\d{3})/, '$1 '))}</b>. It will be able to see your bookmarks, passwords, history and chats.</div></div>
@@ -774,13 +772,40 @@ $('#sync-recovery-show').addEventListener('click', async () => {
 });
 $('#sync-devices').addEventListener('click', async (e) => {
   const id = e.target.closest('[data-remove]') && e.target.closest('[data-device]')?.dataset.device;
-  if (!id || !confirm('Remove this device from sync? It stops getting your synced data until it’s approved again.')) return;
+  if (!id || !confirm(syncState?.flow === 'managed'
+    ? 'Remove this device from the list? If it’s still signed in to Lumio, it shows up again the next time it syncs. Sign out of Lumio on it to stop it syncing.'
+    : 'Remove this device from sync? It stops getting your synced data until it’s approved again.')) return;
   await page.invoke('page:sync-remove-device', id);
   loadSyncDevices();
 });
 $('#sync-delete').addEventListener('click', async () => {
   if (!confirm('Delete everything synced from Lumio’s servers and turn sync off? What’s on each device stays there.')) return;
   const r = await page.invoke('page:sync-delete-all');
+  if (!r.ok) alert(r.error);
+  refreshSync();
+  loadSyncDevices();
+});
+// Encrypt with my own passphrase (Advanced): on starts over with a key only
+// devices have, so the new recovery key shows right away to be written down.
+$('#sync-passphrase').addEventListener('change', async (e) => {
+  const on = e.target.checked;
+  const ok = confirm(on
+    ? 'Encrypt sync with your own key? Lumio deletes its copy of your sync key and starts over with a new key that only your devices have. Your other devices need to be approved again, or set up with your recovery key.'
+    : 'Let Lumio keep a copy of your sync key? Then signing in is all a new device needs, and Lumio could technically read what you sync.');
+  if (!ok) { e.target.checked = !on; return; }
+  e.target.disabled = true;
+  const r = await page.invoke('page:sync-set-mode', on ? 'passphrase' : 'managed');
+  if (!r.ok) { e.target.checked = !on; alert(r.error); }
+  await refreshSync();
+  // Only once this computer syncs with the new key: its recovery key is the account's.
+  if (r.ok && on && syncState?.mode === 'passphrase' && syncState?.status === 'ready') {
+    $('#sync-recovery').hidden = true;
+    $('#sync-recovery-show').click();
+  }
+});
+$('#sync-reset').addEventListener('click', async () => {
+  if (!confirm('Reset sync? Everything synced is deleted from Lumio’s servers and sync starts over with a new key. What’s on each device stays there.')) return;
+  const r = await page.invoke('page:sync-reset');
   if (!r.ok) alert(r.error);
   refreshSync();
   loadSyncDevices();

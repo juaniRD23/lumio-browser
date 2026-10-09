@@ -120,7 +120,10 @@ function snapshot(opts) {
     if (el.tagName === 'A') {
       try {
         const u = new URL(el.href, location.href);
-        const short = u.origin === location.origin ? u.pathname + u.search : u.host + u.pathname;
+        // Not a web page (mailto:, ms-excel:, tel:…): its scheme shows, so
+        // Lumio knows the link would open another app.
+        const web = u.protocol === 'http:' || u.protocol === 'https:';
+        const short = !web ? u.href : u.origin === location.origin ? u.pathname + u.search : u.host + u.pathname;
         if (short && short !== '/') line += ` → ${clean(short, 60)}`;
       } catch (_) { /* ignore */ }
     }

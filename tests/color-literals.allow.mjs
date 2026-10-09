@@ -5,7 +5,7 @@
 // selector matches `rule`, in the files that match `file` (any file without one).
 export const ALLOWED = [
   { why: 'Incognito is always dark (the site info’s Incognito chip only shows there)', rule: /incog|^\.si-host em$/ },
-  { why: 'The screen glow and its Stop pill are a fixed dark overlay (aura.html is always dark)', file: /ui\/aura\.css$/, rule: /./ },
+  { why: 'The Stop bar over the page is a fixed dark overlay (aura.html is always dark)', file: /ui\/aura\.css$/, rule: /./ },
   { why: 'The Update button is the same blue in both (update.e2e checks it)', file: /ui\/shell\.css$/, rule: /^\.update-btn\b/ },
   { why: 'The thinking-effort slider is a picture: white stars on deep blues', file: /ui\/shell\.css$/, rule: /^\.slider \.s-(fill|knob)$/ },
   { why: 'The voice orb is a lit sphere', file: /ui\/shell\.css$/, rule: /^\.voice-bar \.vb-orb i$/ },
