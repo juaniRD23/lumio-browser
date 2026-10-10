@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Nested</title>
+  <style>body { margin: 0; padding: 6px; font: 14px sans-serif; } input { width: 160px; }</style>
+</head>
+<body>
+  <label for="deep">Deep field</label> <input id="deep" />
+  <script>
+    window.events = [];
+    document.addEventListener('click', (e) => window.events.push(`click:${e.target.id}:${e.isTrusted}`), true);
+  </script>
+</body>
+</html>

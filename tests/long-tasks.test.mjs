@@ -44,13 +44,13 @@ test('a 400-step task: every request stays under the server\'s limits, keeps the
 });
 
 // An AI controller for one window, with no real tabs, on the stand-in server.
-function controller(reply, { tabs = {} } = {}) {
+function controller(reply, { tabs = {}, caps = {} } = {}) {
   const events = [];
   const notified = [];
   const finished = [];
   let ended = null;
   const store = { settings: { reasoning: 'medium', approvalMode: 'auto', appsOff: [] }, setSetting(k, v) { this.settings[k] = v; } };
-  const account = fakeAccount(reply, { tools: ['read_page', 'click', 'wait', 'update_plan', 'web_search', 'read_url'] });
+  const account = fakeAccount(reply, { tools: ['read_page', 'click', 'wait', 'update_plan', 'web_search', 'read_url'], caps });
   const ai = new AIController({
     store,
     chats: new ChatStore(null),
@@ -66,6 +66,58 @@ function controller(reply, { tabs = {} } = {}) {
 }
 // The model keeps doing something new (a tool this window doesn't have, so nothing real runs).
 const busy = (body, i) => ({ calls: [{ name: 'look_around', arguments: `{"n":${i}}` }] });
+
+// update_plan's "blocked" status is newer than Lumio Browser 0.6.7 and its
+// Beta 8, so the server offers it only to versions whose steps say they
+// understand it (context.planStatuses). This one says so once the server lists
+// the statuses (GET /v1/agent): a server from before refuses fields it doesn't
+// know. Without them, Lumio still keeps going, and isn't told to mark steps blocked.
+test('keep going: the steps say this version understands the "blocked" plan status when the server lists it', async () => {
+  const STATUSES = ['pending', 'in_progress', 'done', 'blocked'];
+  const plan = JSON.stringify({ steps: [{ title: 'Fill the cart', status: 'done' }, { title: 'Check out', status: 'pending' }] });
+  const reply = (body, i) => (i === 1 ? { calls: [{ name: 'update_plan', arguments: plan }] } : i === 2 ? { text: 'The cart is ready.' } : { text: 'Shall I pay $42.10?' });
+  for (const [caps, says] of [[{ planStatuses: STATUSES }, true], [{ planStatuses: ['pending', 'in_progress', 'done'] }, false], [{}, false]]) {
+    const { ai, account, end } = controller(reply, { caps });
+    const ending = end();
+    assert.equal((await ai.send({ text: 'Order dinner' })).ok, true);
+    await ending;
+    assert.equal(account.bodies.length, 3, 'it kept going once, then asked');
+    for (const body of account.bodies) {
+      if (says) assert.deepEqual(body.context.planStatuses, STATUSES);
+      else assert.equal('planStatuses' in body.context, false, JSON.stringify(caps));
+    }
+    const note = account.bodies[2].messages.at(-1).content;
+    assert.match(note, /^\[Lumio Browser, not the user\] Your task checklist isn't finished\. Still to do: "Check out"\./);
+    if (says) assert.match(note, /then ask exactly that, and mark that step blocked in update_plan with the reason\.$/);
+    else assert.match(note, /information you can't find\): then ask exactly that\.$/);
+  }
+});
+
+// The account is refreshed after every step, and that checks GET /v1/agent
+// again (main.js). One check failing mid-task (offline, a timeout) doesn't
+// change what the rest of the task's steps say: the notes already tell the
+// model to mark steps blocked.
+test('keep going: a capabilities check that fails mid-task leaves the steps saying they understand "blocked"', async () => {
+  const STATUSES = ['pending', 'in_progress', 'done', 'blocked'];
+  const plan = JSON.stringify({ steps: [{ title: 'Fill the cart', status: 'in_progress' }, { title: 'Check out', status: 'pending' }] });
+  const reply = (body, i) => (i === 1 ? { calls: [{ name: 'update_plan', arguments: plan }] } : i <= 4 ? { calls: [{ name: 'look_around', arguments: `{"n":${i}}` }] } : i === 5 ? { text: 'The cart is ready.' } : { text: 'Shall I pay $42.10?' });
+  const { ai, account, end } = controller(reply, { caps: { planStatuses: STATUSES } });
+  const fetch = account.fetch;
+  let checks = 0;
+  account.fetch = async (url, init = {}) => {
+    if (!init.body && ++checks > 1) throw new TypeError('fetch failed'); // every check after the first
+    return fetch(url, init);
+  };
+  account.refresh = async () => { ai.refreshCapabilities(); }; // as main.js does when the account changes
+  const ending = end();
+  assert.equal((await ai.send({ text: 'Order dinner' })).ok, true);
+  await ending;
+  assert.ok(checks > 2, `${checks} checks`);
+  assert.equal(ai.blockedSteps(), false, 'the failed check forgot the statuses');
+  assert.equal(account.bodies.length, 6);
+  for (const [i, body] of account.bodies.entries()) assert.deepEqual(body.context.planStatuses, STATUSES, `step ${i + 1}`);
+  assert.match(account.bodies[5].messages.at(-1).content, /and mark that step blocked in update_plan with the reason\.$/);
+});
 
 test('a task the person watches runs past 100 steps to the end, with no note', async () => {
   const { ai, account, end } = controller((body, i) => (i <= 250 ? busy(body, i) : { text: 'Checked all 250.' }));

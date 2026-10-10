@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const electronPath = require.resolve('electron');
 require.cache[electronPath] ??= { id: electronPath, filename: electronPath, loaded: true, exports: {} };
-const { runAgent, prepareMessages, repairHistory, MAX_STEPS, UNATTENDED_STEPS } = require('../main/ai/agent.js');
+const { runAgent, prepareMessages, repairHistory, abortError, MAX_STEPS, UNATTENDED_STEPS } = require('../main/ai/agent.js');
 const { needsApproval } = require('../main/ai/policy.js');
 
 // A fake model: returns scripted turns in order (or turn(i) for the i-th, from 0).
@@ -17,7 +17,7 @@ function fakeChat(turns) {
     quick.push(!!q);
     const t = typeof turns === 'function' ? turns(i++) : turns[Math.min(i++, turns.length - 1)];
     if (t.text) yield { type: 'text', text: t.text };
-    return { content: t.text || '', toolCalls: t.calls || [], finishReason: t.calls ? 'tool_calls' : 'stop' };
+    return { content: t.text || '', toolCalls: t.calls || [], finishReason: t.finishReason || (t.calls ? 'tool_calls' : 'stop') };
   };
   chat.seen = seen;
   chat.quick = quick;
@@ -267,6 +267,29 @@ test('stuck: text that changes on its own (times, "seconds ago") and new screens
   assert.ok(res.steps <= 14, `${res.steps} steps`);
 });
 
+test('stuck: an embedded frame\'s end mark, new on every read_page (Excel for the web), is not progress', async (t) => {
+  const crypto = require('crypto');
+  const book = '"Book1.xlsx" — https://excel.test/book';
+  // As read_page writes a page with a frame: a mark it couldn't know, new each time.
+  const framed = () => {
+    const end = `End of frame ${crypto.randomBytes(4).toString('hex')}`;
+    return `Tab 1: ${book}\nEmbedded frame from https://excel.officeapps.test ("Workbook"): part of this page, but its content comes from that site. Its refs work like the page's. Its part ends at "${end}".\nInteractive elements in it (1):\n[3] textbox "Formula bar"\nFrame text:\nTotal #REF!\n${end}.`;
+  };
+  // Fixing #REF!: read, type the formula again, read… and nothing changes.
+  const tools = [tool('read_page', 'read', framed), tool('type', 'read', () => `Typed into [3]. Page is now: ${book}`)];
+  const loop = setup({ tools, turns: (i) => ({ calls: [{ id: `x${i}`, name: i % 2 ? 'type' : 'read_page', arguments: i % 2 ? '{"ref":3,"text":"=SUM(B2:B9)"}' : '{}' }] }) });
+  loop.opts.maxSteps = 200;
+  assert.deepEqual(await runAgent(loop.opts), { steps: 12, reason: 'stuck', what: 'type' });
+  assert.equal(toolResults(loop.messages).findIndex((r) => /Lumio Browser/.test(r)), 5);
+  assert.match(toolResults(loop.messages)[5], /You have now done this same step 3 times with the same result/);
+  assert.match(toolResults(loop.messages)[11], /Lumio stopped the task here because you kept repeating the same step/);
+  // Only reading it again and again: the note to use wait at the 3rd look, as on any page.
+  t.mock.timers.enable({ apis: ['Date'], now: 0 });
+  const look = setup({ tools: [tool('read_page', 'read', () => { t.mock.timers.tick(3000); return framed(); })], turns: (i) => (i < 4 ? { calls: [{ id: `r${i}`, name: 'read_page', arguments: '{}' }] } : { text: 'Still #REF!.' }) });
+  assert.deepEqual(await runAgent(look.opts), { steps: 5, reason: 'complete' });
+  assert.match(toolResults(look.messages)[2], /You have checked 3 times and nothing has changed\. If you are waiting for something, use wait between checks/);
+});
+
 test('stuck: the same click or scroll is progress when the page changes, even if the tool says the same thing', async () => {
   let qty = 1;
   const plus = tool('click', 'read', () => { qty++; return 'Clicked [12]. Page is now: "Cart" — https://shop.test/cart'; });
@@ -429,4 +452,200 @@ test('speed: a voice message answers quickly from the first turn', async () => {
   opts.quickStart = true;
   await runAgent(opts);
   assert.deepEqual(chat.quick, [true, true]);
+});
+
+// ---------------------------------------------------------------- keep going
+// The model answers without tools while its own checklist (update_plan) still
+// has steps to do: Lumio tells it to carry on instead of ending the task.
+const { tools: planTools } = require('../main/ai/tools/plan.js');
+const updatePlan = planTools.find((t) => t.name === 'update_plan');
+const planCall = (id, steps) => ({ calls: [{ id, name: 'update_plan', arguments: JSON.stringify({ steps: steps.map(([title, status, reason]) => ({ title, status, ...(reason ? { reason } : {}) })) }) }] });
+const BAKERY = [['Ingredients sheet', 'done'], ['Weekly formulas', 'in_progress'], ['Supplier orders', 'pending'], ['Costs', 'pending']];
+const REPORT = { text: 'The weekly formulas currently show #REF! because those sheets haven’t been set up correctly yet. I wasn’t able to finish the supplier-order and costs sheets.' };
+const kept = (events) => events.filter((e) => e.type === 'continued');
+const keepNotes = (messages) => messages.filter((m) => m.role === 'user' && /Your task checklist isn't finished/.test(m.content));
+function planSetup(turns, { tools = [], ...rest } = {}) {
+  let n = 0;
+  const plans = [];
+  const s = setup({
+    turns,
+    tools: [updatePlan, tool('read_page', 'read', (args) => `page ${args?.tab_id ?? ''}`), tool('click', 'read', () => `Clicked. Fixed ${++n}.`), ...tools],
+    ...rest,
+  });
+  s.opts.ctx = { setPlan: (p) => plans.push(p) };
+  return { ...s, plans };
+}
+
+test('keep going: it stops with a progress report while its checklist has steps left, is told to carry on, and finishes them', async () => {
+  const { opts, events, messages, chat, plans } = planSetup([
+    planCall('p1', BAKERY),
+    REPORT,
+    { calls: [{ id: 'fix', name: 'click', arguments: '{"ref":4}' }] },
+    planCall('p2', BAKERY.map(([title]) => [title, 'done'])),
+    { text: 'All done: the workbook has every sheet, and the formulas work.' },
+  ]);
+  const res = await runAgent(opts);
+  assert.deepEqual(res, { steps: 5, reason: 'complete' });
+  assert.deepEqual(kept(events).map(({ left, steps }) => ({ left, steps })), [{ left: 3, steps: ['Weekly formulas', 'Supplier orders', 'Costs'] }]);
+  // Its report stays in the chat; the note follows it as a message from Lumio Browser.
+  const at = messages.findIndex((m) => m.role === 'assistant' && m.content === REPORT.text);
+  assert.equal(messages[at + 1].role, 'user');
+  assert.equal(messages[at + 1].content, `[Lumio Browser, not the user] Your task checklist isn't finished. Still to do: "Weekly formulas", "Supplier orders", "Costs". Keep working: fix what's broken (like #REF! errors) and finish the remaining steps; a progress report is not a stopping point. If some of those steps are already done, mark them done with update_plan. Only stop if you truly need the user (a sign-in, an OK to pay or buy, a decision only they can make, information you can't find): then ask exactly that, and mark that step blocked in update_plan with the reason.`);
+  assert.equal(chat.seen[2].at(-1), messages[at + 1], 'the next request ends with it');
+  assert.equal(chat.quick[2], false, 'it thinks at full effort after being told');
+  assert.deepEqual(events.filter((e) => e.type === 'done').map((e) => e.reason), ['complete'], 'one ending, at the real end');
+  assert.equal(plans.at(-1).every((s) => s.status === 'done'), true);
+  assert.equal(messages.at(-1).content, 'All done: the workbook has every sheet, and the formulas work.');
+});
+
+test('keep going: a step marked blocked (it needs the person) ends the turn, with the reason on the checklist', async () => {
+  const { opts, events, plans, chat } = planSetup([
+    planCall('p1', [['Fill the cart', 'done'], ['Check out', 'blocked', 'Needs your OK to pay $42.10 on DoorDash'], ['Confirm the order', 'pending']]),
+    { text: 'Your cart is ready ($42.10). Should I place the order?' },
+  ]);
+  assert.deepEqual(await runAgent(opts), { steps: 2, reason: 'complete' });
+  assert.equal(chat.seen.length, 2);
+  assert.deepEqual(kept(events), []);
+  assert.deepEqual(plans[0][1], { title: 'Check out', status: 'blocked', reason: 'Needs your OK to pay $42.10 on DoorDash' });
+});
+
+test('keep going: not after Stop', async () => {
+  // Stop pressed while it was answering: the answer ends the run.
+  const ac = new AbortController();
+  const one = planSetup((i) => (i === 0 ? planCall('p1', BAKERY) : (ac.abort(), REPORT)));
+  one.opts.signal = ac.signal;
+  assert.deepEqual(await runAgent(one.opts), { steps: 2, reason: 'complete' });
+  assert.equal(one.chat.seen.length, 2);
+  assert.deepEqual(kept(one.events), []);
+  assert.deepEqual(keepNotes(one.messages), []);
+  // Stop pressed while the model works on the answer (the request is cancelled).
+  const two = planSetup([planCall('p1', BAKERY), REPORT]);
+  const ac2 = new AbortController();
+  const inner = two.opts.chat;
+  two.opts.chat = (o) => { if (two.chat.seen.length === 1) { ac2.abort(); throw abortError(); } return inner(o); };
+  two.opts.signal = ac2.signal;
+  await assert.rejects(runAgent(two.opts), (e) => e.name === 'AbortError');
+  assert.deepEqual(kept(two.events), []);
+});
+
+test('keep going: at most 3 times in a row without progress, then the task ends as usual', async () => {
+  const { opts, events, messages, chat } = planSetup((i) => (i === 0 ? planCall('p1', BAKERY) : { text: `I'll stop here (${i}).` }));
+  assert.deepEqual(await runAgent(opts), { steps: 5, reason: 'complete' });
+  assert.equal(chat.seen.length, 5);
+  assert.equal(kept(events).length, 3);
+  assert.equal(keepNotes(messages).length, 3);
+  assert.equal(messages.at(-1).content, "I'll stop here (4).");
+  assert.equal(events.at(-1).type, 'done');
+});
+
+test('keep going: progress starts the count again: new work or a plan step done, not a repeat or a rewritten plan', async () => {
+  const PLAN = [['A', 'in_progress'], ['B', 'pending'], ['C', 'pending']];
+  const read = (id) => ({ calls: [{ id, name: 'read_page', arguments: '{"tab_id":1}' }] });
+  const stop = { text: 'Stopping.' };
+  // New work resets it; a read, or the plan rewritten with nothing done, doesn't.
+  const click = (id) => ({ calls: [{ id, name: 'click', arguments: '{"ref":1}' }] });
+  const a = planSetup([planCall('p1', PLAN), stop, click('r1'), stop, read('r2'), stop, planCall('p2', [['A (fix #REF!)', 'in_progress'], ['B', 'pending'], ['C', 'pending']]), stop, stop]);
+  assert.deepEqual(await runAgent(a.opts), { steps: 9, reason: 'complete' });
+  assert.equal(kept(a.events).length, 4, 'once before the new work, then 3 more');
+  // A plan step done resets it.
+  const b = planSetup([planCall('p1', PLAN), stop, stop, planCall('p2', [['A', 'done'], ['B', 'in_progress'], ['C', 'pending']]), stop, stop, stop, stop]);
+  assert.deepEqual(await runAgent(b.opts), { steps: 8, reason: 'complete' });
+  assert.deepEqual(kept(b.events).map((e) => e.left), [3, 3, 2, 2, 2]);
+});
+
+test('keep going: no checklist, or every step done: its answer ends the task as before', async () => {
+  const none = planSetup([{ calls: [{ id: 'a', name: 'read_page', arguments: '{}' }] }, { text: 'Here is the page.' }]);
+  assert.deepEqual(await runAgent(none.opts), { steps: 2, reason: 'complete' });
+  assert.deepEqual(kept(none.events), []);
+  const finished = planSetup([planCall('p1', BAKERY.map(([title]) => [title, 'done'])), { text: 'Done.' }]);
+  assert.deepEqual(await runAgent(finished.opts), { steps: 2, reason: 'complete' });
+  assert.deepEqual(kept(finished.events), []);
+});
+
+test('keep going: not when its answer is for the person: an action they denied, a field left for them, a message they sent', async () => {
+  // Denied: it explains or asks what they want instead.
+  const denied = planSetup([planCall('p1', BAKERY), { calls: [{ id: 'buy', name: 'navigate', arguments: '{}' }] }, { text: 'OK, I won’t open it. What should I do instead?' }], {
+    tools: [tool('navigate', 'browser', () => 'opened')],
+    decide: () => 'deny',
+  });
+  assert.deepEqual(await runAgent(denied.opts), { steps: 3, reason: 'complete' });
+  assert.deepEqual(kept(denied.events), []);
+  // A password or card field it refused to fill: the person fills it in.
+  const field = planSetup([planCall('p1', BAKERY), { calls: [{ id: 'pw', name: 'type', arguments: '{"ref":3}' }] }, { text: 'Please type your password, then tell me to continue.' }], {
+    tools: [tool('type', 'read', () => ({ text: 'Refused: this looks like a password, payment, or ID field. Ask the user to fill it in themselves.', summary: 'Sensitive field, left for you', status: 'blocked' }))],
+  });
+  assert.deepEqual(await runAgent(field.opts), { steps: 3, reason: 'complete' });
+  assert.deepEqual(kept(field.events), []);
+  // They asked something while it worked: the answer is for them.
+  const queue = ['what does the costs sheet show so far?'];
+  const asked = planSetup([planCall('p1', BAKERY), { calls: [{ id: 'r', name: 'read_page', arguments: '{}' }] }, { text: 'So far: flour $3.20/kg, sugar $1.10/kg.' }]);
+  let n = 0;
+  asked.opts.takeQueued = () => (++n === 2 ? queue.splice(0) : []);
+  assert.deepEqual(await runAgent(asked.opts), { steps: 3, reason: 'complete' });
+  assert.deepEqual(kept(asked.events), []);
+  // But after more work of its own, an answer with steps left is pushed on again.
+  const later = planSetup([planCall('p1', BAKERY), { calls: [{ id: 'buy', name: 'navigate', arguments: '{}' }] }, { calls: [{ id: 'c', name: 'click', arguments: '{"ref":9}' }] }, REPORT, planCall('p2', BAKERY.map(([title]) => [title, 'done'])), { text: 'Done.' }], {
+    tools: [tool('navigate', 'browser', () => 'opened')],
+    decide: () => 'deny',
+  });
+  await runAgent(later.opts);
+  assert.equal(kept(later.events).length, 1);
+});
+
+test('keep going: a field left for the person stays theirs while it only looks (a screenshot, read_page, the plan) before asking', async () => {
+  const card = tool('type', 'read', () => ({ text: 'Refused: this is a payment field (card number). Ask the user to fill it in themselves.', summary: 'Payment field, left for you', status: 'blocked' }));
+  const shot = tool('screenshot_tab', 'read', () => ({ text: 'Screenshot of tab 1 (1280x800px). Page is now: "Checkout" — https://pay.test/', image: 'data:image/jpeg;base64,AAA' }));
+  const PAY = [['Fill the cart', 'done'], ['Pay', 'in_progress'], ['Confirm the order', 'pending']];
+  const ask = { text: 'Please enter your card details yourself, then tell me to continue.' };
+  const typeCard = { calls: [{ id: 'card', name: 'type', arguments: '{"ref":3,"text":"4242"}' }] };
+  for (const looks of [['screenshot_tab'], ['read_page'], ['screenshot_tab', 'read_page'], ['update_plan']]) {
+    const turns = [planCall('p1', PAY), typeCard, ...looks.map((name, i) => (name === 'update_plan' ? planCall(`p${i + 2}`, PAY) : { calls: [{ id: `l${i}`, name, arguments: '{}' }] })), ask];
+    const s = planSetup(turns, { tools: [card, shot] });
+    assert.deepEqual(await runAgent(s.opts), { steps: turns.length, reason: 'complete' }, looks.join(', '));
+    assert.deepEqual(kept(s.events), [], looks.join(', '));
+  }
+  // The same for an action they denied.
+  const denied = planSetup([planCall('p1', PAY), { calls: [{ id: 'buy', name: 'navigate', arguments: '{}' }] }, { calls: [{ id: 's', name: 'screenshot_tab', arguments: '{}' }] }, { text: 'OK, I won’t pay. Tell me when you want to.' }], {
+    tools: [tool('navigate', 'browser', () => 'opened'), shot],
+    decide: () => 'deny',
+  });
+  assert.deepEqual(await runAgent(denied.opts), { steps: 4, reason: 'complete' });
+  assert.deepEqual(kept(denied.events), []);
+  // Refused, then a refused field and new work in the same turn: still theirs.
+  const both = planSetup([planCall('p1', PAY), { calls: [{ id: 'c', name: 'click', arguments: '{"ref":8}' }, { id: 'card', name: 'type', arguments: '{"ref":3}' }] }, ask], { tools: [card] });
+  assert.deepEqual(await runAgent(both.opts), { steps: 3, reason: 'complete' });
+  assert.deepEqual(kept(both.events), []);
+  // New work of its own after the refusal: an answer with steps left is pushed on again.
+  const moved = planSetup([planCall('p1', PAY), typeCard, { calls: [{ id: 's', name: 'screenshot_tab', arguments: '{}' }] }, { calls: [{ id: 'c', name: 'click', arguments: '{"ref":9}' }] }, REPORT, planCall('p2', PAY.map(([title]) => [title, 'done'])), { text: 'Done.' }], { tools: [card, shot] });
+  await runAgent(moved.opts);
+  assert.equal(kept(moved.events).length, 1);
+});
+
+test('keep going: not once it was told to wrap up near the safety ceiling', async () => {
+  const { opts, events, chat } = planSetup((i) => (i === 0 ? planCall('p1', BAKERY) : /only 3 more steps/.test(chat.seen.at(-1).at(-1).content) ? REPORT : { calls: [{ id: `r${i}`, name: 'read_page', arguments: `{"tab_id":${i}}` }] }));
+  opts.maxSteps = 10;
+  assert.deepEqual(await runAgent(opts), { steps: 8, reason: 'complete' });
+  assert.deepEqual(kept(events), []);
+});
+
+test('keep going: only looking (read_page, screenshots) between answers is not progress', async () => {
+  const read = (i) => ({ calls: [{ id: `r${i}`, name: 'read_page', arguments: `{"tab_id":${i}}` }] }); // a page that changes a little each time
+  const { opts, events } = planSetup((i) => (i === 0 ? planCall('p1', BAKERY) : i % 2 ? { text: 'Stuck.' } : read(i)));
+  await runAgent(opts);
+  assert.equal(kept(events).length, 3);
+});
+
+test('keep going: steps added to the checklist already done are not progress', async () => {
+  const { opts, events } = planSetup((i) => (i === 0 ? planCall('p1', BAKERY) : i % 2 ? { text: 'Stuck.' } : planCall(`p${i}`, [...BAKERY, ...Array.from({ length: i }, (_, k) => [`Reviewed ${k}`, 'done'])])));
+  await runAgent(opts);
+  assert.equal(kept(events).length, 3);
+});
+
+test('keep going: not when the answer was cut off (length), nor for a question after a note', async () => {
+  const cut = planSetup([planCall('p1', BAKERY), { text: 'The weekly formulas', finishReason: 'length' }]);
+  assert.deepEqual(await runAgent(cut.opts), { steps: 2, reason: 'length' });
+  assert.deepEqual(kept(cut.events), []);
+  const asks = planSetup([planCall('p1', BAKERY), REPORT, { text: 'Google wants you to sign in. Can you sign in, then tell me to continue?' }]);
+  assert.deepEqual(await runAgent(asks.opts), { steps: 3, reason: 'complete' });
+  assert.equal(kept(asks.events).length, 1);
 });

@@ -1,10 +1,14 @@
-// Scripts injected into web pages (in an isolated JS world, sharing the DOM).
-// Each is a plain function serialized with toString(), so it must be
-// self-contained. Tested against fixtures in tests/e2e.test.mjs.
+// Scripts injected into web pages (in an isolated JS world, sharing the DOM;
+// in an embedded frame, in the frame's own world: frames.js). Each is a plain
+// function serialized with toString(), so it must be self-contained. Tested in
+// headless Chrome (tests/ai-cards, page-overlays, ai-frames-page) and in the
+// app (tests/e2e).
 
+// opts.start: refs go on from there (an embedded frame's come after the page's).
 function snapshot(opts) {
   const MAX = opts.max ?? 220;
   const maxText = opts.maxText ?? 6000;
+  const start = opts.start || 0;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   if (MAX > 0) document.querySelectorAll('[data-lumio-ref]').forEach((el) => el.removeAttribute('data-lumio-ref'));
@@ -97,7 +101,7 @@ function snapshot(opts) {
   const lines = [];
   const meta = {};
   chosen.forEach((el, i) => {
-    const ref = i + 1;
+    const ref = start + i + 1;
     el.setAttribute('data-lumio-ref', String(ref));
     const role = roleOf(el);
     const name = nameOf(el);
@@ -154,12 +158,13 @@ function snapshot(opts) {
   };
 }
 
-// Scrolls the element into view and returns its center (CSS px) plus
-// whether something else covers that point, and whether it's a sensitive field.
+// Scrolls the element into view (unless scroll: false) and returns its center
+// (CSS px) plus whether something else covers that point, and whether it's a
+// sensitive field. vw, vh: the viewport it's measured in.
 function locate(opts) {
   const el = document.querySelector(`[data-lumio-ref="${opts.ref}"]`);
   if (!el) return { error: `No element [${opts.ref}] on the page. Call read_page again to get fresh refs.` };
-  el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+  if (opts.scroll !== false) el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
   const r = el.getBoundingClientRect();
   const x = Math.round(r.left + Math.min(r.width / 2, Math.max(4, r.width - 4)));
   const y = Math.round(r.top + r.height / 2);
@@ -179,38 +184,49 @@ function locate(opts) {
     x, y, width: Math.round(r.width), height: Math.round(r.height), covered, sensitive, editable,
     tag: el.tagName.toLowerCase(),
     isSelect: el.tagName === 'SELECT',
+    vw: window.innerWidth, vh: window.innerHeight,
   };
 }
 
 // Checks whatever element actually has keyboard focus right now (a click on
-// a label or wrapper can move focus into a password field). Blurs it if sensitive.
-function focusCheck() {
+// a label or wrapper can move focus into a password field). Blurs it if
+// sensitive (unless opts.keep: a key like Enter or Tab is pressed there).
+// Focus in an embedded frame: which one (its mark from read_page and its
+// window index), so frames.js checks the field in there too.
+function focusCheck(opts) {
+  const keep = !!(opts && opts.keep);
   let el = document.activeElement;
   while (el && el.shadowRoot && el.shadowRoot.activeElement) el = el.shadowRoot.activeElement;
   if (!el || el === document.body || el === document.documentElement) return { sensitive: false, none: true };
-  if (el.tagName === 'IFRAME') {
+  if (el.tagName === 'IFRAME' || el.tagName === 'FRAME' || el.tagName === 'OBJECT') {
     const hint = [el.src, el.name, el.title, el.id].join(' ');
-    if (/(stripe|card|payment|checkout|braintree|adyen|cvc|cvv|secure|pay)/i.test(hint)) { el.blur(); return { sensitive: true }; }
-    return { sensitive: false, frame: true };
+    if (/(stripe|card|payment|checkout|braintree|adyen|cvc|cvv|secure|pay)/i.test(hint)) { if (!keep) el.blur(); return { sensitive: true }; }
+    let index = -1;
+    for (let i = 0; i < window.length; i++) if (window[i] === el.contentWindow) { index = i; break; }
+    return { sensitive: false, frame: true, key: el.getAttribute('data-lumio-frame') || '', index };
   }
   const hints = [el.type, el.name, el.id, el.getAttribute('autocomplete'), el.getAttribute('aria-label'), el.getAttribute('placeholder'),
     el.labels && el.labels[0] ? el.labels[0].innerText : ''].join(' ').toLowerCase();
   const sensitive = el.type === 'password'
     || /(^|\s)(cc-|one-time-code|current-password|new-password)/.test(el.getAttribute('autocomplete') || '')
     || /(password|passcode|passwd|card.?number|credit.?card|cc.?num|cvv|cvc|csc|security code|expir|iban|routing|account.?number|ssn|social security|passport|\bpin\b)/.test(hints);
-  if (sensitive) el.blur();
+  if (sensitive && !keep) el.blur();
   return { sensitive };
 }
 
 // While Lumio takes a screenshot for the AI, card numbers and security codes
 // in fields show as dots (the person sees them again right after). Runs in
-// Lumio's isolated world, so the page can't see what it keeps.
+// Lumio's isolated world, so the page can't see what it keeps; in an
+// embedded frame (a payment provider's card fields), in the frame's own world,
+// under a key that changes each time Lumio starts (opts.key).
 function maskCards(opts) {
   const luhn = (n) => { let sum = 0; for (let i = 0; i < n.length; i++) { let d = Number(n[n.length - 1 - i]); if (i % 2) { d *= 2; if (d > 9) d -= 9; } sum += d; } return sum % 10 === 0; };
   const cardField = (el) => /(^|\s)cc-(number|csc)\b/.test(el.getAttribute('autocomplete') || '')
     || /(card.?num|cc.?num|cvv|cvc|csc|security.?code)/i.test([el.name, el.id, el.getAttribute('aria-label'), el.placeholder].join(' '))
     || (/^\d{12,19}$/.test(el.value.replace(/[\s-]/g, '')) && luhn(el.value.replace(/[\s-]/g, '')));
-  const masked = (window.__lumioMasked ||= new Map()); // field -> its own text-security style
+  const masked = opts.key // field -> its own text-security style
+    ? (window[opts.key] || Object.defineProperty(window, opts.key, { value: new Map(), configurable: true })[opts.key])
+    : (window.__lumioMasked ||= new Map());
   if (opts.on) {
     for (const el of document.querySelectorAll('input')) {
       if (!el.value || el.type === 'password' || masked.has(el) || !cardField(el)) continue;
@@ -281,8 +297,234 @@ function pageState(opts) {
   return `${all.length}:${(h >>> 0).toString(36)}`;
 }
 
+// frame: how much of the viewport the embedded frame in the middle of the
+// page covers (0: none there), for the wheel to go in there when it's most of
+// the page (Excel's workbook) or the page itself can't scroll that way (up,
+// down).
 function scrollInfo() {
-  return { y: Math.round(window.scrollY), height: Math.round(document.documentElement.scrollHeight), vh: window.innerHeight };
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const mid = document.elementFromPoint(vw / 2, vh / 2);
+  let frame = 0;
+  if (mid && /^(IFRAME|FRAME|OBJECT|EMBED)$/.test(mid.tagName)) {
+    const r = mid.getBoundingClientRect();
+    const seen = Math.max(0, Math.min(r.right, vw) - Math.max(r.left, 0)) * Math.max(0, Math.min(r.bottom, vh) - Math.max(r.top, 0));
+    frame = vw > 0 && vh > 0 ? Math.round((100 * seen) / (vw * vh)) / 100 : 0;
+  }
+  const height = Math.round((document.scrollingElement || document.documentElement).scrollHeight);
+  const y = Math.round(window.scrollY);
+  return { y, height, vh, frame, up: y > 0, down: y + vh < height - 1 };
+}
+
+// The embedded frames in this document (iframes, also in open shadow roots),
+// for frames.js. Each one's window index (window[i] is its window: the frame
+// finds the same number for itself with opts.self, even from another site),
+// name, address, mark from an earlier read_page, and its box: border box in
+// the viewport (CSS px, after transforms), layout size, borders, padding and
+// content size, from which frames.js works out where its content starts.
+// Whether the person can see it: shown (not hidden, and at least half opaque
+// with its ancestors' opacity and filter), vis (the part in view, clipped by
+// the viewport, opts.clip and every ancestor that clips its overflow; null:
+// none), hit (the share of points in vis where the frame is what's on top,
+// not covered, also not by something that lets clicks through), seen (vis's
+// area times hit). count: window.length; shadow: frames not in it (in shadow
+// roots), which frames.js needs to know to trust window indexes.
+// opts.self: just this document's own index in its parent and viewport size.
+// opts.mark: [[i, index, id]] marks those frames (data-lumio-frame=id) after
+// frames.js matched them. opts.box: { id, index, byIndex, count, scroll, at }:
+// one frame's box, found by its window index (byIndex, when this document's
+// frames are all in its window and count of them: the page can't move that),
+// else its mark, else its index; with at (a point in this document), what
+// covers that point if it isn't the frame. opts.point (list): at, the frame
+// (i) at that point (-1: none of these; other: a frame element that isn't).
+function frameInfo(opts) {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  let index = -1;
+  try {
+    if (window.parent !== window) for (let i = 0; i < window.parent.length; i++) if (window.parent[i] === window) { index = i; break; }
+  } catch (_) { /* ignore */ }
+  if (opts.self) return { index, vw, vh, url: location.href };
+  const found = [];
+  const collect = (root, depth) => {
+    found.push(...root.querySelectorAll('iframe, frame, object'));
+    if (depth >= 3) return;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) if (n.shadowRoot) collect(n.shadowRoot, depth + 1);
+  };
+  collect(document, 0);
+  const winIndex = (el) => { for (let i = 0; i < window.length; i++) if (window[i] === el.contentWindow) return i; return -1; };
+  const withWindow = found.filter((el) => el.contentWindow);
+  const shadow = withWindow.filter((el) => winIndex(el) < 0).length;
+  const px = (v) => parseFloat(v) || 0;
+  const box = (el) => {
+    const r = el.getBoundingClientRect();
+    const cs = getComputedStyle(el);
+    return {
+      left: r.left, top: r.top, width: r.width, height: r.height, ow: el.offsetWidth, oh: el.offsetHeight,
+      bl: el.clientLeft, bt: el.clientTop, pl: px(cs.paddingLeft), pt: px(cs.paddingTop),
+      cw: el.clientWidth - px(cs.paddingLeft) - px(cs.paddingRight), ch: el.clientHeight - px(cs.paddingTop) - px(cs.paddingBottom),
+      vw, vh,
+    };
+  };
+  // Up from an element, out of shadow roots too.
+  const up = (el) => el.parentElement || (el.parentNode && el.parentNode.host) || null;
+  const opacity = (el) => {
+    let o = 1;
+    for (let n = el; n && n.nodeType === 1; n = up(n)) {
+      const cs = getComputedStyle(n);
+      o *= Number(cs.opacity);
+      for (const m of String(cs.filter || '').matchAll(/opacity\(\s*([\d.]+)(%?)\s*\)/g)) o *= Math.min(1, Number(m[1]) / (m[2] ? 100 : 1));
+    }
+    return o;
+  };
+  const shownOf = (el) => {
+    const cs = getComputedStyle(el);
+    const styled = typeof el.checkVisibility === 'function'
+      ? el.checkVisibility({ opacityProperty: true, visibilityProperty: true, contentVisibilityAuto: true })
+      : cs.display !== 'none' && cs.visibility !== 'hidden';
+    return styled && opacity(el) >= 0.5;
+  };
+  // The part of the frame in view: in the viewport (and opts.clip, the part of
+  // this document its own frame shows), inside every ancestor that clips
+  // (overflow, contain: paint) up to one that's fixed. scroller: one of those
+  // scrolls (the frame may be scrolled out of its view, not hidden).
+  const visOf = (el) => {
+    const r = el.getBoundingClientRect();
+    let x1 = Math.max(r.left, 0);
+    let y1 = Math.max(r.top, 0);
+    let x2 = Math.min(r.right, vw);
+    let y2 = Math.min(r.bottom, vh);
+    const c = opts.clip;
+    if (c) { x1 = Math.max(x1, c.x); y1 = Math.max(y1, c.y); x2 = Math.min(x2, c.x + c.w); y2 = Math.min(y2, c.y + c.h); }
+    const inView = x2 > x1 && y2 > y1;
+    let scroller = false;
+    for (let n = el; n && n.nodeType === 1;) {
+      if (getComputedStyle(n).position === 'fixed') break;
+      n = up(n);
+      if (!n || n === document.documentElement || n === document.body) break;
+      const cs = getComputedStyle(n);
+      const clips = cs.overflowX !== 'visible' || cs.overflowY !== 'visible' || /paint|strict|content/.test(cs.contain || '');
+      if (!clips) continue;
+      if (/auto|scroll/.test(cs.overflowX + cs.overflowY)) scroller = true;
+      const b = n.getBoundingClientRect();
+      const left = b.left + n.clientLeft;
+      const top = b.top + n.clientTop;
+      x1 = Math.max(x1, left); y1 = Math.max(y1, top);
+      x2 = Math.min(x2, left + n.clientWidth); y2 = Math.min(y2, top + n.clientHeight);
+    }
+    const vis = x2 - x1 >= 1 && y2 - y1 >= 1 ? { x: x1, y: y1, w: x2 - x1, h: y2 - y1 } : null;
+    return { vis, inView, scroller };
+  };
+  // What's on top at a point, in the frame element's tree (a shadow root's
+  // own hit test, so not its host), and the same with every element taking
+  // pointer events (an overlay that lets clicks through still hides what's
+  // under it, when it paints there).
+  const rootOf = (el) => { const r = el.getRootNode(); return r && typeof r.elementFromPoint === 'function' ? r : document; };
+  let forcedSheet = null;
+  try { forcedSheet = new CSSStyleSheet(); forcedSheet.replaceSync('*{pointer-events:auto!important}'); } catch (_) { forcedSheet = null; }
+  const forced = (fn) => {
+    if (!forcedSheet) return fn(false);
+    const before = document.adoptedStyleSheets;
+    try { document.adoptedStyleSheets = [...before, forcedSheet]; return fn(true); } catch (_) { return fn(false); } finally {
+      try { document.adoptedStyleSheets = before; } catch (_) { /* ignore */ }
+    }
+  };
+  const paints = (t) => {
+    if (opacity(t) < 0.2) return false;
+    if (/^(IMG|VIDEO|CANVAS|SVG|IFRAME|FRAME|OBJECT|EMBED|INPUT|TEXTAREA|SELECT|BUTTON|PICTURE)$/i.test(t.tagName)) return true;
+    const cs = getComputedStyle(t);
+    if (cs.backgroundImage && cs.backgroundImage !== 'none') return true;
+    const m = /rgba?\(([^)]*)\)/.exec(cs.backgroundColor || '');
+    const alpha = m ? (m[1].split(/[\s,/]+/).filter(Boolean)[3] ?? '1') : '0';
+    if (Number(String(alpha).replace('%', '')) / (String(alpha).includes('%') ? 100 : 1) >= 0.2) return true;
+    return [...t.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+  };
+  const describe = (t) => `${t.tagName.toLowerCase()} "${String(t.innerText || t.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim().slice(0, 40)}"`;
+  // Points over the part in view (a 4 by 4 grid): which show the frame.
+  const grid = (v) => {
+    const pts = [];
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) pts.push([v.x + ((i + 0.5) * v.w) / 4, v.y + ((j + 0.5) * v.h) / 4]);
+    return pts;
+  };
+  const veiledAt = (el, x, y, on) => {
+    if (!on) return null;
+    const t = rootOf(el).elementFromPoint(x, y);
+    return t && t !== el && paints(t) ? t : null;
+  };
+
+  if (opts.mark) {
+    for (const el of found) if (el.hasAttribute('data-lumio-frame')) el.removeAttribute('data-lumio-frame');
+    let marked = 0;
+    for (const [i, idx, id] of opts.mark) {
+      const el = found[i];
+      if (el && (idx < 0 || winIndex(el) === idx)) { el.setAttribute('data-lumio-frame', String(id)); marked++; }
+    }
+    return { marked };
+  }
+  if (opts.box) {
+    const want = String(opts.box.id);
+    let el = null;
+    if (opts.box.byIndex && opts.box.index >= 0 && window.length === opts.box.count && !shadow) el = withWindow.find((f) => winIndex(f) === opts.box.index) || null;
+    if (!el) el = found.find((f) => f.getAttribute('data-lumio-frame') === want) || null;
+    if (!el && opts.box.index >= 0) el = withWindow.find((f) => winIndex(f) === opts.box.index) || null;
+    if (!el) return { error: 'gone' };
+    if (el.getAttribute('data-lumio-frame') !== want) {
+      for (const f of found) if (f !== el && f.getAttribute('data-lumio-frame') === want) f.removeAttribute('data-lumio-frame');
+      el.setAttribute('data-lumio-frame', want);
+    }
+    if (opts.box.scroll) el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+    const raw = el.getAttribute(el.tagName === 'OBJECT' ? 'data' : 'src');
+    let src = '';
+    try { src = raw ? new URL(raw, location.href).href : ''; } catch (_) { /* ignore */ }
+    const out = { ...box(el), index: winIndex(el), count: window.length, shadow, src, shown: shownOf(el) };
+    if (opts.box.at) {
+      const { x, y } = opts.box.at;
+      const top = rootOf(el).elementFromPoint(x, y);
+      if (top !== el) out.covered = top ? describe(top) : 'nothing (outside the page)';
+      else {
+        const veil = forced((on) => veiledAt(el, x, y, on));
+        if (veil) out.covered = describe(veil);
+      }
+    }
+    return out;
+  }
+  const frames = [];
+  const entries = [];
+  found.forEach((el, i) => {
+    if (!el.contentWindow) return; // an <object> showing an image or plugin
+    const raw = el.getAttribute(el.tagName === 'OBJECT' ? 'data' : 'src');
+    let src = '';
+    try { src = raw ? new URL(raw, location.href).href : ''; } catch (_) { /* ignore */ }
+    const shown = shownOf(el);
+    const { vis, inView, scroller } = shown ? visOf(el) : { vis: null, inView: false, scroller: false };
+    const pts = vis ? grid(vis) : [];
+    const plain = pts.map(([x, y]) => rootOf(el).elementFromPoint(x, y) === el);
+    entries.push({ el, pts, plain });
+    frames.push({ i, index: winIndex(el), name: el.getAttribute('name') || '', src, key: el.getAttribute('data-lumio-frame') || '', shown, inView, scroller, vis, hit: 0, seen: 0, ...box(el) });
+  });
+  // One pass with every element taking pointer events, for all the frames.
+  const veiled = entries.some((e) => e.plain.some(Boolean))
+    ? forced((on) => entries.map(({ el, pts, plain }) => pts.map(([x, y], k) => plain[k] && !!veiledAt(el, x, y, on))))
+    : entries.map(({ pts }) => pts.map(() => false));
+  frames.forEach((f, n) => {
+    const { pts, plain } = entries[n];
+    const shows = pts.filter((_, k) => plain[k] && !veiled[n][k]).length;
+    f.hit = pts.length ? shows / pts.length : 0;
+    f.seen = f.vis ? Math.round(f.vis.w * f.vis.h * f.hit) : 0;
+  });
+  let at;
+  if (opts.point) {
+    let t = document.elementFromPoint(opts.point.x, opts.point.y);
+    while (t && t.shadowRoot && t.shadowRoot.elementFromPoint) {
+      const inner = t.shadowRoot.elementFromPoint(opts.point.x, opts.point.y);
+      if (!inner || inner === t) break;
+      t = inner;
+    }
+    at = t ? found.indexOf(t) : -1;
+    if (at < 0 && t && /^(IFRAME|FRAME|OBJECT|EMBED)$/.test(t.tagName)) at = 'other';
+  }
+  return { index, vw, vh, url: location.href, count: window.length, shadow, frames, ...(opts.point ? { at } : {}) };
 }
 
 // A fake cursor that glides to where Lumio is about to click.
@@ -530,4 +772,4 @@ function serp(opts) {
   };
 }
 
-module.exports = { domClick, domType, domScroll, youtube, snapshot, locate, focusCheck, selectContents, selectOption, pageState, scrollInfo, cursor, aura, serp, maskCards };
+module.exports = { domClick, domType, domScroll, youtube, snapshot, locate, focusCheck, selectContents, selectOption, pageState, scrollInfo, cursor, aura, serp, maskCards, frameInfo };

@@ -3,6 +3,7 @@
 // can drive the loop with a fake model.
 const crypto = require('crypto');
 const { needsApproval } = require('./policy');
+const { unfinished } = require('./tools/plan');
 const { t } = require('../i18n');
 
 // There's no step budget: a task runs until Lumio answers without tools, the
@@ -42,9 +43,27 @@ const WAIT_LIMIT_MS = 15 * 60_000;
 const LOOKS = new Set(['read_page', 'screenshot_tab', 'list_tabs', 'read_url']);
 // Text that changes on its own: clock times, "5 seconds ago", countdowns, long ids.
 const VOLATILE = /(?<!\d)\d{1,2}:\d{2}(?::\d{2})?(?:\s?[ap]\.?m\b\.?)?|\b\d+(?:\.\d+)?\s*(?:ms|s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?)\b|\d{10,}/gi;
-const steady = (text) => String(text || '').replace(VOLATILE, '#');
+// read_page ends each embedded frame's part with a mark made new on every read
+// (tools/browser.js), so a framed page (Excel for the web) would look new each time.
+const FRAME_MARK = /End of frame [0-9a-f]{8}/g;
+const steady = (text) => String(text || '').replace(FRAME_MARK, 'End of frame #').replace(VOLATILE, '#');
 // Close to the safety ceiling, the model is told to wrap up and report.
 const WRAP_UP = 3;
+
+// Keep going: models like to end a long task with a progress report ("the
+// formulas show #REF!, I couldn't finish the costs sheet") while their own
+// checklist (update_plan) still has steps to do. When it answers without
+// tools and steps are left, Lumio tells it to carry on, and the chat says so.
+// Not when it's waiting for the person: a step marked blocked, an action they
+// just denied, a field left for them (passwords, cards). At most 3 times in a
+// row without progress (a plan step done, or a step it hadn't done before).
+// `blocked`: the server offers update_plan's "blocked" status (one that
+// doesn't would refuse it), so the note says to mark such a step blocked.
+const KEEP_GOING = 3;
+function keepGoingNote(left, blocked = true) {
+  const steps = left.map((s) => `"${s.title}"`).join(', ');
+  return `[Lumio Browser, not the user] Your task checklist isn't finished. Still to do: ${steps}. Keep working: fix what's broken (like #REF! errors) and finish the remaining steps; a progress report is not a stopping point. If some of those steps are already done, mark them done with update_plan. Only stop if you truly need the user (a sign-in, an OK to pay or buy, a decision only they can make, information you can't find): then ask exactly that${blocked ? ', and mark that step blocked in update_plan with the reason' : ''}.`;
+}
 
 function abortError() {
   const e = new Error('Stopped');
@@ -102,22 +121,22 @@ function sameArgs(raw) {
 
 // Remembers each step's fingerprint and says whether the task is stuck
 // (verdict 'nudge' or 'stop'). heard() marks something new from the person
-// (a message sent while it works), which starts the count again.
-function stuckWatch(now = Date.now) {
+// (a message sent while it works), which starts the count again. It also says
+// whether the step did work it hadn't done before (`fresh`), leaving out
+// quiet tools (the checklist): rewriting the plan while repeating a click
+// isn't progress (agent loop, keep going).
+function stuckWatch(now = Date.now, isQuiet = () => false) {
   const seen = new Set(); // every step so far
+  const seenWork = new Set(); // the same, without the quiet tools
   let run = []; // the newest step that brought something new, and the ones since; { key, at, waits, looks }
-  const check = async (calls, results, ctx) => {
-    const tab = safe(() => ctx?.tabs?.active);
-    let page = '';
-    try { page = (await ctx?.pageState?.(VOLATILE.source)) || ''; } catch { /* no page to look at */ }
-    const names = calls.map((c) => c.name);
-    const key = digest([
-      ...calls.map((c) => (c.name === 'wait' ? 'wait' : `${c.name} ${sameArgs(c.arguments)}`)),
-      tab?.url || '',
-      page,
-      ...results.map((r) => `${steady(r.text)}\n${r.sig || ''}`),
-    ].join('\n'));
-    const step = { key, at: now(), waits: names.includes('wait'), looks: names.every((n) => n === 'wait' || LOOKS.has(n)) };
+  const fingerprint = (calls, results, url, page) => digest([
+    ...calls.map((c) => (c.name === 'wait' ? 'wait' : `${c.name} ${sameArgs(c.arguments)}`)),
+    url,
+    page,
+    ...results.map((r) => `${steady(r.text)}\n${r.sig || ''}`),
+  ].join('\n'));
+  const judge = (step) => {
+    const { key } = step;
     if (!seen.has(key)) { seen.add(key); run = [step]; return { verdict: null }; }
     run.push(step);
     const stale = run.slice(1);
@@ -136,6 +155,21 @@ function stuckWatch(now = Date.now) {
     const n = repeats(NUDGE.within);
     if (n >= NUDGE.times) return { verdict: 'nudge', times: n };
     return stale.length >= NUDGE.stale ? { verdict: 'nudge', loop: stale.length } : { verdict: null };
+  };
+  const check = async (calls, results, ctx) => {
+    const tab = safe(() => ctx?.tabs?.active);
+    let page = '';
+    try { page = (await ctx?.pageState?.(VOLATILE.source)) || ''; } catch { /* no page to look at */ }
+    const names = calls.map((c) => c.name);
+    const url = tab?.url || '';
+    const key = fingerprint(calls, results, url, page);
+    // Only actions: looking again at a page that changed a little (a live
+    // cursor, a counter) isn't progress.
+    const work = calls.map((c, i) => [c, results[i]]).filter(([c]) => !isQuiet(c.name) && c.name !== 'wait' && !LOOKS.has(c.name));
+    const workKey = work.length ? fingerprint(work.map(([c]) => c), work.map(([, r]) => r), url, page) : null;
+    const fresh = !!workKey && !seenWork.has(workKey);
+    if (workKey) seenWork.add(workKey);
+    return { ...judge({ key, at: now(), waits: names.includes('wait'), looks: names.every((n) => n === 'wait' || LOOKS.has(n)) }), fresh };
   };
   check.heard = () => { run = [{ key: null, at: now(), waits: false, looks: false }]; };
   return check;
@@ -173,7 +207,7 @@ async function runToolCall(call, env) {
     if (decision === 'stop' || signal?.aborted) throw abortError();
     if (decision === 'deny') {
       emit({ type: 'step_done', id: call.id, status: 'denied' });
-      return { text: 'The user denied this action. Do not retry it. Explain what you were trying to do, or ask the user how they want to proceed.', label };
+      return { text: 'The user denied this action. Do not retry it. Explain what you were trying to do, or ask the user how they want to proceed.', label, denied: true };
     }
     if (decision === 'task') grants.add(tool.name);
   }
@@ -194,7 +228,7 @@ async function runToolCall(call, env) {
 
 async function runAgent({
   model, messages, tools, systemPrompt, chat, approve, getMode, emit, signal, ctx,
-  maxSteps = MAX_STEPS, grants = new Set(), takeQueued = null, quickStart = false,
+  maxSteps = MAX_STEPS, grants = new Set(), takeQueued = null, quickStart = false, blockedSteps = true,
 }) {
   const byName = new Map(tools.map((t) => [t.name, t]));
   // Messages the person sent (typed or said) while Lumio was working join the
@@ -218,7 +252,16 @@ async function runAgent({
   // needs judgment (an error, a new message, research results, every 10th
   // step) gets the full effort again.
   let quick = quickStart; // a voice message: the first answer is quick too, so it starts talking sooner
-  const stuck = stuckWatch();
+  const stuck = stuckWatch(Date.now, (name) => !!byName.get(name)?.quiet);
+  // Keep going (KEEP_GOING): this run's checklist as update_plan last set it,
+  // how many times Lumio has told it to carry on since it last made progress,
+  // the most plan steps done so far, and whether its next answer may be for
+  // the person: they just said something, denied an action, or a field was
+  // left for them to fill (passwords, cards). That lasts until it makes
+  // progress: looking (a screenshot, read_page) before it asks doesn't end it.
+  let plan = null;
+  let pushes = 0;
+  let theirTurn = false;
 
   for (let step = 0; step < maxSteps; step++) {
     if (signal?.aborted) throw abortError();
@@ -247,7 +290,20 @@ async function runAgent({
     if (result.content) emit({ type: 'text_end' });
 
     if (!calls.length) {
-      if (absorb()) { quick = false; continue; } // they said something while it answered: answer that too
+      if (absorb()) { quick = false; theirTurn = true; continue; } // they said something while it answered: answer that too
+      // Steps left on its checklist and nothing it's waiting on the person
+      // for: it isn't done, so it keeps going (not near the safety ceiling).
+      const left = unfinished(plan);
+      // Already told once and its answer is a question: it's asking the person.
+      const asks = pushes > 0 && /\?\s*$/.test(result.content || '');
+      if (left.length && !plan.some((s) => s.status === 'blocked') && !theirTurn && !asks && pushes < KEEP_GOING
+        && result.finishReason !== 'length' && !signal?.aborted && maxSteps - (step + 1) > WRAP_UP) {
+        pushes++;
+        messages.push({ role: 'user', content: keepGoingNote(left, blockedSteps) });
+        emit({ type: 'continued', left: left.length, steps: left.map((s) => s.title) });
+        quick = false;
+        continue;
+      }
       const reason = result.finishReason === 'length' ? 'length' : 'complete';
       emit({ type: 'done', reason, timing: timing(step + 1) });
       return { steps: step + 1, reason };
@@ -256,12 +312,22 @@ async function runAgent({
     const images = [];
     const results = [];
     let trouble = false;
+    let finished = false;
+    let needsPerson = false; // an action they denied, or a field left for them
     for (const call of calls) {
       const toolStart = Date.now();
       const out = await runToolCall(call, env);
       toolMs += Date.now() - toolStart;
       const text = out.text || 'Done.';
       if (/^(Error|Refused)\b/.test(text) || out.status === 'blocked') trouble = true;
+      if (out.denied || out.status === 'blocked') needsPerson = true;
+      if (out.plan) {
+        // A step it had on the checklist, now done (an invented step added
+        // as done isn't progress).
+        const open = new Set(unfinished(plan).map((s) => s.title));
+        if (out.plan.some((s) => s.status === 'done' && open.has(s.title))) finished = true;
+        plan = out.plan;
+      }
       messages.push({ role: 'tool', tool_call_id: call.id, content: text });
       if (out.image) images.push(out.image);
       results.push({ text, sig: out.sig, label: out.label || call.name });
@@ -274,7 +340,13 @@ async function runAgent({
     // Doing the same thing again with the same result: first a note to try
     // something else, then the task ends (unless the person just said something).
     const said = takeQueued?.() || [];
-    const { verdict, times, loop, waiting, minutes } = await stuck(calls, results, ctx);
+    const { verdict, times, loop, waiting, minutes, fresh } = await stuck(calls, results, ctx);
+    // Progress (keep going counts from here again): a plan step done, or work
+    // it hadn't done before (not just the checklist itself).
+    if (finished || fresh) pushes = 0;
+    // Waiting on the person from this step on, or no longer once it moves on.
+    if (needsPerson) theirTurn = true;
+    else if (finished || fresh) theirTurn = false;
     if (said.length) stuck.heard();
     else if (verdict === 'nudge') {
       last.content += waiting
@@ -300,6 +372,7 @@ async function runAgent({
       });
     }
     const heard = absorb(said);
+    if (heard) theirTurn = true; // its next answer may be for them
     if (!heard && verdict === 'stop') {
       const what = results.map((r) => r.label).join(', ').slice(0, 80);
       const waited = waiting ? { waited: minutes } : {}; // it gave up waiting: for how many minutes nothing changed

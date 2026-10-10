@@ -1,6 +1,9 @@
 // Browser tools: read and operate web pages in Lumio's own tabs. Input is
-// sent as real (trusted) mouse/keyboard events via webContents.sendInputEvent.
+// sent as real (trusted) mouse/keyboard events via webContents.sendInputEvent
+// (in an embedded frame, through DevTools' Input domain: frames.js).
+const crypto = require('crypto');
 const scripts = require('./page-scripts');
+const frames = require('./frames');
 const { parseInput, displayUrl } = require('../../omnibox');
 const { markSynthetic } = require('../../synthetic-input');
 const { classify } = require('../../external-protocols');
@@ -43,6 +46,13 @@ function inPage(wc, fn, arg = {}) {
 }
 
 function wait(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+// The top page's runner for frames.js (Lumio's isolated world, with the dialog check).
+const topRun = (wc) => (fn, arg) => inPage(wc, fn, arg);
+// The embedded frames pageState looks at too: those the tab's last read_page
+// read that show much of the page (Excel's workbook), and those Lumio acted in
+// since (not an ad or a ticker that changes all the time).
+const frameReads = new WeakMap(); // webContents -> { big: [frame id], acted: Set(frame id) }
 
 // Resolves once the page stops loading (or after `max` ms).
 function settle(wc, max = 8000) {
@@ -113,11 +123,63 @@ function pageLine(wc) {
   return `Page is now: "${wc.getTitle()}" — ${wc.getURL()}${note ? `\n${note}` : ''}`;
 }
 
+// The embedded frame a ref from read_page is in (null: the top page).
+function refFrame(ctx, tab, wc, ref) {
+  const id = ctx.refs?.get(tab.id)?.[ref]?.frame;
+  if (id == null) return null;
+  const frame = frames.byId(wc, id);
+  if (!frame) throw new Error(`Element [${ref}] was in an embedded frame that's gone. Call read_page again.`);
+  frameReads.get(wc)?.acted.add(id);
+  return frame;
+}
+
+// What a page script in an embedded frame answers is that frame's word (it
+// runs in the frame's own world): its words in Lumio's replies stay on one
+// short line, its numbers numbers.
+const oneLine = (v, n) => String(v ?? '').replace(/[\r\n\u2028\u2029\u0085]+/g, ' ').trim().slice(0, n);
+function tidy(res) {
+  if (!res || typeof res !== 'object') return { error: 'The embedded frame didn’t answer. Call read_page again.' };
+  const out = { ...res };
+  if (out.error) out.error = `The embedded frame says: ${oneLine(out.error, 200)}`;
+  for (const k of ['selected', 'covered']) if (out[k] != null) out[k] = oneLine(out[k], 80);
+  for (const k of ['scrollY', 'scrollHeight', 'y', 'height', 'vh']) if (k in out && !Number.isFinite(out[k])) out[k] = 0;
+  return out;
+}
+
+// Whether a ref from read_page was in an embedded frame (whatever became of it).
+const frameRef = (ctx, tab, ref) => ctx.refs?.get(tab.id)?.[ref]?.frame != null;
+
+// A page script in the top page, or in the frame a ref is in.
+const runIn = (wc, frame, fn, arg) => (frame ? frames.inFrame(frame, fn, arg).then(tidy) : inPage(wc, fn, arg));
+
+// Where the element with this ref is (scripts.locate): x, y in the top page's
+// CSS px, an element in a frame measured out through the frames around it.
+const locateRef = (wc, frame, ref) => (frame ? frames.place(frame, ref, frames.runner(topRun(wc), wc.mainFrame)) : inPage(wc, scripts.locate, { ref }));
+
+// Payment providers' fields in their own frames (frames.js PAYMENT_HOSTS),
+// and focus in a frame that can't be checked, stay the person's.
+const paymentRefusal = (host) => ({ text: `Refused: that's in a payment frame (from ${host}). Ask the user to fill in payment details themselves.`, summary: 'Payment field, left for you', status: 'blocked' });
+const uncheckedRefusal = () => ({ text: 'Refused: focus is in an embedded frame Lumio can’t check for password, payment or ID fields. Ask the user to type there themselves.', summary: 'Unchecked field, left for you', status: 'blocked' });
+
+// Where focus is after a click on an element in `frame` (frames.focus);
+// elsewhere: in another embedded frame than that one (or one in it), where
+// the text would go instead (asked again once: the browser may not know yet).
+async function focusAfterClick(wc, frame) {
+  for (let tries = 0; ; tries++) {
+    const focus = await frames.focus(wc, topRun(wc));
+    if (!frame || focus.sensitive || focus.unknown || !focus.frame || frames.inside(focus.frame, frame)) return focus;
+    if (tries) return { ...focus, elsewhere: true };
+    await wait(120);
+  }
+}
+
 function refName(ctx, tabId, ref) {
   const tab = tabId ? ctx.tabs.get(tabId) : ctx.tabs.active;
   const meta = tab && ctx.refs.get(tab.id);
   const name = meta?.[ref]?.name;
-  return name ? `“${name.length > 40 ? name.slice(0, 40) + '…' : name}”` : `element [${ref}]`;
+  // An element in an embedded frame says which site's it is (the frame named it).
+  const site = meta?.[ref]?.site ? ` in a frame from ${meta[ref].site}` : '';
+  return `${name ? `“${name.length > 40 ? name.slice(0, 40) + '…' : name}”` : `element [${ref}]`}${site}`;
 }
 
 function activeHost(ctx, tabId) {
@@ -152,6 +214,15 @@ async function mouseClick(wc, xDip, yDip, count = 1, button = 'left') {
   }
 }
 
+// A click at a point on the page (the top page's CSS px). An element in an
+// embedded frame gets it through DevTools, which reaches frames from other
+// sites too; the top page's (or when DevTools can't attach), sendInputEvent's in DIPs.
+async function clickAt(wc, x, y, count, inFrame) {
+  if (inFrame && await frames.click(wc, x, y, count)) return;
+  const z = wc.getZoomFactor();
+  await mouseClick(wc, Math.round(x * z), Math.round(y * z), count);
+}
+
 const KEY_NAMES = {
   enter: 'Enter', return: 'Enter', tab: 'Tab', esc: 'Escape', escape: 'Escape', backspace: 'Backspace',
   delete: 'Delete', del: 'Delete', space: 'Space', up: 'Up', down: 'Down', left: 'Left', right: 'Right',
@@ -160,7 +231,9 @@ const KEY_NAMES = {
 };
 const MODS = { cmd: 'meta', command: 'meta', meta: 'meta', ctrl: 'control', control: 'control', alt: 'alt', option: 'alt', opt: 'alt', shift: 'shift' };
 
-function pressKey(wc, combo) {
+// "cmd+shift+z" -> the key, its keyCode name, the modifiers, and the
+// webContents editing command it is (edit), if any.
+function parseKeys(combo) {
   const parts = String(combo).split('+').map((p) => p.trim()).filter(Boolean);
   const modifiers = [];
   let key = '';
@@ -170,13 +243,15 @@ function pressKey(wc, combo) {
   }
   if (!key) throw new Error(`No key in "${combo}".`);
   const lower = key.toLowerCase();
-  // Editing shortcuts go through webContents (sendInputEvent bypasses the menu on macOS).
-  if (modifiers.includes('meta') && key.length === 1) {
-    const shift = modifiers.includes('shift');
-    const edit = { a: 'selectAll', c: 'copy', v: 'paste', x: 'cut', z: shift ? 'redo' : 'undo' }[lower];
-    if (edit) { wc[edit](); return; }
-  }
-  const keyCode = KEY_NAMES[lower] || (key.length === 1 ? key.toUpperCase() : key);
+  const edit = modifiers.includes('meta') && key.length === 1 ? { a: 'selectAll', c: 'copy', v: 'paste', x: 'cut', z: modifiers.includes('shift') ? 'redo' : 'undo' }[lower] || null : null;
+  return { key, keyCode: KEY_NAMES[lower] || (key.length === 1 ? key.toUpperCase() : key), modifiers, edit };
+}
+
+function pressKey(wc, combo) {
+  const { key, keyCode, modifiers, edit } = parseKeys(combo);
+  // Editing shortcuts go through webContents (sendInputEvent bypasses the menu
+  // on macOS); they reach the focused frame, wherever it is.
+  if (edit) { wc[edit](); return; }
   markSynthetic(wc); // not the person: Esc here doesn't stop Lumio
   wc.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
   const plain = !modifiers.some((m) => m !== 'shift');
@@ -188,6 +263,27 @@ function pressKey(wc, combo) {
   wc.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
 }
 
+// Keys and text for whatever has focus (frames.focus): in an embedded frame
+// through DevTools, which sends them to that frame even when it runs in
+// another process (sendInputEvent and insertText only reach the top page's).
+async function sendKeys(wc, combo, focus) {
+  if (focus?.inFrame) {
+    const parsed = parseKeys(combo);
+    if (!parsed.edit && await frames.keys(wc, parsed)) return;
+  }
+  pressKey(wc, combo);
+}
+async function typeText(wc, focus, text) {
+  if (focus?.inFrame && await frames.insertText(wc, text)) return;
+  await wc.insertText(text);
+}
+
+// Excel for the web's workbook (a frame from officeapps.live.com, /x/ for Excel).
+const EXCEL_WEB = /^https:\/\/([^/?#]+\.officeapps\.live\.com\/x\/|excel\.cloud\.microsoft\/)/i;
+// A page's own elements and text, and its embedded frames' together, at most.
+const PAGE_ELEMENTS = 220;
+const PAGE_TEXT = 7000;
+
 async function thumbOf(image, width = 320) {
   return 'data:image/jpeg;base64,' + image.resize({ width, quality: 'good' }).toJPEG(70).toString('base64');
 }
@@ -197,7 +293,7 @@ const tools = [
     name: 'read_page',
     risk: 'read',
     icon: 'page',
-    description: 'Read a tab: its URL, title, the interactive elements (with [ref] numbers for click/type) and the visible text. Call again after the page changes; refs are renumbered each time.',
+    description: 'Read a tab: its URL, title, the interactive elements (with [ref] numbers for click/type) and the visible text, with those of the embedded frames shown on it. Call again after the page changes; refs are renumbered each time.',
     parameters: {
       type: 'object',
       properties: {
@@ -209,8 +305,19 @@ const tools = [
     async run(a, ctx) {
       const { tab, wc } = tabFor(ctx, a.tab_id);
       if (wc.isLoading()) await settle(wc, 6000);
-      const snap = await inPage(wc, scripts.snapshot, { maxText: a.include_text === false ? 0 : 7000 });
-      ctx.refs.set(tab.id, snap.meta);
+      const withText = a.include_text !== false;
+      // Embedded frames shown on the page (frames.js) share the budget with
+      // it, by how much of the page they cover; the rest of it goes to them.
+      const run = frames.runner(topRun(wc), wc.mainFrame);
+      const found = frames.childrenOf(wc.mainFrame).length ? await frames.survey(wc.mainFrame, run).catch(() => null) : null;
+      const cover = found ? Math.min(0.8, frames.coverage(found)) : 0;
+      const snap = await inPage(wc, scripts.snapshot, {
+        max: Math.max(60, Math.round(PAGE_ELEMENTS * (1 - cover))),
+        maxText: withText ? Math.max(1500, Math.round(PAGE_TEXT * (1 - cover))) : 0,
+      });
+      const meta = { ...snap.meta };
+      ctx.refs.set(tab.id, meta); // the page's refs, whatever its frames do
+      frameReads.set(wc, { big: [], acted: new Set() });
       const parts = [
         `Tab ${tab.id}: "${snap.title}"`,
         `URL: ${snap.url}`,
@@ -225,10 +332,32 @@ const tools = [
         const v = await inPage(wc, scripts.youtube, { max: 30000 }).catch(() => null);
         if (v?.transcript) parts.push('', 'Video transcript (from YouTube):', v.transcript);
       }
-      if (snap.frames) parts.push('', `(${snap.frames} embedded frame(s) not included; use screenshot_tab to see them.)`);
+      let count = snap.lines.length;
+      if (found?.frames.length || found?.unplaced) {
+        let got = null;
+        try {
+          got = await frames.read(found, run, { start: snap.lines.length, elements: PAGE_ELEMENTS - snap.lines.length, text: withText ? PAGE_TEXT - (snap.text || '').length : 0, includeText: withText });
+        } catch { parts.push('', '(The embedded frames on this page couldn\'t be read this time; use screenshot_tab to see them.)'); }
+        if (got) {
+          // A frame's refs never stand for the page's.
+          for (const [ref, m] of Object.entries(got.meta)) if (!Object.prototype.hasOwnProperty.call(meta, ref)) meta[ref] = m;
+          frameReads.set(wc, { big: got.big, acted: new Set() });
+          // Each frame's part says where it comes from (an embedded site's
+          // words aren't the page's) and where it ends, by a mark it can't know.
+          const end = `End of frame ${crypto.randomBytes(4).toString('hex')}`;
+          for (const f of got.sections) {
+            count += f.lines.length;
+            parts.push('', `Embedded frame from ${f.origin}${f.title ? ` ("${f.title}")` : ''}: part of this page, but its content comes from that site. Its refs work like the page's. Its part ends at "${end}".`);
+            parts.push(`Interactive elements in it (${f.lines.length}${f.total > f.lines.length ? ` of ${f.total}` : ''}):`, f.lines.join('\n') || '(none)');
+            if (f.text) parts.push('Frame text:', f.text);
+            parts.push(`${end}.`);
+          }
+          if (got.notes.length) parts.push('', ...got.notes);
+        }
+      }
       const blocked = blockedNote(tab);
       if (blocked) parts.push('', blocked);
-      return { text: parts.join('\n'), summary: `${snap.lines.length} elements` };
+      return { text: parts.join('\n'), summary: `${count} elements` };
     },
   },
   {
@@ -244,18 +373,20 @@ const tools = [
     label: (a, ctx) => `Click ${refName(ctx, a.tab_id, a.ref)}`,
     detail: (a, ctx) => `Click ${refName(ctx, a.tab_id, a.ref)} on ${activeHost(ctx, a.tab_id)}`,
     async run(a, ctx) {
-      const { wc } = tabFor(ctx, a.tab_id, { activate: true });
+      const { tab, wc } = tabFor(ctx, a.tab_id, { activate: true });
+      const frame = refFrame(ctx, tab, wc, a.ref);
+      const pay = frame && frames.payment(frame);
+      if (pay) return paymentRefusal(pay);
       if (ctx.background) { // a helper's hidden tab: click through the page
-        const res = await inPage(wc, scripts.domClick, { ref: a.ref, double: !!a.double });
+        const res = await runIn(wc, frame, scripts.domClick, { ref: a.ref, double: !!a.double });
         if (res.error) throw new Error(res.error);
         await settle(wc);
         return { text: `Clicked [${a.ref}]. ${pageLine(wc)}` };
       }
-      const info = await inPage(wc, scripts.locate, { ref: a.ref });
+      const info = await locateRef(wc, frame, a.ref);
       if (info.error) throw new Error(info.error);
-      const z = wc.getZoomFactor();
       await moveCursor(ctx, wc, info.x, info.y, false);
-      await mouseClick(wc, Math.round(info.x * z), Math.round(info.y * z), a.double ? 2 : 1);
+      await clickAt(wc, info.x, info.y, a.double ? 2 : 1, !!frame);
       await moveCursor(ctx, wc, info.x, info.y, true);
       await settle(wc);
       const note = info.covered ? `\nNote: the click point was covered by ${info.covered}; the click may have hit that instead.` : '';
@@ -281,31 +412,36 @@ const tools = [
     label: (a, ctx) => `Type “${String(a.text).slice(0, 30)}${String(a.text).length > 30 ? '…' : ''}” into ${refName(ctx, a.tab_id, a.ref)}`,
     detail: (a, ctx) => `Type into ${refName(ctx, a.tab_id, a.ref)} on ${activeHost(ctx, a.tab_id)}${a.submit ? ' and press Enter' : ''}:\n${a.text}`,
     async run(a, ctx) {
-      const { wc } = tabFor(ctx, a.tab_id, { activate: true });
-      const info = await inPage(wc, scripts.locate, { ref: a.ref });
+      const { tab, wc } = tabFor(ctx, a.tab_id, { activate: true });
+      const frame = refFrame(ctx, tab, wc, a.ref);
+      const pay = frame && frames.payment(frame);
+      if (pay) return paymentRefusal(pay);
+      // A helper's hidden tab only needs to know what the field is, not where it is on the page.
+      const info = await (ctx.background && frame ? runIn(wc, frame, scripts.locate, { ref: a.ref }) : locateRef(wc, frame, a.ref));
       if (info.error) throw new Error(info.error);
       if (info.sensitive) {
         return { text: 'Refused: this looks like a password, payment, or ID field. Ask the user to fill it in themselves.', summary: 'Sensitive field, left for you', status: 'blocked' };
       }
       if (info.isSelect) throw new Error('That element is a dropdown; use select_option.');
       if (ctx.background) { // a helper's hidden tab: type through the page
-        const res = await inPage(wc, scripts.domType, { ref: a.ref, text: String(a.text), clear: a.clear !== false, submit: !!a.submit });
+        const res = await runIn(wc, frame, scripts.domType, { ref: a.ref, text: String(a.text), clear: a.clear !== false, submit: !!a.submit });
         if (res.error) throw new Error(res.error);
         if (a.submit) await settle(wc); else await wait(150);
         return { text: `Typed into [${a.ref}]${a.submit ? ' and pressed Enter' : ''}. ${pageLine(wc)}` };
       }
-      const z = wc.getZoomFactor();
       await moveCursor(ctx, wc, info.x, info.y, false);
-      await mouseClick(wc, Math.round(info.x * z), Math.round(info.y * z));
+      await clickAt(wc, info.x, info.y, 1, !!frame);
       await moveCursor(ctx, wc, info.x, info.y, true);
       await wait(60);
-      const focus = await inPage(wc, scripts.focusCheck);
+      const focus = await focusAfterClick(wc, frame);
       if (focus.sensitive) {
         return { text: 'Refused: focus landed on a password, payment, or ID field. Ask the user to fill it in themselves.', summary: 'Sensitive field, left for you', status: 'blocked' };
       }
-      if (a.clear !== false) await inPage(wc, scripts.selectContents, { ref: a.ref });
-      await wc.insertText(String(a.text));
-      if (a.submit) { await wait(120); pressKey(wc, 'Enter'); await settle(wc); } else await wait(150);
+      if (focus.unknown) return uncheckedRefusal();
+      if (focus.elsewhere) throw new Error(`The click on [${a.ref}] put focus in another embedded frame, not that field's. Call read_page again.`);
+      if (a.clear !== false) await runIn(wc, frame, scripts.selectContents, { ref: a.ref });
+      await typeText(wc, focus, String(a.text));
+      if (a.submit) { await wait(120); await sendKeys(wc, 'Enter', focus); await settle(wc); } else await wait(150);
       return { text: `Typed into [${a.ref}]${a.submit ? ' and pressed Enter' : ''}. ${pageLine(wc)}` };
     },
   },
@@ -326,30 +462,38 @@ const tools = [
     },
     detail: (a, ctx) => `Paste into ${a.ref ? refName(ctx, a.tab_id, a.ref) : 'the selected place'} on ${activeHost(ctx, a.tab_id)}:\n${a.text}`,
     async run(a, ctx) {
-      const { wc } = tabFor(ctx, a.tab_id, { activate: true });
+      const { tab, wc } = tabFor(ctx, a.tab_id, { activate: true });
       const text = String(a.text ?? '');
       if (!text) throw new Error('Nothing to paste.');
+      let clicked = null; // the frame clicked into (or 'page')
       if (a.ref) {
-        const info = await inPage(wc, scripts.locate, { ref: a.ref });
+        const frame = refFrame(ctx, tab, wc, a.ref);
+        const pay = frame && frames.payment(frame);
+        if (pay) return paymentRefusal(pay);
+        const info = await locateRef(wc, frame, a.ref);
         if (info.error) throw new Error(info.error);
         if (info.sensitive) return { text: 'Refused: this looks like a password, payment, or ID field. Ask the user to fill it in themselves.', summary: 'Sensitive field, left for you', status: 'blocked' };
-        const z = wc.getZoomFactor();
         await moveCursor(ctx, wc, info.x, info.y, false);
-        await mouseClick(wc, Math.round(info.x * z), Math.round(info.y * z));
+        await clickAt(wc, info.x, info.y, 1, !!frame);
         await moveCursor(ctx, wc, info.x, info.y, true);
         await wait(80);
+        clicked = frame || 'page';
       }
-      const focus = await inPage(wc, scripts.focusCheck).catch(() => ({}));
+      const focus = await focusAfterClick(wc, clicked === 'page' ? null : clicked).catch(() => ({}));
       if (focus.sensitive) return { text: 'Refused: focus is on a password, payment, or ID field. Ask the user to fill it in themselves.', summary: 'Sensitive field, left for you', status: 'blocked' };
+      if (focus.unknown) return uncheckedRefusal();
+      if (focus.elsewhere) throw new Error(`The click on [${a.ref}] put focus in another embedded frame, not that field's. Call read_page again.`);
       // Through the real clipboard (sites like Google Sheets only split rows and
       // columns on a real paste); whatever the user had copied is put back.
       const { clipboard } = require('electron');
       // Google Sheets: a cell being edited takes the whole paste as its text,
       // so leave editing first (Esc keeps the cell selected), and paste the rows
-      // as a table too, which Sheets always spreads over the cells.
+      // as a table too, which Sheets always spreads over the cells. Excel for
+      // the web too (in its workbook's frame): Esc first, then the rows.
       const sheet = /^https:\/\/docs\.google\.com\/spreadsheets\//.test(wc.getURL());
+      const excel = EXCEL_WEB.test(focus.url || wc.getURL());
       const grid = /[\t\n]/.test(text.trim());
-      if (sheet && grid) { pressKey(wc, 'Escape'); await wait(120); }
+      if ((sheet || excel) && grid) { await sendKeys(wc, 'Escape', focus); await wait(120); }
       const esc = (v) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       const table = sheet && grid ? `<table>${text.replace(/\r/g, '').replace(/\n+$/, '').split('\n').map((row) => `<tr>${row.split('\t').map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</table>` : null;
       const formats = clipboard.availableFormats();
@@ -377,8 +521,11 @@ const tools = [
     label: (a, ctx) => `Choose “${a.value}” in ${refName(ctx, a.tab_id, a.ref)}`,
     detail: (a, ctx) => `Choose “${a.value}” in ${refName(ctx, a.tab_id, a.ref)} on ${activeHost(ctx, a.tab_id)}`,
     async run(a, ctx) {
-      const { wc } = tabFor(ctx, a.tab_id, { activate: true });
-      const res = await inPage(wc, scripts.selectOption, { ref: a.ref, value: a.value });
+      const { tab, wc } = tabFor(ctx, a.tab_id, { activate: true });
+      const frame = refFrame(ctx, tab, wc, a.ref);
+      const pay = frame && frames.payment(frame);
+      if (pay) return paymentRefusal(pay);
+      const res = await runIn(wc, frame, scripts.selectOption, { ref: a.ref, value: a.value });
       if (res.error) throw new Error(res.error);
       await wait(200);
       return `Selected "${res.selected}".`;
@@ -394,11 +541,26 @@ const tools = [
     detail: (a, ctx) => `Press ${a.keys} on ${activeHost(ctx, a.tab_id)}`,
     async run(a, ctx) {
       const { wc } = tabFor(ctx, a.tab_id, { activate: true });
+      const parsed = parseKeys(a.keys);
       const printable = String(a.keys).length === 1 || /^(shift\+).$/i.test(a.keys) || /\+v$/i.test(a.keys);
-      if (printable && (await inPage(wc, scripts.focusCheck)).sensitive) {
+      const plain = parsed.modifiers.every((m) => m === 'shift');
+      // Keys that only leave a field (Tab, Esc) or submit it (Enter), and
+      // those that change or copy what's in it (typing, Backspace, Delete,
+      // cut, copy, paste, select all, undo).
+      const leaves = plain && (parsed.keyCode === 'Tab' || parsed.keyCode === 'Escape');
+      const submits = plain && parsed.keyCode === 'Enter';
+      const edits = printable || !!parsed.edit || parsed.keyCode === 'Backspace' || parsed.keyCode === 'Delete';
+      // Where focus is decides where the keys go; Enter, Tab or Esc leave the field as it is.
+      let focus = {};
+      try { focus = await frames.focus(wc, topRun(wc), { keep: leaves || submits }); } catch (err) { if (edits) throw err; }
+      // A payment provider's field: nothing but leaving it. A password, card or
+      // ID field: nothing but leaving or submitting it (the user filled it in).
+      if (focus.payment && !leaves) return paymentRefusal(focus.payment);
+      if (focus.sensitive && !leaves && !submits) {
         return { text: 'Refused: the focused field is a password, payment, or ID field. Ask the user to fill it in themselves.', summary: 'Sensitive field, left for you', status: 'blocked' };
       }
-      pressKey(wc, a.keys);
+      if (focus.unknown && edits) return uncheckedRefusal();
+      await sendKeys(wc, a.keys, focus);
       await settle(wc, 4000);
       return `Pressed ${a.keys}. ${pageLine(wc)}`;
     },
@@ -416,30 +578,45 @@ const tools = [
     label: (a) => `Scroll ${a.direction}`,
     async run(a, ctx) {
       const { tab, wc } = tabFor(ctx, a.tab_id, { activate: true });
+      let frame = null;
+      try { frame = a.ref ? refFrame(ctx, tab, wc, a.ref) : null; } catch { /* its frame is gone: scroll the page */ }
+      if (frame && frames.payment(frame)) frame = null; // nothing runs there: the page scrolls
       if (ctx.background) { // a helper's hidden tab: scroll through the page
-        const res = await inPage(wc, scripts.domScroll, { ref: a.ref, down: a.direction !== 'up', amount: Math.min(5, Math.max(0.1, a.amount || 0.8)) });
+        const res = await runIn(wc, frame, scripts.domScroll, { ref: frame || !a.ref || !frameRef(ctx, tab, a.ref) ? a.ref : 0, down: a.direction !== 'up', amount: Math.min(5, Math.max(0.1, a.amount || 0.8)) });
         await wait(300);
-        return `Scrolled ${a.direction}. Now at ${res.scrollY} of ${res.scrollHeight}px.`;
+        return `Scrolled ${a.direction}${frame ? ' in the embedded frame' : ''}. Now at ${res.scrollY} of ${res.scrollHeight}px.`;
       }
       const bounds = tab.view.getBounds();
+      const z = wc.getZoomFactor();
       let x = Math.round(bounds.width / 2);
       let y = Math.round(bounds.height / 2);
-      if (a.ref) {
-        const info = await inPage(wc, scripts.locate, { ref: a.ref });
-        if (!info.error) { const z = wc.getZoomFactor(); x = Math.round(info.x * z); y = Math.round(info.y * z); }
+      let at = null; // the point, in the page's CSS px, when it's in an embedded frame
+      let located = false;
+      if (a.ref && (frame || !frameRef(ctx, tab, a.ref))) {
+        const info = await locateRef(wc, frame, a.ref).catch(() => ({ error: true }));
+        if (!info.error) { x = Math.round(info.x * z); y = Math.round(info.y * z); located = true; if (frame) at = info; }
       }
+      // The middle of the page is an embedded frame that's most of it (Excel's
+      // workbook), or the page itself can't scroll that way: the wheel goes in there.
+      const middle = located ? null : await inPage(wc, scripts.scrollInfo).catch(() => null);
+      const intoMiddle = middle?.frame > 0 && (middle.frame >= 0.6 || !(a.direction === 'up' ? middle.up : middle.down));
+      if (intoMiddle) at = { x: x / z, y: y / z };
       // Chromium caps each wheel event, so big scrolls go out as several.
       let px = Math.round(bounds.height * Math.min(5, Math.max(0.1, a.amount || 0.8)));
-      wc.sendInputEvent({ type: 'mouseMove', x, y });
+      let devtools = !!at;
+      if (!devtools) wc.sendInputEvent({ type: 'mouseMove', x, y });
       while (px > 0) {
         const step = Math.min(px, Math.round(bounds.height * 0.8));
-        wc.sendInputEvent({ type: 'mouseWheel', x, y, deltaX: 0, deltaY: a.direction === 'up' ? step : -step, canScroll: true });
+        if (devtools) devtools = await frames.wheel(wc, at.x, at.y, (a.direction === 'up' ? -step : step) / z);
+        if (!devtools) wc.sendInputEvent({ type: 'mouseWheel', x, y, deltaX: 0, deltaY: a.direction === 'up' ? step : -step, canScroll: true });
         px -= step;
         await wait(120);
       }
       await wait(350);
+      const inner = located && frame ? await runIn(wc, frame, scripts.scrollInfo).catch(() => null) : null;
+      if (inner && !inner.error) return `Scrolled ${a.direction} in the embedded frame. Now at ${inner.y} of ${inner.height}px (viewport ${inner.vh}px).`;
       const s = await inPage(wc, scripts.scrollInfo);
-      return `Scrolled ${a.direction}. Now at ${s.y} of ${s.height}px (viewport ${s.vh}px).`;
+      return `Scrolled ${a.direction}${intoMiddle ? ' (in the embedded frame in the middle of the page)' : ''}. Now at ${s.y} of ${s.height}px (viewport ${s.vh}px).`;
     },
   },
   {
@@ -487,9 +664,11 @@ const tools = [
       const bounds = tab.view.getBounds();
       await ctx.onCapture?.(wc, true); // keep Lumio's own glow out of the picture
       await inPage(wc, scripts.maskCards, { on: true }).catch(() => {}); // and card numbers
+      await frames.mask(wc, true); // in frames too (a payment provider's card fields)
       let img;
       try { img = await wc.capturePage(); } finally {
         await inPage(wc, scripts.maskCards, { on: false }).catch(() => {});
+        await frames.mask(wc, false);
         await ctx.onCapture?.(wc, false);
       }
       const width = Math.min(1280, bounds.width);
@@ -518,8 +697,13 @@ const tools = [
       const x = Math.round(a.x / shot.scale);
       const y = Math.round(a.y / shot.scale);
       const z = wc.getZoomFactor();
+      // An embedded frame there gets the click through DevTools (the view's
+      // own input doesn't reach a frame from another site); never a payment
+      // provider's, or one that may be.
+      const where = await frames.frameAt(wc, topRun(wc), { x: x / z, y: y / z }).catch(() => ({ frame: null }));
+      if (where.payment) return paymentRefusal(where.payment);
       await moveCursor(ctx, wc, x / z, y / z, false);
-      await mouseClick(wc, x, y, a.double ? 2 : 1);
+      if (!(where.frame && await frames.click(wc, x / z, y / z, a.double ? 2 : 1))) await mouseClick(wc, x, y, a.double ? 2 : 1);
       await moveCursor(ctx, wc, x / z, y / z, true);
       await settle(wc);
       return `Clicked. ${pageLine(wc)}`;
@@ -604,10 +788,16 @@ const tools = [
 
 // A short hash of what a tab shows (scripts.pageState), so the AI can tell
 // whether its last step changed anything: '' when there's nothing to read.
+// The frames the last read_page read count too (an edit in Excel's workbook).
 async function pageState(tab, volatile) {
   const wc = tab?.view?.webContents;
   if (!wc || wc.isDestroyed() || PRIVATE_PAGE.test(wc.getURL())) return '';
-  return Promise.race([inPage(wc, scripts.pageState, { volatile }), wait(1000).then(() => '')]).catch(() => '');
+  const top = Promise.race([inPage(wc, scripts.pageState, { volatile }), wait(1000).then(() => '')]).catch(() => '');
+  const seen = frameReads.get(wc);
+  const ids = seen ? [...new Set([...seen.big, ...seen.acted])] : [];
+  if (!ids.length) return top;
+  const [page, inFrames] = await Promise.all([top, frames.states(wc, ids, volatile).catch(() => '')]);
+  return inFrames ? `${page}|${inFrames}` : page;
 }
 
 // Removes the fake cursor from every tab (called when a run ends).
@@ -703,4 +893,4 @@ async function tabPdf(tabs, tabId) {
   }
 }
 
-module.exports = { tools, clearCursors, pageState, pageContext, allTabsContext, tabPdf, YOUTUBE_VIDEO, videoText, pressKey, inPage, settle, PRIVATE_PAGE };
+module.exports = { tools, clearCursors, pageState, pageContext, allTabsContext, tabPdf, YOUTUBE_VIDEO, videoText, pressKey, parseKeys, inPage, settle, PRIVATE_PAGE };

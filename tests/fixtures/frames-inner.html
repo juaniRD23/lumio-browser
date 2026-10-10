@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Embedded editor</title>
+  <style>
+    body { margin: 0; padding: 8px; font: 14px/1.3 -apple-system, sans-serif; }
+    input { display: block; margin: 2px 0 8px; width: 220px; height: 22px; }
+    #nested { border: 3px solid #39f; width: 280px; height: 70px; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <form id="f">
+    <label for="customer">Customer</label><input id="customer" name="customer" />
+    <label for="pw">Password</label><input id="pw" type="password" autocomplete="current-password" />
+    <label for="card">Card number</label><input id="card" name="cardnumber" autocomplete="cc-number" />
+    <button id="save">Save</button>
+  </form>
+  <p id="result">Nothing saved yet.</p>
+  <iframe id="nested" title="Nested"></iframe>
+  <script>
+    const other = location.hostname === 'localhost' ? '127.0.0.1' : 'localhost';
+    document.getElementById('nested').src = `http://${other}:${location.port}/frames-nested.html`;
+    // What reached the page, and whether it was real (trusted) input.
+    window.events = [];
+    for (const type of ['click', 'keydown', 'input']) document.addEventListener(type, (e) => window.events.push(`${type}:${e.target.id}:${e.isTrusted}`), true);
+    document.getElementById('f').addEventListener('submit', (e) => {
+      e.preventDefault();
+      document.getElementById('result').textContent = `Saved ${document.getElementById('customer').value}.`;
+    });
+  </script>
+</body>
+</html>

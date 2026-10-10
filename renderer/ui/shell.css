@@ -726,6 +726,10 @@ body.chat-full .suggestions { grid-template-columns: repeat(2, 1fr); max-width: 
 /* Steps to come: text between --dim and --text, an icon fainter than the label. */
 .plan-step.pending { color: color-mix(in srgb, var(--text) 30%, var(--dim)); }
 .plan-step.pending .ic { color: color-mix(in srgb, var(--label) 75%, var(--card)); }
+/* A step that needs the person (blocked): what Lumio needs from them goes under it. */
+.plan-step.blocked .ic { color: var(--warn); }
+.plan-step.blocked .t { font-weight: 500; }
+.plan-step .why { display: block; margin-top: 2px; color: var(--warn-text); font-size: 12px; font-weight: 400; }
 .plan-step.flash { animation: plan-flash .5s var(--ease); }
 .plan-step.done.flash .ic svg { animation: state-in var(--dur-4) var(--ease-spring); }
 .plan-step.done.flash .ic path { stroke-dasharray: 14; animation: draw var(--dur-3) var(--ease-out) var(--dur-1) backwards; }

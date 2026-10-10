@@ -584,6 +584,14 @@ test('browser: capabilities, a streamed step, tool calls, replays and the Free d
   assert.deepEqual(calls.or[0].body.provider.max_price, ceiling(findModel(BROWSER_DEFAULT)));
   assert.deepEqual(calls.or[0].body.tools.map((t) => t.function.name), ['read_page', 'click', 'update_plan']);
   assert.doesNotMatch(calls.or[0].body.messages[0].content, /web_search/, 'older browsers without the research tools aren’t told to use them');
+  // Keep going: long tasks finish every plan step, fix failures, and only stop when the user is truly needed
+  // (this step is from an app that doesn't know the "blocked" plan status, so it isn't told to mark steps blocked).
+  const sys = calls.or[0].body.messages[0].content;
+  assert.match(sys, /Finish every step of the plan: a progress report is not a stopping point/);
+  assert.match(sys, /an error like #REF! or #N\/A, a click that did nothing\), find out why and fix it instead of reporting it/);
+  assert.match(sys, /information you can't find\): then ask exactly that\./);
+  assert.doesNotMatch(sys, /blocked/);
+  assert.deepEqual(calls.or[0].body.tools.find((t) => t.function.name === 'update_plan').function.parameters.properties.steps.items.properties.status.enum, ['pending', 'in_progress', 'done']);
 
   const again = await call('/v1/agent', { token, method: 'POST', body: step({ reasoning: 'high' }) });
   assert.equal(again.headers.get('x-lumio-step-replayed'), 'true');
@@ -657,6 +665,101 @@ test('browser: small slips in tool arguments are fixed, and a bad call gets one 
   const result = retried.find((e) => e.type === 'result');
   assert.deepEqual(result.message.tool_calls.map((c) => [c.id, c.function.arguments]), [['call_y', '{"ref":7}']]);
   assert.equal(sql.prepare("SELECT cost_microusd FROM steps ORDER BY created_at DESC LIMIT 1").get().cost_microusd, 20);
+});
+
+// update_plan's "blocked" status (a step that waits on the person) is newer
+// than Lumio Browser 0.6.7, its Beta 8 and the iPhone apps from then, and the
+// server is deployed before people update. So it's offered only to apps whose
+// steps say they understand it (context.planStatuses, sent once GET /v1/agent
+// lists planStatuses); every other step gets update_plan and the prompt as before.
+// update_plan as the server offered it before "blocked", byte for byte.
+const OLD_UPDATE_PLAN = '{"type":"function","function":{"name":"update_plan","description":"Show or update your step-by-step plan for the current task. The user sees it as a \\"Task progress\\" checklist. Use it for tasks with 3 or more steps: call it before you start, then again whenever a step starts or finishes. Send the whole list every time, keep exactly one step in_progress while you work, and mark every step done when you finish. Skip it for quick questions.","parameters":{"type":"object","properties":{"steps":{"type":"array","minItems":1,"maxItems":12,"items":{"type":"object","properties":{"title":{"type":"string","minLength":1,"maxLength":100,"description":"A short step, like \\"Compare prices\\""},"status":{"type":"string","enum":["pending","in_progress","done"]}},"required":["title","status"],"additionalProperties":false}}},"required":["steps"],"additionalProperties":false}}}';
+const NEW_STATUSES = ['pending', 'in_progress', 'done', 'blocked'];
+
+test('browser: the "blocked" plan status only for apps that say they understand it; older apps get update_plan and the prompt as before', async () => {
+  const { token } = await signIn();
+  const caps = await (await call('/v1/agent', { token })).json();
+  assert.deepEqual(caps.planStatuses, NEW_STATUSES, 'apps learn they may say so');
+  const toolCall = (name, args, id = 'call_1') => sse([{ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id, type: 'function', function: { name, arguments: args } }] }, finish_reason: 'tool_calls' }] }, { choices: [], usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110, cost: 0.00001 } }]);
+  const sent = async (body) => {
+    const before = calls.or.length;
+    const ev = await events(await call('/v1/agent', { token, method: 'POST', body }));
+    await settled();
+    return { ev, requests: calls.or.slice(before).map((c) => c.body) };
+  };
+  const planDef = (body) => body.tools.find((t) => t.function.name === 'update_plan');
+  const newer = { ...context, computer: false, planStatuses: NEW_STATUSES };
+
+  // An older app (Lumio Browser 0.6.7, Beta 8, the iPhone apps from then): no planStatuses.
+  const ios = { platform: 'ios', computer: false, mode: 'ask', timeZone: 'Europe/Madrid', tabCount: 2 };
+  for (const [i, older] of [context, { ...context, computer: false }, ios].entries()) {
+    const { requests: [req] } = await sent(step({ stepId: `old${i}`, context: older }));
+    assert.equal(JSON.stringify(planDef(req)), OLD_UPDATE_PLAN, 'update_plan exactly as before');
+    assert.match(req.messages[0].content, /information you can't find\): then ask exactly that\./);
+    assert.doesNotMatch(req.messages[0].content, /blocked/);
+  }
+  // A newer app: "blocked" with its reason, and the prompt and update_plan say when to use it.
+  const { requests: [nreq] } = await sent(step({ stepId: 'new1', context: newer }));
+  const def = planDef(nreq).function;
+  assert.deepEqual(def.parameters.properties.steps.items.properties.status.enum, NEW_STATUSES);
+  assert.deepEqual(def.parameters.properties.steps.items.properties.reason, { type: 'string', minLength: 0, maxLength: 200, description: 'For a blocked step: what you need from the user' });
+  assert.match(def.description, /mark it blocked with the reason and ask them exactly that/);
+  assert.match(nreq.messages[0].content, /then mark that plan step blocked with the reason, and ask exactly that\./);
+  // The two differ only there: the same prompt and tools otherwise.
+  const { requests: [oreq] } = await sent(step({ stepId: 'old-again', context: { ...context, computer: false } }));
+  assert.equal(nreq.messages[0].content.replace('then mark that plan step blocked with the reason, and ask exactly that.', 'then ask exactly that.'), oreq.messages[0].content);
+  assert.deepEqual(nreq.tools.filter((t) => t.function.name !== 'update_plan'), oreq.tools.filter((t) => t.function.name !== 'update_plan'));
+  // Statuses this server doesn't offer are ignored (a newer app may list more); so is a list without "blocked".
+  for (const [i, planStatuses] of [['pending', 'in_progress', 'done'], ['pending', 'skipped'], []].entries()) {
+    const { requests: [req] } = await sent(step({ stepId: `other${i}`, context: { ...context, planStatuses } }));
+    assert.equal(JSON.stringify(planDef(req)), OLD_UPDATE_PLAN);
+  }
+  const { requests: [more] } = await sent(step({ stepId: 'more', context: { ...context, planStatuses: [...NEW_STATUSES, 'skipped'] } }));
+  assert.ok(planDef(more).function.parameters.properties.steps.items.properties.status.enum.includes('blocked'));
+  // Anything but a short list of status names is refused.
+  for (const [i, planStatuses] of [['blocked', 7], 'blocked', { blocked: true }, Array(17).fill('done'), ['Blocked!'], ['x'.repeat(33)], null].entries()) {
+    assert.equal((await call('/v1/agent', { token, method: 'POST', body: step({ stepId: `bad${i}`, context: { ...context, planStatuses } }) })).status, 400, JSON.stringify(planStatuses));
+  }
+
+  // The model marks a step blocked. A newer app gets it (with its reason, and the model's other words for it)...
+  const blockedPlan = '{"steps":[{"title":"Fill the cart","status":"done"},{"title":"Check out","status":"blocked","reason":"Needs your OK to pay $42.10"},{"title":"Sign in","status":"needs_user"}]}';
+  reply = () => toolCall('update_plan', blockedPlan);
+  const { ev: got } = await sent(step({ stepId: 'new2', context: newer }));
+  assert.deepEqual(JSON.parse(got.find((e) => e.type === 'tool_call').tool_call.function.arguments).steps, [
+    { title: 'Fill the cart', status: 'done' }, { title: 'Check out', status: 'blocked', reason: 'Needs your OK to pay $42.10' }, { title: 'Sign in', status: 'blocked' },
+  ]);
+  // ...an older app never does: such a step comes back "pending" (as those apps take a status
+  // they don't know), without its reason, and without a retry. Its chat may have blocked steps
+  // from a newer app (Lumio Sync) that the model copies, and twice in a row would end the task.
+  const { ev: old, requests } = await sent(step({ stepId: 'old3' }));
+  assert.equal(requests.length, 1, 'no retry');
+  assert.deepEqual(old.filter((e) => e.type === 'tool_call').map((e) => e.tool_call.function.arguments), ['{"steps":[{"title":"Fill the cart","status":"done"},{"title":"Check out","status":"pending"},{"title":"Sign in","status":"pending"}]}']);
+  assert.equal(old.some((e) => e.type === 'error'), false);
+  // Other statuses it doesn't take are still refused, and the model tries again.
+  let n = 0;
+  reply = () => (n++ === 0 ? toolCall('update_plan', '{"steps":[{"title":"Check out","status":"skipped"}]}', 'call_x') : toolCall('update_plan', '{"steps":[{"title":"Check out","status":"pending"}]}', 'call_y'));
+  const { ev: again, requests: retried } = await sent(step({ stepId: 'old4' }));
+  assert.equal(retried.length, 2);
+  assert.match(retried[1].messages.at(-1).content, /steps\[0\]\.status: must be one of "pending", "in_progress", "done"/);
+  assert.deepEqual(again.filter((e) => e.type === 'tool_call').map((e) => e.tool_call.function.arguments), ['{"steps":[{"title":"Check out","status":"pending"}]}']);
+
+  // Earlier plans in a chat's history: an older app's go to the model byte for byte as before,
+  // and blocked ones (from a newer app, on any device) are accepted from any app.
+  reply = () => textReply('OK.');
+  const history = (args) => [
+    { role: 'user', content: 'Order dinner' },
+    { role: 'assistant', content: null, tool_calls: [{ id: 'p1', type: 'function', function: { name: 'update_plan', arguments: args } }] },
+    { role: 'tool', tool_call_id: 'p1', content: 'Plan updated.' },
+    { role: 'user', content: 'Go on' },
+  ];
+  const plain = '{"steps":[{"title":"Look","status":"done"},{"title":"Buy","status":"in_progress"},{"title":"Pay","status":"pending"}]}';
+  for (const [i, c] of [context, newer].entries()) {
+    const { requests: [req] } = await sent(step({ stepId: `hist${i}`, context: c, messages: history(plain) }));
+    assert.equal(req.messages[2].tool_calls[0].function.arguments, plain);
+    const blocked = '{"steps":[{"title":"Look","status":"done"},{"title":"Pay","status":"blocked","reason":"Your OK to pay"}]}';
+    const { requests: [breq] } = await sent(step({ stepId: `histb${i}`, context: c, messages: history(blocked) }));
+    assert.equal(breq.messages[2].tool_calls[0].function.arguments, blocked);
+  }
 });
 
 test('web Chat: people pick a model; bigger ones need a paid plan', async () => {

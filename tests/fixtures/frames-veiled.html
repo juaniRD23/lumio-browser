@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Veiled frames — Test Page</title>
+  <style>
+    body { margin: 0; font: 14px/1.3 -apple-system, sans-serif; }
+    main { display: grid; grid-template-columns: repeat(3, 310px); gap: 10px; padding: 10px; }
+    iframe { width: 300px; height: 150px; border: 0; display: block; }
+    .box { position: relative; width: 300px; height: 150px; }
+    .cover { position: absolute; inset: 0; background: #fff; }
+    #sliver { height: 1px; overflow: hidden; }
+  </style>
+</head>
+<body>
+  <!-- The same frame from another site (signed-in content, say) five ways:
+       in plain view, and four the person can't see: in a 1px-tall box,
+       nearly transparent, under an opaque box, and under an opaque box that
+       lets clicks through. Only the first is read. -->
+  <main>
+    <iframe id="plain" title="Plain"></iframe>
+    <div id="sliver"><iframe id="clipped" title="Clipped"></iframe></div>
+    <iframe id="faint" title="Faint" style="opacity: 0.01"></iframe>
+    <div class="box"><iframe id="under" title="Under"></iframe><div class="cover">Nothing to see</div></div>
+    <div class="box"><iframe id="ghosted" title="Ghosted"></iframe><div class="cover" style="pointer-events: none">Nothing here either</div></div>
+  </main>
+  <script>
+    const other = location.hostname === 'localhost' ? '127.0.0.1' : 'localhost';
+    for (const id of ['plain', 'clipped', 'faint', 'under', 'ghosted']) document.getElementById(id).src = `http://${other}:${location.port}/frames-secret.html?${id}`;
+  </script>
+</body>
+</html>

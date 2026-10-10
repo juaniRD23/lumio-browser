@@ -63,7 +63,7 @@ function trimmedNote(dropped) {
   }
   if (!lines.length && !plan) return [];
   let steps = null;
-  try { steps = JSON.parse(plan).steps.map((p, i) => `${i + 1}. [${p.status}] ${p.title}`).join('\n'); } catch { steps = plan && clip(plan, 1200); }
+  try { steps = JSON.parse(plan).steps.map((p, i) => `${i + 1}. [${p.status}] ${p.title}${p.reason ? ` (${p.reason})` : ''}`).join('\n'); } catch { steps = plan && clip(plan, 1200); }
   const more = lines.length - TRIMMED_LINES;
   return [{
     role: 'user',

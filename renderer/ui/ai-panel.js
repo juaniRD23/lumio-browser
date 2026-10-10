@@ -232,8 +232,8 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   const planEl = $('#plan');
   const planList = $('#plan-list');
   $('#plan-head .plan-ic').innerHTML = icons.list;
-  const STEP_ICON = { done: icons.stepDone, in_progress: icons.stepNow, pending: icons.stepTodo };
-  const STEP_WORD = { done: 'Done', in_progress: 'In progress', pending: 'Not started' };
+  const STEP_ICON = { done: icons.stepDone, in_progress: icons.stepNow, pending: icons.stepTodo, blocked: icons.stepBlocked };
+  const STEP_WORD = { done: 'Done', in_progress: 'In progress', pending: 'Not started', blocked: 'Needs you' };
   function setPlanCollapsed(collapsed) {
     planEl.classList.toggle('collapsed', collapsed);
     $('#plan-head').setAttribute('aria-expanded', String(!collapsed));
@@ -246,17 +246,26 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     const before = [...planList.children].map((li) => li.dataset.key);
     planList.innerHTML = '';
     plan.forEach((step, i) => {
+      const status = STEP_ICON[step.status] ? step.status : 'pending';
       const li = document.createElement('li');
-      li.className = `plan-step ${step.status}`;
-      li.dataset.key = `${step.status}:${step.title}`;
-      li.innerHTML = `<span class="ic" role="img" aria-label="${STEP_WORD[step.status]}">${STEP_ICON[step.status]}</span><span class="t"></span>`;
+      li.className = `plan-step ${status}`;
+      li.dataset.key = `${status}:${step.title}:${step.reason || ''}`;
+      li.innerHTML = `<span class="ic" role="img" aria-label="${STEP_WORD[status]}">${STEP_ICON[status]}</span><span class="t"></span>`;
       li.querySelector('.t').textContent = step.title;
+      // Blocked: what Lumio needs from the person, under the step.
+      if (status === 'blocked' && step.reason) {
+        const why = document.createElement('span');
+        why.className = 'why';
+        why.textContent = step.reason;
+        li.querySelector('.t').append(why);
+      }
       if (changed && before[i] !== li.dataset.key) li.classList.add('flash');
       planList.append(li);
     });
     const done = plan.filter((x) => x.status === 'done').length;
     $('#plan-count').textContent = `${done}/${plan.length}`;
-    $('#plan-now').textContent = (plan.find((x) => x.status === 'in_progress') || plan.find((x) => x.status === 'pending'))?.title || '';
+    const blocked = plan.find((x) => x.status === 'blocked');
+    $('#plan-now').textContent = blocked ? `${tr('Needs you')}: ${blocked.title}` : (plan.find((x) => x.status === 'in_progress') || plan.find((x) => x.status === 'pending'))?.title || '';
   }
   function showPlan(items, { changed = false } = {}) {
     const first = !plan && items;
@@ -883,6 +892,12 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
         scrollDown();
         break;
       }
+      case 'continued':
+        // It answered with steps of its checklist left, so it carries on: say so.
+        endText();
+        thinking(false);
+        if (ev.note) notice(ev.note, 'info');
+        break;
       case 'done':
         endText();
         thinking(false);

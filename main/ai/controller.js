@@ -10,6 +10,7 @@ const { buildSystemPrompt } = require('./prompts');
 const { MODES } = require('./policy');
 const { MODEL, REASONING, DEFAULT_REASONING, findReasoning } = require('./models');
 const browser = require('./tools/browser');
+const frames = require('./tools/frames');
 const plan = require('./tools/plan');
 const make = require('./tools/make');
 const schedule = require('./tools/schedule');
@@ -69,6 +70,10 @@ function endNote(ev) {
   return null;
 }
 
+// The chat's note when Lumio answered with steps of its checklist left and the
+// agent loop told it to keep going (agent.js, keep going).
+const keptGoingNote = (left) => `Lumio kept going: ${left === 1 ? '1 step' : `${left} steps`} left`;
+
 class AIController {
   constructor({ store, chats, tabs, emit, account = null, indicator = null, schedules = null, workflows = null, projects = null, siteTips = null, learnTips = true, notify = null, onSettingsChanged = () => {} }) {
     this.store = store;
@@ -85,14 +90,17 @@ class AIController {
     this.emit = emit;
     this.onSettingsChanged = onSettingsChanged; // lets every window refresh its panel
     this.run = null;
-    this.capsCache = null; // { at, tools, model, remote } from the Lumio server
+    this.capsCache = null; // { at, tools, model, remote, planStatuses } from the Lumio server
     this.docJobs = new Map(); // documents the panel is building for create_document
     this.refs = new Map();
     if (!findReasoning(store.settings.reasoning)) store.setSetting('reasoning', DEFAULT_REASONING);
   }
 
   // ------------------------------------------------------------ settings
-  lumioContext() {
+  // `blocked`: whether to say this version understands the "blocked" plan
+  // status. A run decides it once, at its start (start()): its notes and
+  // history follow that, whatever a later capabilities check gets.
+  lumioContext(blocked = this.blockedSteps()) {
     const tab = this.tabs.active;
     return {
       platform: process.platform === 'win32' ? 'windows' : 'mac',
@@ -102,8 +110,16 @@ class AIController {
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
       tabCount: this.tabs.tabs.length,
       ...(tab ? { activeTab: { id: tab.id, title: String(tab.title || '').slice(0, 300), url: String(this.tabs.displayUrl(tab) || '').slice(0, 2048) } } : {}),
+      // The plan statuses this version understands ("blocked" among them), so
+      // the server offers "blocked" (older versions don't know it). Only to a
+      // server that lists them: one from before refuses fields it doesn't know.
+      ...(blocked ? { planStatuses: plan.STATUSES } : {}),
     };
   }
+
+  // Whether the server offers update_plan's "blocked" status (GET /v1/agent's
+  // planStatuses). Without it, Lumio isn't told to mark steps blocked.
+  blockedSteps() { return !!this.capsCache?.planStatuses?.includes('blocked'); }
 
   reasoning() { return findReasoning(this.store.settings.reasoning) || findReasoning(DEFAULT_REASONING); }
 
@@ -182,12 +198,14 @@ class AIController {
     } catch { /* not critical */ }
   }
 
-  // The tips for the page in `tab()`, the first time this run reaches it.
+  // The tips for the page in `tab()`, the first time this run reaches it
+  // (built-in ones also by its frames: Excel's workbook is one).
   tipsHook(tab) {
     const shown = new Set();
     return () => {
-      const url = tab()?.url || '';
-      const tips = this.siteTips?.forUrl(url) || [];
+      const t = tab();
+      const url = t?.url || '';
+      const tips = this.siteTips?.forUrl(url, frames.urls(t?.view?.webContents)) || [];
       const key = tips.join('\n');
       if (!tips.length || shown.has(key)) return null;
       shown.add(key);
@@ -272,6 +290,7 @@ class AIController {
         tools: Array.isArray(caps?.tools) ? new Set(caps.tools) : null,
         model: m && typeof m.id === 'string' && typeof m.name === 'string' ? { id: m.id, name: m.name, maker: String(m.maker || '') } : null,
         remote: Array.isArray(caps?.remoteTools) ? caps.remoteTools : [],
+        planStatuses: Array.isArray(caps?.planStatuses) ? caps.planStatuses.filter((s) => typeof s === 'string') : [],
       };
       if (this.model().id !== before) this.emitState();
     }
@@ -526,7 +545,7 @@ class AIController {
         messages,
         tools,
         systemPrompt: () => '',
-        chat: (opts) => lumioChat({ account: this.account, ...opts, reasoning: opts.quick ? 'low' : 'medium', context: this.lumioContext(), ids: { taskId: chat.id, runId: `${runId}-h${h.n}`, stepId: `h${h.n}s${++stepNo}` } }),
+        chat: (opts) => lumioChat({ account: this.account, ...opts, reasoning: opts.quick ? 'low' : 'medium', context: this.lumioContext(run.blocked), ids: { taskId: chat.id, runId: `${runId}-h${h.n}`, stepId: `h${h.n}s${++stepNo}` } }),
         approve: (id) => new Promise((resolve) => run.pending.set(id, resolve)),
         getMode: () => this.store.settings.approvalMode,
         emit,
@@ -564,7 +583,7 @@ class AIController {
 
   async start(chat, { scheduled = null, watch = null, quickStart = false } = {}) {
     const abort = new AbortController();
-    const run = { chatId: chat.id, abort, pending: new Map(), grants: new Set(), text: null, steps: new Map(), scheduled, queue: [] };
+    const run = { chatId: chat.id, abort, pending: new Map(), grants: new Set(), text: null, steps: new Map(), scheduled, queue: [], blocked: false };
     this.run = run;
     this.chatStore.running.add(chat.id);
     this.emitState();
@@ -597,6 +616,9 @@ class AIController {
 
     try {
       const tools = await this.lumioTools();
+      // Once per run: a capabilities check that fails mid-run (lumioChat
+      // refreshes the account after every step) doesn't change it.
+      run.blocked = this.blockedSteps();
       await runAgent({
         model: this.model().id,
         messages: chat.messages,
@@ -609,7 +631,8 @@ class AIController {
             mode: this.store.settings.approvalMode,
           });
         },
-        chat: (opts) => lumioChat({ account: this.account, ...opts, reasoning: opts.quick ? 'low' : reasoning, context: this.lumioContext(), ids: { taskId: chat.id, runId, stepId: `s${++stepNo}` } }),
+        chat: (opts) => lumioChat({ account: this.account, ...opts, reasoning: opts.quick ? 'low' : reasoning, context: this.lumioContext(run.blocked), ids: { taskId: chat.id, runId, stepId: `s${++stepNo}` } }),
+        blockedSteps: run.blocked,
         approve: (id) => new Promise((resolve) => run.pending.set(id, resolve)),
         getMode: () => this.store.settings.approvalMode,
         emit: record,
@@ -686,6 +709,14 @@ class AIController {
       case 'plan':
         chat.plan = ev.items;
         break;
+      case 'continued': {
+        // It answered as if it were done, with steps left: the chat says it carried on.
+        run.text = null;
+        const note = keptGoingNote(ev.left);
+        d.push({ kind: 'note', text: note });
+        ev = { ...ev, note };
+        break;
+      }
       case 'made':
         run.text = null;
         d.push({ kind: 'made', file: ev.file });
@@ -732,4 +763,4 @@ class AIController {
   }
 }
 
-module.exports = { AIController };
+module.exports = { AIController, keptGoingNote };

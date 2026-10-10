@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Order desk — Test Shop</title>
+  <style>
+    body { margin: 0; font: 16px/1.4 -apple-system, sans-serif; color: #222; }
+    header { height: 120px; padding: 10px; }
+    #editor { border: 6px solid #888; padding: 4px; margin-left: 30px; width: 420px; height: 460px; }
+    .spacer { height: 1500px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Order desk</h1>
+    <button id="top">Top button</button>
+  </header>
+  <!-- The editor comes from another site (127.0.0.1 and localhost are two
+       sites, so Chromium runs it in its own process); a hidden frame and a
+       1px one (a tracker) are never read. -->
+  <iframe id="editor" name="editor" title="Editor"></iframe>
+  <iframe id="hidden" title="Hidden" style="display:none"></iframe>
+  <iframe id="pixel" title="Pixel" style="width:1px;height:1px;border:0"></iframe>
+  <div class="spacer"></div>
+  <script>
+    const other = location.hostname === 'localhost' ? '127.0.0.1' : 'localhost';
+    const at = (p) => `http://${other}:${location.port}/${p}`;
+    document.getElementById('editor').src = at('frames-inner.html');
+    document.getElementById('hidden').src = at('frames-nested.html?hidden');
+    document.getElementById('pixel').src = at('frames-nested.html?pixel');
+  </script>
+</body>
+</html>

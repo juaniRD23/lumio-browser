@@ -2,7 +2,7 @@
 // The server owns the model, tool definitions and system prompt; the browser
 // picks tools by name. Retries of the same step replay its saved result.
 import {
-  BROWSER_AGENT_VERSION, BROWSER_REASONING, browserAgentTools, browserInputEstimate,
+  BROWSER_AGENT_VERSION, BROWSER_REASONING, PLAN_STATUSES, browserAgentTools, browserInputEstimate, browserTools, offersBlocked,
   browserContextNote, browserSystemPrompt, parseToolArgs, withContextNote, ToolArgumentsError, validateBrowserStep, validateBrowserToolCall, type AgentMessage, type NativeToolCall,
 } from './agent.ts';
 import type { User } from './auth.ts';
@@ -30,6 +30,10 @@ export async function capabilities(env: Env, user: User) {
     tools: [...browserAgentTools, ...connected].map((t) => t.function.name),
     // Tools the browser runs by asking the server (POST /v1/tools/run): the person's connected apps.
     remoteTools: connected.map((t) => ({ name: t.function.name, app: appForTool(t.function.name)?.name || '' })),
+    // update_plan's statuses. An app that understands more than pending,
+    // in_progress and done lists them in its steps' context.planStatuses, and
+    // only then is "blocked" offered (a server from before it refuses that field).
+    planStatuses: PLAN_STATUSES,
     reasoning: { levels: BROWSER_REASONING, default: 'medium' },
     usage: await allowance(env, user.id, user.plan),
   });
@@ -64,7 +68,8 @@ export async function step(request: Request, env: Env, ctx: ExecutionContext, us
 
   const inputTokens = browserInputEstimate(s, extra);
   const { maxOutput } = await reserve(env, { key, owner: user.id, plan: user.plan, requestHash, kind: 'browser', inputTokens, model, now });
-  const tools = [...browserAgentTools, ...extra].filter((t) => s.tools.includes(t.function.name));
+  // update_plan as this app understands it ("blocked" only for apps that say so).
+  const tools = [...browserTools(s), ...extra].filter((t) => s.tools.includes(t.function.name));
   const ids: string[] = []; // OpenRouter generation IDs, for the cost double-check
   const call = (messages: unknown[]) => complete(env, model, {
     messages,
@@ -123,7 +128,7 @@ export async function step(request: Request, env: Env, ctx: ExecutionContext, us
         let bad: { index: number; error: ToolArgumentsError } | null = null;
         toolCalls = [];
         for (let i = 0; i < raw.length && !bad; i++) {
-          try { toolCalls.push(validateBrowserToolCall(raw[i], s.tools, extra)); } catch (err) {
+          try { toolCalls.push(validateBrowserToolCall(raw[i], s.tools, extra, false, offersBlocked(s))); } catch (err) {
             if (err instanceof ToolArgumentsError) bad = { index: i, error: err }; else throw err;
           }
         }

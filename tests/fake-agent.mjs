@@ -1,8 +1,9 @@
 // A stand-in for the Lumio server's /v1/agent, as LumioAccount.fetch, for
 // driving lumioChat (and the AI controller) without a network. `reply(body, n)`
 // gives the n-th step's answer: { calls: [{ name, arguments }], text } for a
-// streamed result, or { status, error, code } for a refusal.
-export function fakeAccount(reply, { tools = [] } = {}) {
+// streamed result, or { status, error, code } for a refusal. `caps`: more of
+// what GET /v1/agent says (like planStatuses).
+export function fakeAccount(reply, { tools = [], caps = {} } = {}) {
   const bodies = [];
   return {
     bodies,
@@ -12,7 +13,7 @@ export function fakeAccount(reply, { tools = [] } = {}) {
     refresh: async () => {},
     async fetch(url, init = {}) {
       // GET: what the plan allows (lumioCapabilities).
-      if (!init.body) return Response.json({ tools, model: { id: 'mock/agent', name: 'Mock', maker: 'Lumio' }, remoteTools: [] });
+      if (!init.body) return Response.json({ tools, model: { id: 'mock/agent', name: 'Mock', maker: 'Lumio' }, remoteTools: [], ...caps });
       const body = JSON.parse(init.body);
       bodies.push(body);
       const r = reply(body, bodies.length);

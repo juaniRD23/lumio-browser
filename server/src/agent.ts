@@ -51,7 +51,14 @@ const num=(min:number,max:number,description?:string):Schema=>({type:'number',mi
 const bool=(description?:string):Schema=>({type:'boolean',...(description?{description}:{})});
 const oneOf=(values:readonly string[]):Schema=>({type:'string',enum:values});
 const TAB=int(1,1_000_000,'Tab id (defaults to the active tab)');
-const PLAN_STEPS:Schema={type:'array',minItems:1,maxItems:12,items:{type:'object',properties:{title:str(100,1,'A short step, like "Compare prices"'),status:oneOf(['pending','in_progress','done'])},required:['title','status'],additionalProperties:false}};
+// update_plan's statuses. A step Lumio can't do without the person (a sign-in,
+// an OK to pay) is "blocked", with the reason; the browser won't push it to
+// keep going past it. Lumio Browser 0.6.7, its Beta 8 and the iPhone apps from
+// then don't know "blocked", so it is offered (in the schema and the prompt)
+// only to apps whose steps say they understand it (context.planStatuses);
+// the others get update_plan exactly as before.
+export const PLAN_STATUSES=['pending','in_progress','done','blocked'] as const;
+const planSteps=(blocked:boolean):Schema=>({type:'array',minItems:1,maxItems:12,items:{type:'object',properties:{title:str(100,1,'A short step, like "Compare prices"'),status:oneOf(blocked?PLAN_STATUSES:PLAN_STATUSES.slice(0,3)),...(blocked?{reason:str(200,0,'For a blocked step: what you need from the user')}:{})},required:['title','status'],additionalProperties:false}});
 const HELPER_LIST:Schema={type:'array',minItems:1,maxItems:4,items:{type:'object',properties:{title:str(60,1,'A few words, like "Best Buy price"'),task:str(2000,1,'The complete task for this helper'),url:str(2000,0,'Where to start (optional)')},required:['title','task'],additionalProperties:false}};
 const WORKFLOW_INPUTS:Schema={type:'array',maxItems:6,description:'A friendly label for each {blank} (optional)',items:{type:'object',properties:{name:str(30,1),label:str(60,1)},required:['name','label'],additionalProperties:false}};
 const tool=(name:string,description:string,properties:Record<string,Schema>,required:string[]=[])=>({type:'function' as const,function:{name,description,parameters:{type:'object' as const,properties,required,additionalProperties:false as const}}});
@@ -61,6 +68,8 @@ const tool=(name:string,description:string,properties:Record<string,Schema>,requ
 export const generateImageTool=tool('generate_image','Make a picture from a description: a photo, illustration, logo, icon, poster, diagram-like art. Only when the user asks for an image. It uses the user’s plan, so make one image per request unless they ask for more. Write a detailed prompt (subject, style, setting, colors, text to include).',{prompt:str(4000,1,'A detailed description of the image'),aspect:oneOf(['square','portrait','landscape'])},['prompt']);
 export const createDocumentTool=tool('create_document','Create a file the user can download: a PDF, Word document (docx), PowerPoint deck (pptx), Markdown, plain text, CSV (for spreadsheets/Excel) or HTML page. Use it when they ask for a document, report, letter, résumé, contract, presentation, table or any file. Write the complete content: Markdown for pdf/docx/md/html (headings, lists, tables, bold); for pptx, Markdown where each ## heading is one slide title (no “Slide 1:” numbering) with 3-6 short bullet points under it, starting with a # heading and one subtitle line for the title slide; plain text for txt; CSV rows for csv. After creating it, reply with a short note instead of repeating the content.',{title:str(120,1,'File title, like "Q3 Sales Report"'),format:oneOf(['pdf','docx','pptx','md','txt','csv','html']),content:str(200000,1,'The full content')},['title','format','content']);
 export const chatTools=[generateImageTool,createDocumentTool];
+
+const planTool=(blocked:boolean)=>tool('update_plan',`Show or update your step-by-step plan for the current task. The user sees it as a "Task progress" checklist. Use it for tasks with 3 or more steps: call it before you start, then again whenever a step starts or finishes. Send the whole list every time, keep exactly one step in_progress while you work, and mark every step done when you finish.${blocked?' If a step truly needs the user (a sign-in, an OK to pay or buy, a decision only they can make, information you can\'t find), mark it blocked with the reason and ask them exactly that.':''} Skip it for quick questions.`,{steps:planSteps(blocked)},['steps']);
 
 // Definitions belong to the server. The browser can only choose a subset by name.
 export const browserAgentTools=[
@@ -85,7 +94,7 @@ export const browserAgentTools=[
  tool('switch_tab','Make a tab the active one.',{tab_id:int(1,1_000_000)},['tab_id']),
  tool('close_tab','Close a tab.',{tab_id:int(1,1_000_000)},['tab_id']),
  tool('wait','Wait a few seconds for something to load.',{seconds:num(0.1,30)},['seconds']),
- tool('update_plan','Show or update your step-by-step plan for the current task. The user sees it as a "Task progress" checklist. Use it for tasks with 3 or more steps: call it before you start, then again whenever a step starts or finishes. Send the whole list every time, keep exactly one step in_progress while you work, and mark every step done when you finish. Skip it for quick questions.',{steps:PLAN_STEPS},['steps']),
+ planTool(false),
  tool('schedule_task','Schedule a task for Lumio to do later on its own, once or repeating (hourly, daily, weekdays, weekly), in the user\'s local time. Only when the user asks for something to happen later or regularly. Write the prompt as a complete instruction for your future self, since the chat history won\'t be there.',{title:str(80,1,'Short name, like "Morning news"'),prompt:str(4000,1,'What to do when it runs, as a complete instruction'),repeat:oneOf(['once','hourly','daily','weekdays','weekly']),time:str(10,1,'Local time, like "08:00" or "18:30" (for hourly, the minutes count)'),weekday:oneOf(['sunday','monday','tuesday','wednesday','thursday','friday','saturday']),date:str(10,0,'For once: YYYY-MM-DD (default: the next time that clock time comes)')},['title','prompt','repeat','time']),
  tool('list_scheduled_tasks','List the user\'s scheduled tasks with their ids, times and what they do.',{}),
  tool('cancel_scheduled_task','Delete one of the user\'s scheduled tasks by id (from list_scheduled_tasks).',{id:str(64,1)},['id']),
@@ -93,6 +102,12 @@ export const browserAgentTools=[
  tool('save_workflow','Save a reusable workflow the user can run again with one click: when they ask to save what you just did (or a task they describe) as a workflow. Write the instructions for your future self as clear, general steps (pages to open, what to look for, what to report), not a log of this run, and put things that change each time in curly braces, like {item} or {date}. Saving a name that already exists updates it.',{title:str(60,1,'Short name, like "Weekly expense report"'),instructions:str(6000,1,'The steps, with {blanks} for what changes each run'),start_url:str(2000,0,'The page to start on (optional)'),description:str(200,0,'One line for the list (optional)'),inputs:WORKFLOW_INPUTS},['title','instructions']),
  tool('list_workflows','List the user’s saved workflows with their instructions, to follow one when they ask you to run it by name.',{}),
 ];
+// The same, with update_plan's "blocked" status, for apps that understand it.
+const blockedBrowserTools=browserAgentTools.map(item=>item.function.name==='update_plan'?planTool(true):item);
+// Whether a step's app understands "blocked" plan steps (it said so in its context).
+export const offersBlocked=(step:{context:BrowserContext})=>!!step.context.planStatuses?.includes('blocked');
+// The tool definitions for a step: update_plan as its app understands it.
+export function browserTools(step:{context:BrowserContext}){return offersBlocked(step)?blockedBrowserTools:browserAgentTools}
 
 // Tools that controlled the computer outside the browser (the screen, other
 // apps, shell commands, AppleScript). Lumio's AI works only in the browser's
@@ -149,7 +164,7 @@ function schemaError(value:unknown,schema:Schema,at='arguments'):string|null{
 
 // Small models often send "12" for 12, "[12]" for a ref, "true" for true, null
 // for optional fields or "completed" for "done". Fix those before checking.
-const ENUM_ALIASES:Record<string,string>={completed:'done',complete:'done',finished:'done',in_progress:'in_progress',inprogress:'in_progress',active:'in_progress',doing:'in_progress',current:'in_progress',started:'in_progress',todo:'pending',not_started:'pending',waiting:'pending'};
+const ENUM_ALIASES:Record<string,string>={completed:'done',complete:'done',finished:'done',in_progress:'in_progress',inprogress:'in_progress',active:'in_progress',doing:'in_progress',current:'in_progress',started:'in_progress',todo:'pending',not_started:'pending',waiting:'pending',needs_user:'blocked',needs_input:'blocked',waiting_for_user:'blocked',waiting_on_user:'blocked',on_hold:'blocked'};
 function repairArgs(value:unknown,schema:Schema):unknown{
  if((schema.type==='integer'||schema.type==='number')&&typeof value==='string'){
   const m=/^\s*\[?\s*(-?\d+(?:\.\d+)?)\s*\]?\s*$/.exec(value);
@@ -160,8 +175,12 @@ function repairArgs(value:unknown,schema:Schema):unknown{
  if(schema.type==='string'&&(typeof value==='number'||typeof value==='boolean'))value=String(value);
  if(schema.type==='string'&&typeof value==='string'&&schema.enum&&!schema.enum.includes(value)){
   const key=value.trim().toLowerCase().replace(/[\s-]+/g,'_');
-  const fixed=schema.enum.includes(key)?key:ENUM_ALIASES[key];
-  if(fixed&&schema.enum.includes(fixed))return fixed;
+  const fixed=schema.enum.includes(key)?key:ENUM_ALIASES[key]??key;
+  if(schema.enum.includes(fixed))return fixed;
+  // A plan step "blocked" for an app that wasn't offered it (its chat may have
+  // come from a newer app, through Lumio Sync, with blocked steps the model
+  // copies): "pending", as those apps take any status they don't know.
+  if(fixed==='blocked'&&schema.enum.includes('pending'))return 'pending';
  }
  if(schema.type==='array'&&Array.isArray(value))return value.map(item=>repairArgs(item,schema.items!));
  if(schema.type==='object'&&object(value)){
@@ -223,10 +242,13 @@ function appLinkError(name:string,args:Record<string,unknown>):string|null{
 
 // `extra`: more tool definitions this person may use (their connected apps).
 // `past`: a call from the chat's history, taken as it was (it already ran).
+// `blocked`: update_plan takes the "blocked" status (and its reason). Always
+// for history, so any chat's earlier plans stay valid; for the model's new
+// calls, only when the step's app understands it (offersBlocked).
 type ToolDef={type:'function';function:{name:string;description:string;parameters:unknown}};
-export function validateBrowserToolCall(value:unknown,allowed:string[],extra:ToolDef[]=[],past=false):NativeToolCall{
+export function validateBrowserToolCall(value:unknown,allowed:string[],extra:ToolDef[]=[],past=false,blocked=past):NativeToolCall{
  if(!object(value)||Object.keys(value).some(key=>!['id','type','function'].includes(key))||!validId(value.id)||value.type!=='function'||!object(value.function)||Object.keys(value.function).some(key=>!['name','arguments'].includes(key))||typeof value.function.name!=='string'||typeof value.function.arguments!=='string'||value.function.arguments.length>100000)throw new AgentError('Invalid tool call.',400,'invalid_tool_call');
- const definition=[...browserAgentTools,...extra].find(item=>item.function.name===(value.function as {name:string}).name);
+ const definition=[...(blocked?blockedBrowserTools:browserAgentTools),...extra].find(item=>item.function.name===(value.function as {name:string}).name);
  if(!definition||!allowed.includes(definition.function.name))throw new ToolArgumentsError(String((value.function as {name:string}).name).slice(0,80),`there is no tool named "${String((value.function as {name:string}).name).slice(0,80)}" right now`);
  let args:unknown;try{args=parseArgs(value.function.arguments)}catch{throw new ToolArgumentsError(definition.function.name,'the arguments are not valid JSON')}
  args=repairArgs(args,definition.function.parameters as Schema);
@@ -237,12 +259,14 @@ export function validateBrowserToolCall(value:unknown,allowed:string[],extra:Too
  return {id:value.id,type:'function',function:{name:definition.function.name,arguments:JSON.stringify(args)}};
 }
 
-export type BrowserContext={platform:'mac'|'windows'|'ios';mode:'ask'|'auto'|'bypass';timeZone:string;tabCount:number;activeTab?:{id:number;title:string;url:string}};
+// planStatuses: the update_plan statuses beyond pending, in_progress and done
+// that the app understands and this server offers (only "blocked" so far).
+export type BrowserContext={platform:'mac'|'windows'|'ios';mode:'ask'|'auto'|'bypass';timeZone:string;tabCount:number;activeTab?:{id:number;title:string;url:string};planStatuses?:'blocked'[]};
 export type BrowserStep=DesktopStep&{context:BrowserContext;reasoning:BrowserReasoning};
 
 function readContext(value:unknown):BrowserContext{
- if(!object(value)||Object.keys(value).some(key=>!['platform','computer','mode','timeZone','tabCount','activeTab'].includes(key)))throw new AgentError('Invalid browser context.');
- const {platform,computer,mode,timeZone,tabCount,activeTab}=value;
+ if(!object(value)||Object.keys(value).some(key=>!['platform','computer','mode','timeZone','tabCount','activeTab','planStatuses'].includes(key)))throw new AgentError('Invalid browser context.');
+ const {platform,computer,mode,timeZone,tabCount,activeTab,planStatuses}=value;
  // 'ios': Lumio for iPhone and iPad. `computer` (whether the browser could
  // control the computer) is still sent by older versions and is ignored: the
  // AI works only in the browser's tabs, everywhere. An iPhone never claims it.
@@ -252,7 +276,16 @@ function readContext(value:unknown):BrowserContext{
   if(!object(activeTab)||!Number.isSafeInteger(activeTab.id)||typeof activeTab.title!=='string'||typeof activeTab.url!=='string'||Object.keys(activeTab).some(key=>!['id','title','url'].includes(key)))throw new AgentError('Invalid browser context.');
   tab={id:activeTab.id as number,title:activeTab.title.slice(0,300),url:activeTab.url.slice(0,2048)};
  }
- return {platform:platform as BrowserContext['platform'],mode:mode as BrowserContext['mode'],timeZone,tabCount:tabCount as number,...(tab?{activeTab:tab}:{})};
+ // The plan statuses the app understands (newer Lumio apps list them, once
+ // the server says it has them: GET /v1/agent's planStatuses). Older apps
+ // send none and get update_plan as they know it. Ones this server doesn't
+ // offer are ignored, so a newer app can list more.
+ let statuses:BrowserContext['planStatuses'];
+ if(planStatuses!==undefined){
+  if(!Array.isArray(planStatuses)||planStatuses.length>16||!planStatuses.every(item=>typeof item==='string'&&/^[a-z_]{1,32}$/.test(item)))throw new AgentError('Invalid browser context.');
+  if(planStatuses.includes('blocked'))statuses=['blocked'];
+ }
+ return {platform:platform as BrowserContext['platform'],mode:mode as BrowserContext['mode'],timeZone,tabCount:tabCount as number,...(tab?{activeTab:tab}:{}),...(statuses?{planStatuses:statuses}:{})};
 }
 
 // Mirrors validateDesktopStep, with the browser's tools and context.
@@ -405,7 +438,7 @@ How to work:
 ${step.tools.includes('paste_text')?'- To fill a spreadsheet or table (Google Sheets, Excel), click the first cell, then paste_text all the rows in one go (tabs between columns, new lines between rows). Never type cell by cell.\n':''}- When you already know the next few actions (for example click a field and type into it, or several fields of a form), call those tools together in one turn instead of one per turn.\n${step.tools.includes('save_site_tip')?'- If you were given tips for a site, use them. When you finish a task and learned a faster way to do it on that site, save it with save_site_tip (one short, general sentence) so next time is quicker.\n':''}- Use screenshot_tab only when read_page doesn\'t show what you need (canvases, images, layout): it is slower.\n${step.tools.includes('web_search')?'- To look things up or research, use web_search and read_url: they work in the background without opening tabs and are much faster. Open pages in tabs (navigate) only to click, type or fill something in, or when the user wants to see the page.\n':''}- To work in a page, call read_page to see it and get element refs like [12], then click/type using those refs. Refs are renumbered on every read_page, so read again after the page changes.
 - If an element isn't in the list, scroll or use screenshot_tab + click_at for things like canvases.
 ${ios?'- Plans can’t be bought in this app (App Store rules): never tell the user how or where to buy, upgrade or subscribe to a Lumio plan, and don’t link to prices. If they ask about their plan or usage, say they can see both in Lumio’s Settings, under their account.\n':''}- Work step by step and verify the result of important actions. When the task is done, reply with a short summary of what you did.
-- Long tasks are fine: there is no step limit. Keep going until the whole task is done instead of stopping partway to ask whether to go on. Stop early only when you need the user (a decision, a sign-in, something irreversible) or you are stuck, and then say what is blocking you.
+- Long tasks are fine: there is no step limit. Finish every step of the plan: a progress report is not a stopping point, so don't stop partway to report or to ask whether to go on. When a step fails (an error like #REF! or #N/A, a click that did nothing), find out why and fix it instead of reporting it. Stop early only when you truly need the user (a sign-in, an OK to pay or buy, a decision only they can make, information you can't find): then ${offersBlocked(step)?'mark that plan step blocked with the reason, and ':''}ask exactly that.
 - For tasks with 3 or more steps, keep a plan with update_plan: list the steps before you start, then update it as each step starts and finishes (the user watches it as a "Task progress" checklist). Skip it for quick questions.
 - Approval mode is "${c.mode}". Some actions ask the user first. If the user denies an action, don't retry it — explain, or ask what they'd like instead.
 - Keep responses and tool arguments short.
@@ -449,7 +482,7 @@ export function withContextNote(messages:AgentMessage[],note:string):AgentMessag
 
 // The system prompt and the tool definitions, which every step carries.
 function browserFixedTokens(step:BrowserStep,extra:ToolDef[]=[]){
- return 64+textTokens(browserSystemPrompt(step))+textTokens(browserContextNote(step))+textTokens(JSON.stringify([...browserAgentTools,...extra].filter(item=>step.tools.includes(item.function.name))));
+ return 64+textTokens(browserSystemPrompt(step))+textTokens(browserContextNote(step))+textTokens(JSON.stringify([...browserTools(step),...extra].filter(item=>step.tools.includes(item.function.name))));
 }
 export function browserInputEstimate(step:BrowserStep,extra:ToolDef[]=[]){
  return browserFixedTokens(step,extra)+step.messages.reduce((tokens,message)=>tokens+messageTokens(message),0);

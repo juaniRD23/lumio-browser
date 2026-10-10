@@ -11,7 +11,10 @@ const MAX_PER_SITE = 6;
 const MAX_SITES = 200;
 const MAX_TIP = 300;
 
-// Built in: sites where the obvious way is slow or doesn't work.
+// Built in: sites where the obvious way is slow or doesn't work. host is the
+// address's host, or one of its frames' (frames: true; suffix: any host
+// ending so), and path its start.
+const EXCEL = 'Excel for the web: the workbook (grid, Name Box, formula bar, ribbon, sheet tabs) is an embedded frame; read_page lists its elements after the page’s. To go to a cell or range, type it (like B2 or A1:D20) into the Name Box with submit=true. To fill many cells, go to the top-left one that way, then paste_text all the rows at once (tabs between columns, new lines between rows). Formula: go to its cell, type it (starting with =) into the formula bar, press Enter. New sheet: the + by the sheet tabs; rename: double-click the tab. Formats: the Home tab; charts: Insert. To check a value, read the formula bar or use screenshot_tab.';
 const BUILT_IN = [
   {
     host: 'docs.google.com', path: '/spreadsheets',
@@ -21,7 +24,21 @@ const BUILT_IN = [
     host: 'docs.google.com', path: '/document',
     tip: 'Google Docs: the text is drawn on a canvas. Click inside the page to place the cursor, then type or paste_text (paste_text is much faster for long text). To check the document, use screenshot_tab.',
   },
+  // Excel for the web opens on excel.cloud.microsoft, OneDrive, SharePoint or
+  // office.com; the workbook is a frame from officeapps.live.com (/x/: Word's
+  // is /we/, PowerPoint's /p/), so it's known by that frame.
+  { host: 'excel.cloud.microsoft', path: '/', tip: EXCEL },
+  { suffix: '.officeapps.live.com', path: '/x/', frames: true, tip: EXCEL },
 ];
+
+function builtInFor(url, frame) {
+  let u;
+  try { u = new URL(url); } catch { return []; }
+  if (!/^https?:$/.test(u.protocol)) return [];
+  const host = u.hostname.replace(/^www\./, '').toLowerCase();
+  return BUILT_IN.filter((b) => (frame ? b.frames : true)
+    && (b.suffix ? host.endsWith(b.suffix) : b.host === host) && u.pathname.startsWith(b.path)).map((b) => b.tip);
+}
 
 const siteOf = (url) => {
   try {
@@ -89,13 +106,14 @@ class SiteTips {
       .sort((a, b) => (b.tips[0]?.at || 0) - (a.tips[0]?.at || 0));
   }
 
-  // The tips for a page: built-in ones that match its address, then saved ones.
-  forUrl(url) {
+  // The tips for a page: built-in ones that match its address or one of its
+  // frames' (frameUrls), then saved ones.
+  forUrl(url, frameUrls = []) {
     let u;
     try { u = new URL(url); } catch { return []; }
     if (!/^https?:$/.test(u.protocol)) return [];
     const host = u.hostname.replace(/^www\./, '').toLowerCase();
-    const builtIn = BUILT_IN.filter((b) => b.host === host && u.pathname.startsWith(b.path)).map((b) => b.tip);
+    const builtIn = new Set([...builtInFor(url, false), ...frameUrls.flatMap((f) => builtInFor(f, true))]);
     return [...builtIn, ...(this.sites[host] || []).map((t) => t.tip)];
   }
 }
