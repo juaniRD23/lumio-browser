@@ -16,6 +16,8 @@ const { encodePng, decodePng } = createRequire(import.meta.url)('../build/make-i
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
 
+// Public releases of Lumio Browser leave out the iPhone app (ios/).
+const HAS_IOS = fs.existsSync(path.join(ROOT, 'ios'));
 test('the browser mark is the Lumio mark with the pointer inside the ring', () => {
   assert.ok(!markSvg(18).includes(POINTER_PATH));
   for (const blue of [false, true]) {
@@ -60,7 +62,7 @@ test('the icon sources carry the pointer', () => {
     assert.match(svg, /<path class="lm-cursor" d="M[\d.L Z]+"/, `${f}: the pointer`);
   }
   assert.match(read('build/icon-beta.svg'), />BETA<\/text>/);
-  assert.match(read('ios/scripts/make-app-icon.swift'), /\(25\.73, 21\.33\), \(25\.73, 41\.33\), \(30\.86, 36\.7\), \(33\.98, 44\.2\),\s+\(37\.48, 42\.7\), \(34\.36, 35\.33\), \(40\.73, 35\.33\)/, 'the iOS icon draws the same pointer');
+  if (HAS_IOS) assert.match(read('ios/scripts/make-app-icon.swift'), /\(25\.73, 21\.33\), \(25\.73, 41\.33\), \(30\.86, 36\.7\), \(33\.98, 44\.2\),\s+\(37\.48, 42\.7\), \(34\.36, 35\.33\), \(40\.73, 35\.33\)/, 'the iOS icon draws the same pointer');
 });
 
 // The .icns entries by type: 16 and 32 px are ARGB (ic04, ic05), the rest PNGs.
@@ -104,7 +106,7 @@ test('the built icons have every size (npm run icon makes them)', () => {
   }
 });
 
-test('the iPhone and iPad icon: opaque by default, the mark alone in dark and tinted', () => {
+test('the iPhone and iPad icon: opaque by default, the mark alone in dark and tinted', { skip: !HAS_IOS && 'the iPhone app isn’t in this copy (public releases leave out ios/)' }, () => {
   const dir = 'ios/Lumio/Resources/Assets.xcassets/AppIcon.appiconset';
   const read1024 = (f) => { const buf = fs.readFileSync(path.join(ROOT, dir, f)); return { type: buf[25], ...decodePng(buf) }; };
   const light = read1024('AppIcon-1024.png');

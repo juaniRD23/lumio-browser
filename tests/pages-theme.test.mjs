@@ -126,6 +126,17 @@ for (const scheme of ['light', 'dark']) {
   });
 }
 
+// Colors as [r, g, b, a] bytes drawn on a canvas: Chrome versions write the same
+// computed color differently (color(srgb …) in one, oklab(…) in a newer one).
+const toBytes = (page, css) => page.evaluate((c) => { const i = document.body.appendChild(document.createElement('i')); i.style.background = c; const v = getComputedStyle(i).backgroundColor; i.remove(); const x = document.createElement('canvas').getContext('2d'); x.fillStyle = v; x.fillRect(0, 0, 1, 1); return [...x.getImageData(0, 0, 1, 1).data]; }, css);
+const bytesOf = (page, sel) => page.$eval(sel, (el) => { const x = document.createElement('canvas').getContext('2d'); x.fillStyle = getComputedStyle(el).backgroundColor; x.fillRect(0, 0, 1, 1); return [...x.getImageData(0, 0, 1, 1).data]; });
+// A hover color once it has landed: a busy runner applies :hover a few frames late.
+async function settlesOn(page, sel, want, ms = 3000) {
+  let got = await bytesOf(page, sel);
+  for (const end = Date.now() + ms; !got.every((v, i) => Math.abs(v - want[i]) <= 1) && Date.now() < end; got = await bytesOf(page, sel)) await page.waitForTimeout(25);
+  return got;
+}
+
 test('incognito pages stay dark on a light computer', { skip: !CHROME && 'Google Chrome not installed' }, async () => {
   const { page, errors } = await openPage('newtab', { colorScheme: 'light', query: '?appearance=dark', answers: { 'page:newtab-data': { ...ANSWERS['page:newtab-data'], incognito: true } } });
   const c = await readColors(page, { parts: PARTS });
@@ -186,8 +197,8 @@ test('Settings › Lumio AI › Approvals: Bypass asks first in Lumio’s red di
   // Under the pointer it deepens like every solid red button (§6.1). (Reduce Motion: no fade to wait for.)
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.hover('#bypass-on');
-  await page.waitForTimeout(50);
-  assert.equal(await page.$eval('#bypass-on', (b) => getComputedStyle(b).backgroundColor), await fill('color-mix(in srgb, var(--danger-fill) 88%, var(--text-strong))'));
+  const deepRed = await toBytes(page, 'color-mix(in srgb, var(--danger-fill) 88%, var(--text-strong))');
+  assert.deepEqual(await settlesOn(page, '#bypass-on', deepRed), deepRed);
   await page.focus('#bypass-cancel');
 
   // Enter (on Cancel), Esc and a click on the dimmed page all keep Ask.
@@ -246,9 +257,8 @@ test('Settings says where each plan works, and how Auto asks, in Lumio AI’s wo
   // Plus's Subscribe is the accent button; under the pointer it changes like the panel's Upgrade (§6.1).
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.hover('.btn.accent[data-subscribe="plus"]');
-  await page.waitForTimeout(50);
-  const accentHover = await page.evaluate(() => { const i = document.body.appendChild(document.createElement('i')); i.style.background = 'color-mix(in srgb, var(--accent) 88%, var(--text-strong))'; const out = getComputedStyle(i).backgroundColor; i.remove(); return out; });
-  assert.equal(await page.$eval('.btn.accent[data-subscribe="plus"]', (b) => getComputedStyle(b).backgroundColor), accentHover);
+  const accentHover = await toBytes(page, 'color-mix(in srgb, var(--accent) 88%, var(--text-strong))');
+  assert.deepEqual(await settlesOn(page, '.btn.accent[data-subscribe="plus"]', accentHover), accentHover);
   await page.close();
   assert.deepEqual(errors, []);
 });

@@ -145,7 +145,10 @@ test('tabs to the side: the column lists every tab, the toolbar is the top row, 
   const [toolbar, col, slot] = [await box(page, '#toolbar'), await box(page, '#vtabs'), await box(page, '#slot')];
   assert.equal(toolbar.top, 0, 'the toolbar is the top row');
   assert.ok(col.top >= toolbar.bottom && col.right <= slot.left, 'the column sits beside the page, under the toolbar');
-  const reported = await lastSent(page, 'layout:slot');
+  // The shell reports the slot on the next animation frame: a busy runner takes a few.
+  let reported = await lastSent(page, 'layout:slot');
+  for (let i = 0; i < 150 && !reported; i++) { await page.waitForTimeout(20); reported = await lastSent(page, 'layout:slot'); }
+  assert.ok(reported, 'the page slot is reported');
   assert.equal(Math.round(reported.x), Math.round(slot.left), 'main hears where the page goes');
   // The Mac's window buttons get room at the toolbar's start; the sidebar's show button moved there.
   assert.ok((await box(page, '.vt-traffic')).width >= 70);
