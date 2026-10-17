@@ -745,7 +745,9 @@ function makeDefaultBrowser() {
 }
 
 // ---------------------------------------------------------------- account + profile
-const ACCOUNT_PAGES = { manage: '/account', upgrade: '/account#plans', billing: '/account', home: '/' };
+// Upgrading from Lumio Browser says so (?app=browser): a Go plan bought here
+// works only in Lumio Browser; Plus and up work in both apps.
+const ACCOUNT_PAGES = { manage: '/account', upgrade: '/account?app=browser#plans', billing: '/account', home: '/' };
 
 // Signing in happens on lumio-co.online in a normal tab of the profile. When
 // the site's session cookie appears in the profile's session, its account
@@ -837,6 +839,9 @@ async function openCheckout(w, plan) {
   wc.on('will-navigate', (e, url) => { if (!/^https:\/\//.test(url) && !url.startsWith(account.base)) e.preventDefault(); });
   win.once('ready-to-show', () => win.show());
   const closed = new Promise((resolve) => win.on('closed', resolve));
+  // app=1: Lumio Browser's own payment window (the page closes it when the
+  // payment is done). The server and the website read it as Lumio Browser
+  // too, so a Go plan bought here is for Lumio Browser.
   win.loadURL(account.url(`/checkout?plan=${plan}&app=1`)).catch(() => {});
   await closed;
   checkoutWin = null;
@@ -1564,7 +1569,9 @@ function registerIpc() {
   internalHandle('page:account-sign-out', ['settings'], async ({ w }) => { await signOutLumio(w.profile.base); return w.profile.account.state(); });
   internalHandle('page:account-open', ['settings', 'newtab'], ({ w }, which) => openAccountPage(String(which), w));
   internalHandle('page:billing', ['settings'], ({ w }) => billingCall(w.profile, '/api/billing/subscription'));
-  internalHandle('page:billing-change', ['settings'], ({ w }, plan) => billingCall(w.profile, '/api/billing/change', { plan: String(plan || '') }));
+  // A switch to Go here is for Lumio Browser (Go works only in the app it was
+  // bought in; Plus and up work in both apps).
+  internalHandle('page:billing-change', ['settings'], ({ w }, plan) => billingCall(w.profile, '/api/billing/change', { plan: String(plan || ''), ...(plan === 'go' ? { planApp: 'browser' } : {}) }));
   internalHandle('page:billing-cancel', ['settings'], ({ w }, form) => billingCall(w.profile, '/api/billing/cancel', { reason: String(form?.reason || ''), comment: String(form?.comment || '').slice(0, 1000) }));
   internalHandle('page:billing-resume', ['settings'], ({ w }) => billingCall(w.profile, '/api/billing/resume', {}));
   internalHandle('page:billing-redeem', ['settings'], ({ w }, code) => billingCall(w.profile, '/api/billing/redeem', { code: String(code || '').slice(0, 40) }));

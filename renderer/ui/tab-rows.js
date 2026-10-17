@@ -2,7 +2,7 @@
 // (vertical-tabs.js) and its flyout over the page when the column is
 // collapsed (tab-flyout.js, in the overlay). Both draw the same tab state the
 // tab strip draws, and send the same tab:… messages.
-import { icons, markSvg } from './icons.js';
+import { icons, browserMarkSvg } from './icons.js';
 
 const svg = (d, size = 14) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 // Two pages side by side: a tab in a split view.
@@ -10,7 +10,7 @@ export const splitIcon = (size = 13) => svg('<rect x="3.5" y="5" width="7.2" hei
 
 export function faviconHtml(t) {
   if (t.loading) return '<span class="spinner"></span>';
-  if (t.internal) return markSvg(14);
+  if (t.internal) return browserMarkSvg(14);
   if (t.favicon) return `<img src="${encodeURI(t.favicon)}" alt="" draggable="false">`;
   return icons.globe;
 }

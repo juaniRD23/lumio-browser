@@ -165,23 +165,21 @@ test('signed out, the panel asks to sign in; on the Free plan the AI is ready', 
   assert.ok(await until(() => L.shell(`!!document.querySelector('.suggestion')`)));
 });
 
-test('one model; the thinking-effort slider under the chat box sets how hard it thinks', async () => {
+test('one model; the thinking-effort menu under the chat box sets how hard it thinks', async () => {
   assert.equal(await L.shell(`!!document.querySelector('#composer .composer-row #reasoning-btn')`), true);
   assert.equal(await L.shell(`document.getElementById('reasoning-name').textContent`), 'Medium');
   assert.equal(await L.shell(`document.querySelectorAll('#reasoning-bars rect').length`), 3);
+  // The server names the model (the browser doesn't hard-code it): the chip's tooltip says it.
+  assert.equal(await L.shell(`document.getElementById('reasoning-btn').dataset.tip`), 'Effort: Medium (Mock Agent)');
   await L.shell(`document.getElementById('reasoning-btn').click(); true`);
-  assert.deepEqual(await L.shell(`[...document.querySelectorAll('#effort-ticks button')].map((b) => b.textContent)`), ['Low', 'Medium', 'High']);
-  assert.equal(await L.shell(`document.getElementById('effort-slider').getAttribute('aria-valuenow')`), '1');
-  assert.equal(await L.shell(`document.getElementById('effort-label').textContent`), 'Medium');
-  // The server names the model (the browser doesn't hard-code it).
-  assert.equal(await L.shell(`document.getElementById('effort-model').textContent`), 'Mock Agent');
-  // It opens upward, above the chat box, and shows what's left of the plan.
+  // Three levels, the one in use checked; it opens upward, above the chat box.
+  assert.deepEqual(await L.shell(`[...document.querySelectorAll('#effort-rows .menu-row')].map((b) => [b.dataset.level, b.querySelector('b').textContent, b.getAttribute('aria-checked')])`),
+    [['low', 'Low', 'false'], ['medium', 'Medium', 'true'], ['high', 'High', 'false']]);
   assert.equal(await L.shell(`document.getElementById('reasoning-menu').getBoundingClientRect().bottom <= document.getElementById('composer').getBoundingClientRect().top`), true);
-  assert.match(await L.shell(`document.getElementById('reasoning-foot').textContent`), /Lumio Free · \d+% left\s*Get more/);
   await L.wait(400);
-  await shot('05-effort-slider');
-  // A real click at the right end of the track moves the knob to High.
-  const r = await L.shell(`(() => { const b = document.getElementById('effort-slider').getBoundingClientRect(); return { x: Math.round(b.right - 6), y: Math.round(b.top + b.height / 2) }; })()`);
+  await shot('05-effort-menu');
+  // A real click on High.
+  const r = await L.shell(`(() => { const b = document.querySelector('#effort-rows [data-level="high"]').getBoundingClientRect(); return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) }; })()`);
   await L.main(async (_e, p) => {
     const wc = global.lumio.win.webContents;
     wc.sendInputEvent({ type: 'mouseDown', x: p.x, y: p.y, button: 'left', clickCount: 1 });
@@ -189,14 +187,18 @@ test('one model; the thinking-effort slider under the chat box sets how hard it 
   }, r);
   await until(async () => (await L.shell(`document.getElementById('reasoning-name').textContent`)) === 'High');
   assert.equal(await L.main(() => global.lumio.store.settings.reasoning), 'high');
-  assert.equal(await L.shell(`document.getElementById('effort-slider').getAttribute('aria-valuenow')`), '2');
-  // Arrow keys step through the levels; the tick labels pick one directly.
-  await L.shell(`document.getElementById('effort-slider').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); true`);
+  assert.equal(await L.shell(`document.getElementById('reasoning-menu').hidden`), true, 'picking closes it');
+  // From the keyboard: arrows move, Enter picks, Esc closes.
+  await L.shell(`document.getElementById('reasoning-btn').click(); true`);
+  assert.equal(await L.shell(`document.activeElement.dataset.level`), 'high');
+  await L.shell(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true })); true`);
+  assert.equal(await L.shell(`document.activeElement.dataset.level`), 'medium');
+  await L.shell(`document.activeElement.click(); true`);
   await until(async () => (await L.main(() => global.lumio.store.settings.reasoning)) === 'medium');
-  await L.shell(`document.querySelector('#effort-ticks [data-i="2"]').click(); true`);
+  await L.shell(`document.getElementById('reasoning-btn').click(); true`);
+  await L.shell(`document.querySelector('#effort-rows [data-level="high"]').click(); true`);
   await until(async () => (await L.main(() => global.lumio.store.settings.reasoning)) === 'high');
-  // Escape closes it.
-  await L.shell(`document.getElementById('effort-slider').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); true`);
+  await L.shell(`document.getElementById('reasoning-btn').click(); document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); true`);
   assert.equal(await L.shell(`document.getElementById('reasoning-menu').hidden`), true);
   assert.equal(await L.shell(`document.getElementById('reasoning-name').textContent`), 'High');
   // Anything else is refused.
@@ -220,7 +222,17 @@ test('approvals: one button shows the mode, and its menu switches between Ask, A
   assert.equal(await L.shell(`document.querySelector('#mode-menu [data-mode="auto"]').getAttribute('aria-checked')`), 'true');
   await shot('03-approvals-menu');
   await L.shell(`document.getElementById('mode-btn').click(); true`);
-  await pick('bypass');
+  // Bypass asks first, in red; Cancel keeps Auto, Turn on Bypass turns it on.
+  await L.shell(`document.getElementById('mode-btn').click(); true`);
+  await L.shell(`document.querySelector('#mode-menu [data-mode="bypass"]').click(); true`);
+  assert.equal(await L.shell(`document.getElementById('bypass-confirm').hidden`), false);
+  await shot('03b-bypass-confirm');
+  await L.shell(`document.querySelector('#bypass-confirm [data-bc="cancel"]').click(); true`);
+  assert.equal(await L.main(() => global.lumio.store.settings.approvalMode), 'auto');
+  await L.shell(`document.getElementById('mode-btn').click(); true`);
+  await L.shell(`document.querySelector('#mode-menu [data-mode="bypass"]').click(); true`);
+  await L.shell(`document.querySelector('#bypass-confirm [data-bc="ok"]').click(); true`);
+  assert.ok(await until(() => L.main(() => global.lumio.store.settings.approvalMode === 'bypass')), 'mode bypass');
   assert.equal(await L.shell(`document.getElementById('mode-btn').classList.contains('bypass')`), true);
   await pick(start);
   assert.equal(await L.shell(`document.getElementById('mode-btn').classList.contains('bypass')`), false);
@@ -566,13 +578,15 @@ test('connections: connect Gmail from the + menu, then Lumio searches it through
   await L.shell(`document.getElementById('plus-btn').click(); true`);
 });
 
-test('the usage ring next to Send shows the plan, and opens the details', async () => {
+test('the usage circle next to Send shows this week’s share used, and opens the details', async () => {
   assert.equal(await L.shell(`document.getElementById('usage-btn').hidden`), false);
-  const offset = await L.shell(`parseFloat(document.querySelector('#usage-btn .ring-fg').style.strokeDashoffset)`);
+  const offset = await L.shell(`parseFloat(document.querySelector('#usage-btn .arc').style.strokeDashoffset)`);
   assert.ok(Math.abs(offset - 2 * Math.PI * 8.5 * 0.62) < 0.5, `38% used (${offset})`);
+  assert.equal(await L.shell(`document.getElementById('usage-btn').dataset.level`), 'low', 'gray under 50%');
+  assert.match(await L.shell(`document.getElementById('usage-btn').getAttribute('aria-label')`), /^38% of this week used · All of it frees up by /);
   await L.shell(`document.getElementById('usage-btn').click(); true`);
   const text = await L.shell(`document.getElementById('usage-pop').innerText`);
-  assert.match(text, /Lumio Free[\s\S]*Weekly usage[\s\S]*38% used[\s\S]*62% left[\s\S]*fully by[\s\S]*No 5-hour limits/i);
+  assert.match(text, /Lumio Free[\s\S]*38%[\s\S]*of this week used[\s\S]*62% left[\s\S]*frees up by[\s\S]*share it[\s\S]*See all/i);
   await L.wait(300);
   await shot('43-usage');
   await L.shell(`document.getElementById('usage-btn').click(); true`);
@@ -581,13 +595,18 @@ test('the usage ring next to Send shows the plan, and opens the details', async 
 test('out of allowance, the chat offers an upgrade', async () => {
   await ask('you are out of allowance');
   await idle();
-  const note = await L.shell(`(() => { const n = [...document.querySelectorAll('.notice')].at(-1); return { text: n.textContent, button: n.querySelector('button')?.textContent } })()`);
+  const note = await L.shell(`(() => { const n = [...document.querySelectorAll('.notice')].at(-1); return { text: n.textContent, buttons: [...n.querySelectorAll('button')].map((b) => b.textContent) } })()`);
   assert.match(note.text, /allowance/);
-  assert.equal(note.button, 'Upgrade');
+  assert.deepEqual(note.buttons, ['See usage', 'Upgrade']);
+  // See usage opens the usage details and points at the circle.
+  await L.shell(`[...document.querySelectorAll('.notice')].at(-1).querySelector('[data-act="usage"]').click(); true`);
+  assert.equal(await L.shell(`!document.getElementById('usage-pop').hidden && document.getElementById('usage-btn').classList.contains('is-pointed')`), true);
+  await L.shell(`document.getElementById('usage-btn').click(); true`);
+  // Upgrade opens the plans, saying it's from Lumio Browser (a Go plan bought there is for Lumio Browser).
   const before = await L.main(() => global.lumio.tabs.tabs.length);
-  await L.shell(`[...document.querySelectorAll('.notice')].at(-1).querySelector('button').click(); true`);
+  await L.shell(`[...document.querySelectorAll('.notice')].at(-1).querySelector('[data-act="upgrade"]').click(); true`);
   await until(async () => (await L.main(() => global.lumio.tabs.tabs.length)) === before + 1);
-  assert.equal(await L.main(() => global.lumio.tabs.active.url), `${lumio.base}/account#plans`);
+  assert.equal(await L.main(() => global.lumio.tabs.active.url), `${lumio.base}/account?app=browser#plans`);
   await L.main(() => global.lumio.cmd.closeTab());
 });
 

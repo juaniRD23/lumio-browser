@@ -123,13 +123,18 @@ svg { display: block; }
 .acc-btn.ghost { background: var(--active); color: var(--text-soft); }
 .acc-error { margin: 0 8px 8px; color: var(--danger-strong-text); font-size: 12px; text-align: center; }
 .acc-list { border-top: 1px solid var(--line); padding-top: 4px; }
+.acc-list + .acc-list { margin-top: 4px; }
+/* Where a Go plan bought in the other app works. */
+.acc-scope { margin-top: 4px; color: var(--label); font-size: 12px; }
+/* Settings' shortcut, at the right of its row. */
+.acc-kbd { font: 11px var(--mono); color: var(--label); padding: 1px 5px; border: 1px solid var(--line); border-radius: 6px; }
 .acc-item { display: flex; align-items: center; gap: 12px; width: 100%; height: 38px; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: var(--text); font: inherit; text-align: left; }
-.acc-item:hover { background: var(--active); }
+.acc-item:hover, .acc-item:focus-visible { background: var(--overlay-3); } /* a menu row (design-system §6.2), like the panel's */
 .acc-item .ic { width: 18px; display: grid; place-items: center; color: var(--dim); flex: none; }
 .acc-item .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .acc-meta { color: var(--muted); font-size: 12px; display: inline-grid; place-items: center; }
 .acc-pill { font-size: 11.5px; font-weight: 600; color: var(--on-accent); background: var(--accent); padding: 3px 9px; border-radius: 999px; }
-.acc-pill:hover { filter: brightness(1.1); }
+.acc-pill:hover { background: color-mix(in srgb, var(--accent) 88%, var(--text-strong)); } /* Upgrade, like every accent button */
 
 /* password suggestions under a sign-in field */
 .af-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 6px 10px; border: 0; border-radius: 8px; background: none; color: var(--text); font: inherit; text-align: left; }

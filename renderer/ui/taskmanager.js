@@ -2,7 +2,7 @@
 // CPU, network and process ID, refreshed every second. Click a column to
 // sort; arrows choose a row; Enter (or a double-click) shows that tab; End
 // process stops the chosen page's process; Esc closes the window.
-import { icons, markSvg } from './icons.js';
+import { icons, markSvg, browserMarkSvg } from './icons.js';
 
 const api = window.lumio;
 const $ = (sel) => document.querySelector(sel);
@@ -14,7 +14,7 @@ let selected = null; // pid
 
 const memory = (n) => (n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(2)} GB` : `${(n / 1024 ** 2).toFixed(1)} MB`);
 const rate = (n) => (n == null ? '–' : n < 1 ? '0' : n < 1024 ** 2 ? `${(n / 1024).toFixed(1)} KB/s` : `${(n / 1024 ** 2).toFixed(1)} MB/s`);
-const KIND_ICON = { browser: markSvg(14), ui: markSvg(14), ai: markSvg(14), gpu: icons.bolt, utility: icons.gear, extension: icons.puzzle, devtools: icons.terminal, popup: icons.app, other: icons.app, tab: icons.globe };
+const KIND_ICON = { browser: browserMarkSvg(14), ui: browserMarkSvg(14), ai: markSvg(14), gpu: icons.bolt, utility: icons.gear, extension: icons.puzzle, devtools: icons.terminal, popup: icons.app, other: icons.app, tab: icons.globe };
 
 function sorted() {
   const { key, dir } = sort;

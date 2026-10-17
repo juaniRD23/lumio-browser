@@ -12,11 +12,11 @@ a:hover { text-decoration: underline; }
 .btn:active { transform: scale(.98); }
 .btn.primary { background: var(--primary-bg); color: var(--primary-fg); border-color: transparent; font-weight: 600; }
 .btn.accent { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
-.btn.accent:hover { background: color-mix(in srgb, var(--accent) 78%, var(--primary-hover)); } /* lighter in dark, deeper in light */
+.btn.accent:hover { background: color-mix(in srgb, var(--accent) 88%, var(--text-strong)); } /* lighter in dark, deeper in light (design-system §6.1) */
 .btn.primary:hover { background: var(--primary-hover); }
 .btn.danger { color: var(--danger); }
 .btn:disabled { opacity: .4; cursor: default; }
-.field { height: 38px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--field); outline: none; }
+.field { height: 34px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--field); outline: none; font-size: 13.5px; }
 .field:focus { border-color: var(--focus-ring); }
 .mark { display: inline-grid; place-items: center; }
 .wrap { max-width: 760px; margin: 0 auto; padding: 48px 28px 80px; }

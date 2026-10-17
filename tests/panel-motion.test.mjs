@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright-core';
-import { CHROME, INIT, startServer, openPage } from './shell-page.mjs';
+import { CHROME, INIT, startServer, openPage, slowMotion } from './shell-page.mjs';
 
 const skip = CHROME ? false : 'Google Chrome is not installed';
 let browser, server, base;
@@ -59,6 +59,7 @@ test('streaming: finished blocks are drawn once, the chat sticks to the bottom u
   await page.waitForFunction(() => document.querySelector('.msg.ai.streaming strong'));
   assert.equal(await page.evaluate((p) => p.isConnected && document.querySelector('.msg.ai.streaming p') === p, first), true, 'the first block was not drawn again');
   assert.equal(await page.$$eval('.msg.ai.streaming pre', (els) => els.length), 1, 'the code block is whole');
+  assert.equal(await page.$eval('.msg.ai.streaming .code-block .code-head > span', (s) => s.textContent), 'js', 'with its head while it streams');
   // Following: at the bottom, new words keep it at the bottom.
   for (let i = 0; i < 8; i++) await emit(page, 'ai-event', { type: 'text', chatId: 'c1', delta: `\n\nMore ${i} ${'text '.repeat(40)}` });
   await page.waitForTimeout(250);
@@ -81,7 +82,7 @@ test('streaming: finished blocks are drawn once, the chat sticks to the bottom u
   await frames(page);
   assert.match(await page.textContent('#ai-announce'), /^Lumio: First block\. .*Third block/);
   assert.equal(await page.$eval('#messages', (m) => m.getAttribute('aria-live')), null, 'the chat itself is not read word by word');
-  assert.equal(await page.$$eval('.msg.ai', (els) => els.at(-1).querySelectorAll('pre .copy').length), 1, 'the finished answer gets its copy button');
+  assert.equal(await page.$$eval('.msg.ai', (els) => els.at(-1).querySelectorAll('.code-block > .code-head .code-copy').length), 1, 'the finished answer’s code block has its Copy');
   assert.deepEqual(errors, []);
   await page.close();
 });
@@ -104,4 +105,37 @@ test('a step’s spinner turns into its result', { skip }, async () => {
   const dur = await rm.page.$eval('#messages > .msg.user', (el) => el.getAnimations()[0]?.effect.getTiming().duration ?? 0);
   assert.ok(dur <= 1, `instant under Reduce Motion (${dur} ms)`);
   await rm.page.close();
+});
+
+test('menus come in like Lumio AI’s: 200ms, eased out, from 6px and .97; those over the chat box rise, the others drop', { skip }, async () => {
+  const { page, errors } = await openPage(browser, base, {
+    init: { ...PANEL, sidebar: { open: true } },
+    answers: { 'ai:chats': [{ id: 'c1', title: 'Trip to Lisbon', updatedAt: Date.now() - 60_000, projectId: null }] },
+  });
+  await page.waitForSelector('#sb-menu', { state: 'attached' });
+  const looks = await page.evaluate(() => {
+    const frames = {};
+    for (const sheet of document.styleSheets) {
+      for (const r of sheet.cssRules) if (r instanceof CSSKeyframesRule) frames[r.name] = r.cssRules[0].style;
+    }
+    const probe = document.body.appendChild(document.createElement('i'));
+    probe.style.animationTimingFunction = 'var(--ease-out)';
+    const easeOut = getComputedStyle(probe).animationTimingFunction;
+    probe.remove();
+    const of = (id) => {
+      const s = getComputedStyle(document.getElementById(id));
+      const from = frames[s.animationName];
+      return [s.animationName, s.animationDuration, s.animationTimingFunction === easeOut, from?.opacity, from?.transform];
+    };
+    return Object.fromEntries(['mode-menu', 'reasoning-menu', 'plus-menu', 'usage-pop', 'bypass-confirm', 'chat-menu', 'sb-menu'].map((id) => [id, of(id)]));
+  });
+  const up = ['menu-up', '0.2s', true, '0', 'translateY(6px) scale(0.97)'];
+  const down = ['menu-down', '0.2s', true, '0', 'translateY(-6px) scale(0.97)'];
+  assert.deepEqual(looks, { 'mode-menu': up, 'reasoning-menu': up, 'plus-menu': up, 'usage-pop': up, 'bypass-confirm': up, 'chat-menu': down, 'sb-menu': down });
+  // Opening one plays it (slowed down, so it's still playing when we look).
+  await slowMotion(page, 0.1);
+  await page.click('#mode-btn');
+  assert.equal(await page.$eval('#mode-menu', (el) => el.getAnimations().some((a) => a.animationName === 'menu-up')), true);
+  assert.deepEqual(errors, []);
+  await page.close();
 });

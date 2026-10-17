@@ -279,7 +279,9 @@ class Speaker {
 }
 
 // ---------------------------------------------------------------- the panel part
-export function initVoice({ api, prompt, autosize, submit, notice, isReady, isBusy, getChatId, onChange = () => {} }) {
+// What the mic's tooltip says while the system doesn't let Lumio use it.
+const MIC_HELP = /Win/.test(globalThis.navigator?.platform || '') ? 'Allow microphone access in Windows Settings › Privacy & security › Microphone.' : 'Allow the microphone in System Settings › Privacy & Security › Microphone.';
+export function initVoice({ api, prompt, autosize, submit, notice, isReady, isBusy, getChatId, onChange = () => {}, icons = null, tips = null }) {
   const micBtn = $('#mic-btn');
   const modeBtn = $('#voice-btn');
   const bar = $('#voice-bar');
@@ -294,6 +296,7 @@ export function initVoice({ api, prompt, autosize, submit, notice, isReady, isBu
   let dictated = ''; // the last dictated words, until a message with them is sent
   let aloud = null; // a dictated message's chat: its answer is read aloud
   let muted = false;
+  let micDenied = false; // the system said no to the microphone
   let starting = false;
   let hearing = 0; // phrases being turned into text
   let chain = Promise.resolve(); // what was heard is handled in order
@@ -321,7 +324,18 @@ export function initVoice({ api, prompt, autosize, submit, notice, isReady, isBu
     const p = phase();
     document.body.classList.toggle('voice-on', mode);
     document.body.dataset.voice = p;
-    micBtn.classList.toggle('on', dictating);
+    // The mic: listening (red), turning what you said into text (a spinner),
+    // or crossed out when the system doesn't let Lumio use it.
+    const transcribing = dictating && hearing > 0;
+    micBtn.classList.toggle('on', dictating && !transcribing);
+    micBtn.classList.toggle('busy', transcribing);
+    const off = micDenied && !dictating;
+    if (icons && micBtn.classList.contains('off') !== off) micBtn.innerHTML = off ? icons.micOff : icons.mic;
+    micBtn.classList.toggle('off', off);
+    const word = transcribing ? 'Transcribing…' : dictating ? 'Done talking' : 'Dictate';
+    micBtn.setAttribute('aria-label', word);
+    micBtn.dataset.tip = off ? `${word}\n${MIC_HELP}` : word;
+    tips?.refresh(micBtn);
     modeBtn.classList.toggle('on', mode);
     modeBtn.setAttribute('aria-pressed', String(mode));
     bar.hidden = !mode;
@@ -349,10 +363,12 @@ export function initVoice({ api, prompt, autosize, submit, notice, isReady, isBu
     listener = new Listener({ endMs: dictating ? 1300 : 1000 }); // a short pause mid-sentence doesn't end the phrase
     try {
       mic = await openMic(onFrame);
+      micDenied = false;
       return true;
     } catch (err) {
       listener = null;
       const why = `${err?.name} ${err?.message}`;
+      micDenied = /denied|not allowed|permission/i.test(why);
       notice(/denied|not allowed|permission/i.test(why)
         ? (/Mac/.test(navigator.platform) ? 'Lumio can’t use the microphone. Allow Lumio Browser in System Settings › Privacy & Security › Microphone, then try again.' : 'Lumio can’t use the microphone. In Windows Settings › Privacy & security › Microphone, turn on microphone access for desktop apps, then try again.')
         : /notfound|requested device/i.test(why) ? 'No microphone found.' : `The microphone didn’t start: ${err?.message || err}`);
@@ -464,12 +480,11 @@ export function initVoice({ api, prompt, autosize, submit, notice, isReady, isBu
     const ok = await startMic();
     starting = false;
     if (!ok) { dictating = false; render(); return; }
-    micBtn.title = 'Done talking';
+    render();
   });
   function stopDictation() {
     dictating = false;
     closeMic();
-    micBtn.title = 'Dictate';
     render();
   }
 

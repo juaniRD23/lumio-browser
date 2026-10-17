@@ -212,7 +212,10 @@ function renderAccount({ account = {}, profile = {}, incognito, guest, profiles 
   }
   const name = profile.name || account.name || (account.signedIn ? account.email : 'Lumio Browser');
   const sub = account.signedIn ? account.email : 'Not signed in';
-  const plan = account.signedIn && account.planName ? `<span class="acc-plan">Lumio ${esc(account.planName)}</span>` : '';
+  // A Go plan works only in the app it was bought in: bought in Lumio AI, this
+  // browser is on Free, and says where the Go plan is.
+  const goElsewhere = account.signedIn && account.planApp === 'ai' && account.plan !== 'go' ? '<span class="acc-scope">Your Go plan is for Lumio AI.</span>' : '';
+  const plan = account.signedIn && account.planName ? `<span class="acc-plan">Lumio ${esc(account.planName)}</span>${goElsewhere}` : '';
   let status = '';
   if (account.connecting) {
     status = `<div class="acc-box"><div class="acc-box-t">Finish signing in on the Lumio tab</div><div class="acc-box-s">Log in on the Lumio tab that opened. Lumio Browser signs in with you.</div><button class="acc-btn ghost" data-acc="cancel">Cancel</button></div>`;
@@ -222,19 +225,19 @@ function renderAccount({ account = {}, profile = {}, incognito, guest, profiles 
   const error = account.error ? `<div class="acc-error">${esc(account.error)}</div>` : '';
   const w = (account.usage?.windows || []).find((x) => x.id === 'weekly') || account.usage;
   const left = w && w.limit ? Math.max(0, Math.round((w.remaining / w.limit) * 100)) : null;
-  const planLabel = account.signedIn && account.planName ? `Plan and usage` : 'Plans';
+  const planLabel = account.signedIn && account.planName ? 'Plan & usage' : 'Plans';
   const planExtra = account.signedIn && left != null ? `<span class="acc-meta">${left}% left</span>` : '';
   const upgrade = account.plan !== 'max' ? `<span class="acc-pill" data-acc="open:upgrade">Upgrade</span>` : '';
   card.innerHTML = `<div class="acc-head">${avatarHtml({ profile, account, size: 56 })}<div class="acc-name">${esc(name)}</div><div class="acc-sub">${esc(sub)}</div>${plan}</div>
     ${status}${error}
     <div class="acc-list">
-      ${item('page:passwords', icons.key, 'Passwords and Autofill')}
-      ${account.signedIn ? item('open:manage', icons.person, 'Manage your Lumio account', `<span class="acc-meta">${icons.external}</span>`) : ''}
-      ${item('page:profile', icons.brush, 'Customize profile')}
       ${item('page:plan', icons.gauge, planLabel, planExtra + upgrade)}
-      ${item('page:settings', icons.gear, 'Settings')}
-      ${account.signedIn ? item('sign-out', icons.logout, 'Sign out of Lumio') : ''}
+      ${item('page:settings', icons.gear, 'Settings', `<kbd class="acc-kbd">${navigator.platform.startsWith('Mac') ? '⌘,' : 'Ctrl+,'}</kbd>`)}
+      ${item('page:passwords', icons.key, 'Passwords and Autofill')}
+      ${item('page:profile', icons.brush, 'Customize profile')}
+      ${account.signedIn ? item('open:manage', icons.person, 'Manage account', `<span class="acc-meta">${icons.external}</span>`) : ''}
     </div>
+    ${account.signedIn ? `<div class="acc-list">${item('sign-out', icons.logout, 'Sign out of Lumio')}</div>` : ''}
     ${profilesSection(profiles)}`;
 }
 

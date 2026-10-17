@@ -2,7 +2,7 @@
 // one (never the first), Guest mode, and whether this shows at launch.
 // Keyboard: arrows move between profiles, Enter opens, Delete deletes,
 // Shift+F10 or the context-menu key opens a profile's menu, Esc backs out.
-import { icons, markSvg, avatarHtml } from './icons.js';
+import { icons, browserMarkSvg, avatarHtml } from './icons.js';
 
 const api = window.lumio;
 const $ = (sel) => document.querySelector(sel);
@@ -16,7 +16,7 @@ let menuFor = null; // the profile whose ⋯ menu is open
 let deleting = null;
 let addColor = COLORS[1];
 
-$('.brand .mark').innerHTML = markSvg(28, true);
+$('.brand .mark').innerHTML = browserMarkSvg(28, true);
 $('#guest .ic').innerHTML = icons.person;
 
 // ---------------------------------------------------------------- the list

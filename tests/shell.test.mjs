@@ -122,6 +122,112 @@ test('the window and AI panel start without errors, and the composer works', { s
   assert.deepEqual(errors, [], 'no errors while using it');
 });
 
+// The weekly allowance the way /v1/usage reports it (main/account.js keeps it).
+const week = (used) => ({ used, limit: 100, remaining: 100 - used, fullAt: Date.now() + 864e5, windows: [{ id: 'weekly', label: 'Weekly usage', used, limit: 100, remaining: 100 - used, fullAt: Date.now() + 864e5 }] });
+
+test('the chat box: one row under the input like Lumio AI’s, the usage circle, Bypass asks first, Stop is the send circle', { skip: !CHROME && 'Google Chrome not installed' }, async () => {
+  const ai = { ...AI, workflows: true, lumio: { signedIn: true, plan: 'plus', planName: 'Plus', usage: week(85) } };
+  const { page, errors } = await openShell(browser, {
+    'shell:init': { value: { ...INIT, ai } },
+    'ai:projects': { value: [{ id: 'p1', name: 'Trip' }] },
+    'ai:set-mode': { fn: `return { ...${JSON.stringify(ai)}, mode: args[0] }` },
+    'ai:set-reasoning': { fn: `return { ...${JSON.stringify(ai)}, reasoning: args[0], reasoningName: args[0][0].toUpperCase() + args[0].slice(1) }` },
+  });
+  await page.waitForFunction(() => !document.getElementById('project-btn').hidden);
+  // + · effort · approvals · project ····· usage · mic · send (voice while the box is empty).
+  assert.deepEqual(await page.$$eval('#composer .composer-row > :not([hidden])', (els) => els.map((e) => e.id || e.className)),
+    ['plus-btn', 'reasoning-btn', 'mode-btn', 'project-btn', 'spacer', 'usage-btn', 'mic-btn', 'voice-btn']);
+  assert.equal(await page.getAttribute('#composer .composer-row', 'role'), 'toolbar');
+  // The side panel's box is narrow: compact controls, and the chips show only their icons.
+  // Layout sizes (offsetWidth: the full-size chat scales in, and a transform would shrink a box's rect).
+  const size = (sel) => page.$eval(sel, (e) => [e.offsetWidth, e.offsetHeight]);
+  assert.deepEqual(await size('#plus-btn'), [28, 28]);
+  assert.deepEqual(await size('#mode-btn'), [34, 28]);
+  assert.deepEqual(await size('#project-btn'), [34, 28]);
+  assert.deepEqual(await size('#voice-btn'), [32, 32]);
+  assert.equal(await page.isVisible('#mode-name'), false, 'icon only');
+  assert.equal(await page.textContent('#project-btn .pn'), 'No project');
+  assert.equal(await page.$eval('#project-btn', (e) => e.classList.contains('is-empty')), true);
+
+  // The usage circle: this week's share used. Gray, then the accent from 50%, amber from 80%, red from 95%.
+  assert.equal(await page.getAttribute('#usage-btn', 'data-level'), 'high');
+  assert.match(await page.getAttribute('#usage-btn', 'aria-label'), /^85% of this week used · All of it frees up by \S+/);
+  assert.equal(await page.$eval('#usage-btn .arc', (e) => Math.round(parseFloat(e.style.strokeDashoffset) * 100) / 100), Math.round(53.41 * 0.15 * 100) / 100);
+  for (const [used, level] of [[0, 'low'], [49, 'low'], [50, 'half'], [79, 'half'], [80, 'high'], [95, 'full']]) {
+    await page.evaluate((s) => window.__emit('ai-state', s), { ...ai, lumio: { ...ai.lumio, usage: week(used) } });
+    assert.equal(await page.getAttribute('#usage-btn', 'data-level'), level, `${used}%`);
+  }
+  await page.evaluate((s) => window.__emit('ai-state', s), { ...ai, lumio: { ...ai.lumio, usage: week(0) } });
+  assert.equal(await page.getAttribute('#usage-btn', 'aria-label'), 'Nothing used yet this week');
+  await page.evaluate((s) => window.__emit('ai-state', s), { ...ai, lumio: { ...ai.lumio, usage: week(95) } });
+
+  // The chips' names are Lumio AI's (design-system §6.7): Effort, Approval mode.
+  assert.equal(await page.getAttribute('#reasoning-btn', 'data-tip'), 'Effort: Medium (Mock)');
+  assert.equal(await page.getAttribute('#reasoning-btn', 'aria-label'), 'Effort: Medium');
+  assert.equal(await page.getAttribute('#reasoning-menu', 'aria-label'), 'Effort');
+  assert.equal(await page.getAttribute('#mode-btn', 'data-tip'), 'Approval mode: Ask');
+  assert.equal(await page.getAttribute('#mode-btn', 'aria-label'), 'Approval mode: Ask');
+
+  // Thinking effort: a menu of three levels; the chip shows the one picked.
+  await page.click('#reasoning-btn');
+  assert.deepEqual(await page.$$eval('#effort-rows .menu-row', (els) => els.map((e) => [e.dataset.level, e.getAttribute('aria-checked')])), [['low', 'false'], ['medium', 'true'], ['high', 'false']]);
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.level), 'medium', 'the menu takes the keyboard');
+  assert.ok(await page.evaluate(() => document.getElementById('reasoning-menu').getBoundingClientRect().bottom <= document.getElementById('composer').getBoundingClientRect().top), 'it opens upward');
+  await page.click('#effort-rows [data-level="high"]');
+  await page.waitForFunction(() => document.getElementById('reasoning-name').textContent === 'High');
+  assert.equal(await page.isVisible('#reasoning-menu'), false);
+  assert.deepEqual(await page.evaluate(() => window.__calls.filter(([c]) => c === 'ai:set-reasoning').map(([, v]) => v)), ['high']);
+
+  // Bypass asks first, in red: Esc (or Cancel) keeps the mode, Turn on Bypass sets it.
+  await page.click('#mode-btn');
+  await page.click('#mode-menu [data-mode="bypass"]');
+  assert.equal(await page.isVisible('#bypass-confirm'), true);
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.bc), 'cancel', 'Cancel has the focus');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.isVisible('#bypass-confirm'), false);
+  assert.equal(await page.evaluate(() => window.__calls.some(([c, m]) => c === 'ai:set-mode' && m === 'bypass')), false, 'not turned on');
+  await page.click('#mode-btn');
+  await page.click('#mode-menu [data-mode="bypass"]');
+  await page.click('#bypass-confirm [data-bc="ok"]');
+  await page.waitForFunction(() => document.getElementById('mode-btn').classList.contains('bypass'));
+  assert.equal(await page.isVisible('#bypass-confirm'), false);
+
+  // The project chip: a new chat starts in the project picked.
+  await page.click('#project-btn');
+  await page.click('#project-menu [data-project="p1"]');
+  assert.equal(await page.textContent('#project-btn .pn'), 'Trip');
+  assert.equal(await page.$eval('#project-btn', (e) => e.classList.contains('is-empty')), false);
+
+  // While Lumio works, Send is Stop: the same circle, with a square.
+  await page.evaluate(() => window.__emit('ai-event', { chatId: 'c9', type: 'user', text: 'Find a bakery' }));
+  await page.evaluate((s) => window.__emit('ai-state', s), { ...ai, mode: 'bypass', lumio: { ...ai.lumio, usage: week(95) }, running: true, runChatId: 'c9' });
+  assert.equal(await page.getAttribute('#send', 'aria-label'), 'Stop');
+  assert.equal(await page.$eval('#send', (e) => e.classList.contains('stop') && !!e.querySelector('rect')), true);
+  assert.deepEqual(await size('#send'), [32, 32]);
+
+  // A limit: the message points at the circle (See usage), which turns red behind.
+  await page.evaluate(() => window.__emit('ai-event', { chatId: 'c9', type: 'error', code: 'usage_limit', message: 'You’ve used your Lumio AI allowance on the Plus plan for now.' }));
+  assert.deepEqual(await page.$$eval('.notice.limit button', (els) => els.map((e) => e.textContent)), ['See usage', 'Upgrade']);
+  assert.equal(await page.getAttribute('#usage-btn', 'data-blocked'), '');
+  await page.click('.notice.limit [data-act="usage"]');
+  assert.equal(await page.isVisible('#usage-pop'), true);
+  assert.equal(await page.$eval('#usage-btn', (e) => e.classList.contains('is-pointed')), true);
+  assert.match(await page.textContent('#usage-pop'), /Lumio Plus.*95%.*of this week used.*5% left.*Works in: Lumio AI ✓ · Lumio Browser ✓.*Lumio AI and Lumio Browser share it.*See all/s);
+  await page.click('#usage-pop [data-see-all]');
+  assert.deepEqual(await page.evaluate(() => window.__sent.filter(([c]) => c === 'tab:new').at(-1)), ['tab:new', 'lumio://settings/#plan']);
+
+  // Full size: the regular sizes in Lumio's 780px column, with the chips' words.
+  await page.click('#expand-btn');
+  await page.waitForFunction(() => document.body.classList.contains('chat-full'));
+  const [boxW, room] = await page.evaluate(() => [document.getElementById('composer').offsetWidth, document.getElementById('panel').clientWidth]);
+  assert.equal(boxW, Math.min(780, room - 48), 'the 780px column, with 24px each side when the window is narrower');
+  assert.deepEqual(await size('#plus-btn'), [32, 32]);
+  assert.deepEqual(await size('#send'), [34, 34]);
+  assert.equal(await page.isVisible('#mode-name'), true);
+  assert.equal(await page.textContent('#mode-name'), 'Bypass');
+  assert.deepEqual(errors, []);
+});
+
 test('bookmarks bar: under the address bar, icons, the new tab page, right-click and drops', { skip: !CHROME && 'Google Chrome not installed' }, async () => {
   const { page, errors } = await openShell(browser);
   await page.route('https://c.example/favicon.ico', (r) => r.fulfill({ status: 404, body: '' }));
@@ -306,6 +412,34 @@ test('dictation: what you said lands in the box, and when you send it the answer
   } finally {
     await b.close();
   }
+});
+
+test('code blocks: a head with the language and Copy, like Lumio AI’s, and Copy is there for the keyboard too', { skip: !CHROME && 'Google Chrome not installed' }, async () => {
+  const reply = 'Here:\n\n```js\nconst a = 1;\n```\n\nAnd plain:\n\n```\nls -la\n```';
+  const { page, errors } = await openShell(browser, { 'ai:chat': { value: { id: 'c1', title: 'Code', display: [{ kind: 'user', text: 'Show me' }, { kind: 'ai', text: reply }] } } });
+  await page.evaluate(() => window.__emit('ai-open-chat', { id: 'c1' }));
+  await page.waitForSelector('.msg.ai .code-block');
+  assert.deepEqual(await page.$$eval('.msg.ai .code-block', (els) => els.map((b) => [b.querySelector('.code-head > span').textContent, b.querySelector('.code-copy').textContent, b.querySelector('pre').textContent.trim()])),
+    [['js', 'Copy', 'const a = 1;'], ['', 'Copy', 'ls -la']]);
+  // §6.8: r12 on --card2, a 30px head with a line under it; compact body padding 10 12. Copy shows without hovering.
+  const look = (sel) => page.$eval(sel, (b) => {
+    const head = b.querySelector('.code-head');
+    const copy = b.querySelector('.code-copy');
+    return { radius: getComputedStyle(b).borderRadius, head: head.offsetHeight, line: getComputedStyle(head).borderBottomWidth, pad: getComputedStyle(b.querySelector('pre')).padding, copy: copy.offsetWidth > 0 && getComputedStyle(copy).opacity === '1' };
+  });
+  assert.deepEqual(await look('.msg.ai .code-block'), { radius: '12px', head: 30, line: '1px', pad: '10px 12px', copy: true });
+  // Copy, from the keyboard: the code (not the head) goes to the clipboard, and it says so for a moment.
+  await page.evaluate(() => { window.__copied = []; navigator.clipboard.writeText = async (t) => { window.__copied.push(t); }; });
+  await page.focus('.msg.ai .code-copy');
+  await page.keyboard.press('Enter');
+  assert.deepEqual(await page.evaluate(() => window.__copied.map((t) => t.trim())), ['const a = 1;']);
+  assert.equal(await page.textContent('.msg.ai .code-copy'), 'Copied');
+  await page.waitForFunction(() => document.querySelector('.msg.ai .code-copy').textContent === 'Copy');
+  // Full size: the regular body padding.
+  await page.click('#expand-btn');
+  await page.waitForFunction(() => document.body.classList.contains('chat-full'));
+  assert.equal((await look('.msg.ai .code-block')).pad, '12px 14px');
+  assert.deepEqual(errors, []);
 });
 
 test('workflows: / lists them, the card asks for blanks, and Run sends it', { skip: !CHROME && 'Google Chrome not installed' }, async () => {

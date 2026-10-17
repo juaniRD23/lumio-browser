@@ -5,6 +5,7 @@
 // sheet. A website's Share button (navigator.share) opens it too.
 // Also the Install app / Create shortcut dialog (main/apps.js).
 import { qrMatrix } from '/assets/qr.js';
+import { POINTER_PATH } from './icons.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const pretty = (u) => String(u || '').replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '');
@@ -41,7 +42,8 @@ function ago(t) {
 
 // ---------------------------------------------------------------- QR codes
 // Black on white in both appearances (scanners need dark on light), with
-// Lumio's mark in the middle when there's enough error correction to cover it.
+// Lumio Browser's mark in the middle when there's enough error correction to
+// cover it.
 const QUIET = 4;
 export function drawQr(canvas, text, { px = 512 } = {}) {
   const m = qrMatrix(text, { ecc: 'Q' });
@@ -73,6 +75,12 @@ export function drawQr(canvas, text, { px = 512 } = {}) {
     ctx.beginPath();
     ctx.arc(48, 17, 5, 0, Math.PI * 2);
     ctx.fill();
+    const pointer = new Path2D(POINTER_PATH);
+    ctx.fillStyle = '#111111';
+    ctx.lineWidth = 1.75;
+    ctx.lineJoin = 'round';
+    ctx.fill(pointer);
+    ctx.stroke(pointer);
     ctx.restore();
   }
   return m;

@@ -20,8 +20,8 @@ class LumioAccount {
     this.onSignedOut = onSignedOut; // signed out, or the session ended: Lumio Sync forgets a key Lumio keeps
     this.fetch = fetchImpl;
     this.pending = null; // { expiresAt } while waiting for the person to log in on the website
-    this.info = null; // { email, name, username, publicUsername }
-    this.usage = null; // { plan, planName, used, remaining, limit, fullAt, windows } (Lumio AI allowance)
+    this.info = null; // { email, name, username, publicUsername, planApp }
+    this.usage = null; // { plan, planName, planApp, used, remaining, limit, fullAt, windows } (Lumio AI allowance)
     this.error = null;
     this.timer = null;
   }
@@ -51,9 +51,10 @@ class LumioAccount {
     return { status: res.status, ok: res.ok, data };
   }
 
-  // The AI routes (/v1), with the session as a bearer token.
+  // The AI routes (/v1), with the session as a bearer token. The app says
+  // it's Lumio Browser: a Go plan works only in the app it was bought in.
   async ai(path) {
-    const res = await this.fetch(AI_BASE + path, { headers: { Authorization: `Bearer ${this.token()}` }, signal: AbortSignal.timeout(15000) });
+    const res = await this.fetch(AI_BASE + path, { headers: { Authorization: `Bearer ${this.token()}`, 'X-Lumio-App': 'browser' }, signal: AbortSignal.timeout(15000) });
     let data = null;
     try { data = await res.json(); } catch { /* empty */ }
     return { status: res.status, ok: res.ok, data };
@@ -70,6 +71,10 @@ class LumioAccount {
       username: this.info?.publicUsername || this.info?.username || null,
       plan: this.usage?.plan || null,
       planName: this.usage?.planName || null,
+      // Which app a Go plan works in ('browser' or 'ai'; null: both apps, or
+      // not on Go), from /api/account's plan.app. Bought in Lumio AI, this
+      // browser is on Free (plan above) and says where the Go plan is.
+      planApp: this.info?.planApp || null,
       paid: ['go', 'plus', 'pro', 'max'].includes(this.usage?.plan),
       usage: this.usage ? {
         remaining: this.usage.remaining,
@@ -141,7 +146,7 @@ class LumioAccount {
         this.ended();
       } else if (account.ok) {
         const a = account.data;
-        this.info = { email: a.email, name: a.profile?.name || null, username: a.username, publicUsername: a.publicUsername };
+        this.info = { email: a.email, name: a.profile?.name || null, username: a.username, publicUsername: a.publicUsername, planApp: ['ai', 'browser'].includes(a.plan?.app) ? a.plan.app : null };
         if (usage.ok && usage.data?.usage) this.usage = usage.data.usage;
         this.error = null;
       }

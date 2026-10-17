@@ -1,5 +1,5 @@
 // Browser chrome: tab strip, toolbar, omnibox, info bars and page-slot layout.
-import { icons, markSvg, avatarHtml } from './icons.js';
+import { icons, markSvg, browserMarkSvg, avatarHtml } from './icons.js';
 import { THEME_COLORS, accentFor, setAccent } from '/assets/theme-colors.js';
 import { initPanel } from './ai-panel.js';
 import { initSidebar } from './sidebar.js';
@@ -99,7 +99,7 @@ let splitDrop = null; // a tab dragged onto an edge of the page (split-view.js),
 function faviconHtml(t) {
   if (t.crashed) return SAD_ICON;
   if (t.loading) return '<span class="spinner"></span>';
-  if (t.internal) return markSvg(14);
+  if (t.internal) return browserMarkSvg(14);
   if (t.favicon) return `<img src="${encodeURI(t.favicon)}" alt="" draggable="false">`;
   return icons.globe;
 }

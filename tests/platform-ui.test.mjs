@@ -132,6 +132,13 @@ for (const scheme of ['light', 'dark']) {
     assert.deepEqual(await sent('profiles:remove'), []);
     await page.click('[data-more="p0000beef"]', { force: true });
     await page.click('#menu [data-act=delete]');
+    // Delete is the solid red button; under the pointer it deepens like every one (design-system §6.1).
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.hover('#confirm-delete');
+    await page.waitForTimeout(50);
+    const deeper = await page.evaluate(() => { const i = document.body.appendChild(document.createElement('i')); i.style.background = 'color-mix(in srgb, var(--danger-fill) 88%, var(--text-strong))'; const out = getComputedStyle(i).backgroundColor; i.remove(); return out; });
+    assert.equal(await page.$eval('#confirm-delete', (b) => getComputedStyle(b).backgroundColor), deeper);
+    await page.emulateMedia({ reducedMotion: null });
     await page.click('#confirm-delete');
     assert.deepEqual(await sent('profiles:remove'), [['p0000beef']]);
     assert.equal(await page.$$eval('.card', (els) => els.length), 2);
@@ -305,6 +312,34 @@ for (const scheme of ['light', 'dark']) {
     assert.deepEqual(errors, []);
   });
 }
+
+test('the account menu says what Lumio AI’s says: Plan & usage, Settings, Manage account (design-system §6.10, §7)', { skip }, async () => {
+  const { page, errors, sent } = await open('overlay', {});
+  const account = { signedIn: true, name: 'Juan', email: 'juan@example.com', plan: 'plus', planName: 'Plus', usage: { windows: [{ id: 'weekly', limit: 100, remaining: 62, used: 38 }] } };
+  const show = (a) => page.evaluate((p) => window.__emit('overlay-data', p), { kind: 'account', account: a, profile: { name: 'Juan', color: '#7ee2a8' }, profiles: [] });
+  await show(account);
+  assert.deepEqual(await page.$$eval('.acc-item .t', (els) => els.map((e) => e.textContent)),
+    ['Plan & usage', 'Settings', 'Passwords and Autofill', 'Customize profile', 'Manage account', 'Sign out of Lumio']);
+  assert.equal(await page.textContent('[data-acc="page:plan"] .acc-meta'), '62% left');
+  assert.equal(await page.textContent('.acc-plan'), 'Lumio Plus');
+  assert.equal(await page.$('.acc-scope'), null, 'Plus works in both apps');
+  // Under the pointer, rows fill like every menu row (§6.2: --overlay-3, not the darker --active), and
+  // Upgrade like every accent button (§6.1).
+  const fill = (css) => page.evaluate((c) => { const i = document.body.appendChild(document.createElement('i')); i.style.background = c; const out = getComputedStyle(i).backgroundColor; i.remove(); return out; }, css);
+  const bg = (sel) => page.$eval(sel, (el) => getComputedStyle(el).backgroundColor);
+  await page.hover('[data-acc="open:manage"]');
+  assert.equal(await bg('[data-acc="open:manage"]'), await fill('var(--overlay-3)'));
+  await page.hover('[data-acc="open:upgrade"]');
+  assert.equal(await bg('[data-acc="open:upgrade"]'), await fill('color-mix(in srgb, var(--accent) 88%, var(--text-strong))'));
+  await page.dispatchEvent('[data-acc="open:manage"]', 'mousedown');
+  assert.equal((await sent('account:open')).at(-1)?.[0], 'manage');
+  // Go bought in Lumio AI: this browser is on Free, and says where the Go plan is.
+  await show({ ...account, plan: 'free', planName: 'Free', planApp: 'ai' });
+  assert.equal(await page.textContent('.acc-plan'), 'Lumio Free');
+  assert.equal(await page.textContent('.acc-scope'), 'Your Go plan is for Lumio AI.');
+  await page.close();
+  assert.deepEqual(errors, []);
+});
 
 test('Settings › Performance: Memory Saver modes, sites kept active, Energy Saver, preloading', { skip }, async () => {
   const state = { memorySaver: true, mode: 'balanced', sites: ['youtube.com'], energySaver: true, energySaverWhen: 'low', saving: true, alerts: true, preload: 'standard' };

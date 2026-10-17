@@ -129,6 +129,20 @@ $('#p-photo').addEventListener('click', async () => { s.profile = await page.inv
 $('#p-photo-remove').addEventListener('click', () => saveProfile({ photo: null }));
 
 // ------------------------------------------------------------ plan
+// The usage levels of the circle under the chat box: the accent from 50%, amber from 80%, red from 95%.
+const usageLevel = (p) => (p >= 95 ? 'full' : p >= 80 ? 'high' : p >= 50 ? 'half' : 'low');
+// Where the plan works. Go works only in the app it was bought in (Lumio
+// Browser, unless it was bought in Lumio AI); Plus, Pro and Max in both apps.
+function worksIn(a) {
+  if (a.planApp === 'ai' && a.plan !== 'go') return 'Your Go plan is for Lumio AI.';
+  if (!a.plan || a.plan === 'free') return '';
+  // A Go plan without an app (bought before Go was per app) works in both.
+  const only = a.plan === 'go' && ['ai', 'browser'].includes(a.planApp) ? a.planApp : null;
+  return `Works in: Lumio AI ${!only || only === 'ai' ? '✓' : '—'} · Lumio Browser ${!only || only === 'browser' ? '✓' : '—'}`;
+}
+// Under the plans: which apps each one covers (design-system §7, as Lumio AI says it).
+const SCOPE_NOTE = 'Lumio Go works only in the app where you bought it. Plus, Pro and Max work in both apps with shared usage.';
+const planApps = (id) => (id === 'go' ? 'This app only' : 'Lumio AI and Lumio Browser · shared usage');
 function when(t) {
   const d = new Date(t);
   const sameDay = d.toDateString() === new Date().toDateString();
@@ -143,14 +157,18 @@ function renderPlan() {
     return;
   }
   const w = (a.usage?.windows || []).find((x) => x.id === 'weekly') || a.usage;
-  const left = w?.limit ? Math.max(0, Math.min(100, Math.round((w.remaining / w.limit) * 100))) : null;
-  const usage = left == null ? '' : `
+  // What's used, like the usage circle under the chat box (same four colors;
+  // any use shows at least a sliver).
+  const spent = w?.limit ? Math.max(0, Number.isFinite(w.used) ? w.used : w.limit - (w.remaining || 0)) : 0;
+  const used = w?.limit ? Math.min(100, Math.round((spent * 100) / w.limit)) : null;
+  const usage = used == null ? '' : `
     <div class="usage">
-      <div class="usage-top"><span class="title">Weekly limit</span><span class="usage-left"><b>${left}%</b> left</span></div>
-      <div class="meter"><i style="width:${left}%"></i></div>
-      <div class="desc">${w.used > 0 && w.fullAt ? `Fully refilled by ${esc(when(w.fullAt))}` : 'All of this week’s usage is available'} · No 5-hour limits</div>
+      <div class="usage-top"><span class="title">Weekly limit</span><span class="usage-used"><b>${used}%</b> used</span></div>
+      <div class="meter" data-level="${usageLevel(used)}"><i style="width:${spent > 0 ? Math.max(2, used) : 0}%"></i></div>
+      <div class="desc">${100 - used}% left · ${spent > 0 && w.fullAt ? `Fully refilled by ${esc(when(w.fullAt))}` : 'All of this week’s usage is available'} · No 5-hour limits</div>
     </div>`;
-  $('#plan-card').innerHTML = `<div class="plan-top"><div class="grow"><div class="desc">Your plan</div><div class="plan-name">Lumio ${esc(a.planName || 'Free')}</div></div>
+  const scope = worksIn(a);
+  $('#plan-card').innerHTML = `<div class="plan-top"><div class="grow"><div class="desc">Your plan</div><div class="plan-name">Lumio ${esc(a.planName || 'Free')}</div>${scope ? `<div class="desc plan-works">${esc(scope)}</div>` : ''}</div>
       ${a.plan === 'free' ? '<button class="btn primary" id="see-plans">See plans</button>' : ''}</div>${usage}`;
   $('#see-plans')?.addEventListener('click', () => $('#billing').scrollIntoView({ behavior: 'smooth', block: 'start' }));
   loadBilling();
@@ -209,9 +227,11 @@ function renderBilling() {
       <article class="bill-plan ${p.id === 'plus' ? 'pick' : ''}">
         <div class="bp-name">${esc(p.name)}${p.id === 'plus' ? '<span class="pill">Most popular</span>' : ''}</div>
         <div class="bp-price">$${p.price}<small> a month</small></div>
+        <div class="bp-apps">${esc(planApps(p.id))}</div>
         <p class="bp-desc">${esc(DESCS[p.id] || '')}</p>
         <button class="btn ${p.id === 'plus' ? 'accent' : ''}" data-subscribe="${esc(p.id)}">Subscribe</button>
       </article>`).join('')}</div>
+      <p class="bill-scope">${esc(SCOPE_NOTE)}</p>
       <p class="bill-fine">You pay securely inside Lumio. Cancel anytime: you keep your plan until the end of the month you paid for.</p>
       ${codeForm}`;
     card.querySelectorAll('[data-subscribe]').forEach((b) => { b.onclick = () => subscribe(b.dataset.subscribe, b); });
@@ -240,11 +260,11 @@ function renderBilling() {
     ${billOpen === 'change' ? `<div class="bill-panel">${others.map((p) => {
       const up = ORDER.indexOf(p.id) > ORDER.indexOf(bill.plan);
       return `<div class="bill-row">
-        <div class="grow"><div class="title">${esc(p.name)} · $${p.price} a month</div><div class="desc">${esc(DESCS[p.id] || '')}</div>
+        <div class="grow"><div class="title">${esc(p.name)} · $${p.price} a month</div><div class="desc">${esc(planApps(p.id))} · ${esc(DESCS[p.id] || '')}</div>
           <div class="desc confirm" hidden>${up ? 'You pay the difference for the rest of this month now, and the bigger allowance starts right away.' : 'Your weekly allowance gets smaller right away. The unused part of this month is credited to your next bill.'}</div></div>
         <button class="btn ${up ? 'accent' : ''}" data-switch="${esc(p.id)}">${up ? 'Upgrade' : 'Switch'}</button>
       </div>`;
-    }).join('')}</div>` : ''}
+    }).join('')}<p class="bill-scope">${esc(SCOPE_NOTE)}</p></div>` : ''}
     ${billOpen === 'cancel' ? `<form class="bill-panel bill-cancel" id="cancel-form">
       <div class="title">Why are you canceling?</div>
       <div class="desc">You keep ${esc(name)} until ${esc(day(sub.periodEnd))}, then you’re on Free. Your answer goes straight to the people who build Lumio.</div>
@@ -333,9 +353,38 @@ document.querySelectorAll('input[name=reasoning]').forEach((r) => {
   r.checked = r.value === s.ai.reasoning;
   r.addEventListener('change', () => page.invoke('page:set-setting', 'reasoning', r.value));
 });
+// Bypass asks first, in red, like the chat box and Lumio AI's Settings
+// (lumio-ai docs/design-system.md §6.7, §6.14): a dialog over the dimmed page
+// where Cancel has the focus, so Enter keeps the mode you had; Esc, Cancel or
+// a click outside it do too. Resolves true for "Turn on Bypass".
+const bypassDialog = $('#bypass-dialog');
+function confirmBypass() {
+  return new Promise((resolve) => {
+    bypassDialog.returnValue = '';
+    bypassDialog.addEventListener('close', () => resolve(bypassDialog.returnValue === 'on'), { once: true });
+    bypassDialog.showModal();
+    $('#bypass-cancel').focus();
+  });
+}
+$('#bypass-cancel').addEventListener('click', () => bypassDialog.close('cancel'));
+$('#bypass-on').addEventListener('click', () => bypassDialog.close('on'));
+bypassDialog.addEventListener('click', (e) => {
+  // The dimmed page around the card (a click on the card's own padding is the dialog too).
+  const r = bypassDialog.getBoundingClientRect();
+  if (e.target === bypassDialog && (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom)) bypassDialog.close('cancel');
+});
 document.querySelectorAll('input[name=mode]').forEach((r) => {
   r.checked = r.value === s.approvalMode;
-  r.addEventListener('change', () => page.invoke('page:set-setting', 'approvalMode', r.value));
+  r.addEventListener('change', async () => {
+    if (r.value === 'bypass' && !(await confirmBypass())) {
+      // Kept: back to the mode you had, with the keyboard there.
+      const was = document.querySelector(`input[name=mode][value="${s.approvalMode}"]`);
+      if (was) { was.checked = true; was.focus(); } else r.checked = false;
+      return;
+    }
+    s.approvalMode = r.value;
+    page.invoke('page:set-setting', 'approvalMode', r.value);
+  });
 });
 
 // ------------------------------------------------------------ passwords

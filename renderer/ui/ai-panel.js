@@ -6,7 +6,8 @@ import { icons, markSvg, levelBars } from './icons.js';
 import { reduced } from './motion.js';
 import { initVoice } from './voice.js';
 import { initWorkflows } from './panel-workflows.js';
-import { initExtras, filesEl, madeEl } from './panel-extras.js';
+import { initExtras, filesEl, madeEl, placeMenu } from './panel-extras.js';
+import { initTooltips } from './tooltip.js';
 
 const LEVEL = { low: 1, medium: 2, high: 3 }; // reasoning level -> bars
 
@@ -17,8 +18,16 @@ const SUGGESTIONS = [
   { title: 'Make a spreadsheet', text: 'Open Excel on the web and start a simple monthly budget for me.' },
 ];
 
-// Approval modes, for the button under the chat box.
+// Approval modes, for the chip under the chat box.
 const MODES = { ask: { name: 'Ask', icon: icons.shield }, auto: { name: 'Auto', icon: icons.bolt }, bypass: { name: 'Bypass', icon: icons.warn } };
+
+// The thinking-effort menu's rows (Lumio's design system §6.7). A level the
+// server adds that isn't here shows its own description.
+const EFFORT_DESC = {
+  low: 'Quick answers. Uses the least of your plan.',
+  medium: 'Balanced: good for most things.',
+  high: 'Thinks longer on hard problems. Can cost 3–10× more.',
+};
 
 const RISK_LABEL = { browser: 'Browser action' };
 
@@ -69,13 +78,15 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   let live = null; // { textEl, textBuf, thinkingEl, steps: Map }
   let plan = null; // the current chat's checklist from update_plan
 
-  // + menu (files, connections), attachments tray, usage ring, made files.
-  const extras = initExtras({ api, getAi: () => ai, onChange: () => renderState(), notice: (t) => notice(t) });
+  // Tooltips for the row under the chat box (the usage circle, the mic, chips).
+  const tips = initTooltips($('#composer .composer-row'), $('#panel'));
+  // + menu (files, connections), attachments tray, usage circle, made files.
+  const extras = initExtras({ api, getAi: () => ai, onChange: () => renderState(), notice: (t) => notice(t), tips });
   // Dictation and hands-free voice mode.
   $('#mic-btn').innerHTML = icons.mic;
   $('#voice-btn').innerHTML = icons.wave;
   const voice = initVoice({
-    api, prompt, autosize: () => autosize(), notice: (t) => notice(t),
+    api, prompt, autosize: () => autosize(), notice: (t) => notice(t), icons, tips,
     submit: (text, opts) => submit(text, undefined, null, opts),
     isReady: () => !!ai.ready,
     isBusy: () => !!(ai.running && ai.runChatId === chatId),
@@ -203,25 +214,44 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   }
 
   // ------------------------------------------------------------ state
+  // Sets an element's words only when they change: Lumio's Spanish runtime
+  // translates them in place, and renderState runs on every keystroke.
+  const said = new WeakMap();
+  function words(el, attr, text) {
+    const was = said.get(el) || {};
+    if (was[attr] === text) return;
+    said.set(el, { ...was, [attr]: text });
+    el.setAttribute(attr, text);
+  }
   function renderState() {
     const level = LEVEL[ai.reasoning] || 2;
-    $('#reasoning-bars').innerHTML = levelBars(level);
+    const effortBtn = $('#reasoning-btn');
+    if (effortBtn.dataset.bars !== String(level)) { $('#reasoning-bars').innerHTML = levelBars(level); effortBtn.dataset.bars = String(level); }
     $('#reasoning-name').textContent = ai.reasoningName || 'Medium';
-    $('#reasoning-btn').title = `Thinking effort: ${ai.reasoningName || 'Medium'} (${ai.modelName})`;
-    if (!$('#reasoning-menu').hidden && !$('#effort-slider').classList.contains('dragging')) renderModels();
+    // Its name says the level (in a narrow box the chip shows only its bars); the tooltip adds the model.
+    words(effortBtn, 'aria-label', `Effort: ${ai.reasoningName || 'Medium'}`);
+    effortBtn.dataset.tip = ai.modelName ? `Effort: ${ai.reasoningName || 'Medium'} (${ai.modelName})` : `Effort: ${ai.reasoningName || 'Medium'}`;
+    if (!$('#reasoning-menu').hidden) renderEffort();
     renderMode();
     const running = ai.running && ai.runChatId === chatId;
     const steering = running && !!prompt.value.trim(); // typing while it works: Send adds to the task
-    sendBtn.classList.toggle('stop', running && !steering);
-    sendBtn.innerHTML = running && !steering ? icons.square : icons.send;
-    sendBtn.title = steering ? 'Add to the task (↵)' : running ? 'Stop (Esc)' : 'Send (↵)';
-    prompt.placeholder = running ? 'Add to the task, or tell Lumio to stop…' : 'Ask Lumio, or tell it what to do…';
+    // Stop is the same circle as Send, with a square; the glyph springs in when it changes.
+    const glyph = running && !steering ? 'stop' : 'send';
+    if (sendBtn.dataset.glyph !== glyph) {
+      sendBtn.classList.toggle('swap', !!sendBtn.dataset.glyph);
+      sendBtn.dataset.glyph = glyph;
+      sendBtn.innerHTML = glyph === 'stop' ? icons.stopSquare : icons.send;
+    }
+    sendBtn.classList.toggle('stop', glyph === 'stop');
+    words(sendBtn, 'title', steering ? 'Add to the task (↵)' : running ? 'Stop (Esc)' : 'Send (↵)');
+    words(sendBtn, 'aria-label', steering ? 'Add to the task' : running ? 'Stop' : 'Send');
+    words(prompt, 'placeholder', running ? 'Add to the task, or tell Lumio to stop…' : 'Ask Lumio, or tell it what to do…');
     sendBtn.disabled = !running && ((!prompt.value.trim() && !extras.ready()) || extras.busy() || !ai.ready);
     // An empty box offers voice mode where Send is (and Send comes back as you type).
     const talk = document.body.classList.contains('voice-on') || (!running && ai.ready && !prompt.value.trim() && !extras.ready() && !extras.busy());
     sendBtn.hidden = !!talk;
     $('#voice-btn').hidden = !talk;
-    extras.renderRing();
+    extras.renderUsage();
     setRunning(!!ai.running);
     spin(!!ai.running);
     planEl.classList.toggle('live', !!(ai.running && ai.runChatId === chatId));
@@ -284,10 +314,32 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     if (messages.querySelector('.empty') && before !== key(ai)) renderEmpty();
   });
 
+  // ------------------------------------------------------------ menus over the chat box
+  // One open at a time; each opens upward from its chip (placeMenu).
+  function closeComposerMenus(except = null) {
+    document.querySelectorAll('#composer .popover').forEach((p) => { if (p !== except) p.hidden = true; });
+    document.querySelectorAll('#composer [aria-expanded="true"]').forEach((b) => b.setAttribute('aria-expanded', 'false'));
+  }
+  // Arrows, Home and End move through a menu's rows; Esc closes it (back to
+  // its chip) and Tab closes it. Enter and Space pick the row (a button).
+  function menuKeys(e, menu, close) {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(true); return; }
+    if (e.key === 'Tab') { close(false); return; }
+    const rows = [...menu.querySelectorAll('.menu-row')];
+    if (!rows.length) return;
+    const i = rows.indexOf(document.activeElement);
+    const to = { ArrowDown: i + 1, ArrowUp: i < 0 ? rows.length - 1 : i - 1, Home: 0, End: rows.length - 1 }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    rows[(to + rows.length) % rows.length].focus();
+  }
+
   // ------------------------------------------------------------ approvals
-  // One button shows the mode; its menu has Ask, Auto and Bypass.
+  // One chip shows the mode; its menu has Ask, Auto and Bypass. Bypass asks
+  // first, in red.
   const modeBtn = $('#mode-btn');
   const modeMenu = $('#mode-menu');
+  const bypassBox = $('#bypass-confirm');
   modeMenu.querySelectorAll('[data-mode]').forEach((b) => {
     b.querySelector('.mi').innerHTML = MODES[b.dataset.mode].icon;
     b.querySelector('.tick').innerHTML = icons.check;
@@ -296,40 +348,59 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   function renderMode() {
     const m = MODES[ai.mode] ? ai.mode : 'ask';
     const btn = $('#mode-btn');
-    $('#mode-ic').innerHTML = MODES[m].icon;
-    $('#mode-name').textContent = MODES[m].name;
+    if (btn.dataset.shown !== m) { $('#mode-ic').innerHTML = MODES[m].icon; btn.dataset.shown = m; }
+    const name = $('#mode-name');
+    name.textContent = MODES[m].name;
+    // "Auto" stays "Auto" in Spanish (it fits the chip).
+    if (m === 'auto') name.setAttribute('translate', 'no'); else name.removeAttribute('translate');
     btn.classList.toggle('auto', m === 'auto');
     btn.classList.toggle('bypass', m === 'bypass');
-    btn.title = `Approvals: ${MODES[m].name}`;
+    btn.dataset.tip = `Approval mode: ${MODES[m].name}`;
+    words(btn, 'aria-label', btn.dataset.tip);
     $('#mode-menu').querySelectorAll('[data-mode]').forEach((b) => {
       b.classList.toggle('on', b.dataset.mode === m);
       b.setAttribute('aria-checked', String(b.dataset.mode === m));
     });
   }
-  function closeMode() { modeMenu.hidden = true; modeBtn.setAttribute('aria-expanded', 'false'); }
+  function closeMode(focus = false) { modeMenu.hidden = true; modeBtn.setAttribute('aria-expanded', 'false'); if (focus) modeBtn.focus(); }
   function openMode() {
-    document.querySelectorAll('#composer .popover').forEach((p) => { if (p !== modeMenu) p.hidden = true; });
-    document.querySelectorAll('#composer [aria-expanded="true"]').forEach((b) => b.setAttribute('aria-expanded', 'false'));
+    closeComposerMenus(modeMenu);
     modeMenu.hidden = false;
     modeBtn.setAttribute('aria-expanded', 'true');
+    placeMenu(modeMenu, modeBtn);
     (modeMenu.querySelector('.menu-row.on') || modeMenu.querySelector('.menu-row')).focus();
   }
+  async function setMode(m) {
+    ai = await api.invoke('ai:set-mode', m);
+    renderState();
+    prompt.focus();
+  }
   modeBtn.addEventListener('click', () => (modeMenu.hidden ? openMode() : closeMode()));
-  modeMenu.addEventListener('click', async (e) => {
+  modeMenu.addEventListener('click', (e) => {
     const b = e.target.closest('[data-mode]');
     if (!b) return;
     closeMode();
-    ai = await api.invoke('ai:set-mode', b.dataset.mode);
-    renderState();
-    prompt.focus();
+    if (b.dataset.mode === 'bypass' && ai.mode !== 'bypass') { openBypass(); return; }
+    setMode(b.dataset.mode);
   });
-  modeMenu.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { e.stopPropagation(); closeMode(); modeBtn.focus(); return; }
-    const rows = [...modeMenu.querySelectorAll('.menu-row')];
-    const step = { ArrowDown: 1, ArrowUp: -1 }[e.key];
-    if (step) { e.preventDefault(); rows[(rows.indexOf(document.activeElement) + step + rows.length) % rows.length].focus(); }
-  });
+  modeMenu.addEventListener('keydown', (e) => menuKeys(e, modeMenu, closeMode));
   document.addEventListener('mousedown', (e) => { if (!modeMenu.hidden && !e.target.closest('#mode-menu, #mode-btn')) closeMode(); });
+  // Turning Bypass on: Cancel has the focus, Esc cancels.
+  function openBypass() {
+    closeComposerMenus(bypassBox);
+    bypassBox.hidden = false;
+    placeMenu(bypassBox, modeBtn);
+    bypassBox.querySelector('[data-bc="cancel"]').focus();
+  }
+  function closeBypass(focus = true) { bypassBox.hidden = true; if (focus) modeBtn.focus(); }
+  bypassBox.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-bc]');
+    if (!b) return;
+    closeBypass(b.dataset.bc !== 'ok');
+    if (b.dataset.bc === 'ok') setMode('bypass');
+  });
+  bypassBox.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeBypass(); } });
+  document.addEventListener('mousedown', (e) => { if (!bypassBox.hidden && !e.target.closest('#bypass-confirm')) closeBypass(false); });
 
   // ------------------------------------------------------------ context chip
   function renderChip() {
@@ -420,7 +491,9 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   // ------------------------------------------------------------ composer
   function autosize() {
     prompt.style.height = 'auto';
-    prompt.style.height = Math.min(180, prompt.scrollHeight) + 'px';
+    // Up to 240px in a wide chat box, 180px in a narrow one (shell.css), then it scrolls.
+    const max = parseFloat(getComputedStyle(prompt).maxHeight) || 180;
+    prompt.style.height = Math.min(max, prompt.scrollHeight) + 'px';
     renderState();
   }
   prompt.addEventListener('input', () => { autosize(); wf.onInput(); });
@@ -599,19 +672,34 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     return el;
   }
 
+  // Code blocks get a head with their language and Copy, like Lumio AI's
+  // (lumio-ai docs/design-system.md §6.8). Added here, after the sanitizer,
+  // also to the blocks of a reply that's still streaming. A reply's text is
+  // skipped by the page's translation, so Copy is translated here.
   function decorate(el) {
     el.querySelectorAll('pre').forEach((pre) => {
-      if (pre.querySelector('.copy')) return;
-      const b = document.createElement('button');
-      b.className = 'icon-btn small copy';
-      b.title = 'Copy';
-      b.innerHTML = icons.copy;
-      b.addEventListener('click', () => {
-        navigator.clipboard.writeText(pre.querySelector('code')?.innerText || pre.innerText);
-        b.innerHTML = icons.check;
-        setTimeout(() => { b.innerHTML = icons.copy; }, 1200);
+      if (pre.parentElement?.classList.contains('code-block')) return;
+      const code = pre.querySelector('code');
+      const box = document.createElement('div');
+      box.className = 'code-block';
+      const head = document.createElement('div');
+      head.className = 'code-head';
+      const lang = document.createElement('span');
+      lang.textContent = /(?:^|\s)language-([\w+#.-]{1,24})/.exec(code?.className || '')?.[1] || '';
+      const copy = document.createElement('button');
+      copy.type = 'button';
+      copy.className = 'code-copy';
+      const show = (done) => { copy.innerHTML = `${done ? icons.check : icons.copy}<span></span>`; copy.lastChild.textContent = tr(done ? 'Copied' : 'Copy'); };
+      show(false);
+      copy.addEventListener('click', () => {
+        navigator.clipboard.writeText(code?.innerText ?? pre.innerText).catch(() => {});
+        show(true);
+        clearTimeout(copy.timer);
+        copy.timer = setTimeout(() => show(false), 1200);
       });
-      pre.append(b);
+      head.append(lang, copy);
+      pre.replaceWith(box);
+      box.append(head, pre);
     });
   }
 
@@ -679,15 +767,16 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     const detail = a.detail && a.detail !== a.label ? a.detail : '';
     const code = /\n/.test(detail);
     el.innerHTML = `
-      <div class="a-title"><span></span></div>
+      <div class="a-title"><span class="a-ic">${icons.shield}</span><span class="a-q"></span></div>
       <div class="a-detail"></div>
       ${code ? '<pre></pre>' : ''}
       <div class="a-actions">
-        <button class="btn primary" data-d="once">Allow</button>
+        <button class="btn primary" data-d="once">Allow once</button>
         <button class="btn" data-d="task">Allow for this task</button>
-        <button class="btn ghost" data-d="deny">Deny</button>
+        <span class="spacer"></span>
+        <button class="btn danger-quiet" data-d="deny">Deny</button>
       </div>`;
-    el.querySelector('.a-title span').textContent = `Lumio wants to: ${a.label}`;
+    el.querySelector('.a-q').textContent = `Lumio wants to: ${a.label}`;
     el.querySelector('.a-detail').textContent = RISK_LABEL[a.risk] || '';
     if (code) el.querySelector('pre').textContent = detail;
     else if (detail) el.querySelector('.a-detail').textContent += ` · ${detail}`;
@@ -699,15 +788,24 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   }
 
 
-  // Out of Lumio allowance: offer the upgrade right in the chat.
+  // Out of Lumio allowance: say so, point at the usage circle (See usage) and
+  // offer the upgrade below Max, right in the chat. Never a budget control.
   function limitNotice(text) {
-    const el = notice(text, 'info');
-    const b = document.createElement('button');
-    b.className = 'btn primary';
-    b.style.marginLeft = '8px';
-    b.textContent = 'Upgrade';
-    b.addEventListener('click', () => api.send('account:open', 'upgrade'));
-    el.append(b);
+    if (!replaying) announce(text);
+    const el = document.createElement('div');
+    el.className = 'notice warn limit';
+    const upgrade = (ai.lumio?.plan || 'free') !== 'max' ? '<button type="button" class="btn accent" data-act="upgrade">Upgrade</button>' : '';
+    el.innerHTML = `<span class="n-ic">${icons.gauge}</span><span class="n-text"></span><span class="n-acts"><button type="button" class="btn" data-act="usage">See usage</button>${upgrade}</span>`;
+    el.querySelector('.n-text').textContent = text;
+    el.addEventListener('click', (e) => {
+      const act = e.target.closest('[data-act]')?.dataset.act;
+      if (act === 'usage') extras.pointUsage();
+      else if (act === 'upgrade') api.send('account:open', 'upgrade');
+    });
+    messages.querySelector('.empty')?.remove();
+    messages.append(el);
+    if (!replaying) extras.setBlocked(true);
+    scrollDown(true);
     return el;
   }
 
@@ -782,11 +880,13 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     if (end > l.stable) {
       const done = document.createElement('template');
       done.innerHTML = renderMd(l.textBuf.slice(l.stable, end));
+      decorate(done.content);
       l.textEl.append(done.content);
       l.stable = end;
     }
     const tail = document.createElement('template');
     tail.innerHTML = renderMd(l.textBuf.slice(l.stable));
+    decorate(tail.content); // a code block has its head while it streams too
     l.tail = [...tail.content.childNodes];
     l.textEl.append(tail.content);
     scrollDown();
@@ -822,6 +922,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     switch (ev.type) {
       case 'start':
         live = { textEl: null, textBuf: '', thinkingEl: null, steps: new Map() };
+        extras.setBlocked(false); // a limit hit earlier no longer shows on the usage circle
         thinking(true);
         break;
       case 'thinking':
@@ -948,98 +1049,54 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   });
 
   // ------------------------------------------------------------ thinking effort
-  // One model; people choose how hard it thinks, on a slider that snaps to
-  // each level. The popover also shows how much of their plan is left.
-  const modelMenu = $('#reasoning-menu');
-  const modelBtn = $('#reasoning-btn');
-  const slider = $('#effort-slider');
-  const levels = () => (ai.reasoningLevels?.length ? ai.reasoningLevels : [{ id: 'low', name: 'Low', desc: '' }, { id: 'medium', name: 'Medium', desc: '' }, { id: 'high', name: 'High', desc: '' }]);
-  const levelIndex = () => Math.max(0, levels().findIndex((r) => r.id === ai.reasoning));
-
-  function allowance() {
-    const l = ai.lumio || {};
-    const u = l.usage;
-    const pct = u && u.limit ? Math.max(0, Math.min(100, Math.round((u.remaining / u.limit) * 100))) : null;
-    const plan = l.planName ? `Lumio ${esc(l.planName)}` : 'Your Lumio plan';
-    const left = pct == null ? '' : ` · ${pct}% left`;
-    const more = l.plan !== 'max' ? '<button class="link" id="reasoning-upgrade" type="button">Get more</button>' : '';
-    return `<span>${plan}${left}</span>${more}`;
-  }
-  // i: the level to show; p: where the knob sits (0-1), while dragging.
-  function renderEffort(i = levelIndex(), p) {
+  // One model; people choose how hard it thinks, from a menu of three levels
+  // (Lumio's design system §6.7). How much of the plan is left is the usage
+  // circle's job.
+  const effortMenu = $('#reasoning-menu');
+  const effortBtn = $('#reasoning-btn');
+  const levels = () => (ai.reasoningLevels?.length ? ai.reasoningLevels : [{ id: 'low', name: 'Low' }, { id: 'medium', name: 'Medium' }, { id: 'high', name: 'High' }]);
+  // (Runs from renderState: the rows stay put while open, so focus doesn't jump.)
+  function renderEffort() {
+    const rows = $('#effort-rows');
     const L = levels();
-    const r = L[i] || L[0];
-    slider.style.setProperty('--p', p ?? (L.length > 1 ? i / (L.length - 1) : 0));
-    slider.setAttribute('aria-valuemax', String(L.length - 1));
-    slider.setAttribute('aria-valuenow', String(i));
-    slider.setAttribute('aria-valuetext', r.name);
-    $('#effort-model').textContent = ai.modelName || '';
-    $('#effort-label').textContent = r.name;
-    $('#effort-desc').textContent = r.desc || '';
-    $('#effort-ticks').innerHTML = L.map((x, n) => `<button type="button" data-i="${n}" class="${n === i ? 'on' : ''}">${esc(x.name)}</button>`).join('');
-  }
-  function renderModels() {
-    renderEffort();
-    $('#reasoning-foot').innerHTML = allowance();
-    $('#reasoning-upgrade')?.addEventListener('click', () => { closeModels(); api.send('account:open', 'upgrade'); });
-  }
-  async function setEffort(i) {
-    const L = levels();
-    const r = L[Math.max(0, Math.min(L.length - 1, i))];
-    if (r && r.id !== ai.reasoning) {
-      ai.reasoning = r.id; // show it right away; the main process confirms
-      renderEffort();
-      ai = await api.invoke('ai:set-reasoning', r.id);
-      renderState();
+    const ids = L.map((r) => r.id).join(',');
+    if (rows.dataset.ids !== ids) {
+      rows.dataset.ids = ids;
+      rows.innerHTML = L.map((r, i) => `<button type="button" class="menu-row" role="menuitemradio" data-level="${esc(r.id)}"><span class="mi">${levelBars(LEVEL[r.id] || Math.min(3, i + 1), 16)}</span><span class="mt"><b>${esc(r.name)}</b><small>${esc(EFFORT_DESC[r.id] || r.desc || '')}</small></span><i class="tick">${icons.check}</i></button>`).join('');
     }
-    renderEffort();
+    rows.querySelectorAll('[data-level]').forEach((b) => {
+      b.classList.toggle('on', b.dataset.level === ai.reasoning);
+      b.setAttribute('aria-checked', String(b.dataset.level === ai.reasoning));
+    });
   }
-  function closeModels() {
-    modelMenu.hidden = true;
-    modelBtn.setAttribute('aria-expanded', 'false');
+  async function setEffort(id) {
+    const r = levels().find((x) => x.id === id);
+    if (!r || id === ai.reasoning) return;
+    ai.reasoning = r.id; // show it right away; the main process confirms
+    ai.reasoningName = r.name;
+    renderState();
+    ai = await api.invoke('ai:set-reasoning', r.id);
+    renderState();
   }
-  function openModels() {
+  function closeEffort(focus = false) { effortMenu.hidden = true; effortBtn.setAttribute('aria-expanded', 'false'); if (focus) effortBtn.focus(); }
+  function openEffort() {
     $('#chat-menu').hidden = true;
-    modelMenu.hidden = false;
-    modelBtn.setAttribute('aria-expanded', 'true');
-    renderModels();
-    slider.focus();
+    closeComposerMenus(effortMenu);
+    renderEffort();
+    effortMenu.hidden = false;
+    effortBtn.setAttribute('aria-expanded', 'true');
+    placeMenu(effortMenu, effortBtn);
+    (effortMenu.querySelector('.menu-row.on') || effortMenu.querySelector('.menu-row'))?.focus();
   }
-  modelBtn.addEventListener('click', () => (modelMenu.hidden ? openModels() : closeModels()));
-  modelMenu.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { e.stopPropagation(); closeModels(); modelBtn.focus(); }
+  effortBtn.addEventListener('click', () => (effortMenu.hidden ? openEffort() : closeEffort()));
+  effortMenu.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-level]');
+    if (!b) return;
+    closeEffort();
+    setEffort(b.dataset.level);
+    prompt.focus();
   });
-  slider.addEventListener('keydown', (e) => {
-    const step = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1 }[e.key];
-    if (step) { e.preventDefault(); setEffort(levelIndex() + step); }
-    else if (e.key === 'Home') { e.preventDefault(); setEffort(0); }
-    else if (e.key === 'End') { e.preventDefault(); setEffort(levels().length - 1); }
-    else if (e.key === 'Enter') { e.preventDefault(); closeModels(); prompt.focus(); }
-  });
-  slider.addEventListener('pointerdown', (e) => {
-    slider.setPointerCapture(e.pointerId);
-    slider.classList.add('dragging');
-    let i = levelIndex();
-    const at = (ev) => {
-      const r = slider.getBoundingClientRect();
-      const p = Math.max(0, Math.min(1, (ev.clientX - r.left - 15) / (r.width - 30)));
-      i = Math.round(p * (levels().length - 1));
-      renderEffort(i, p);
-    };
-    at(e);
-    const up = () => {
-      slider.classList.remove('dragging');
-      slider.removeEventListener('pointermove', at);
-      setEffort(i);
-    };
-    slider.addEventListener('pointermove', at);
-    slider.addEventListener('pointerup', up, { once: true });
-    slider.addEventListener('pointercancel', up, { once: true });
-  });
-  $('#effort-ticks').addEventListener('click', (e) => {
-    const b = e.target.closest('[data-i]');
-    if (b) setEffort(Number(b.dataset.i));
-  });
+  effortMenu.addEventListener('keydown', (e) => menuKeys(e, effortMenu, closeEffort));
 
   // ------------------------------------------------------------ chats menu
   const chatMenu = $('#chat-menu');
@@ -1051,7 +1108,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     return new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   }
   async function openChats() {
-    closeModels();
+    closeEffort();
     chatMenu.hidden = false;
     const list = await api.invoke('ai:chats');
     $('#chat-list').innerHTML = list.length
@@ -1114,8 +1171,9 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   $('#newchat-btn').addEventListener('click', () => { chatMenu.hidden = true; newChat(chatProject); });
 
   // ------------------------------------------------------------ projects
-  // "Choose project" under the chat box: a new chat starts in it; an open
-  // chat moves into it. Projects are made and managed in the sidebar too.
+  // The project chip in the row under the chat box: a new chat starts in the
+  // project; an open chat moves into it. Projects are made and managed in the
+  // sidebar too.
   const projectBtn = $('#project-btn');
   const projectMenu = $('#project-menu');
   projectBtn.querySelector('.pi').innerHTML = icons.folder || '';
@@ -1133,19 +1191,26 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     const btn = $('#project-btn');
     btn.hidden = !ai.workflows; // not in incognito
     const p = projectsCache.find((x) => x.id === chatProject);
-    btn.querySelector('.pn').textContent = p ? p.name : 'Choose project';
-    btn.classList.toggle('set', !!p);
+    const name = btn.querySelector('.pn');
+    name.textContent = p ? p.name : 'No project';
+    // A project's name is the person's own words: never translated.
+    if (p) name.setAttribute('translate', 'no'); else name.removeAttribute('translate');
+    btn.classList.toggle('is-empty', !p);
+    btn.dataset.tip = p ? `Project: ${p.name}` : 'No project';
+    btn.setAttribute('aria-label', p ? `Project: ${p.name}` : 'Project');
   }
-  function closeProjectMenu() { projectMenu.hidden = true; projectBtn.setAttribute('aria-expanded', 'false'); }
+  function closeProjectMenu(focus = false) { projectMenu.hidden = true; projectBtn.setAttribute('aria-expanded', 'false'); if (focus) projectBtn.focus(); }
   async function openProjectMenu() {
-    document.querySelectorAll('#composer .popover').forEach((x) => { if (x !== projectMenu) x.hidden = true; });
+    closeComposerMenus(projectMenu);
     await loadProjects();
     projectMenu.innerHTML = `<div class="list-label">${chatId ? 'Move this chat to' : 'Start this chat in'}</div>
-      ${projectsCache.map((p) => `<button type="button" class="menu-row${p.id === chatProject ? ' on' : ''}" data-project="${esc(p.id)}"><span class="mi">${icons.folder || ''}</span><span class="mt"><b>${esc(p.name)}</b>${p.instructions ? `<small>${esc(p.instructions.slice(0, 70))}</small>` : ''}</span></button>`).join('')}
-      <button type="button" class="menu-row${!chatProject ? ' on' : ''}" data-project=""><span class="mi">–</span><span class="mt"><b>No project</b></span></button>
+      ${projectsCache.map((p) => `<button type="button" class="menu-row${p.id === chatProject ? ' on' : ''}" role="menuitemradio" aria-checked="${p.id === chatProject}" data-project="${esc(p.id)}"><span class="mi">${icons.folder || ''}</span><span class="mt" translate="no"><b>${esc(p.name)}</b>${p.instructions ? `<small>${esc(p.instructions.slice(0, 70))}</small>` : ''}</span><i class="tick">${icons.check}</i></button>`).join('')}
+      <button type="button" class="menu-row${!chatProject ? ' on' : ''}" role="menuitemradio" aria-checked="${!chatProject}" data-project=""><span class="mi">–</span><span class="mt"><b>No project</b></span><i class="tick">${icons.check}</i></button>
       <form class="project-new"><input placeholder="New project name" maxlength="60" aria-label="New project name"><button class="btn" type="submit">Create</button></form>`;
     projectMenu.hidden = false;
     projectBtn.setAttribute('aria-expanded', 'true');
+    placeMenu(projectMenu, projectBtn);
+    (projectMenu.querySelector('.menu-row.on') || projectMenu.querySelector('.menu-row'))?.focus();
   }
   async function pickProject(id) {
     chatProject = id || null;
@@ -1154,6 +1219,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
     chatChanged();
   }
   projectBtn.addEventListener('click', () => (projectMenu.hidden ? openProjectMenu() : closeProjectMenu()));
+  projectMenu.addEventListener('keydown', (e) => { if (!e.target.closest('.project-new') || e.key === 'Escape') menuKeys(e, projectMenu, closeProjectMenu); });
   projectMenu.addEventListener('click', (e) => {
     const b = e.target.closest('[data-project]');
     if (b) pickProject(b.dataset.project);
@@ -1170,7 +1236,7 @@ export function initPanel({ api, getActiveTab, onLayout, setRunning }) {
   document.addEventListener('mousedown', (e) => { if (!projectMenu.hidden && !e.target.closest('#project-menu, #project-btn')) closeProjectMenu(); });
   api.on('sidebar-changed', () => loadProjects());
   document.addEventListener('mousedown', (e) => {
-    if (!modelMenu.hidden && !e.target.closest('#reasoning-menu, #reasoning-btn')) closeModels();
+    if (!effortMenu.hidden && !e.target.closest('#reasoning-menu, #reasoning-btn')) closeEffort();
     if (!e.target.closest('#chat-menu, #chats-btn')) chatMenu.hidden = true;
   });
 

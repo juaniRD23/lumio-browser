@@ -47,6 +47,26 @@ test('motion tokens: durations, curves and one Reduce Motion rule set', { skip }
   assert.deepEqual(reduced.errors, []);
 });
 
+test('Reduce Motion, from the system or from Settings: the mic’s spinner keeps turning while it transcribes', { skip }, async () => {
+  for (const how of ['system', 'setting']) {
+    const { page, errors } = await openPage(browser, base, { init: { ...INIT, panel: { open: true, width: 380 } }, reducedMotion: how === 'system' ? 'reduce' : 'no-preference' });
+    if (how === 'setting') {
+      await page.evaluate(() => window.__emit('ui-prefs', { reduceMotion: true }));
+      await page.waitForFunction(() => document.documentElement.hasAttribute('data-reduce-motion'));
+    }
+    // What voice.js does while what you said turns into text.
+    const spin = await page.evaluate(() => {
+      const mic = document.getElementById('mic-btn');
+      mic.classList.add('busy');
+      const s = getComputedStyle(mic, '::after');
+      return [s.animationName, s.animationIterationCount, s.animationDuration];
+    });
+    assert.deepEqual(spin, ['spin', 'infinite', '1.6s'], `${how}: it turns, slower, like every spinner`);
+    await page.close();
+    assert.deepEqual(errors, []);
+  }
+});
+
 test('tabs: a new one grows in, a closed one folds away, neither on the first draw', { skip }, async () => {
   const { page, errors } = await openPage(browser, base, { init: withTabs([tab(1), tab(2)]) });
   assert.equal(await page.$$eval('.tab.entering, .tab[style]', (els) => els.length), 0, 'the first draw doesn’t animate');

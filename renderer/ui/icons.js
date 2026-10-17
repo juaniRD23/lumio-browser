@@ -21,6 +21,8 @@ export const icons = {
   down: s('<path d="M6 9l6 6 6-6"/>', 'width="15" height="15"'),
   send: s('<path d="M12 19V5M6 11l6-6 6 6"/>', 'stroke-width="2.1"'),
   square: '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2.5" fill="currentColor"/></svg>',
+  // Stop in the chat box's send circle: a 10px square (9px in a narrow box), sized by CSS.
+  stopSquare: '<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><rect width="10" height="10" rx="2.5" fill="currentColor"/></svg>',
   chats: s('<path d="M4 5h16v11H9l-5 4z"/>', 'width="16" height="16"'),
   compose: s('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>', 'width="16" height="16"'),
   expand: s('<path d="M14 4h6v6"/><path d="M20 4l-7 7"/><path d="M10 20H4v-6"/><path d="M4 20l7-7"/>', 'width="15" height="15"'),
@@ -38,6 +40,7 @@ export const icons = {
   shield: s('<path d="M12 3.5l7 3v5c0 4.2-2.9 7.6-7 9-4.1-1.4-7-4.8-7-9v-5z"/><path d="M9 12l2 2 4-4"/>', 'width="15" height="15"'),
   bolt: s('<path d="M13 3L5 13.5h6L10.5 21 19 10.5h-6z"/>', 'width="15" height="15"'),
   mic: s('<rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5"/>', 'width="17" height="17"'),
+  micOff: s('<rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5M4 4l16 16"/>', 'width="17" height="17"'),
   wave: s('<path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 10.5v3"/>', 'width="17" height="17"'),
   play: s('<rect x="3" y="5.5" width="18" height="13" rx="3.5"/><path d="M10.5 9.5v5l4-2.5z" fill="currentColor"/>'),
   page: s('<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>', 'width="13" height="13"'),
@@ -112,6 +115,13 @@ export const levelBars = (n, size = 14) => `<svg viewBox="0 0 16 16" width="${si
 // The Lumio mark (lumio-co.online's favicon), drawn in the text color so it
 // shows on light and dark backgrounds; `blue` gives its dot the accent color.
 export const markSvg = (size = 18, blue = false) => `<svg viewBox="0 0 64 64" width="${size}" height="${size}" aria-hidden="true"><path d="M35 12a21 21 0 1 0 17 19" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><circle cx="48" cy="17" r="5" fill="currentColor"${blue ? ' style="fill:var(--accent)"' : ''}/></svg>`;
+
+// Lumio Browser's own mark: the same ring and dot with a pointer inside the
+// ring (build/icon.svg). Only where the browser names itself: its pages' tab
+// icons, the profile picker, the task manager's browser rows. Anything Lumio
+// AI does (the AI button, the panel, the chat) keeps markSvg.
+export const POINTER_PATH = 'M25.73 21.33L25.73 41.33L30.86 36.7L33.98 44.2L37.48 42.7L34.36 35.33L40.73 35.33Z';
+export const browserMarkSvg = (size = 18, blue = false) => markSvg(size, blue).replace('</svg>', `<path d="${POINTER_PATH}" fill="currentColor" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>`);
 
 // Model maker logos (Simple Icons, CC0), keyed by the "maker" in main/ai/models.js.
 const brand = (d, color) => (size = 14) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="${color}" aria-hidden="true" class="brand"><path d="${d}"/></svg>`;

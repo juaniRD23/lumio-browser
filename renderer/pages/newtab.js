@@ -4,9 +4,11 @@ import { initCustomize } from './newtab-customize.js';
 import { initShortcuts, icon, fixIcons } from './ntp-shortcuts.js';
 const page = window.lumioPage;
 const $ = (s) => document.querySelector(s);
-// The Lumio mark in the text color, with an accent dot.
+// The Lumio mark in the text color, with an accent dot: Lumio AI's (the Ask
+// button), and Lumio Browser's, with the pointer inside the ring, over the page.
 const MARK = '<svg viewBox="0 0 64 64" width="40" height="40"><path d="M35 12a21 21 0 1 0 17 19" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><circle cx="48" cy="17" r="5" style="fill:var(--accent)"/></svg>';
-$('#mark').innerHTML = MARK;
+const BROWSER_MARK = MARK.replace('</svg>', '<path d="M25.73 21.33L25.73 41.33L30.86 36.7L33.98 44.2L37.48 42.7L34.36 35.33L40.73 35.33Z" fill="currentColor" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>');
+$('#mark').innerHTML = BROWSER_MARK;
 const hour = new Date().getHours();
 // "Good morning, Juan" (the name in the accent color), or "Up late, Juan?"
 function greet(name) {

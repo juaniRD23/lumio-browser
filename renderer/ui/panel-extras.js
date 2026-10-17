@@ -1,7 +1,8 @@
 // The AI panel's composer extras, same as Lumio Chat on the website:
 //   +      add photos & files (up to 10) and turn connected apps on or off
 //   tray   what's attached to the next message
-//   ring   how much of the plan is used (click for details)
+//   usage  the usage circle: how much of this week's allowance is used (click
+//          for details), as in Lumio AI (lumio-ai docs/design-system.md §6.4)
 //   cards  pictures and files Lumio made (saved in Downloads)
 // Files are read here with Lumio Chat's own code (web/attach.js); documents
 // Lumio writes are built with web/docmaker.js and sent back to the main process.
@@ -31,13 +32,25 @@ function fileLook(name = '') {
 }
 export const ficon = (name) => { const [label, color] = fileLook(name); return `<span class="ficon" style="background:${color}">${esc(label)}</span>`; };
 
+// A menu over the chat box opens upward with its left edge on its button,
+// kept inside the box (Lumio's design system §6.2). Call it once it shows.
+export function placeMenu(pop, btn) {
+  const box = pop.offsetParent;
+  if (!box || !btn.offsetParent) return;
+  const width = Math.min(pop.offsetWidth, box.clientWidth + 2);
+  const left = Math.max(-1, Math.min(btn.offsetLeft - 1, box.clientWidth + 1 - width));
+  pop.style.left = `${Math.round(left)}px`;
+}
+
 // Popovers inside the composer: one open at a time.
 function popover(btn, pop, onOpen) {
   const close = () => { pop.hidden = true; btn.setAttribute('aria-expanded', 'false'); };
   const open = () => {
     document.querySelectorAll('#composer .popover').forEach((p) => { if (p !== pop) p.hidden = true; });
+    document.querySelectorAll('#composer [aria-expanded="true"]').forEach((b) => { if (b !== btn) b.setAttribute('aria-expanded', 'false'); });
     pop.hidden = false;
     btn.setAttribute('aria-expanded', 'true');
+    placeMenu(pop, btn);
     onOpen?.();
   };
   btn.addEventListener('click', () => (pop.hidden ? open() : close()));
@@ -59,7 +72,7 @@ async function thumbOf(blob) {
   } catch { return null; }
 }
 
-export function initExtras({ api, getAi, onChange, notice }) {
+export function initExtras({ api, getAi, onChange, notice, tips }) {
   let attachments = []; // { key, name, kind, status: busy|ready|error, items: [{ kind, name, dataUrl?, thumb?, text?, pages? }], preview }
   let web = null;
   const lib = () => (web ??= import('./web/attach.js'));
@@ -156,39 +169,107 @@ export function initExtras({ api, getAi, onChange, notice }) {
     if (id) { plus.close(); api.send('ai:connect', id); }
   });
 
-  // ------------------------------------------------------------ usage ring
-  const RING = 2 * Math.PI * 8.5;
-  const ringBtn = $('#usage-btn');
-  ringBtn.innerHTML = '<svg class="ring" viewBox="0 0 24 24" aria-hidden="true"><circle class="ring-bg" cx="12" cy="12" r="8.5"/><circle class="ring-fg" cx="12" cy="12" r="8.5"/></svg>';
-  const when = (t) => new Date(t).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  // ------------------------------------------------------------ usage circle
+  // This week's allowance, used: gray under 50%, the accent from 50%, amber
+  // from 80% and red from 95% (the server's warning levels). It's red behind
+  // too when a limit stopped a task; a limit message's See usage points at it.
+  const ARC = 53.41; // 2π × 8.5
+  const usageBtn = $('#usage-btn');
+  usageBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle class="track" cx="12" cy="12" r="8.5"/><circle class="arc" cx="12" cy="12" r="8.5"/></svg>';
+  let blocked = false; // a limit stopped a task (until the next one starts)
+  let lastLevel = null;
+  const lang = () => document.documentElement.lang || undefined;
+  // "Tue 4:00 PM", in Lumio's language.
+  const freesWhen = (t) => { try { return new Intl.DateTimeFormat(lang(), { weekday: 'short', hour: 'numeric', minute: '2-digit' }).format(new Date(t)); } catch { return new Date(t).toLocaleString(); } };
+  const levelOf = (p) => (p >= 95 ? 'full' : p >= 80 ? 'high' : p >= 50 ? 'half' : 'low');
+  // The weekly window: { p (0-100, used), used, limit, fullAt, out }, or null signed out.
+  function week() {
+    const l = getAi().lumio || {};
+    if (!l.signedIn || !l.usage) return null;
+    const u = l.usage;
+    const w = (u.windows || []).find((x) => x.id === 'weekly') || u;
+    const limit = Number(w.limit) || 0;
+    const used = Number.isFinite(w.used) ? w.used : Math.max(0, limit - (Number(w.remaining) || 0));
+    const p = limit > 0 ? Math.max(0, Math.min(100, Math.round((used * 100) / limit))) : 0;
+    return { p, used: limit > 0 ? used : 0, limit, fullAt: w.fullAt || u.fullAt || null, out: limit > 0 && used >= limit, known: limit > 0 };
+  }
+  // The circle's words: its tooltip, and its name for screen readers.
+  function usageLines(w) {
+    if (!w.known) return ['Usage'];
+    const lines = [w.used > 0 ? `${w.p}% of this week used` : 'Nothing used yet this week'];
+    if (w.used > 0 && w.fullAt) lines.push(`All of it frees up by ${freesWhen(w.fullAt)}`);
+    return lines;
+  }
+  // Where the plan works (Go is for the app it was bought in; Plus and up, both).
+  function worksIn(l) {
+    const plan = l.plan || 'free';
+    if (l.planApp === 'ai' && plan !== 'go') return 'Your Go plan is for Lumio AI.';
+    if (plan === 'free') return null;
+    // A Go plan without an app (bought before Go was per app) works in both.
+    const only = plan === 'go' && ['ai', 'browser'].includes(l.planApp) ? l.planApp : null;
+    return `Works in: Lumio AI ${!only || only === 'ai' ? '✓' : '—'} · Lumio Browser ${!only || only === 'browser' ? '✓' : '—'}`;
+  }
+  // Who uses this allowance: one weekly allowance for both apps, except on a
+  // Go plan, where each app counts its own (Go's in its app, Free's in the other).
+  const sharedBy = (l) => (['ai', 'browser'].includes(l.planApp) ? 'Only Lumio Browser uses it.' : 'Lumio AI and Lumio Browser share it.');
   function renderUsagePop() {
     const l = getAi().lumio || {};
-    const u = l.usage;
+    const w = week();
     const pop = $('#usage-pop');
-    if (!l.signedIn || !u) { pop.innerHTML = '<p>Sign in to Lumio to see your usage.</p>'; return; }
-    const used = u.limit ? Math.min(100, Math.round((u.used / u.limit) * 100)) : 100;
+    if (!w) { pop.innerHTML = '<p>Sign in to Lumio to see your usage.</p>'; return; }
+    const level = levelOf(w.p);
+    const works = worksIn(l);
     pop.innerHTML = `
-      <div class="u-top"><span class="u-plan">Lumio ${esc(l.planName || u.planName || 'Free')}</span>${l.plan !== 'max' ? '<button type="button" class="u-up">Upgrade</button>' : ''}</div>
-      <div class="u-label">Weekly usage</div>
-      <div class="u-bar"><i style="width:${used}%"></i></div>
-      <div class="u-nums"><span><b>${used}%</b> used</span><span>${100 - used}% left</span></div>
-      ${u.used > 0 && u.fullAt ? `<p>It refills bit by bit, and fully by <b>${esc(when(u.fullAt))}</b>.</p>` : '<p>Your full weekly usage is available.</p>'}
-      <p>Lumio Browser, Chat and pictures share it. No 5-hour limits.</p>`;
+      <div class="u-top"><span class="u-plan">Lumio ${esc(l.planName || l.usage?.planName || 'Free')}</span>${l.plan !== 'max' ? '<button type="button" class="u-up">Upgrade</button>' : ''}</div>
+      ${w.known ? `<div class="u-big"><span class="u-pct">${w.p}%</span><span class="u-of">of this week used</span></div>
+      <div class="u-meter" data-level="${level}"><i></i></div>
+      <div class="u-left">${100 - w.p}% left</div>
+      <p>${w.used > 0 && w.fullAt ? esc(`All of it frees up by ${freesWhen(w.fullAt)}`) : 'Your full weekly usage is available.'}</p>` : ''}
+      ${works ? `<div class="u-works">${esc(works)}</div>` : ''}
+      <div class="menu-foot"><span>${sharedBy(l)}</span><button type="button" class="link" data-see-all>See all</button></div>`;
+    // Any use above 0 shows at least a sliver.
+    const bar = pop.querySelector('.u-meter i');
+    if (bar) bar.style.width = `${w.used > 0 ? Math.max(2, w.p) : 0}%`;
     pop.querySelector('.u-up')?.addEventListener('click', () => { usage.close(); api.send('account:open', 'upgrade'); });
+    pop.querySelector('[data-see-all]').addEventListener('click', () => { usage.close(); api.send('tab:new', 'lumio://settings/#plan'); });
   }
-  const usage = popover(ringBtn, $('#usage-pop'), renderUsagePop);
-  function renderRing() {
-    const l = getAi().lumio || {};
-    const u = l.usage;
-    ringBtn.hidden = !l.signedIn;
-    const used = u?.limit ? Math.min(1, u.used / u.limit) : 0;
-    const fg = ringBtn.querySelector('.ring-fg');
-    fg.style.strokeDasharray = RING;
-    fg.style.strokeDashoffset = RING * (1 - used);
-    ringBtn.classList.toggle('high', used >= 0.8 && used < 1);
-    ringBtn.classList.toggle('full', used >= 1);
-    ringBtn.title = u ? `Usage: ${Math.round(used * 100)}% of this week’s used` : 'Usage';
+  const usage = popover(usageBtn, $('#usage-pop'), renderUsagePop);
+  function renderUsage() {
+    const w = week();
+    usageBtn.hidden = !w;
+    if (!w) return;
+    const level = levelOf(w.p);
+    // Any use above 0 shows at least 2%.
+    const shown = w.used > 0 ? Math.max(2, w.p) : 0;
+    usageBtn.querySelector('.arc').style.strokeDashoffset = String(ARC * (1 - shown / 100));
+    if (lastLevel && lastLevel !== level) {
+      usageBtn.classList.remove('bump');
+      void usageBtn.offsetWidth; // play it again
+      usageBtn.classList.add('bump');
+    }
+    lastLevel = level;
+    usageBtn.dataset.level = level;
+    usageBtn.toggleAttribute('data-blocked', blocked || w.out);
+    // Its words, only when they change (Lumio's Spanish runtime translates them in place).
+    const lines = usageLines(w);
+    if (usageBtn.dataset.tip !== lines.join('\n')) {
+      usageBtn.dataset.tip = lines.join('\n');
+      usageBtn.setAttribute('aria-label', lines.join(' · '));
+      tips?.refresh(usageBtn);
+    }
     if (!$('#usage-pop').hidden) renderUsagePop();
+  }
+  usageBtn.addEventListener('animationend', (e) => { if (e.animationName === 'usage-bump') usageBtn.classList.remove('bump'); });
+  let pointTimer = 0;
+  // "See usage" in a limit message: opens the details and points at the circle.
+  function pointUsage() {
+    if (usageBtn.hidden) return;
+    if ($('#usage-pop').hidden) usage.open();
+    usageBtn.classList.remove('is-pointed');
+    void usageBtn.offsetWidth;
+    usageBtn.classList.add('is-pointed');
+    clearTimeout(pointTimer);
+    pointTimer = setTimeout(() => usageBtn.classList.remove('is-pointed'), 2400);
   }
 
   // ------------------------------------------------------------ documents Lumio writes
@@ -203,7 +284,9 @@ export function initExtras({ api, getAi, onChange, notice }) {
   });
 
   return {
-    renderRing,
+    renderUsage,
+    pointUsage,
+    setBlocked(on) { if (blocked !== !!on) { blocked = !!on; renderUsage(); } },
     closePlus: () => plus.close(),
     // Reads one file the way an attachment is read (for "Summarize this PDF").
     read: (file) => read(file).then((r) => r.items),

@@ -3,7 +3,7 @@
 // recently closed tabs and windows. Typing narrows the list (fuzzy, on titles
 // and sites); ↑/↓ move, Enter switches to the tab (and its window) or reopens
 // it, Esc closes. main/tab-search.js gives the list and does the switching.
-import { icons, markSvg } from './icons.js';
+import { icons, browserMarkSvg } from './icons.js';
 import { fuzzySearch, highlight } from './fuzzy.mjs';
 import { SAD_ICON } from './tabstrip.js';
 
@@ -25,7 +25,7 @@ function iconFor(row) {
   const it = row.item;
   if (row.type === 'closed' && it.kind === 'window') return icons.tabs;
   if (it.crashed) return SAD_ICON;
-  if (it.internal) return markSvg(14);
+  if (it.internal) return browserMarkSvg(14);
   if (it.favicon) return `<img src="${esc(it.favicon)}" alt="" draggable="false">`;
   return row.type === 'closed' ? icons.clock : icons.globe;
 }

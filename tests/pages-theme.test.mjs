@@ -148,6 +148,111 @@ test('Settings › Theme shows the setting, follows changes from elsewhere, and 
   assert.deepEqual(errors, []);
 });
 
+test('Settings › Lumio AI › Approvals: Bypass asks first in Lumio’s red dialog, where Cancel has the focus', { skip: !CHROME && 'Google Chrome not installed' }, async () => {
+  const { page, errors } = await openPage('settings', { colorScheme: 'dark' });
+  let pageDialogs = 0;
+  page.on('dialog', (d) => { pageDialogs++; d.dismiss(); });
+  const checked = () => page.$eval('input[name=mode]:checked', (r) => r.value);
+  const saved = () => page.evaluate(() => window.__calls.filter(([c, key]) => c === 'page:set-setting' && key === 'approvalMode').map((c) => c[2]));
+  const open = () => page.evaluate(() => document.getElementById('bypass-dialog').open);
+  // Closed, and the radios show what was kept (the dialog's close event comes a moment later).
+  const closedWith = async (mode) => {
+    await page.waitForFunction((m) => !document.getElementById('bypass-dialog').open && document.querySelector('input[name=mode]:checked')?.value === m, mode);
+    assert.equal(await checked(), mode);
+  };
+  const fill = (css) => page.evaluate((c) => { const i = document.body.appendChild(document.createElement('i')); i.style.background = c; const out = getComputedStyle(i).backgroundColor; i.remove(); return out; }, css);
+  const pickBypass = async () => {
+    await page.click('#modes input[value=bypass]');
+    await page.waitForFunction(() => document.getElementById('bypass-dialog').open);
+  };
+
+  await pickBypass();
+  assert.equal(pageDialogs, 0, 'not the page’s confirm(), whose OK is the default');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'bypass-cancel', 'Cancel has the focus');
+  assert.equal(await page.textContent('#bypass-title'), 'Turn on Bypass?');
+  assert.equal(await page.textContent('#bypass-desc'), 'Lumio will act in your tabs without asking you first, even to buy or send something. Use it only where you can undo a mistake.', 'the chat box’s words');
+  // §6.14: 420px wide, r16, a 17px title, and the red button.
+  const look = await page.evaluate(() => {
+    const d = document.getElementById('bypass-dialog');
+    const probe = document.body.appendChild(document.createElement('i'));
+    probe.style.background = 'var(--danger-fill)';
+    const red = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    const title = getComputedStyle(document.getElementById('bypass-title'));
+    return { width: d.offsetWidth, radius: getComputedStyle(d).borderRadius, title: [title.fontSize, title.fontWeight, title.textTransform], red, button: getComputedStyle(document.getElementById('bypass-on')).backgroundColor };
+  });
+  assert.deepEqual([look.width, look.radius, look.title], [420, '16px', ['17px', '600', 'none']]);
+  assert.equal(look.button, look.red, 'Turn on Bypass is the solid red button');
+  // Under the pointer it deepens like every solid red button (§6.1). (Reduce Motion: no fade to wait for.)
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.hover('#bypass-on');
+  await page.waitForTimeout(50);
+  assert.equal(await page.$eval('#bypass-on', (b) => getComputedStyle(b).backgroundColor), await fill('color-mix(in srgb, var(--danger-fill) 88%, var(--text-strong))'));
+  await page.focus('#bypass-cancel');
+
+  // Enter (on Cancel), Esc and a click on the dimmed page all keep Ask.
+  await page.keyboard.press('Enter');
+  await closedWith('ask');
+  assert.equal(await page.evaluate(() => document.activeElement.value), 'ask', 'the keyboard goes back to the mode you had');
+  await pickBypass();
+  await page.keyboard.press('Escape');
+  await closedWith('ask');
+  await pickBypass();
+  await page.mouse.click(12, 12);
+  await closedWith('ask');
+  assert.deepEqual(await saved(), [], 'nothing changed');
+
+  // A click on the card itself (its text, its padding) doesn't close it; Turn on Bypass does, and saves it.
+  await pickBypass();
+  await page.click('#bypass-desc');
+  const card = await page.$eval('#bypass-dialog', (d) => { const r = d.getBoundingClientRect(); return { x: r.left + 6, y: r.top + 6 }; });
+  await page.mouse.click(card.x, card.y);
+  assert.equal(await open(), true);
+  await page.click('#bypass-on');
+  await page.waitForFunction(() => window.__calls.some(([c, key]) => c === 'page:set-setting' && key === 'approvalMode'));
+  await closedWith('bypass');
+  assert.deepEqual(await saved(), ['bypass']);
+  // Leaving Bypass doesn't ask.
+  await page.click('#modes input[value=auto]');
+  assert.equal(await open(), false);
+  assert.deepEqual(await saved(), ['bypass', 'auto']);
+  assert.equal(pageDialogs, 0);
+  await page.close();
+  assert.deepEqual(errors, []);
+});
+
+test('Settings says where each plan works, and how Auto asks, in Lumio AI’s words (design-system §7, §6.7)', { skip: !CHROME && 'Google Chrome not installed' }, async () => {
+  // Plus: both apps, Lumio AI first.
+  let { page, errors } = await openPage('settings', { colorScheme: 'light' });
+  assert.equal(await page.textContent('.plan-works'), 'Works in: Lumio AI ✓ · Lumio Browser ✓');
+  assert.equal(await page.textContent('#modes .row:has(input[value=auto]) .desc'), 'Browse on its own. Still checks with you before buying or sending anything.');
+  await page.close();
+  assert.deepEqual(errors, []);
+
+  // Go bought in Lumio Browser works only here.
+  const GO = { ...ACCOUNT, plan: 'go', planName: 'Go', planApp: 'browser' };
+  ({ page, errors } = await openPage('settings', { colorScheme: 'light', answers: { 'page:settings': { ...ANSWERS['page:settings'], account: GO }, 'page:account': GO } }));
+  assert.equal(await page.textContent('.plan-works'), 'Works in: Lumio AI — · Lumio Browser ✓');
+  await page.close();
+  assert.deepEqual(errors, []);
+
+  // Choosing a plan: each plan's line, and §7's sentence once under them.
+  const FREE = { ...ACCOUNT, plan: 'free', planName: 'Free', paid: false };
+  const plans = [{ id: 'go', name: 'Go', price: 10 }, { id: 'plus', name: 'Plus', price: 20 }];
+  ({ page, errors } = await openPage('settings', { colorScheme: 'light', answers: { 'page:settings': { ...ANSWERS['page:settings'], account: FREE }, 'page:account': FREE, 'page:billing': { ok: true, plan: 'free', planName: 'Free', subscription: null, plans, allPlans: plans, reasons: [] } } }));
+  await page.waitForSelector('.bill-scope');
+  assert.deepEqual(await page.$$eval('.bp-apps', (els) => els.map((e) => e.textContent)), ['This app only', 'Lumio AI and Lumio Browser · shared usage']);
+  assert.equal(await page.textContent('.bill-scope'), 'Lumio Go works only in the app where you bought it. Plus, Pro and Max work in both apps with shared usage.');
+  // Plus's Subscribe is the accent button; under the pointer it changes like the panel's Upgrade (§6.1).
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.hover('.btn.accent[data-subscribe="plus"]');
+  await page.waitForTimeout(50);
+  const accentHover = await page.evaluate(() => { const i = document.body.appendChild(document.createElement('i')); i.style.background = 'color-mix(in srgb, var(--accent) 88%, var(--text-strong))'; const out = getComputedStyle(i).backgroundColor; i.remove(); return out; });
+  assert.equal(await page.$eval('.btn.accent[data-subscribe="plus"]', (b) => getComputedStyle(b).backgroundColor), accentHover);
+  await page.close();
+  assert.deepEqual(errors, []);
+});
+
 test('Settings: Home button, page zoom, zoom levels and the start pages', { skip: !CHROME && 'Google Chrome not installed' }, async () => {
   const NAV = { showHome: false, homePage: '', defaultZoom: 100, presets: [50, 90, 100, 110, 125], zoomLevels: [{ host: 'news.example', percent: 125 }], startup: 'pages', startupPages: [{ url: 'https://a.example/', title: 'Alpha' }] };
   const { page, errors } = await openPage('settings', {

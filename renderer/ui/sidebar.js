@@ -121,6 +121,14 @@ export function initSidebar({ api, panel, isNewTab, onLayout, getAi }) {
   api.on('workflows-changed', load);
   api.on('sync-state', (s) => { syncState = s; renderStart(!!getAi().lumio?.signedIn); });
   panel.onChatChange((c) => { current = c; renderChats(); });
+  // The chat Lumio is working on shows a blinking dot where its time was.
+  let runningKey = '';
+  api.on('ai-state', (s) => {
+    const key = s?.running ? String(s.runChatId || '') : '';
+    if (key === runningKey) return;
+    runningKey = key;
+    renderChats();
+  });
 
   // ---------------------------------------------------------------- nav
   $('#sb-new').addEventListener('click', () => {
@@ -192,8 +200,10 @@ export function initSidebar({ api, panel, isNewTab, onLayout, getAi }) {
       label.innerHTML = '<span>Recents</span>';
       list = chats.slice(0, 40);
     }
+    const ai = getAi() || {};
+    const running = ai.running ? ai.runChatId : null;
     $('#sb-recents').innerHTML = list.length
-      ? list.map((c) => `<div class="sb-row sb-chat${c.id === current.chatId ? ' on' : ''}" data-chat="${esc(c.id)}" role="button" tabindex="0" title="${esc(c.title)}"><span class="sb-t">${esc(c.title || 'Chat')}</span><small>${esc(ago(c.updatedAt))}</small><button class="sb-mini sb-dots" data-cmenu="${esc(c.id)}" aria-label="Chat options">${IC.dots}</button></div>`).join('')
+      ? list.map((c) => `<div class="sb-row sb-chat${c.id === current.chatId ? ' on' : ''}" data-chat="${esc(c.id)}" role="button" tabindex="0" title="${esc(c.title)}"><span class="sb-t">${esc(c.title || 'Chat')}</span>${c.id === running ? '<i class="sb-run" role="img" aria-label="Running"></i>' : `<small>${esc(ago(c.updatedAt))}</small>`}<button class="sb-mini sb-dots" data-cmenu="${esc(c.id)}" aria-label="Chat options">${IC.dots}</button></div>`).join('')
       : `<div class="sb-empty">${projectView ? 'No chats in this project yet. New task starts one here.' : 'Your Lumio chats show up here.'}</div>`;
     $('#sb-back')?.addEventListener('click', () => { projectView = null; render(); });
   }

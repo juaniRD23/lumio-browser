@@ -99,16 +99,11 @@
         <ol id="plan-list"></ol>
       </section>
       <div id="composer">
-        <div id="reasoning-menu" class="popover effort-pop" role="dialog" aria-label="Thinking effort" hidden>
-          <div class="effort-head"><span class="effort-model" id="effort-model"></span><b id="effort-label">Medium</b><span id="effort-desc"></span></div>
-          <div class="slider" id="effort-slider" role="slider" tabindex="0" aria-label="Thinking effort" aria-valuemin="0" aria-valuemax="2" aria-valuenow="1">
-            <div class="s-track"><div class="s-fill"></div></div>
-            <div class="s-knob"></div>
-          </div>
-          <div class="ticks" id="effort-ticks"></div>
-          <div id="reasoning-foot" class="menu-foot"></div>
+        <div id="reasoning-menu" class="popover cmp-menu effort-menu" role="menu" aria-label="Effort" hidden>
+          <div class="list-label">Effort</div>
+          <div id="effort-rows"></div>
         </div>
-        <div id="plus-menu" class="popover plus-menu" role="menu" aria-label="Add" hidden>
+        <div id="plus-menu" class="popover cmp-menu plus-menu" role="menu" aria-label="Add" hidden>
           <button type="button" class="menu-row" id="add-files" role="menuitem">
             <span class="mi"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 11-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg></span>
             <span class="mt"><b>Add photos &amp; files</b><small>Pictures, PDFs, Word, PowerPoint, Excel, text · up to 10</small></span>
@@ -120,13 +115,18 @@
           <div class="list-label conn-label">Connections</div>
           <div id="apps" class="apps"></div>
         </div>
-        <div id="mode-menu" class="popover plus-menu mode-menu" role="menu" aria-label="Approvals" hidden>
+        <div id="mode-menu" class="popover cmp-menu mode-menu" role="menu" aria-label="Approvals" hidden>
           <div class="list-label">Approvals</div>
           <button type="button" class="menu-row" role="menuitemradio" data-mode="ask"><span class="mi"></span><span class="mt"><b>Ask</b><small>Asks before every action. Reading pages never asks.</small></span><i class="tick"></i></button>
-          <button type="button" class="menu-row" role="menuitemradio" data-mode="auto"><span class="mi"></span><span class="mt"><b>Auto</b><small>Browses on its own. Still checks with you in chat before buying or sending anything.</small></span><i class="tick"></i></button>
+          <button type="button" class="menu-row" role="menuitemradio" data-mode="auto"><span class="mi"></span><span class="mt"><b translate="no">Auto</b><small>Browses on its own. Still checks with you before buying or sending anything.</small></span><i class="tick"></i></button>
           <button type="button" class="menu-row bypass" role="menuitemradio" data-mode="bypass"><span class="mi"></span><span class="mt"><b>Bypass</b><small>Never asks. Use with care.</small></span><i class="tick"></i></button>
         </div>
-        <div id="usage-pop" class="popover usage-pop" role="dialog" aria-label="Usage" hidden></div>
+        <div id="bypass-confirm" class="popover cmp-menu bypass-confirm" role="alertdialog" aria-modal="false" aria-labelledby="bypass-title" aria-describedby="bypass-text" hidden>
+          <div class="bc-title" id="bypass-title">Turn on Bypass?</div>
+          <p class="bc-text" id="bypass-text">Lumio will act in your tabs without asking you first, even to buy or send something. Use it only where you can undo a mistake.</p>
+          <div class="bc-actions"><button type="button" class="btn" data-bc="cancel">Cancel</button><button type="button" class="btn danger-fill" data-bc="ok">Turn on Bypass</button></div>
+        </div>
+        <div id="usage-pop" class="popover cmp-menu usage-pop" role="dialog" aria-label="Usage" hidden></div>
         <div id="voice-bar" class="voice-bar" hidden>
           <button type="button" class="vb-orb" title="Skip what Lumio is saying, or finish talking" aria-label="Skip, or finish talking"><i></i></button>
           <div class="vb-main">
@@ -136,25 +136,25 @@
           <button type="button" class="vb-mute round-btn" title="Mute the microphone" aria-label="Mute the microphone" aria-pressed="false"></button>
           <button type="button" class="vb-end">End</button>
         </div>
-        <div id="wf-menu" class="popover plus-menu wf-menu" role="listbox" aria-label="Workflows" hidden></div>
+        <div id="wf-menu" class="popover cmp-menu plus-menu wf-menu" role="listbox" aria-label="Workflows" hidden></div>
         <div id="wf-card" class="wf-card" hidden></div>
         <div id="tray" class="tray" hidden></div>
         <button id="page-suggest" class="page-suggest" type="button" hidden></button>
         <div id="context-chip" class="chip" hidden title="Lumio will read this page with your message"><i></i><span></span><button aria-label="Don't include this page">×</button></div>
         <textarea id="prompt" rows="1" placeholder="Ask Lumio, or tell it what to do…" spellcheck="true"></textarea>
-        <div class="composer-row">
+        <div class="composer-row" role="toolbar" aria-label="Message options">
           <button id="plus-btn" class="round-btn" title="Add files and connections" aria-label="Add files and connections" aria-haspopup="menu" aria-expanded="false"></button>
-          <button id="reasoning-btn" class="model-btn" title="Thinking effort" aria-haspopup="dialog" aria-expanded="false"><span id="reasoning-bars"></span><span id="reasoning-name">Medium</span><i class="chev"></i></button>
-          <button id="mode-btn" class="model-btn mode-btn" title="Approvals" aria-label="Approvals" aria-haspopup="menu" aria-expanded="false"><span id="mode-ic"></span><span id="mode-name">Ask</span><i class="chev"></i></button>
+          <button id="reasoning-btn" class="model-btn is-effort" type="button" aria-label="Effort" aria-haspopup="menu" aria-expanded="false"><span id="reasoning-bars" class="ic"></span><span id="reasoning-name" class="lbl">Medium</span><svg class="chip-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+          <button id="mode-btn" class="model-btn is-mode" type="button" aria-label="Approval mode" aria-haspopup="menu" aria-expanded="false"><span id="mode-ic" class="ic"></span><span id="mode-name" class="lbl">Ask</span><svg class="chip-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+          <button id="project-btn" class="model-btn is-folder is-empty" type="button" aria-label="Project" aria-haspopup="menu" aria-expanded="false" hidden><span class="pi ic"></span><span class="pn lbl">No project</span><svg class="chip-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
           <span class="spacer"></span>
-          <button id="usage-btn" class="round-btn ring-btn" title="Usage" aria-label="Usage" aria-haspopup="dialog" aria-expanded="false" hidden></button>
-          <button id="mic-btn" class="round-btn mic-btn" title="Dictate" aria-label="Dictate"></button>
+          <button id="usage-btn" class="round-btn quiet usage-btn" type="button" aria-label="Usage" aria-haspopup="dialog" aria-expanded="false" data-level="low" hidden></button>
+          <button id="mic-btn" class="round-btn quiet mic-btn" type="button" aria-label="Dictate" data-tip="Dictate"></button>
           <button id="voice-btn" class="round-btn voice-btn" title="Voice mode: talk with Lumio hands-free" aria-label="Voice mode" aria-pressed="false"></button>
           <button id="send" class="send" title="Send (↵)" aria-label="Send"></button>
         </div>
-        <div id="project-menu" class="popover plus-menu project-menu" role="menu" aria-label="Project" hidden></div>
+        <div id="project-menu" class="popover cmp-menu plus-menu project-menu" role="menu" aria-label="Project" hidden></div>
       </div>
-      <button id="project-btn" class="project-btn" type="button" aria-haspopup="menu" aria-expanded="false" hidden><span class="pi"></span><span class="pn">Choose project</span></button>
     </aside>
   </main>
 

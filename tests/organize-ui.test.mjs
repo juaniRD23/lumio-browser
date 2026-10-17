@@ -324,7 +324,10 @@ test('side panel: the switcher shares the panel with Lumio AI; reading list, boo
     assert.equal(await page.getAttribute('.ss-tab[data-view="bookmarks"]', 'aria-selected'), 'true');
     await page.evaluate(() => window.__emit('ai-focus'));
     assert.equal(await page.getAttribute('.ss-tab[data-view="ai"]', 'aria-selected'), 'true');
-    // Arrow keys move along the switcher.
+    // Arrow keys move along the switcher. Opening the panel (panel-toggle
+    // above) focuses the chat box on the next frame: let that land first, or
+    // it can take the focus back from the switcher before the key.
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve())));
     await page.focus('.ss-tab[data-view="ai"]');
     await page.keyboard.press('ArrowRight');
     await page.waitForSelector('.ss-tab[data-view="reading"][aria-selected="true"]', { timeout: 5000 });

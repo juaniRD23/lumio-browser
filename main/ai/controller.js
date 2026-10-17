@@ -133,7 +133,7 @@ class AIController {
     return {
       // The AI runs on the person's Lumio plan; every plan has an allowance.
       ready: !!a.signedIn,
-      lumio: { signedIn: !!a.signedIn, paid: !!a.paid, plan: a.plan || null, planName: a.planName || null, connecting: !!a.connecting, usage: a.usage || null },
+      lumio: { signedIn: !!a.signedIn, paid: !!a.paid, plan: a.plan || null, planName: a.planName || null, planApp: a.planApp || null, connecting: !!a.connecting, usage: a.usage || null },
       model: m.id,
       modelName: m.name,
       modelMaker: m.maker,

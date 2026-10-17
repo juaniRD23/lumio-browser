@@ -186,10 +186,60 @@
 }
 :root[data-appearance="light"] { --accent: var(--accent-light, #2563eb); }
 
+/* Lumio's shared design tokens (radii, spacing, sizes, type, the composer,
+   the usage circle, dictation, Bypass, diffs): the same block, byte for
+   byte, as lumio-ai's shared/chat/theme.css. This file is its source; the
+   spec is lumio-ai docs/design-system.md. */
+/* @lumio-tokens v1 (start): docs/design-system.md §3.9 */
+:root {
+  --r-tag: 6px; --r-control: 8px; --r-row: 10px; --r-card: 12px; --r-tile: 14px;
+  --r-pop: 16px; --r-sheet: 20px; --r-composer: 22px; --r-pill: 999px;
+
+  --sp-0-5: 2px; --sp-1: 4px; --sp-1-5: 6px; --sp-2: 8px; --sp-2-5: 10px; --sp-3: 12px; --sp-3-5: 14px;
+  --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-10: 40px; --sp-12: 48px;
+
+  --h-xs: 22px; --h-sm: 28px; --h-md: 34px; --h-lg: 40px;
+  --icon-btn: 30px; --icon-btn-sm: 26px;
+
+  --fs-display: 46px; --fs-h1: 38px; --fs-hero: clamp(32px, 5vw, 44px); --fs-h2: 30px; --fs-h3: 26px;
+  --fs-title: 17px; --fs-read: 15px; --fs-body: 14px; --fs-ui: 13.5px; --fs-row: 13px;
+  --fs-sm: 12.5px; --fs-xs: 12px; --fs-2xs: 11.5px; --fs-label: 10.5px;
+  --lh-tight: 1.1; --lh-ui: 1.45; --lh-input: 1.5; --lh-read: 1.65;
+  --track-label: .12em; --track-serif: -.01em;
+
+  --z-sticky: 10; --z-popover: 30; --z-sheet: 40; --z-toast: 50; --z-drop: 60; --z-tooltip: 70;
+
+  --sidebar-w: 244px; --topbar-h: 44px; --measure: 780px; --gutter: clamp(14px, 4vw, 24px);
+
+  /* the composer, regular (a composer under 480px wide switches to compact: §6.3) */
+  --cmp-ctl: 32px; --cmp-send: 34px; --cmp-gap: 6px; --cmp-font: 15px; --cmp-chip-font: 13px;
+  --cmp-icon: 16px; --cmp-ring: 20px;
+
+  --usage-track: var(--overlay-5);
+  --usage-low: var(--dim);
+  --usage-half: var(--accent);
+  --usage-high: var(--amber);
+  --usage-full: var(--danger);
+
+  --rec-fill: light-dark(#e5372f, #e5372f);
+  --on-rec: light-dark(#ffffff, #ffffff);
+
+  --bypass-bg: color-mix(in srgb, var(--danger-fill) 12%, transparent);
+  --bypass-line: color-mix(in srgb, var(--danger-fill) 30%, transparent);
+  --bypass-text: var(--danger-text);
+
+  --diff-add: light-dark(#137333, #8be0a8);
+  --diff-del: light-dark(#b3261e, #ff9d90);
+  --diff-add-bg: light-dark(#e6f4ea, #0f2a1a);
+  --diff-del-bg: light-dark(#fce8e6, #2e1212);
+}
+/* @lumio-tokens v1 (end) */
+
 /* Reduce Motion (the system's accessibility setting): one rule set for all of
    Lumio's UI and pages. Transitions and animations finish at once (their end
    events still fire, so nothing waits on them); spinners keep turning, since
-   they say something is loading. Script animations check the same setting
+   they say something is loading (the mic's, while it transcribes, is drawn by
+   its ::after). Script animations check the same setting
    (renderer/ui/motion.js). */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -200,7 +250,7 @@
     transition-delay: 0s !important;
     scroll-behavior: auto !important;
   }
-  .spinner { animation-duration: 1.6s !important; animation-iteration-count: infinite !important; }
+  .spinner, .mic-btn.busy::after { animation-duration: 1.6s !important; animation-iteration-count: infinite !important; }
 }
 /* Settings › Accessibility › Reduce motion in Lumio: the same, whatever the
    system says (main/accessibility.js puts the attribute on <html>). */
@@ -212,7 +262,7 @@
   transition-delay: 0s !important;
   scroll-behavior: auto !important;
 }
-:root[data-reduce-motion] .spinner { animation-duration: 1.6s !important; animation-iteration-count: infinite !important; }
+:root[data-reduce-motion] .spinner, :root[data-reduce-motion] .mic-btn.busy::after { animation-duration: 1.6s !important; animation-iteration-count: infinite !important; }
 
 /* Keyboard focus shows a ring everywhere, unless a control draws its own. */
 :where(:focus-visible) { outline: 2px solid var(--focus-ring); outline-offset: 2px; }

@@ -196,7 +196,7 @@ test('settings: the subscription manager shows the plan, switches it in place, a
   await go('lumio://settings/#plan', 'Settings');
   await until(() => L.page(`document.querySelector('.plan-name')?.textContent === 'Lumio Plus'`));
   const plan = await L.page(`document.getElementById('plan-card').innerText`);
-  assert.match(plan, /Lumio Plus[\s\S]*Weekly limit[\s\S]*62%\s*left[\s\S]*Fully refilled by[\s\S]*No 5-hour limits/);
+  assert.match(plan, /Lumio Plus[\s\S]*Works in: Lumio AI ✓ · Lumio Browser ✓[\s\S]*Weekly limit[\s\S]*38%\s*used[\s\S]*62% left[\s\S]*Fully refilled by[\s\S]*No 5-hour limits/);
   assert.equal(await L.page(`!!document.getElementById('ai-status')`), false, 'no "Runs on your Lumio plan" note');
   // The subscription: plan, renewal date and card.
   assert.ok(await until(() => L.page(`!!document.querySelector('.bill-top')`)));
