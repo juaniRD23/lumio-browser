@@ -2,7 +2,7 @@
 
 A Chromium web browser with **Lumio AI** built in. Lumio sits in a side panel next to the page. Ask it anything, or tell it what to do: it reads and operates web pages, and opens the web versions of apps like Excel, Word or Google Sheets in a tab. It works only inside the browser, and asks before it acts.
 
-**Download:** [lumio-co.online](https://lumio-co.online/#download) · macOS 14+ (Apple silicon and Intel) · Windows 10/11 (x64)
+**Download:** [lumio-co.online/browser](https://lumio-co.online/browser#download) · macOS 14+ (Apple silicon and Intel)
 
 ## What it does
 
@@ -27,9 +27,9 @@ A Chromium web browser with **Lumio AI** built in. Lumio sits in a side panel ne
 
 ## Install
 
-**Mac:** open the `.dmg` and drag Lumio Browser to Applications. The app isn't signed with an Apple Developer ID yet, so the first time you open it macOS blocks it. Go to **System Settings → Privacy & Security**, scroll down, click **Open Anyway**, and confirm.
+**Mac:** open the `.dmg` and drag Lumio Browser to Applications. It's signed and notarized by Apple, so it opens like any other app (macOS asks once to confirm an app from the internet).
 
-**Windows:** unzip, open the folder, and run `Lumio Browser.exe`. Windows SmartScreen may say it protected your PC; click **More info → Run anyway**.
+Lumio Browser is Mac only for now; copies already installed on Windows stay on 0.6.7.
 
 ## Development
 
